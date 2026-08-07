@@ -63,7 +63,7 @@ export function DashboardViews({
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 py-6">
       <div className="flex items-center gap-2">
         <h1 className="text-lg font-bold">Dashboard</h1>
         <div className="ml-auto flex overflow-x-auto rounded-lg border border-edge bg-surface p-0.5 text-xs">

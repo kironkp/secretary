@@ -3,6 +3,7 @@
 // Debounced cross-entity search over everything the secretary knows.
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { Bookmark, Calendar, Check, MessageSquare } from "lucide-react";
 
 type Results = {
   tasks: { id: string; title: string; status: string; dueAt: string | null; source: string }[];
@@ -74,8 +75,9 @@ export function SearchBox() {
                 <div>
                   <p className="mb-1 text-xs font-bold uppercase tracking-wide text-muted">Tasks</p>
                   {results.tasks.map((t) => (
-                    <p key={t.id} className="mb-0.5">
-                      ✓ {t.title}{" "}
+                    <p key={t.id} className="mb-0.5 flex items-baseline gap-1.5">
+                      <Check size={12} strokeWidth={2.5} className="flex-none translate-y-[1px] text-ok" />
+                      {t.title}{" "}
                       <span className="text-xs text-faint">
                         · {t.status}
                         {t.dueAt &&
@@ -89,8 +91,9 @@ export function SearchBox() {
                 <div>
                   <p className="mb-1 text-xs font-bold uppercase tracking-wide text-muted">Events</p>
                   {results.events.map((e) => (
-                    <p key={e.id} className="mb-0.5">
-                      📅 {e.title}{" "}
+                    <p key={e.id} className="mb-0.5 flex items-baseline gap-1.5">
+                      <Calendar size={12} strokeWidth={1.75} className="flex-none translate-y-[1px] text-accent" />
+                      {e.title}{" "}
                       <span className="text-xs text-faint">
                         {new Intl.DateTimeFormat("en-US", {
                           month: "short",
@@ -110,8 +113,9 @@ export function SearchBox() {
                     Known facts
                   </p>
                   {results.memories.map((m) => (
-                    <p key={m.id} className="mb-0.5">
-                      ◆ {m.fact}
+                    <p key={m.id} className="mb-0.5 flex items-baseline gap-1.5">
+                      <Bookmark size={12} strokeWidth={2} className="flex-none translate-y-[1px] text-grape" />
+                      {m.fact}
                     </p>
                   ))}
                 </div>
@@ -125,9 +129,10 @@ export function SearchBox() {
                     <p key={m.id} className="mb-0.5">
                       <Link
                         href={`/chat?c=${m.conversationId}&m=${m.id}`}
-                        className="hover:text-accent"
+                        className="flex items-baseline gap-1.5 hover:text-accent"
                       >
-                        💬 <span className="text-muted">“{m.snippet}”</span>{" "}
+                        <MessageSquare size={12} strokeWidth={1.75} className="flex-none translate-y-[1px] text-faint" />
+                        <span className="text-muted">“{m.snippet}”</span>{" "}
                         <span className="text-xs text-faint">
                           {new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(
                             new Date(m.createdAt)

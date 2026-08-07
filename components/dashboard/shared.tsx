@@ -4,6 +4,7 @@
 // Timeline/Adaptive): row types, due-date formatting, the cross-off button,
 // and provenance links.
 import Link from "next/link";
+import { Check, MessageSquare } from "lucide-react";
 
 export type TaskRow = {
   id: string;
@@ -64,9 +65,10 @@ export function ProvenanceLink({ t }: { t: TaskRow }) {
     <Link
       href={`/chat?c=${t.conversationId}${t.messageId ? `&m=${t.messageId}` : ""}`}
       title={t.conversationLabel ?? "From a conversation"}
-      className="text-xs text-faint hover:text-accent"
+      aria-label={t.conversationLabel ?? "From a conversation"}
+      className="text-faint transition-colors hover:text-accent"
     >
-      💬
+      <MessageSquare size={13} strokeWidth={1.75} />
     </Link>
   );
 }
@@ -84,13 +86,14 @@ export function CheckButton({
       disabled={done}
       onClick={() => onDone(t.id)}
       title="Mark done"
-      className={`flex h-5 w-5 flex-none items-center justify-center rounded-full border text-[11px] transition-colors ${
+      aria-label="Mark done"
+      className={`flex h-5 w-5 flex-none items-center justify-center rounded-full border transition-colors ${
         done
           ? "border-ok/50 bg-ok/20 text-ok"
           : "border-edge text-transparent hover:border-ok hover:text-ok"
       }`}
     >
-      ✓
+      <Check size={12} strokeWidth={2.5} />
     </button>
   );
 }

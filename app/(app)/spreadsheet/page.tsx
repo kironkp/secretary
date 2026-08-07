@@ -5,6 +5,7 @@
 import { headers } from "next/headers";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { Keyboard, Lightbulb, MessageSquare, Mic, Sparkles } from "lucide-react";
 import { auth } from "@/lib/auth";
 import {
   getCheckinsWithTask,
@@ -15,17 +16,20 @@ import {
 } from "@/lib/db/queries";
 import { SearchBox } from "@/components/spreadsheet/search-box";
 
-const SOURCE_STYLE: Record<string, { label: string; cls: string }> = {
-  spoken: { label: "🎙 spoken", cls: "border-accent/40 text-accent" },
-  typed: { label: "⌨ typed", cls: "border-edge text-muted" },
-  inferred: { label: "✨ inferred", cls: "border-warn/40 text-warn" },
-  suggested: { label: "💡 suggested", cls: "border-ok/40 text-ok" },
+const SOURCE_STYLE: Record<string, { label: string; cls: string; Icon: typeof Mic }> = {
+  spoken: { label: "spoken", cls: "border-accent/40 text-accent", Icon: Mic },
+  typed: { label: "typed", cls: "border-edge text-muted", Icon: Keyboard },
+  inferred: { label: "inferred", cls: "border-warn/40 text-warn", Icon: Sparkles },
+  suggested: { label: "suggested", cls: "border-ok/40 text-ok", Icon: Lightbulb },
 };
 
 function SourceChip({ source }: { source: string }) {
   const s = SOURCE_STYLE[source] ?? SOURCE_STYLE.typed;
   return (
-    <span className={`whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] ${s.cls}`}>
+    <span
+      className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] ${s.cls}`}
+    >
+      <s.Icon size={10} strokeWidth={2} />
       {s.label}
     </span>
   );
@@ -105,7 +109,7 @@ export default async function SpreadsheetPage() {
   ].sort((a, b) => b.when.getTime() - a.when.getTime());
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 py-6">
       <div>
         <h1 className="text-lg font-bold">Spreadsheet</h1>
         <p className="text-sm text-muted">
@@ -146,9 +150,10 @@ export default async function SpreadsheetPage() {
                       <Link
                         href={`/chat?c=${r.conversationId}${r.messageId ? `&m=${r.messageId}` : ""}`}
                         title="Jump to the conversation this came from"
-                        className="text-xs text-faint hover:text-accent"
+                        aria-label="Jump to the conversation this came from"
+                        className="inline-block text-faint hover:text-accent"
                       >
-                        💬
+                        <MessageSquare size={13} strokeWidth={1.75} />
                       </Link>
                     )}
                   </td>
@@ -176,7 +181,9 @@ export default async function SpreadsheetPage() {
                 <span className="font-semibold">{taskTitle}</span>{" "}
                 <span className="text-muted">— {checkin.note ?? checkin.type}</span>
                 {checkin.type === "auto_detected" && (
-                  <span className="ml-1.5 text-[11px] text-warn">✨ auto-detected</span>
+                  <span className="ml-1.5 inline-flex items-center gap-1 text-[11px] text-warn">
+                    <Sparkles size={10} strokeWidth={2} /> auto-detected
+                  </span>
                 )}
               </p>
             ))}
@@ -195,7 +202,13 @@ export default async function SpreadsheetPage() {
               className="group rounded-xl border border-edge bg-surface"
             >
               <summary className="cursor-pointer select-none px-4 py-3 text-sm font-semibold text-muted hover:text-ink">
-                {conversation.mode === "voice" ? "🎙" : "⌨"}{" "}
+                <span className="mr-1.5 inline-block translate-y-[2px]">
+                  {conversation.mode === "voice" ? (
+                    <Mic size={13} strokeWidth={1.75} />
+                  ) : (
+                    <Keyboard size={13} strokeWidth={1.75} />
+                  )}
+                </span>
                 {new Intl.DateTimeFormat("en-US", {
                   timeZone: timezone,
                   weekday: "short",
@@ -206,7 +219,7 @@ export default async function SpreadsheetPage() {
                 }).format(conversation.startedAt)}
                 <span className="ml-2 text-xs font-normal text-faint">
                   {msgs.filter((m) => m.role !== "tool").length} messages
-                  {conversation.extractedAt ? " · ✨ extracted" : ""}
+                  {conversation.extractedAt ? " · extracted" : ""}
                 </span>
               </summary>
               <div className="space-y-2 border-t border-edge/50 px-4 py-3">

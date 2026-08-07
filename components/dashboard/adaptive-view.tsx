@@ -5,6 +5,7 @@
 // position against future regenerations.
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { Pin, Sparkles, Undo2 } from "lucide-react";
 import type { LayoutComponent, LayoutSpec } from "@/lib/layout/spec";
 import type { EventRow, TaskRow } from "./shared";
 import { BoardView, ListTable } from "./task-views";
@@ -104,11 +105,14 @@ export function AdaptiveView({
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2 rounded-xl border border-edge bg-surface px-4 py-2 text-xs text-muted">
         {version === 0 ? (
-          <span>✨ Default arrangement — the AI reorganizes this as your life changes.</span>
+          <span className="inline-flex items-center gap-1.5">
+            <Sparkles size={13} strokeWidth={1.75} /> Default arrangement — the AI reorganizes this
+            as your life changes.
+          </span>
         ) : (
           <>
-            <span>
-              ✨ AI-arranged (v{version}
+            <span className="inline-flex items-center gap-1.5">
+              <Sparkles size={13} strokeWidth={1.75} /> AI-arranged (v{version}
               {updatedAt
                 ? `, ${new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(updatedAt))}`
                 : ""}
@@ -117,13 +121,15 @@ export function AdaptiveView({
             <button
               onClick={revert}
               disabled={reverting}
-              className="rounded-full border border-edge px-2.5 py-0.5 hover:border-faint hover:text-ink disabled:opacity-50"
+              className="inline-flex items-center gap-1 rounded-full border border-edge px-2.5 py-0.5 hover:border-faint hover:text-ink disabled:opacity-50"
             >
-              ↩ revert
+              <Undo2 size={12} strokeWidth={2} /> revert
             </button>
           </>
         )}
-        <span className="ml-auto text-faint">📌 pin a section to lock its spot</span>
+        <span className="ml-auto inline-flex items-center gap-1 text-faint">
+          <Pin size={12} strokeWidth={1.75} /> pin a section to lock its spot
+        </span>
       </div>
 
       {layout.sections.map((s, i) => {
@@ -138,13 +144,15 @@ export function AdaptiveView({
               <button
                 onClick={() => togglePin(s.component)}
                 title={isPinned ? "Unpin — let the AI move this" : "Pin — never move this"}
-                className={`ml-auto text-xs transition-opacity ${
+                aria-label={isPinned ? "Unpin section" : "Pin section"}
+                className={`ml-auto inline-flex items-center gap-1 text-xs transition-opacity ${
                   isPinned
-                    ? "opacity-100"
-                    : "opacity-0 hover:!opacity-100 group-hover/section:opacity-40"
+                    ? "text-accent opacity-100"
+                    : "text-muted opacity-0 hover:!opacity-100 group-hover/section:opacity-40"
                 }`}
               >
-                📌{isPinned ? "" : " pin"}
+                <Pin size={12} strokeWidth={1.75} fill={isPinned ? "currentColor" : "none"} />
+                {isPinned ? "" : "pin"}
               </button>
             </div>
             {body}

@@ -104,7 +104,7 @@ export function SignInForm({ google, apple }: { google: boolean; apple: boolean 
         className="mt-3 w-full"
         onClick={signInWithPasskey}
       >
-        🔑 Sign in with a passkey
+        Sign in with a passkey
       </Button>
       <p className="mt-5 text-center text-xs text-muted">
         New here?{" "}

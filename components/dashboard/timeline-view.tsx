@@ -2,6 +2,7 @@
 
 // Phase 9: vertical timeline — overdue first, then everything with a date over
 // the next 30 days, day by day.
+import { Calendar } from "lucide-react";
 import {
   CheckButton,
   ProvenanceLink,
@@ -95,7 +96,7 @@ export function TimelineView({
                     key={`e-${e.event.id}`}
                     className="flex items-center gap-2 rounded-lg border border-edge bg-surface px-3 py-2 text-sm"
                   >
-                    <span>📅</span>
+                    <Calendar size={14} strokeWidth={1.75} className="flex-none text-muted" />
                     <span>{e.event.title}</span>
                     <span className="text-xs text-faint">
                       {new Intl.DateTimeFormat("en-US", {

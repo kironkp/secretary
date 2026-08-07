@@ -13,7 +13,7 @@ export default async function SettingsPage() {
   const timezone = (session.user as { timezone?: string }).timezone ?? "UTC";
 
   return (
-    <div className="mx-auto max-w-xl space-y-6">
+    <div className="mx-auto max-w-xl space-y-6 py-6">
       <div>
         <h1 className="text-lg font-bold">Settings</h1>
         <p className="text-sm text-muted">

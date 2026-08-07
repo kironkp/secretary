@@ -9,12 +9,50 @@
 // it has no WebRTC). Levels come from RTCPeerConnection.getStats() instead.
 import { useEffect, useRef, useState } from "react";
 import {
+  AlignLeft,
+  ArrowRight,
+  Bookmark,
+  Calendar,
+  Check,
+  FolderPlus,
+  Hourglass,
+  Mic,
+  MicOff,
+  Pencil,
+  PhoneOff,
+  TriangleAlert,
+  Wrench,
+} from "lucide-react";
+import {
   playRemoteStream,
   stopRemoteAudio,
   unlockRemoteAudio,
 } from "@/lib/realtime/remote-audio";
 import { useVoiceSession } from "./use-voice-session";
 import { Button } from "@/components/ui";
+
+// Tool toasts arrive from the server with a legacy glyph string — map it to
+// the icon set here so no emoji reaches the chrome.
+function ToastIcon({ glyph }: { glyph: string }) {
+  const cls = "text-ok";
+  const size = 13;
+  switch (glyph) {
+    case "✓":
+      return <Check size={size} strokeWidth={2.5} className={cls} />;
+    case "→":
+      return <ArrowRight size={size} strokeWidth={2} className="text-warn" />;
+    case "✎":
+      return <Pencil size={size} strokeWidth={2} className="text-accent" />;
+    case "▣":
+      return <FolderPlus size={size} strokeWidth={2} className="text-accent" />;
+    case "📅":
+      return <Calendar size={size} strokeWidth={2} className="text-accent" />;
+    case "◆":
+      return <Bookmark size={size} strokeWidth={2} className="text-grape" />;
+    default:
+      return <Check size={size} strokeWidth={2.5} className={cls} />;
+  }
+}
 
 const MODELS = [
   { id: "gpt-realtime-2.1", label: "GPT Realtime (best)" },
@@ -175,15 +213,17 @@ export function VoiceMode({
       {/* Error states (W7) */}
       {session.status === "error" && session.error ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
-          <p className="text-4xl">
-            {session.error.kind === "mic-denied"
-              ? "🎙"
-              : session.error.kind === "quota"
-                ? "⏳"
-                : session.error.kind === "disabled"
-                  ? "🔧"
-                  : "⚠️"}
-          </p>
+          <span className="flex h-16 w-16 items-center justify-center rounded-full bg-surface-2 text-muted">
+            {session.error.kind === "mic-denied" ? (
+              <Mic size={28} strokeWidth={1.75} />
+            ) : session.error.kind === "quota" ? (
+              <Hourglass size={28} strokeWidth={1.75} />
+            ) : session.error.kind === "disabled" ? (
+              <Wrench size={28} strokeWidth={1.75} />
+            ) : (
+              <TriangleAlert size={28} strokeWidth={1.75} className="text-warn" />
+            )}
+          </span>
           <h2 className="text-lg font-bold">
             {session.error.kind === "mic-denied"
               ? "Mic access needed"
@@ -232,8 +272,8 @@ export function VoiceMode({
           <p className="text-sm text-muted">{statusHint}</p>
           {micSilent && (
             <p className="max-w-xs rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-center text-xs text-warn">
-              I can&apos;t hear anything from your mic. Try speaking louder — or end the call (✕)
-              and start it again; iPhones sometimes hand over a dead microphone.
+              I can&apos;t hear anything from your mic. Try speaking louder — or end the call and
+              start it again; iPhones sometimes hand over a dead microphone.
             </p>
           )}
 
@@ -242,9 +282,11 @@ export function VoiceMode({
             {session.toasts.map((t) => (
               <div
                 key={t.key}
-                className="animate-toast-in rounded-lg border border-edge bg-card px-3 py-2 text-xs shadow-lg"
+                className="animate-toast-in flex items-start gap-1.5 rounded-lg border border-edge bg-card px-3 py-2 text-xs shadow-lg"
               >
-                <span className="mr-1.5 text-ok">{t.icon}</span>
+                <span className="translate-y-[1px] flex-none">
+                  <ToastIcon glyph={t.icon} />
+                </span>
                 {t.text}
               </div>
             ))}
@@ -283,31 +325,34 @@ export function VoiceMode({
         <button
           onClick={session.toggleMute}
           title={session.muted ? "Unmute" : "Mute"}
-          className={`flex h-12 w-12 items-center justify-center rounded-full border text-lg transition-colors ${
+          aria-label={session.muted ? "Unmute" : "Mute"}
+          className={`flex h-12 w-12 items-center justify-center rounded-full border transition-colors ${
             session.muted
               ? "border-warn bg-warn/20 text-warn"
               : "border-edge bg-card text-ink hover:border-faint"
           }`}
         >
-          {session.muted ? "🔇" : "🎙"}
+          {session.muted ? <MicOff size={18} strokeWidth={1.75} /> : <Mic size={18} strokeWidth={1.75} />}
         </button>
         <button
           onClick={() => setShowTranscript((s) => !s)}
           title="Live transcript"
-          className={`flex h-12 w-12 items-center justify-center rounded-full border text-lg transition-colors ${
+          aria-label="Live transcript"
+          className={`flex h-12 w-12 items-center justify-center rounded-full border transition-colors ${
             showTranscript
               ? "border-accent bg-accent/20 text-accent"
               : "border-edge bg-card text-ink hover:border-faint"
           }`}
         >
-          ☰
+          <AlignLeft size={18} strokeWidth={1.75} />
         </button>
         <button
           onClick={endCall}
           title="End call"
-          className="flex h-12 w-12 items-center justify-center rounded-full border border-danger/50 bg-danger/15 text-lg text-danger transition-colors hover:bg-danger/25"
+          aria-label="End call"
+          className="flex h-12 w-12 items-center justify-center rounded-full border border-danger/50 bg-danger/15 text-danger transition-colors hover:bg-danger/25"
         >
-          ✕
+          <PhoneOff size={18} strokeWidth={1.75} />
         </button>
       </div>
     </div>

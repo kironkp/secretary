@@ -3,6 +3,7 @@
 // The two main work surfaces — List ("spreadsheet" feel) and Board (kanban) —
 // extracted so both the classic dashboard and the adaptive layout can render them.
 import { useMemo, useState } from "react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import {
   CheckButton,
   ProvenanceLink,
@@ -78,7 +79,15 @@ export function ListTable({
                 className="cursor-pointer select-none px-4 py-2.5 font-semibold hover:text-ink"
               >
                 {label}
-                {sortKey === key && <span className="ml-1">{sortAsc ? "▲" : "▼"}</span>}
+                {sortKey === key && (
+                  <span className="ml-0.5 inline-block translate-y-[2px]">
+                    {sortAsc ? (
+                      <ChevronUp size={12} strokeWidth={2} />
+                    ) : (
+                      <ChevronDown size={12} strokeWidth={2} />
+                    )}
+                  </span>
+                )}
               </th>
             ))}
             <th className="w-8 px-2" />
@@ -120,7 +129,7 @@ export function ListTable({
                 <td
                   className={`px-4 py-2.5 ${isOverdue(t) ? "font-semibold text-danger" : "text-muted"}`}
                 >
-                  {done ? "✓" : fmtDue(t.dueAt)}
+                  {done ? "—" : fmtDue(t.dueAt)}
                 </td>
                 <td className="px-4 py-2.5 text-muted">{STATUS_LABEL[t.status]}</td>
                 <td className="px-4 py-2.5 text-faint">

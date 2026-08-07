@@ -4,6 +4,7 @@
 // the suggested/procrastination zones (P-1…P-3) shown on classic views too.
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Check, Flame, Sparkles, Target, TriangleAlert, X } from "lucide-react";
 import { CheckButton, fmtDue, isOverdue, type EventRow, type TaskRow } from "./shared";
 
 const OPEN = new Set(["inbox", "todo", "in_progress", "blocked"]);
@@ -12,9 +13,12 @@ export function OverdueCallout({ tasks }: { tasks: TaskRow[] }) {
   const overdue = tasks.filter(isOverdue);
   if (overdue.length === 0) return null;
   return (
-    <div className="rounded-xl border border-danger/50 bg-danger/10 px-4 py-3 text-sm">
-      <span className="font-bold text-danger">⚠ Overdue ({overdue.length})</span>
-      <span className="ml-2 text-muted">
+    <div className="flex items-baseline gap-2 rounded-xl border border-danger/50 bg-danger/10 px-4 py-3 text-sm">
+      <span className="inline-flex items-center gap-1.5 font-bold text-danger">
+        <TriangleAlert size={15} strokeWidth={2} className="translate-y-[2px]" />
+        Overdue ({overdue.length})
+      </span>
+      <span className="text-muted">
         {overdue.map((t) => `${t.title} (${fmtDue(t.dueAt)})`).join(" · ")}
       </span>
     </div>
@@ -99,7 +103,9 @@ export function FocusCard({
   const crossingNow = crossing.has(focus.id);
   return (
     <div className="rounded-xl border border-accent/40 bg-surface px-4 py-3.5">
-      <p className="mb-1.5 text-xs font-bold uppercase tracking-wide text-accent">🎯 Focus</p>
+      <p className="mb-1.5 inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-accent">
+        <Target size={13} strokeWidth={2} /> Focus
+      </p>
       <div className="flex items-center gap-2.5">
         <CheckButton t={focus} onDone={onDone} />
         <span className={`text-sm font-semibold cross-off ${crossingNow ? "crossed text-faint" : ""}`}>
@@ -175,7 +181,9 @@ export function ProcrastinationZone({ tasks }: { tasks: TaskRow[] }) {
   if (offenders.length === 0) return null;
   return (
     <div className="rounded-xl border border-warn/40 bg-surface px-4 py-3.5">
-      <p className="mb-2 text-xs font-bold uppercase tracking-wide text-warn">😬 Procrastinating</p>
+      <p className="mb-2 inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-warn">
+        <Flame size={13} strokeWidth={2} /> Procrastinating
+      </p>
       {offenders.map((t) => (
         <p key={t.id} className="mb-1 text-sm last:mb-0">
           {t.title}{" "}
@@ -216,7 +224,9 @@ export function SuggestedZone({ suggestions }: { suggestions: TaskRow[] }) {
   if (visible.length === 0) return null;
   return (
     <div className="rounded-xl border border-ok/40 bg-surface px-4 py-3.5">
-      <p className="mb-2 text-xs font-bold uppercase tracking-wide text-ok">✨ Suggested</p>
+      <p className="mb-2 inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-ok">
+        <Sparkles size={13} strokeWidth={2} /> Suggested
+      </p>
       {visible.map((s) => (
         <div key={s.id} className="mb-2 flex flex-wrap items-center gap-2 text-sm last:mb-0">
           <span>{s.title}</span>
@@ -227,16 +237,16 @@ export function SuggestedZone({ suggestions }: { suggestions: TaskRow[] }) {
             <button
               disabled={busy === s.id}
               onClick={() => act(s.id, "todo")}
-              className="rounded-full border border-ok/50 px-2.5 py-0.5 text-xs text-ok hover:bg-ok/10 disabled:opacity-50"
+              className="inline-flex items-center gap-1 rounded-full border border-ok/50 px-2.5 py-0.5 text-xs text-ok hover:bg-ok/10 disabled:opacity-50"
             >
-              ✓ add
+              <Check size={12} strokeWidth={2.5} /> add
             </button>
             <button
               disabled={busy === s.id}
               onClick={() => act(s.id, "dropped")}
-              className="rounded-full border border-edge px-2.5 py-0.5 text-xs text-muted hover:border-danger/50 hover:text-danger disabled:opacity-50"
+              className="inline-flex items-center gap-1 rounded-full border border-edge px-2.5 py-0.5 text-xs text-muted hover:border-danger/50 hover:text-danger disabled:opacity-50"
             >
-              ✗ dismiss
+              <X size={12} strokeWidth={2.5} /> dismiss
             </button>
           </span>
         </div>

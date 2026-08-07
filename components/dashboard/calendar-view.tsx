@@ -104,7 +104,7 @@ export function CalendarView({ tasks, events }: { tasks: TaskRow[]; events: Even
                     isOverdue(t) ? "bg-danger/15 text-danger" : "bg-surface-2 text-muted"
                   }`}
                 >
-                  ✓ {t.title}
+                  {t.title}
                 </p>
               ))}
               {dayEvents.length + dayTasks.length > 4 && (

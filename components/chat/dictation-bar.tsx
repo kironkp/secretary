@@ -1,8 +1,9 @@
 "use client";
 
 // Dictation (W2): live waveform from real mic levels via AnalyserNode.
-// ✗ discards · ✓ sends to /api/transcribe and drops the text into the input.
+// X discards · Check sends to /api/transcribe and drops the text into the input.
 import { useEffect, useRef, useState } from "react";
+import { Check, Loader2, X } from "lucide-react";
 
 export function DictationBar({
   onCancel,
@@ -132,14 +133,14 @@ export function DictationBar({
   };
 
   return (
-    <div className="flex items-center gap-3 rounded-2xl border border-accent/40 bg-surface-2 px-3 py-2">
+    <div className="flex items-center gap-3 rounded-2xl border border-accent/40 bg-surface px-2.5 py-2 shadow-sm">
       <button
         onClick={cancel}
         title="Discard recording"
         aria-label="Discard recording"
-        className="flex h-10 w-10 flex-none items-center justify-center rounded-full border border-danger/40 bg-danger/15 text-lg text-danger hover:bg-danger/25"
+        className="flex h-9 w-9 flex-none items-center justify-center rounded-full border border-danger/40 bg-danger/10 text-danger transition-colors hover:bg-danger/20"
       >
-        ✕
+        <X size={16} strokeWidth={2} />
       </button>
       <canvas ref={canvasRef} width={400} height={28} className="h-7 min-w-0 flex-1 animate-pulse-subtle" />
       <span className="flex-none text-xs tabular-nums text-faint">
@@ -150,9 +151,9 @@ export function DictationBar({
         disabled={busy}
         title="Use this recording"
         aria-label="Use this recording"
-        className="flex h-10 w-10 flex-none items-center justify-center rounded-full bg-ok text-lg font-bold text-bg hover:opacity-90 disabled:opacity-60"
+        className="flex h-9 w-9 flex-none items-center justify-center rounded-full bg-ok text-bg transition-opacity hover:opacity-90 disabled:opacity-60"
       >
-        {busy ? "…" : "✓"}
+        {busy ? <Loader2 size={16} strokeWidth={2} className="animate-spin" /> : <Check size={16} strokeWidth={2.5} />}
       </button>
     </div>
   );

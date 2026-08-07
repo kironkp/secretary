@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { getTodayStrip } from "@/lib/db/queries";
+import { Calendar } from "lucide-react";
 import { NavTabs } from "@/components/shell/nav-tabs";
 import { ThemeToggle } from "@/components/shell/theme";
 
@@ -17,7 +18,7 @@ export default async function AppLayout({
   const strip = await getTodayStrip(session.user.id, timezone);
 
   const nextEventLabel = strip.nextEvent
-    ? `📅 ${strip.nextEvent.title} · ${new Intl.DateTimeFormat("en-US", {
+    ? `${strip.nextEvent.title} · ${new Intl.DateTimeFormat("en-US", {
         timeZone: timezone,
         hour: "numeric",
         minute: "2-digit",
@@ -25,13 +26,14 @@ export default async function AppLayout({
     : null;
 
   return (
-    <div className="flex min-h-screen flex-col">
-      <header className="sticky top-0 z-10 border-b border-edge bg-surface/90 backdrop-blur">
+    <div className="flex h-dvh flex-col">
+      <header className="z-10 flex-none border-b border-edge bg-surface/90 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center gap-4 px-4 py-3">
           <span className="text-sm font-bold tracking-tight text-accent">Secretary</span>
           <div className="flex flex-1 items-center justify-end gap-2 overflow-x-auto text-xs">
             {nextEventLabel && (
-              <span className="whitespace-nowrap rounded-full border border-edge bg-card px-3 py-1 text-muted">
+              <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-edge bg-card px-3 py-1 text-muted">
+                <Calendar size={11} strokeWidth={1.75} />
                 {nextEventLabel}
               </span>
             )}
@@ -54,7 +56,9 @@ export default async function AppLayout({
           <NavTabs />
         </div>
       </header>
-      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">{children}</main>
+      <main className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto h-full w-full max-w-6xl px-4">{children}</div>
+      </main>
     </div>
   );
 }

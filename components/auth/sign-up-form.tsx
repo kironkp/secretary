@@ -36,7 +36,6 @@ export function SignUpForm({ google, apple }: { google: boolean; apple: boolean 
   if (sent) {
     return (
       <div className="space-y-3 text-center">
-        <p className="text-2xl">📬</p>
         <h1 className="text-lg font-bold">Check your email</h1>
         <p className="text-sm text-muted">
           We sent a verification link to <span className="text-ink">{email}</span>.

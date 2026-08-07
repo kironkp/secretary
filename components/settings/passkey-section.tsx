@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { KeyRound } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 import { Button, ErrorNote } from "@/components/ui";
 
@@ -47,7 +48,10 @@ export function PasskeySection() {
         <ul className="divide-y divide-edge rounded-lg border border-edge bg-surface-2">
           {passkeys.map((pk) => (
             <li key={pk.id} className="flex items-center gap-3 px-3 py-2 text-sm">
-              <span>🔑 {pk.name || "Passkey"}</span>
+              <span className="inline-flex items-center gap-2">
+                <KeyRound size={14} strokeWidth={1.75} className="text-muted" />
+                {pk.name || "Passkey"}
+              </span>
               <span className="ml-auto text-xs text-faint">
                 {new Date(pk.createdAt).toLocaleDateString()}
               </span>
