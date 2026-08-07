@@ -84,6 +84,7 @@ export async function POST(req: Request) {
         type: "realtime",
         model,
         instructions,
+        output_modalities: ["audio"],
         tools: openAIToolDefs(),
         tool_choice: "auto",
         audio: {

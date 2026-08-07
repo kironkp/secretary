@@ -2,7 +2,7 @@
 // Flow: POST /api/realtime/token (auth-gated, rate-limited, briefing baked into
 // the session server-side) → ephemeral client secret → SDP exchange with
 // api.openai.com → audio tracks + "oai-events" data channel.
-import { remoteAudioState } from "./remote-audio";
+import { playRemoteStream, remoteAudioState } from "./remote-audio";
 import type {
   ToolToast,
   VoiceEvents,
@@ -13,6 +13,14 @@ import type {
 
 const OPENAI_CALLS_URL = "https://api.openai.com/v1/realtime/calls";
 const MAX_RECONNECTS = 5;
+
+/** Direction attribute of the first audio m-line section of an SDP. */
+function sdpAudioDirection(sdp: string): string | null {
+  const audioSection = sdp.split(/^m=/m).find((s) => s.startsWith("audio"));
+  if (!audioSection) return null;
+  const m = audioSection.match(/^a=(sendrecv|sendonly|recvonly|inactive)$/m);
+  return m?.[1] ?? null;
+}
 
 type TokenResponse = {
   clientSecret: string;
@@ -41,6 +49,37 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
   private recoveringMic = false;
   private eventsReceived = 0;
   private debugTimers: ReturnType<typeof setTimeout>[] = [];
+
+  // --- diagnostics (kept permanently: this app is debugged from a phone) ---
+  private eventLog: { t: number; type: string }[] = [];
+  private ontrackAt: number | null = null;
+  private ontrackStreams = 0;
+  private trackMutedAtOntrack: boolean | null = null;
+  private trackUnmutedAt: number | null = null;
+  private sdp: { offerAudioDir: string | null; answerAudioDir: string | null; answerHasAudio: boolean } | null = null;
+  private lastErrorEvent: unknown = null;
+  private lastResponseDone: unknown = null;
+  private audioTokensTotal = 0;
+
+  /** Everything the debug overlay / beacon wants, in one object. */
+  debugInfo() {
+    return {
+      status: this.status,
+      connectionState: this.pc?.connectionState ?? "none",
+      dcState: this.dc?.readyState ?? "none",
+      eventsReceived: this.eventsReceived,
+      ontrackAt: this.ontrackAt,
+      ontrackStreams: this.ontrackStreams,
+      trackMutedAtOntrack: this.trackMutedAtOntrack,
+      trackUnmutedAt: this.trackUnmutedAt,
+      sdp: this.sdp,
+      audioTokensTotal: this.audioTokensTotal,
+      lastErrorEvent: this.lastErrorEvent,
+      lastResponseDone: this.lastResponseDone,
+      lastEventTypes: this.eventLog.slice(-15).map((e) => e.type),
+      audioEl: remoteAudioState(),
+    };
+  }
 
   // Refresh/close mid-call would orphan the session (blocking the concurrency
   // limit) — sendBeacon survives page teardown where fetch doesn't.
@@ -130,7 +169,18 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
       pc.addTrack(track, this.micStream);
     }
     pc.ontrack = (e) => {
+      this.ontrackAt = Date.now();
+      this.ontrackStreams = e.streams.length;
+      this.trackMutedAtOntrack = e.track.muted;
+      // a remote track that never unmutes = RTP never arrived — key signature
+      e.track.onunmute = () => {
+        this.trackUnmutedAt = Date.now();
+      };
       this.remoteStream = e.streams[0] ?? new MediaStream([e.track]);
+      // Attach directly here (the documented pattern) — the UI poll is only a
+      // backup. Waiting for React state to observe "connected" before ever
+      // touching the element is how the stream ended up never attached.
+      playRemoteStream(this.remoteStream);
     };
     pc.onconnectionstatechange = () => {
       if (
@@ -159,7 +209,13 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
       this.setStatus("error", { kind: "network", message: "Call setup failed." });
       throw new Error(`sdp-exchange-failed: ${sdpRes.status}`);
     }
-    await pc.setRemoteDescription({ type: "answer", sdp: await sdpRes.text() });
+    const answerSdp = await sdpRes.text();
+    await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
+    this.sdp = {
+      offerAudioDir: sdpAudioDirection(offer.sdp ?? ""),
+      answerAudioDir: sdpAudioDirection(answerSdp),
+      answerHasAudio: /^m=audio /m.test(answerSdp),
+    };
 
     await new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -236,12 +292,9 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
         body: JSON.stringify({
           atMs,
           conversationId: this.conversationId,
-          connectionState: this.pc?.connectionState ?? "none",
-          dcState: this.dc?.readyState ?? "none",
-          eventsReceived: this.eventsReceived,
           ...levels,
-          audioEl: remoteAudioState(),
-          track: track
+          ...this.debugInfo(),
+          micTrack: track
             ? {
                 muted: track.muted,
                 readyState: track.readyState,
@@ -400,10 +453,20 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
   private handleEvent(event: { type: string } & Record<string, unknown>) {
     this.eventsReceived += 1;
     const t = event.type;
+    this.eventLog.push({ t: Date.now(), type: t });
+    if (this.eventLog.length > 200) this.eventLog.splice(0, this.eventLog.length - 200);
 
+    if (t === "error") {
+      // Never kill a live call over a server-side event error, but never
+      // drop it silently either.
+      this.lastErrorEvent = event;
+      console.warn("[realtime] error event:", JSON.stringify(event).slice(0, 500));
+      return;
+    }
     if (t === "input_audio_buffer.speech_started") {
-      // Barge-in: kill the assistant's audio instantly.
-      if (this.assistantResponding) this.send({ type: "response.cancel" });
+      // Barge-in: semantic_vad interrupts the response server-side
+      // (interrupt_response defaults true) — a manual response.cancel here
+      // races with it. Just update the UI.
       this.emit("assistantSpeaking", false);
       return;
     }
@@ -415,11 +478,27 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
     if (t === "response.done") {
       this.assistantResponding = false;
       this.emit("assistantSpeaking", false);
-      const usage = (event.response as { usage?: { input_tokens?: number; output_tokens?: number } })
-        ?.usage;
-      if (usage) {
-        this.inputTokens += usage.input_tokens ?? 0;
-        this.outputTokens += usage.output_tokens ?? 0;
+      const response = event.response as {
+        status?: string;
+        status_details?: unknown;
+        usage?: {
+          input_tokens?: number;
+          output_tokens?: number;
+          output_token_details?: { audio_tokens?: number };
+        };
+      };
+      this.lastResponseDone = {
+        status: response?.status,
+        status_details: response?.status_details,
+        audio_tokens: response?.usage?.output_token_details?.audio_tokens,
+      };
+      this.audioTokensTotal += response?.usage?.output_token_details?.audio_tokens ?? 0;
+      if (response?.status && response.status !== "completed") {
+        console.warn("[realtime] response ended:", JSON.stringify(this.lastResponseDone));
+      }
+      if (response?.usage) {
+        this.inputTokens += response.usage.input_tokens ?? 0;
+        this.outputTokens += response.usage.output_tokens ?? 0;
       }
       return;
     }

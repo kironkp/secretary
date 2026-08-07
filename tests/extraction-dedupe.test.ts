@@ -89,6 +89,10 @@ describe("findDuplicateEvent", () => {
 
 describe("applyExtraction (real database)", () => {
   const U = { id: `test-extract-${crypto.randomUUID()}`, email: `x-${Date.now()}@extract.test` };
+  // relative dates: the extraction event-dedupe window is "yesterday onward",
+  // so fixtures must not rot as the calendar advances
+  const LUNCH_AT = new Date(Date.now() + 2 * 86400000);
+  const LUNCH_AT_LATER = new Date(LUNCH_AT.getTime() + 30 * 60000);
   let convId: string;
   let insuranceTaskId: string;
 
@@ -131,7 +135,7 @@ describe("applyExtraction (real database)", () => {
         { title: "Book dentist appointment", notes: "molar hurts", due_at: null },
       ],
       events: [
-        { title: "Lunch with Sam", starts_at: "2026-08-01T12:00:00Z", ends_at: null, location: null },
+        { title: "Lunch with Sam", starts_at: LUNCH_AT.toISOString(), ends_at: null, location: null },
       ],
       status_updates: [
         { task: "insurance form", signal: "done", new_due_at: null, reason: null },
@@ -169,7 +173,12 @@ describe("applyExtraction (real database)", () => {
     const again = await applyExtraction(U.id, convId, {
       tasks: [{ title: "book a dentist appointment", notes: null, due_at: null }],
       events: [
-        { title: "lunch w/ Sam", starts_at: "2026-08-01T12:30:00Z", ends_at: null, location: null },
+        {
+          title: "lunch w/ Sam",
+          starts_at: LUNCH_AT_LATER.toISOString(),
+          ends_at: null,
+          location: null,
+        },
       ],
       status_updates: [],
       facts: ["The user's dentist is Dr. Patel"],

@@ -9,6 +9,7 @@ const SILENT_WAV =
   "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAIlYAAESsAAACABAAZGF0YQQAAAAAAA==";
 
 let el: HTMLAudioElement | null = null;
+let lastRejection: { name: string; message: string; at: number } | null = null;
 
 export function getRemoteAudioElement(): HTMLAudioElement | null {
   if (typeof document === "undefined") return null;
@@ -22,6 +23,12 @@ export function getRemoteAudioElement(): HTMLAudioElement | null {
   return el;
 }
 
+function recordRejection(where: string, e: unknown) {
+  const err = e instanceof Error ? e : new Error(String(e));
+  lastRejection = { name: err.name, message: `${where}: ${err.message}`, at: Date.now() };
+  console.warn(`[remote-audio] play() rejected (${where}): ${err.name}: ${err.message}`);
+}
+
 /** MUST be called synchronously from a user gesture (the Talk button tap). */
 export function unlockRemoteAudio() {
   const a = getRemoteAudioElement();
@@ -29,9 +36,7 @@ export function unlockRemoteAudio() {
   a.src = SILENT_WAV;
   a.muted = false;
   a.volume = 1;
-  void a.play().catch(() => {
-    /* even a rejected gesture-play records user activation on the element */
-  });
+  void a.play().catch((e) => recordRejection("unlock", e));
 }
 
 /** Attach the live call's remote stream (idempotent) and keep it playing. */
@@ -41,8 +46,10 @@ export function playRemoteStream(stream: MediaStream) {
   if (a.srcObject !== stream) {
     a.removeAttribute("src");
     a.srcObject = stream;
+    a.muted = false;
+    a.volume = 1;
   }
-  if (a.paused) void a.play().catch(() => {});
+  if (a.paused) void a.play().catch((e) => recordRejection("attach", e));
 }
 
 export function stopRemoteAudio() {
@@ -53,10 +60,10 @@ export function stopRemoteAudio() {
   a.removeAttribute("src");
 }
 
-/** For the diagnostics beacon: is the voice actually playing? */
+/** For the diagnostics beacon / debug overlay: is the voice actually playing? */
 export function remoteAudioState() {
   const a = el;
-  if (!a) return { exists: false as const };
+  if (!a) return { exists: false as const, lastRejection };
   return {
     exists: true as const,
     paused: a.paused,
@@ -64,5 +71,6 @@ export function remoteAudioState() {
     volume: a.volume,
     readyState: a.readyState,
     hasStream: Boolean(a.srcObject),
+    lastRejection,
   };
 }

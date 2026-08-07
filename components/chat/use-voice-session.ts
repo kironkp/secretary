@@ -109,5 +109,6 @@ export function useVoiceSession() {
     getLevels: () =>
       providerRef.current?.getAudioLevels() ??
       Promise.resolve({ mic: null, remote: null, micBytesSent: 0, remoteBytesReceived: 0 }),
+    getDebugInfo: () => providerRef.current?.debugInfo() ?? null,
   };
 }

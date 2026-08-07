@@ -80,6 +80,26 @@ export function VoiceMode({
   const micLevel = levels.mic;
   const remoteLevel = levels.remote;
 
+  // Debug overlay (?voicedebug=1) — the iPhone has no console. Ugly on purpose.
+  const [debugOn, setDebugOn] = useState(false);
+  const [debugJson, setDebugJson] = useState("");
+  useEffect(() => {
+    const t = setTimeout(
+      () => setDebugOn(new URLSearchParams(window.location.search).has("voicedebug")),
+      0
+    );
+    return () => clearTimeout(t);
+  }, []);
+  useEffect(() => {
+    if (!debugOn) return;
+    const iv = setInterval(async () => {
+      const info = session.getDebugInfo();
+      const l = await session.getLevels();
+      setDebugJson(JSON.stringify({ ...info, levels: l }, null, 1));
+    }, 1000);
+    return () => clearInterval(iv);
+  }, [debugOn, session]);
+
   useEffect(() => {
     if (!startedRef.current) {
       startedRef.current = true;
@@ -230,6 +250,16 @@ export function VoiceMode({
             ))}
           </div>
         </div>
+      )}
+
+      {debugOn && (
+        <pre
+          onClick={() => void navigator.clipboard?.writeText(debugJson).catch(() => {})}
+          className="max-h-48 overflow-y-auto border-t border-warn/40 bg-black/70 px-2 py-1 text-[9px] leading-tight text-warn"
+          title="Tap to copy"
+        >
+          {debugJson || "collecting…"}
+        </pre>
       )}
 
       {/* Transcript panel */}
