@@ -1,0 +1,43 @@
+{
+  "name": "secretary",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio",
+    "test": "vitest run",
+    "db:local": "node scripts/local-postgres.mjs",
+    "https-proxy": "node scripts/https-proxy.mjs"
+  },
+  "dependencies": {
+    "@better-auth/passkey": "^1.6.23",
+    "better-auth": "^1.6.23",
+    "drizzle-orm": "^0.45.2",
+    "next": "16.2.11",
+    "openai": "^6.48.0",
+    "pg": "^8.22.0",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "resend": "^6.18.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/pg": "^8.20.0",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "dotenv": "^17.4.2",
+    "drizzle-kit": "^0.31.10",
+    "embedded-postgres": "^18.4.0-beta.17",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.11",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "vitest": "^4.1.10"
+  }
+}

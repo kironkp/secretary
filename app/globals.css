@@ -1,0 +1,71 @@
+@import "tailwindcss";
+
+/* Dark-mode-first palette — mirrors the spec board. Light mode lands later. */
+@theme {
+  --color-bg: #0f1115;
+  --color-surface: #171a21;
+  --color-surface-2: #1e222b;
+  --color-card: #232834;
+  --color-edge: #2e3442;
+  --color-ink: #e8eaf0;
+  --color-muted: #9aa3b5;
+  --color-faint: #6b7386;
+  --color-accent: #7aa2ff;
+  --color-ok: #4ade80;
+  --color-warn: #fbbf24;
+  --color-danger: #f87171;
+  --color-grape: #c084fc;
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background-color: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-geist-sans), -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Voice orb idle breathing */
+@keyframes breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+
+/* Card toast slide-in (voice mode) */
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.animate-toast-in { animation: toast-in 0.25s ease-out; }
+
+/* Dictation bar subtle pulse */
+@keyframes pulse-subtle {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.85; }
+}
+.animate-pulse-subtle { animation: pulse-subtle 2s ease-in-out infinite; }
+
+/* Satisfying cross-off: strike draws left→right, text fades */
+.cross-off {
+  position: relative;
+  transition: color 0.4s ease 0.25s;
+}
+.cross-off::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  height: 1.5px;
+  width: 0;
+  background: currentColor;
+  transition: width 0.45s cubic-bezier(0.65, 0, 0.35, 1);
+}
+.cross-off.crossed::after { width: 100%; }
+
+/* Provenance deep-link highlight */
+@keyframes anchor-flash {
+  0% { box-shadow: 0 0 0 2px var(--color-accent); }
+  100% { box-shadow: 0 0 0 2px transparent; }
+}
+.anchor-highlight { animation: anchor-flash 2.5s ease-out; }

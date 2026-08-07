@@ -1,0 +1,307 @@
+// Session-start briefing (Flow 3): assembled server-side before every voice
+// token mint and text chat, injected into system instructions. This is what
+// turns "hello" into "did you send the insurance form?".
+import { and, desc, eq, gte, inArray, isNotNull, lt, ne, or } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { events, memories, tasks } from "@/lib/db/schema";
+import { dayRangeInTz } from "@/lib/time";
+import { refreshProcrastinationScores } from "./procrastination";
+import { getPendingSuggestions } from "./suggestions";
+
+const OPEN_STATUSES = ["inbox", "todo", "in_progress", "blocked"] as const;
+const MAX_NUDGES = 3;
+const STALLED_DAYS = 3;
+
+// Pending suggestions live as source='suggested' + status='inbox' until the
+// user accepts them — they must not masquerade as real tasks anywhere.
+const notPendingSuggestion = or(ne(tasks.source, "suggested"), ne(tasks.status, "inbox"));
+
+type BriefingItem = { id: string; title: string; detail: string };
+
+export type BriefingCard = {
+  dateLabel: string;
+  overdue: BriefingItem[];
+  dueToday: BriefingItem[];
+  dueTomorrow: BriefingItem[];
+  events: BriefingItem[];
+  stalled: BriefingItem[];
+  procrastinated: BriefingItem[];
+  suggestions: BriefingItem[];
+  hasContent: boolean;
+};
+
+export type Briefing = { text: string; card: BriefingCard };
+
+function fmt(d: Date, tz: string, withTime = true) {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    ...(withTime ? { hour: "numeric", minute: "2-digit" } : {}),
+  }).format(d);
+}
+
+/**
+ * Build the briefing. With consumeNudges=true (session starts), the overdue
+ * items surfaced for nudging get lastNudgedAt stamped so the same item isn't
+ * nagged twice in a day.
+ */
+export async function buildBriefing(
+  userId: string,
+  timezone: string,
+  opts: { consumeNudges?: boolean } = {}
+): Promise<Briefing> {
+  const now = new Date();
+  const today = dayRangeInTz(timezone, now);
+  const tomorrow = dayRangeInTz(timezone, new Date(now.getTime() + 86400000));
+
+  // Keep procrastination scores fresh at session start (pure math, no model).
+  await refreshProcrastinationScores(userId, now);
+
+  const overdueRows = await db
+    .select()
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.userId, userId),
+        inArray(tasks.status, [...OPEN_STATUSES]),
+        notPendingSuggestion,
+        isNotNull(tasks.dueAt),
+        lt(tasks.dueAt, now)
+      )
+    )
+    .orderBy(tasks.dueAt);
+
+  const dueTodayRows = await db
+    .select()
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.userId, userId),
+        inArray(tasks.status, [...OPEN_STATUSES]),
+        notPendingSuggestion,
+        gte(tasks.dueAt, now),
+        lt(tasks.dueAt, today.end)
+      )
+    );
+
+  const dueTomorrowRows = await db
+    .select()
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.userId, userId),
+        inArray(tasks.status, [...OPEN_STATUSES]),
+        notPendingSuggestion,
+        gte(tasks.dueAt, tomorrow.start),
+        lt(tasks.dueAt, tomorrow.end)
+      )
+    );
+
+  const todayEvents = await db
+    .select()
+    .from(events)
+    .where(
+      and(eq(events.userId, userId), gte(events.startsAt, today.start), lt(events.startsAt, today.end))
+    )
+    .orderBy(events.startsAt);
+
+  const stalledRows = await db
+    .select()
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.userId, userId),
+        eq(tasks.status, "in_progress"),
+        lt(tasks.updatedAt, new Date(now.getTime() - STALLED_DAYS * 86400000))
+      )
+    )
+    .limit(5);
+
+  const procrastinatedRows = await db
+    .select()
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.userId, userId),
+        inArray(tasks.status, [...OPEN_STATUSES]),
+        notPendingSuggestion,
+        gte(tasks.procrastinationScore, 3)
+      )
+    )
+    .orderBy(desc(tasks.procrastinationScore))
+    .limit(3);
+
+  const suggestionRows = await getPendingSuggestions(userId);
+
+  const memoryRows = await db
+    .select()
+    .from(memories)
+    .where(eq(memories.userId, userId))
+    .orderBy(desc(memories.createdAt))
+    .limit(20);
+
+  // Snapshot of what already exists, so the model updates instead of
+  // duplicating ("push the expense report" must never create a second one).
+  const openTasks = await db
+    .select()
+    .from(tasks)
+    .where(
+      and(eq(tasks.userId, userId), inArray(tasks.status, [...OPEN_STATUSES]), notPendingSuggestion)
+    )
+    .orderBy(tasks.dueAt)
+    .limit(30);
+  const upcomingEvents = await db
+    .select()
+    .from(events)
+    .where(
+      and(
+        eq(events.userId, userId),
+        gte(events.startsAt, today.start),
+        lt(events.startsAt, new Date(now.getTime() + 7 * 86400000))
+      )
+    )
+    .orderBy(events.startsAt)
+    .limit(20);
+
+  // Nudge budget: overdue items not already nudged today, max 3.
+  const nudgeable = overdueRows.filter(
+    (t) => !t.lastNudgedAt || t.lastNudgedAt < today.start
+  );
+  const toNudge = nudgeable.slice(0, MAX_NUDGES);
+  if (opts.consumeNudges && toNudge.length > 0) {
+    await db
+      .update(tasks)
+      .set({ lastNudgedAt: now })
+      .where(
+        and(
+          eq(tasks.userId, userId),
+          inArray(
+            tasks.id,
+            toNudge.map((t) => t.id)
+          )
+        )
+      );
+  }
+
+  const daysLate = (t: { dueAt: Date | null }) =>
+    Math.max(1, Math.floor((now.getTime() - (t.dueAt?.getTime() ?? 0)) / 86400000));
+
+  const card: BriefingCard = {
+    dateLabel: new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      weekday: "long",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(now),
+    overdue: overdueRows.map((t) => ({
+      id: t.id,
+      title: t.title,
+      detail: `${daysLate(t)}d late${t.postponedCount ? ` · pushed ${t.postponedCount}×` : ""}`,
+    })),
+    dueToday: dueTodayRows.map((t) => ({
+      id: t.id,
+      title: t.title,
+      detail: fmt(t.dueAt!, timezone),
+    })),
+    dueTomorrow: dueTomorrowRows.map((t) => ({
+      id: t.id,
+      title: t.title,
+      detail: "tomorrow",
+    })),
+    events: todayEvents.map((e) => ({
+      id: e.id,
+      title: e.title,
+      detail: fmt(e.startsAt, timezone),
+    })),
+    stalled: stalledRows.map((t) => ({
+      id: t.id,
+      title: t.title,
+      detail: "in progress, no movement",
+    })),
+    procrastinated: procrastinatedRows.map((t) => ({
+      id: t.id,
+      title: t.title,
+      detail: t.postponedCount ? `pushed ${t.postponedCount}×` : "stalling",
+    })),
+    suggestions: suggestionRows.map((t) => ({
+      id: t.id,
+      title: t.title,
+      detail: t.notes?.replace(/^Suggested: /, "") ?? "",
+    })),
+    hasContent:
+      overdueRows.length + dueTodayRows.length + todayEvents.length + stalledRows.length > 0,
+  };
+
+  const lines: string[] = [
+    `CURRENT DATE & TIME (server truth — never guess dates): ${card.dateLabel} (${timezone})`,
+    "",
+    "=== TODAY'S BRIEFING ===",
+  ];
+  if (overdueRows.length) {
+    lines.push("Overdue:");
+    for (const t of overdueRows)
+      lines.push(
+        `- "${t.title}" — due ${fmt(t.dueAt!, timezone)} (${daysLate(t)}d late, postponed ${t.postponedCount}×)${
+          toNudge.some((n) => n.id === t.id) ? "" : " [already nudged today — do not nag again unless asked]"
+        }`
+      );
+  }
+  if (dueTodayRows.length)
+    lines.push(
+      "Due today: " + dueTodayRows.map((t) => `"${t.title}" (${fmt(t.dueAt!, timezone)})`).join(", ")
+    );
+  if (dueTomorrowRows.length)
+    lines.push("Due tomorrow: " + dueTomorrowRows.map((t) => `"${t.title}"`).join(", "));
+  if (todayEvents.length)
+    lines.push(
+      "Today's events: " +
+        todayEvents.map((e) => `"${e.title}" at ${fmt(e.startsAt, timezone)}`).join(", ")
+    );
+  if (stalledRows.length)
+    lines.push("Stalled (in progress, no activity ≥3d): " + stalledRows.map((t) => `"${t.title}"`).join(", "));
+  if (procrastinatedRows.length)
+    lines.push(
+      "Most procrastinated: " +
+        procrastinatedRows
+          .map((t) => `"${t.title}" (score ${t.procrastinationScore}, pushed ${t.postponedCount}×)`)
+          .join(", ")
+    );
+  if (suggestionRows.length)
+    lines.push(
+      "Pending suggestions (mention AT MOST ONE per conversation, casually, only if it fits — the user accepts or dismisses them on the dashboard): " +
+        suggestionRows.map((t) => `"${t.title}"`).join(", ")
+    );
+  if (
+    !overdueRows.length &&
+    !dueTodayRows.length &&
+    !todayEvents.length &&
+    !stalledRows.length
+  )
+    lines.push("Nothing overdue, due, or scheduled today. A quiet day.");
+  if (openTasks.length) {
+    lines.push("", "ALL OPEN TASKS (update these — never create a duplicate):");
+    for (const t of openTasks)
+      lines.push(
+        `- [${t.id}] "${t.title}" · ${t.status}${t.dueAt ? ` · due ${fmt(t.dueAt, timezone)}` : ""}${t.postponedCount ? ` · pushed ${t.postponedCount}×` : ""}`
+      );
+  }
+  if (upcomingEvents.length) {
+    lines.push("", "UPCOMING EVENTS (next 7 days — already logged, don't re-create):");
+    for (const e of upcomingEvents)
+      lines.push(`- [${e.id}] "${e.title}" · ${fmt(e.startsAt, timezone)}`);
+  }
+  if (memoryRows.length) {
+    lines.push("", "Things you know about the user:");
+    for (const m of memoryRows) lines.push(`- ${m.fact}`);
+  }
+  lines.push(
+    "",
+    `Nudge budget this session: at most ${MAX_NUDGES}, and only items not marked [already nudged today]. Lead with the single most important one.`
+  );
+
+  return { text: lines.join("\n"), card };
+}

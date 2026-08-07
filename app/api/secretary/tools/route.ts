@@ -1,0 +1,61 @@
+// Tool execution endpoint for the voice path. The Realtime model decides WHAT
+// to do; this route is the only thing that can actually touch the database,
+// and it re-validates everything against the user's session.
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { and, desc, eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { conversations, messages } from "@/lib/db/schema";
+import { isErrorResponse, parseBody, requireSession } from "@/lib/api";
+import { executeTool } from "@/lib/secretary/tools";
+
+const bodySchema = z.object({
+  name: z.string(),
+  args: z.unknown().optional(),
+  conversationId: z.string().nullish(),
+});
+
+export async function POST(req: Request) {
+  const user = await requireSession();
+  if (isErrorResponse(user)) return user;
+
+  const parsed = parseBody(bodySchema, await req.json().catch(() => ({})));
+  if (isErrorResponse(parsed)) return parsed;
+
+  // Provenance: anchor to the latest user message in this (owned) conversation.
+  let conversationId: string | undefined;
+  let anchorMessageId: string | undefined;
+  if (parsed.conversationId) {
+    const [owned] = await db
+      .select({ id: conversations.id })
+      .from(conversations)
+      .where(
+        and(eq(conversations.id, parsed.conversationId), eq(conversations.userId, user.id))
+      )
+      .limit(1);
+    if (owned) {
+      conversationId = owned.id;
+      const [lastUserMsg] = await db
+        .select({ id: messages.id })
+        .from(messages)
+        .where(
+          and(
+            eq(messages.conversationId, owned.id),
+            eq(messages.userId, user.id),
+            eq(messages.role, "user")
+          )
+        )
+        .orderBy(desc(messages.createdAt))
+        .limit(1);
+      anchorMessageId = lastUserMsg?.id;
+    }
+  }
+
+  const outcome = await executeTool(
+    { userId: user.id, timezone: user.timezone, conversationId, anchorMessageId },
+    parsed.name,
+    parsed.args
+  );
+
+  return NextResponse.json(outcome);
+}

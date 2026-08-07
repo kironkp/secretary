@@ -1,0 +1,113 @@
+"use client";
+
+// React binding over the UI-free voice provider.
+import { useCallback, useEffect, useRef, useState } from "react";
+import { OpenAIRealtimeVoice } from "@/lib/realtime/openai-webrtc";
+import type { ToolToast, VoiceErrorKind, VoiceStatus } from "@/lib/realtime/types";
+
+export type TranscriptLine = { role: "user" | "assistant"; text: string; final: boolean };
+export type ActiveToast = ToolToast & { key: number };
+
+export function useVoiceSession() {
+  const providerRef = useRef<OpenAIRealtimeVoice | null>(null);
+  const [status, setStatus] = useState<VoiceStatus>("idle");
+  const [error, setError] = useState<{ kind: VoiceErrorKind; message: string } | null>(null);
+  const [transcript, setTranscript] = useState<TranscriptLine[]>([]);
+  const [toasts, setToasts] = useState<ActiveToast[]>([]);
+  const [muted, setMuted] = useState(false);
+  const [assistantSpeaking, setAssistantSpeaking] = useState(false);
+  const [model, setModel] = useState<string>("");
+  const toastKey = useRef(0);
+
+  const appendTranscript = useCallback(
+    (role: "user" | "assistant") => (text: string, final: boolean) => {
+      setTranscript((prev) => {
+        const last = prev[prev.length - 1];
+        if (last && last.role === role && !last.final) {
+          const merged = final ? { role, text, final: true } : { role, text: last.text + text, final: false };
+          return [...prev.slice(0, -1), merged];
+        }
+        if (!text.trim() && !final) return prev;
+        return [...prev, { role, text, final }];
+      });
+    },
+    []
+  );
+
+  const start = useCallback(
+    async (chosenModel: string) => {
+      const provider = new OpenAIRealtimeVoice();
+      providerRef.current = provider;
+      setTranscript([]);
+      setToasts([]);
+      setError(null);
+      provider.on("status", (s, detail) => {
+        setStatus(s);
+        if (s === "error" && detail?.kind) {
+          setError({ kind: detail.kind, message: detail.message ?? "Something went wrong." });
+        }
+      });
+      provider.on("userTranscript", appendTranscript("user"));
+      provider.on("assistantTranscript", appendTranscript("assistant"));
+      provider.on("assistantSpeaking", setAssistantSpeaking);
+      provider.on("modelChanged", setModel);
+      provider.on("toolResult", (_name, toast) => {
+        if (!toast) return;
+        const key = ++toastKey.current;
+        setToasts((prev) => [...prev.slice(-3), { ...toast, key }]);
+        setTimeout(() => setToasts((prev) => prev.filter((t) => t.key !== key)), 6000);
+      });
+      try {
+        await provider.connect({ model: chosenModel });
+      } catch {
+        /* status/error events already emitted */
+      }
+    },
+    [appendTranscript]
+  );
+
+  const end = useCallback(async () => {
+    const conversationId = providerRef.current?.conversationId ?? null;
+    await providerRef.current?.disconnect();
+    providerRef.current = null;
+    return conversationId;
+  }, []);
+
+  const switchModel = useCallback(async (m: string) => {
+    await providerRef.current?.switchModel(m);
+  }, []);
+
+  const toggleMute = useCallback(() => {
+    setMuted((m) => {
+      providerRef.current?.setMuted(!m);
+      return !m;
+    });
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      providerRef.current?.disconnect();
+    };
+  }, []);
+
+  return {
+    status,
+    error,
+    transcript,
+    toasts,
+    muted,
+    assistantSpeaking,
+    model,
+    start,
+    end,
+    switchModel,
+    toggleMute,
+    getMicStream: () => providerRef.current?.micStream ?? null,
+    getRemoteStream: () => providerRef.current?.remoteStream ?? null,
+    // Stats-based levels — safe on iOS, where Web Audio on the mic stream
+    // mid-call can silence the WebRTC sender.
+    getLevels: () =>
+      providerRef.current?.getAudioLevels() ??
+      Promise.resolve({ mic: null, remote: null, micBytesSent: 0, remoteBytesReceived: 0 }),
+  };
+}
