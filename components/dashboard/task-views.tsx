@@ -172,9 +172,21 @@ export function BoardView({
   crossing: Set<string>;
   onDone: (id: string) => void;
 }) {
+  // never render hollow columns for a handful of tasks — collapse empties
+  const populated = BOARD_COLUMNS.filter((col) =>
+    tasks.some((t) => col.key.includes(t.status))
+  );
+  const emptyCount = BOARD_COLUMNS.length - populated.length;
+  if (populated.length === 0) {
+    return (
+      <p className="rounded-2xl border border-edge bg-surface px-4 py-8 text-center text-sm text-muted">
+        Nothing yet — mention a task in chat or voice and it lands here.
+      </p>
+    );
+  }
   return (
     <div className="flex gap-3 overflow-x-auto pb-2">
-      {BOARD_COLUMNS.map((col) => {
+      {populated.map((col) => {
         const colTasks = tasks.filter((t) => col.key.includes(t.status));
         return (
           <div
@@ -233,6 +245,13 @@ export function BoardView({
           </div>
         );
       })}
+      {emptyCount > 0 && (
+        <div className="flex min-w-[90px] items-start pt-3">
+          <span className="rounded-full border border-edge bg-surface px-2.5 py-1 text-[11px] text-faint">
+            + {emptyCount} empty
+          </span>
+        </div>
+      )}
     </div>
   );
 }

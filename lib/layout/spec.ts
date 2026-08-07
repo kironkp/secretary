@@ -35,16 +35,19 @@ export type LayoutSpec = z.infer<typeof layoutSpecSchema>;
 /** What a spec row's jsonb column holds: the spec plus the data shape it was built for. */
 export type StoredLayout = LayoutSpec & { dataHash: string };
 
-/** Sensible order before the AI has ever arranged anything. */
+/** The designed Overview (planning-documents/secretary-target.html): stats →
+ *  next-up hero → 5-week pressure timeline → project cards → zones → open
+ *  loops. This is what users see before the AI ever rearranges anything. */
 export const DEFAULT_SPEC: LayoutSpec = {
   sections: [
     { component: "overdue_callout", title: null },
     { component: "stat_tiles", title: null },
     { component: "focus_card", title: null },
-    { component: "calendar_strip", title: null },
+    { component: "timeline", title: null },
+    { component: "project_grid", title: null },
     { component: "suggested_zone", title: null },
     { component: "procrastination_zone", title: null },
-    { component: "kanban", title: null },
+    { component: "list", title: null },
   ],
 };
 

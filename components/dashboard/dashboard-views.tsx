@@ -14,8 +14,14 @@ import { OverdueCallout, SuggestedZone } from "./zones";
 
 export type { EventRow, TaskRow } from "./shared";
 
-const VIEWS = ["adaptive", "board", "list", "calendar", "timeline"] as const;
-type View = (typeof VIEWS)[number];
+const VIEWS = [
+  { key: "adaptive", label: "Overview" },
+  { key: "board", label: "Board" },
+  { key: "list", label: "List" },
+  { key: "calendar", label: "Calendar" },
+  { key: "timeline", label: "Timeline" },
+] as const;
+type View = (typeof VIEWS)[number]["key"];
 
 export function DashboardViews({
   tasks: initial,
@@ -69,13 +75,13 @@ export function DashboardViews({
         <div className="ml-auto flex overflow-x-auto rounded-lg border border-edge bg-surface p-0.5 text-xs">
           {VIEWS.map((v) => (
             <button
-              key={v}
-              onClick={() => setView(v)}
-              className={`rounded-md px-3 py-1.5 font-semibold capitalize transition-colors ${
-                view === v ? "bg-card text-ink" : "text-muted hover:text-ink"
+              key={v.key}
+              onClick={() => setView(v.key)}
+              className={`rounded-md px-3 py-1.5 font-semibold transition-colors ${
+                view === v.key ? "bg-card text-ink" : "text-muted hover:text-ink"
               }`}
             >
-              {v}
+              {v.label}
             </button>
           ))}
         </div>

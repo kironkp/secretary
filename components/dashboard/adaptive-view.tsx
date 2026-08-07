@@ -1,28 +1,44 @@
 "use client";
 
-// Phase 7 renderer: maps the AI-generated layout spec onto the fixed component
-// palette. "Layout updated" affordance with revert; 📌 pins lock a section's
-// position against future regenerations.
+// Overview renderer (phase 7 engine, reference visual language): maps the AI
+// layout spec onto the fixed component palette. Quiet "arranged for you" line
+// only when the AI has actually rearranged; pins appear on section hover.
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Pin, Sparkles, Undo2 } from "lucide-react";
 import type { LayoutComponent, LayoutSpec } from "@/lib/layout/spec";
 import type { EventRow, TaskRow } from "./shared";
-import { BoardView, ListTable } from "./task-views";
-import { CalendarStrip, FocusCard, OverdueCallout, ProcrastinationZone, ProjectGrid, StatTiles, SuggestedZone } from "./zones";
-import { TimelineView } from "./timeline-view";
+import { BoardView } from "./task-views";
+import {
+  CalendarStrip,
+  FiveWeekTimeline,
+  NextUpHero,
+  OpenLoopsTable,
+  OverdueCallout,
+  ProcrastinationZone,
+  ProjectGrid,
+  StatTiles,
+  SuggestedZone,
+} from "./zones";
 
 const DEFAULT_TITLES: Record<LayoutComponent, string | null> = {
   overdue_callout: null,
   stat_tiles: null,
-  focus_card: null,
+  focus_card: "Next up",
   kanban: "Board",
-  list: "Tasks",
+  list: "Open loops",
   calendar_strip: "This week",
-  timeline: "Timeline",
+  timeline: "Next 5 weeks",
   procrastination_zone: null,
   suggested_zone: null,
   project_grid: "Projects",
+};
+
+const SECTION_NOTES: Partial<Record<LayoutComponent, string>> = {
+  focus_card: "The one thing that matters before anything else does.",
+  project_grid: "The unit your life is actually organized in.",
+  timeline: "Colour is deadline pressure, not project identity.",
+  list: "Grouped by project · undated items sink to the bottom of their group.",
 };
 
 export function AdaptiveView({
@@ -83,78 +99,73 @@ export function AdaptiveView({
       case "stat_tiles":
         return <StatTiles tasks={tasks} events={events} />;
       case "focus_card":
-        return <FocusCard tasks={tasks} crossing={crossing} onDone={onDone} />;
+        return <NextUpHero tasks={tasks} events={events} />;
       case "kanban":
         return <BoardView tasks={tasks} crossing={crossing} onDone={onDone} />;
       case "list":
-        return <ListTable tasks={tasks} crossing={crossing} onDone={onDone} />;
+        return <OpenLoopsTable tasks={tasks} crossing={crossing} onDone={onDone} />;
       case "calendar_strip":
         return <CalendarStrip events={events} />;
       case "timeline":
-        return <TimelineView tasks={tasks} events={events} crossing={crossing} onDone={onDone} />;
+        return <FiveWeekTimeline tasks={tasks} />;
       case "procrastination_zone":
         return <ProcrastinationZone tasks={tasks} />;
       case "suggested_zone":
         return <SuggestedZone suggestions={suggestions} />;
       case "project_grid":
-        return <ProjectGrid tasks={tasks} />;
+        return <ProjectGrid tasks={tasks} crossing={crossing} onDone={onDone} />;
     }
   };
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-edge bg-surface px-4 py-2 text-xs text-muted">
-        {version === 0 ? (
-          <span className="inline-flex items-center gap-1.5">
-            <Sparkles size={13} strokeWidth={1.75} /> Default arrangement — the AI reorganizes this
-            as your life changes.
-          </span>
-        ) : (
-          <>
-            <span className="inline-flex items-center gap-1.5">
-              <Sparkles size={13} strokeWidth={1.75} /> AI-arranged (v{version}
-              {updatedAt
-                ? `, ${new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(updatedAt))}`
-                : ""}
-              )
-            </span>
-            <button
-              onClick={revert}
-              disabled={reverting}
-              className="inline-flex items-center gap-1 rounded-full border border-edge px-2.5 py-0.5 hover:border-faint hover:text-ink disabled:opacity-50"
-            >
-              <Undo2 size={12} strokeWidth={2} /> revert
-            </button>
-          </>
-        )}
-        <span className="ml-auto inline-flex items-center gap-1 text-faint">
-          <Pin size={12} strokeWidth={1.75} /> pin a section to lock its spot
-        </span>
-      </div>
+    <div className="space-y-7">
+      {version > 0 && (
+        <p className="flex items-center gap-2 text-xs text-faint">
+          <Sparkles size={12} strokeWidth={1.75} />
+          Arranged for you
+          {updatedAt &&
+            ` · ${new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(new Date(updatedAt))}`}
+          <button
+            onClick={revert}
+            disabled={reverting}
+            className="inline-flex items-center gap-1 text-faint underline-offset-2 hover:text-ink hover:underline disabled:opacity-50"
+          >
+            <Undo2 size={11} strokeWidth={2} /> revert
+          </button>
+        </p>
+      )}
 
       {layout.sections.map((s, i) => {
         const body = render(s.component);
         if (!body) return null;
         const title = s.title ?? DEFAULT_TITLES[s.component];
+        const note = SECTION_NOTES[s.component];
         const isPinned = pinned.has(s.component);
         return (
           <section key={`${s.component}-${i}`} className="group/section">
-            <div className="mb-1.5 flex items-center gap-2">
-              {title && <h2 className="text-sm font-bold text-muted">{title}</h2>}
-              <button
-                onClick={() => togglePin(s.component)}
-                title={isPinned ? "Unpin — let the AI move this" : "Pin — never move this"}
-                aria-label={isPinned ? "Unpin section" : "Pin section"}
-                className={`ml-auto inline-flex items-center gap-1 text-xs transition-opacity ${
-                  isPinned
-                    ? "text-accent opacity-100"
-                    : "text-muted opacity-0 hover:!opacity-100 group-hover/section:opacity-40"
-                }`}
-              >
-                <Pin size={12} strokeWidth={1.75} fill={isPinned ? "currentColor" : "none"} />
-                {isPinned ? "" : "pin"}
-              </button>
-            </div>
+            {(title || isPinned) && (
+              <div className="mb-2.5 flex items-baseline gap-3">
+                {title && (
+                  <h2 className="text-xs font-bold uppercase tracking-[0.1em] text-faint">
+                    {title}
+                  </h2>
+                )}
+                {note && <span className="hidden text-[11px] text-faint/80 sm:inline">{note}</span>}
+                <button
+                  onClick={() => togglePin(s.component)}
+                  title={isPinned ? "Unpin — let the AI move this" : "Pin — never move this"}
+                  aria-label={isPinned ? "Unpin section" : "Pin section"}
+                  className={`ml-auto inline-flex items-center gap-1 text-[11px] transition-opacity ${
+                    isPinned
+                      ? "text-accent opacity-100"
+                      : "text-muted opacity-0 hover:!opacity-100 group-hover/section:opacity-50"
+                  }`}
+                >
+                  <Pin size={11} strokeWidth={1.75} fill={isPinned ? "currentColor" : "none"} />
+                  {isPinned ? "pinned" : "pin"}
+                </button>
+              </div>
+            )}
             {body}
           </section>
         );

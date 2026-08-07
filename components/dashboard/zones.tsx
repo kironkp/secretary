@@ -1,13 +1,93 @@
 "use client";
 
-// The fixed component palette the adaptive layout engine arranges (A-4), plus
-// the suggested/procrastination zones (P-1…P-3) shown on classic views too.
-import { useMemo, useState } from "react";
+// The fixed component palette the adaptive layout engine arranges (A-4),
+// restyled to match planning-documents/secretary-target.html: square-dot
+// urgency pills, compact stat tiles, a "Next up" hero, reference-style project
+// cards, a 5-week pressure timeline, and the grouped Open-loops table.
+import { Fragment, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Flame, Sparkles, Target, TriangleAlert, X } from "lucide-react";
-import { CheckButton, fmtDue, isOverdue, type EventRow, type TaskRow } from "./shared";
+import {
+  CalendarClock,
+  CalendarX,
+  Check,
+  Flame,
+  FolderKanban,
+  ListTodo,
+  Sparkles,
+  TriangleAlert,
+  X,
+} from "lucide-react";
+import { CheckButton, ProvenanceLink, fmtDue, isOverdue, type EventRow, type TaskRow } from "./shared";
 
 const OPEN = new Set(["inbox", "todo", "in_progress", "blocked"]);
+const DAY = 86400000;
+
+// ---------------------------------------------------------------------------
+// shared bits
+// ---------------------------------------------------------------------------
+
+type Tone = "danger" | "warn" | "ok" | "neut";
+
+/** Reference-style status pill: square dot + short label. */
+export function Pill({ tone, children }: { tone: Tone; children: React.ReactNode }) {
+  const box: Record<Tone, string> = {
+    danger: "border-danger/40 bg-danger/10 text-danger",
+    warn: "border-warn/40 bg-warn/10 text-warn",
+    ok: "border-ok/40 bg-ok/10 text-ok",
+    neut: "border-edge bg-surface-2 text-muted",
+  };
+  const dot: Record<Tone, string> = {
+    danger: "bg-danger",
+    warn: "bg-warn",
+    ok: "bg-ok",
+    neut: "bg-faint",
+  };
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${box[tone]}`}
+    >
+      <span className={`h-[7px] w-[7px] flex-none rounded-[2px] ${dot[tone]}`} />
+      {children}
+    </span>
+  );
+}
+
+function daysUntil(iso: string, now: number): number {
+  return Math.ceil((new Date(iso).getTime() - now) / DAY);
+}
+
+/** Days until a task's due date, measured now (helper keeps render pure). */
+function dueDays(t: TaskRow): number {
+  return daysUntil(t.dueAt!, Date.now());
+}
+
+/** Deadline pressure → tone (colour is pressure, never project identity). */
+function pressureTone(days: number | null): Tone {
+  if (days === null) return "neut";
+  if (days <= 3) return "danger";
+  if (days <= 14) return "warn";
+  return "neut";
+}
+
+function pressureLabel(days: number): string {
+  if (days < 0) return `${-days}d late`;
+  if (days === 0) return "today";
+  if (days === 1) return "tomorrow";
+  return `in ${days}d`;
+}
+
+function shortDate(d: Date) {
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(d);
+}
+
+function sourceLabel(t: TaskRow): string {
+  const when = shortDate(new Date(t.updatedAt));
+  return `${t.source} · ${when}`;
+}
+
+// ---------------------------------------------------------------------------
+// overdue callout
+// ---------------------------------------------------------------------------
 
 export function OverdueCallout({ tasks }: { tasks: TaskRow[] }) {
   const overdue = tasks.filter(isOverdue);
@@ -25,108 +105,280 @@ export function OverdueCallout({ tasks }: { tasks: TaskRow[] }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// stat tiles — compact single row, accent only where it means something
+// ---------------------------------------------------------------------------
+
 function computeStats(tasks: TaskRow[], events: EventRow[]) {
   const now = Date.now();
-  const openTasks = tasks.filter((t) => OPEN.has(t.status));
-  return {
-    open: openTasks,
-    overdue: tasks.filter(isOverdue).length,
-    dueToday: openTasks.filter((t) => {
-      if (!t.dueAt) return false;
-      const d = new Date(t.dueAt).getTime();
-      return d >= now && d < now + 86400000;
-    }).length,
-    done7d: tasks.filter(
-      (t) => t.status === "done" && now - new Date(t.updatedAt).getTime() < 7 * 86400000
-    ).length,
-    nextEvent: events
-      .filter((e) => new Date(e.startsAt).getTime() >= now)
-      .sort((a, b) => a.startsAt.localeCompare(b.startsAt))[0],
-  };
+  const open = tasks.filter((t) => OPEN.has(t.status));
+  const overdue = tasks.filter(isOverdue).length;
+  const undated = open.filter((t) => !t.dueAt).length;
+  const projects = new Set(open.map((t) => t.projectName).filter(Boolean)).size;
+  const datedFuture = [
+    ...open.filter((t) => t.dueAt && new Date(t.dueAt).getTime() >= now).map((t) => t.dueAt!),
+    ...events.filter((e) => new Date(e.startsAt).getTime() >= now).map((e) => e.startsAt),
+  ].sort();
+  const nextInDays = datedFuture.length ? daysUntil(datedFuture[0], now) : null;
+  return { open: open.length, overdue, undated, projects, nextInDays };
 }
 
 export function StatTiles({ tasks, events }: { tasks: TaskRow[]; events: EventRow[] }) {
-  const { open, overdue, dueToday, done7d, nextEvent } = useMemo(
-    () => computeStats(tasks, events),
-    [tasks, events]
-  );
+  const s = useMemo(() => computeStats(tasks, events), [tasks, events]);
 
-  const tiles: { label: string; value: string; cls?: string }[] = [
-    { label: "open", value: String(open.length) },
-    { label: "overdue", value: String(overdue), cls: overdue ? "text-danger" : undefined },
-    { label: "due today", value: String(dueToday), cls: dueToday ? "text-warn" : undefined },
-    { label: "done this week", value: String(done7d), cls: done7d ? "text-ok" : undefined },
-    ...(nextEvent
-      ? [
-          {
-            label: "next up",
-            value: `${nextEvent.title} · ${new Intl.DateTimeFormat("en-US", {
-              hour: "numeric",
-              minute: "2-digit",
-            }).format(new Date(nextEvent.startsAt))}`,
-          },
-        ]
-      : []),
+  const tiles: {
+    value: string;
+    unit?: string;
+    label: string;
+    Icon: typeof ListTodo;
+    tone?: string;
+  }[] = [
+    { value: String(s.projects), label: "active projects", Icon: FolderKanban },
+    {
+      value: s.nextInDays === null ? "—" : String(Math.max(0, s.nextInDays)),
+      unit: s.nextInDays === null ? undefined : "d",
+      label: "to your next commitment",
+      Icon: CalendarClock,
+      tone: s.nextInDays !== null && s.nextInDays <= 3 ? "text-danger" : undefined,
+    },
+    {
+      value: String(s.overdue),
+      label: "overdue",
+      Icon: TriangleAlert,
+      tone: s.overdue > 0 ? "text-danger" : undefined,
+    },
+    { value: String(s.open), label: "open next-actions", Icon: ListTodo },
+    {
+      value: String(s.undated),
+      label: "items with no date on them",
+      Icon: CalendarX,
+      tone: s.undated > 0 ? "text-warn" : undefined,
+    },
   ];
 
   return (
-    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-5">
+    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
       {tiles.map((t) => (
-        <div key={t.label} className="rounded-xl border border-edge bg-surface px-4 py-3">
-          <p className={`truncate text-lg font-bold ${t.cls ?? ""}`}>{t.value}</p>
-          <p className="text-xs text-faint">{t.label}</p>
+        <div key={t.label} className="rounded-xl border border-edge bg-surface px-4 py-3.5">
+          <div className="flex items-start justify-between gap-2">
+            <p className={`text-[26px] font-bold leading-none tracking-tight ${t.tone ?? ""}`}>
+              {t.value}
+              {t.unit && <span className="text-base font-semibold text-faint">{t.unit}</span>}
+            </p>
+            <t.Icon size={15} strokeWidth={1.75} className="mt-0.5 flex-none text-faint" />
+          </div>
+          <p className="mt-1.5 text-xs leading-tight text-faint">{t.label}</p>
         </div>
       ))}
     </div>
   );
 }
 
-export function FocusCard({
-  tasks,
-  crossing,
-  onDone,
-}: {
-  tasks: TaskRow[];
-  crossing: Set<string>;
-  onDone: (id: string) => void;
-}) {
-  const open = tasks.filter((t) => OPEN.has(t.status));
-  const focus =
-    open
-      .filter(isOverdue)
-      .sort((a, b) => (a.dueAt ?? "").localeCompare(b.dueAt ?? ""))[0] ??
-    open
-      .filter((t) => t.dueAt)
-      .sort((a, b) => (a.dueAt ?? "").localeCompare(b.dueAt ?? ""))[0] ??
-    open.sort((a, b) => b.priority - a.priority)[0];
-  if (!focus) return null;
-  const crossingNow = crossing.has(focus.id);
+// ---------------------------------------------------------------------------
+// next-up hero — the one thing that matters before anything else does
+// ---------------------------------------------------------------------------
+
+function findNextUp(
+  tasks: TaskRow[],
+  events: EventRow[]
+): { at: Date; title: string; meta: string; days: number } | null {
+  const now = Date.now();
+  const candidates: { at: Date; title: string; meta: string }[] = [
+    ...events
+      .filter((e) => new Date(e.startsAt).getTime() >= now)
+      .map((e) => ({
+        at: new Date(e.startsAt),
+        title: e.title,
+        meta: [
+          new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(
+            new Date(e.startsAt)
+          ),
+          e.location,
+        ]
+          .filter(Boolean)
+          .join(" · "),
+      })),
+    ...tasks
+      .filter((t) => OPEN.has(t.status) && t.dueAt && new Date(t.dueAt).getTime() >= now)
+      .map((t) => ({
+        at: new Date(t.dueAt!),
+        title: t.title,
+        meta: [t.projectName, t.postponedCount ? `pushed ${t.postponedCount}×` : "due"]
+          .filter(Boolean)
+          .join(" · "),
+      })),
+  ].sort((a, b) => a.at.getTime() - b.at.getTime());
+  const first = candidates[0];
+  if (!first) return null;
+  return { ...first, days: Math.ceil((first.at.getTime() - now) / DAY) };
+}
+
+export function NextUpHero({ tasks, events }: { tasks: TaskRow[]; events: EventRow[] }) {
+  const next = useMemo(() => findNextUp(tasks, events), [tasks, events]);
+  if (!next) return null;
+  const days = next.days;
   return (
-    <div className="rounded-xl border border-accent/40 bg-surface px-4 py-3.5">
-      <p className="mb-1.5 inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-accent">
-        <Target size={13} strokeWidth={2} /> Focus
-      </p>
-      <div className="flex items-center gap-2.5">
-        <CheckButton t={focus} onDone={onDone} />
-        <span className={`text-sm font-semibold cross-off ${crossingNow ? "crossed text-faint" : ""}`}>
-          {focus.title}
+    <div className="flex flex-wrap items-center gap-5 rounded-2xl border border-edge bg-gradient-to-b from-surface-2 to-surface px-6 py-5">
+      <div className="min-w-[76px]">
+        <p className="text-4xl font-bold leading-none tracking-tight">{next.at.getDate()}</p>
+        <p className="mt-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-faint">
+          {new Intl.DateTimeFormat("en-US", { weekday: "short" }).format(next.at)} ·{" "}
+          {new Intl.DateTimeFormat("en-US", { month: "short" }).format(next.at)}
+        </p>
+      </div>
+      <div className="w-px self-stretch bg-edge" aria-hidden />
+      <div className="min-w-[220px] flex-1">
+        <p className="text-lg font-semibold tracking-tight">{next.title}</p>
+        <p className="mt-1 text-sm text-muted">{next.meta}</p>
+      </div>
+      <Pill tone={pressureTone(days)}>{pressureLabel(days)}</Pill>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// five-week pressure timeline
+// ---------------------------------------------------------------------------
+
+const HORIZON_DAYS = 35;
+
+type TlRow = { name: string; days: number | null; label: string };
+
+function timelineRows(tasks: TaskRow[]): TlRow[] {
+  const now = Date.now();
+  const byProject = new Map<string, TaskRow[]>();
+  for (const t of tasks) {
+    if (!OPEN.has(t.status)) continue;
+    const key = t.projectName ?? "Unfiled";
+    byProject.set(key, [...(byProject.get(key) ?? []), t]);
+  }
+  const rows: TlRow[] = [];
+  for (const [name, rowTasks] of byProject) {
+    const dated = rowTasks
+      .filter((t) => t.dueAt)
+      .sort((a, b) => a.dueAt!.localeCompare(b.dueAt!));
+    if (dated.length === 0) {
+      rows.push({ name: `${name} ×${rowTasks.length}`, days: null, label: "no dates" });
+    } else {
+      const t = dated[0];
+      const days = daysUntil(t.dueAt!, now);
+      rows.push({ name, days, label: `${t.title} · ${fmtDue(t.dueAt)}` });
+    }
+  }
+  return rows
+    .sort((a, b) => (a.days ?? Infinity) - (b.days ?? Infinity))
+    .slice(0, 6);
+}
+
+function weekTicks() {
+  const now = Date.now();
+  return [7, 14, 21, 28].map((d) => ({
+    pct: (d / HORIZON_DAYS) * 100,
+    label: shortDate(new Date(now + d * DAY)),
+  }));
+}
+
+export function FiveWeekTimeline({ tasks }: { tasks: TaskRow[] }) {
+  const rows = useMemo(() => timelineRows(tasks), [tasks]);
+  const ticks = useMemo(() => weekTicks(), []);
+  if (rows.length === 0) return null;
+
+  const barColor: Record<Tone, string> = {
+    danger: "bg-danger",
+    warn: "bg-warn",
+    ok: "bg-ok",
+    neut: "bg-faint",
+  };
+
+  return (
+    <div className="rounded-2xl border border-edge bg-surface p-5">
+      <div className="flex">
+        <div className="w-28 flex-none sm:w-32">
+          {rows.map((r) => (
+            <div key={r.name} className="flex h-9 items-center">
+              <span className="truncate text-xs text-muted">{r.name}</span>
+            </div>
+          ))}
+        </div>
+        <div className="relative min-w-0 flex-1">
+          {/* week gridlines + today line */}
+          <div className="pointer-events-none absolute inset-0" aria-hidden>
+            <div className="absolute bottom-0 top-0 w-px bg-accent/70" style={{ left: 0 }} />
+            {ticks.map((t) => (
+              <div
+                key={t.pct}
+                className="absolute bottom-0 top-0 w-px bg-edge"
+                style={{ left: `${t.pct}%` }}
+              />
+            ))}
+          </div>
+          {rows.map((r) => {
+            const tone = pressureTone(r.days);
+            const pct =
+              r.days === null
+                ? null
+                : Math.min(100, Math.max(2.5, (r.days / HORIZON_DAYS) * 100));
+            return (
+              <div key={r.name} className="relative h-9" title={r.label}>
+                {pct === null ? (
+                  <div className="absolute left-0 right-0 top-1/2 border-t-2 border-dashed border-edge" />
+                ) : (
+                  <>
+                    <div
+                      className={`absolute left-0 top-1/2 h-[7px] -translate-y-1/2 rounded-full opacity-80 ${barColor[tone]}`}
+                      style={{ width: `${pct}%` }}
+                    />
+                    <div
+                      className={`absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-surface ${barColor[tone]}`}
+                      style={{ left: `${pct}%` }}
+                    />
+                  </>
+                )}
+              </div>
+            );
+          })}
+          {/* axis */}
+          <div className="relative mt-1 h-5 border-t border-edge">
+            <span className="absolute -translate-x-0 text-[10px] font-semibold text-accent" style={{ left: 0 }}>
+              Today
+            </span>
+            {ticks.map((t) => (
+              <span
+                key={t.pct}
+                className="absolute -translate-x-1/2 text-[10px] text-faint"
+                style={{ left: `${t.pct}%` }}
+              >
+                {t.label}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 border-t border-edge pt-3 text-[11px] text-muted">
+        <span className="inline-flex items-center gap-1.5">
+          <i className="h-2.5 w-2.5 rounded-[3px] bg-danger" /> imminent — under a week
         </span>
-        {focus.dueAt && (
-          <span className={`text-xs ${isOverdue(focus) ? "text-danger" : "text-muted"}`}>
-            {fmtDue(focus.dueAt)}
-          </span>
-        )}
-        {focus.postponedCount > 0 && (
-          <span className="text-xs text-warn">pushed {focus.postponedCount}×</span>
-        )}
+        <span className="inline-flex items-center gap-1.5">
+          <i className="h-2.5 w-2.5 rounded-[3px] bg-warn" /> tight — under two weeks
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <i className="h-2.5 w-2.5 rounded-[3px] bg-faint" /> runway
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <i className="h-0.5 w-2.5 border-t-2 border-dashed border-faint" /> undated
+        </span>
       </div>
     </div>
   );
 }
 
-export function CalendarStrip({ events }: { events: EventRow[] }) {
+// ---------------------------------------------------------------------------
+// calendar strip (kept for AI-generated layouts)
+// ---------------------------------------------------------------------------
+
+function buildStripDays(events: EventRow[]) {
   const now = new Date();
-  const days = Array.from({ length: 7 }, (_, i) => {
+  return Array.from({ length: 7 }, (_, i) => {
     const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i);
     const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i + 1);
     return {
@@ -137,6 +389,10 @@ export function CalendarStrip({ events }: { events: EventRow[] }) {
       }),
     };
   });
+}
+
+export function CalendarStrip({ events }: { events: EventRow[] }) {
+  const days = useMemo(() => buildStripDays(events), [events]);
   if (days.every((d) => d.events.length === 0)) return null;
   return (
     <div className="flex gap-2 overflow-x-auto pb-1">
@@ -173,6 +429,10 @@ export function CalendarStrip({ events }: { events: EventRow[] }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// procrastination + suggested zones
+// ---------------------------------------------------------------------------
+
 export function ProcrastinationZone({ tasks }: { tasks: TaskRow[] }) {
   const offenders = tasks
     .filter((t) => OPEN.has(t.status) && t.procrastinationScore >= 3)
@@ -180,13 +440,13 @@ export function ProcrastinationZone({ tasks }: { tasks: TaskRow[] }) {
     .slice(0, 5);
   if (offenders.length === 0) return null;
   return (
-    <div className="rounded-xl border border-warn/40 bg-surface px-4 py-3.5">
-      <p className="mb-2 inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-warn">
+    <div className="rounded-2xl border border-edge bg-surface px-5 py-4">
+      <p className="mb-2.5 inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.08em] text-warn">
         <Flame size={13} strokeWidth={2} /> Procrastinating
       </p>
       {offenders.map((t) => (
-        <p key={t.id} className="mb-1 text-sm last:mb-0">
-          {t.title}{" "}
+        <p key={t.id} className="mb-1.5 flex flex-wrap items-baseline gap-2 text-sm last:mb-0">
+          {t.title}
           <span className="text-xs text-faint">
             {[
               t.postponedCount ? `pushed ${t.postponedCount}×` : null,
@@ -223,8 +483,8 @@ export function SuggestedZone({ suggestions }: { suggestions: TaskRow[] }) {
   const visible = suggestions.filter((s) => !hidden.has(s.id));
   if (visible.length === 0) return null;
   return (
-    <div className="rounded-xl border border-ok/40 bg-surface px-4 py-3.5">
-      <p className="mb-2 inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-ok">
+    <div className="rounded-2xl border border-edge bg-surface px-5 py-4">
+      <p className="mb-2.5 inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.08em] text-ok">
         <Sparkles size={13} strokeWidth={2} /> Suggested
       </p>
       {visible.map((s) => (
@@ -255,37 +515,287 @@ export function SuggestedZone({ suggestions }: { suggestions: TaskRow[] }) {
   );
 }
 
-export function ProjectGrid({ tasks }: { tasks: TaskRow[] }) {
-  const byProject = new Map<string, { color: string | null; open: TaskRow[]; done: number }>();
+// ---------------------------------------------------------------------------
+// project cards — the reference's unit of organization
+// ---------------------------------------------------------------------------
+
+type ProjectCard = {
+  name: string;
+  color: string | null;
+  open: TaskRow[];
+  doneRecent: TaskRow[];
+  doneCount: number;
+  earliestDays: number | null;
+  latestSource: TaskRow | null;
+};
+
+function buildProjects(tasks: TaskRow[]): ProjectCard[] {
+  const now = Date.now();
+  const map = new Map<string, ProjectCard>();
   for (const t of tasks) {
-    if (!t.projectName) continue;
-    const entry = byProject.get(t.projectName) ?? { color: t.projectColor, open: [], done: 0 };
-    if (OPEN.has(t.status)) entry.open.push(t);
-    if (t.status === "done") entry.done++;
-    byProject.set(t.projectName, entry);
+    const key = t.projectName ?? "Unfiled";
+    let p = map.get(key);
+    if (!p) {
+      p = {
+        name: key,
+        color: t.projectColor,
+        open: [],
+        doneRecent: [],
+        doneCount: 0,
+        earliestDays: null,
+        latestSource: null,
+      };
+      map.set(key, p);
+    }
+    if (OPEN.has(t.status)) {
+      p.open.push(t);
+      if (t.dueAt) {
+        const d = daysUntil(t.dueAt, now);
+        if (p.earliestDays === null || d < p.earliestDays) p.earliestDays = d;
+      }
+    } else if (t.status === "done") {
+      p.doneCount++;
+      if (now - new Date(t.updatedAt).getTime() < 7 * DAY) p.doneRecent.push(t);
+    }
+    if (
+      t.conversationId &&
+      (!p.latestSource || t.updatedAt.localeCompare(p.latestSource.updatedAt) > 0)
+    ) {
+      p.latestSource = t;
+    }
   }
-  if (byProject.size === 0) return null;
+  return [...map.values()]
+    .filter((p) => p.open.length > 0 || p.doneRecent.length > 0)
+    .sort((a, b) => (a.earliestDays ?? Infinity) - (b.earliestDays ?? Infinity));
+}
+
+export function ProjectGrid({
+  tasks,
+  crossing,
+  onDone,
+}: {
+  tasks: TaskRow[];
+  crossing: Set<string>;
+  onDone: (id: string) => void;
+}) {
+  const projects = useMemo(() => buildProjects(tasks), [tasks]);
+  if (projects.length === 0) return null;
+
   return (
-    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-      {[...byProject.entries()].map(([name, p]) => (
-        <div key={name} className="rounded-xl border border-edge bg-surface px-4 py-3">
-          <p className="mb-1.5 flex items-center gap-1.5 text-sm font-bold">
-            <span className="h-2 w-2 rounded-full" style={{ background: p.color ?? "var(--color-accent)" }} />
-            {name}
-            <span className="ml-auto text-xs font-normal text-faint">
-              {p.open.length} open{p.done ? ` · ${p.done} done` : ""}
-            </span>
-          </p>
-          {p.open.slice(0, 4).map((t) => (
-            <p key={t.id} className="truncate text-xs text-muted">
-              {t.title}
-              {t.dueAt && (
-                <span className={isOverdue(t) ? "text-danger" : " text-faint"}> · {fmtDue(t.dueAt)}</span>
+    <div className="grid gap-3 md:grid-cols-2">
+      {projects.map((p) => {
+        const total = p.open.length + p.doneCount;
+        const donePct = total === 0 ? 0 : Math.round((p.doneCount / total) * 100);
+        const tone = pressureTone(p.earliestDays);
+        const fill: Record<Tone, string> = {
+          danger: "bg-danger",
+          warn: "bg-warn",
+          ok: "bg-ok",
+          neut: "bg-accent",
+        };
+        const sorted = [...p.open].sort((a, b) =>
+          (a.dueAt ?? "9999").localeCompare(b.dueAt ?? "9999")
+        );
+        return (
+          <div
+            key={p.name}
+            className="flex flex-col gap-3.5 rounded-2xl border border-edge bg-surface p-5"
+          >
+            <div className="flex items-start gap-2.5">
+              <div className="min-w-0 flex-1">
+                <h3 className="flex items-center gap-2 text-[17px] font-semibold tracking-tight">
+                  <span
+                    className="h-2 w-2 flex-none rounded-full"
+                    style={{ background: p.color ?? "var(--color-accent)" }}
+                  />
+                  {p.name}
+                </h3>
+                <p className="mt-0.5 text-xs text-faint">
+                  {p.open.length} open{p.doneCount ? ` · ${p.doneCount} done` : ""}
+                </p>
+              </div>
+              {p.earliestDays !== null ? (
+                <Pill tone={tone}>{pressureLabel(p.earliestDays)}</Pill>
+              ) : (
+                <Pill tone="warn">undated</Pill>
               )}
-            </p>
+            </div>
+
+            <div>
+              <div className="mb-1.5 flex justify-between text-xs text-faint">
+                <span>
+                  {p.doneCount} of {total} done
+                </span>
+                <span className="tabular-nums">{donePct}%</span>
+              </div>
+              <div className="flex h-[7px] overflow-hidden rounded-full bg-surface-2">
+                <div
+                  className={`h-full rounded-full ${fill[tone]}`}
+                  style={{ width: `${Math.max(donePct, 3)}%` }}
+                />
+              </div>
+            </div>
+
+            <ul className="flex flex-col gap-2">
+              {p.doneRecent.slice(0, 1).map((t) => (
+                <li key={t.id} className="flex items-start gap-2.5 text-sm">
+                  <span className="mt-0.5 flex h-[18px] w-[18px] flex-none items-center justify-center rounded-md bg-ok text-bg">
+                    <Check size={11} strokeWidth={3} />
+                  </span>
+                  <span className="text-faint line-through">{t.title}</span>
+                </li>
+              ))}
+              {sorted.slice(0, 3).map((t) => (
+                <li key={t.id} className="flex items-start gap-2.5 text-sm">
+                  <span className="mt-0.5">
+                    <CheckButton t={t} onDone={onDone} />
+                  </span>
+                  <span className={`cross-off min-w-0 ${crossing.has(t.id) ? "crossed text-faint" : ""}`}>
+                    {t.title}
+                    {t.dueAt && (
+                      <span className={`ml-1.5 text-xs ${isOverdue(t) ? "text-danger" : "text-faint"}`}>
+                        {fmtDue(t.dueAt)}
+                      </span>
+                    )}
+                    {t.source === "inferred" && (
+                      <span className="ml-1.5 rounded border border-edge px-1 py-px text-[9px] uppercase tracking-wide text-faint">
+                        inferred
+                      </span>
+                    )}
+                  </span>
+                </li>
+              ))}
+              {sorted.length > 3 && (
+                <li className="text-xs text-faint">+ {sorted.length - 3} more</li>
+              )}
+            </ul>
+
+            {p.latestSource && (
+              <div className="mt-auto flex items-center gap-2 border-t border-edge pt-3 text-[11px] text-faint">
+                <span className="rounded border border-edge bg-surface-2 px-1.5 py-px">
+                  {sourceLabel(p.latestSource)}
+                </span>
+                <ProvenanceLink t={p.latestSource} />
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// open loops — grouped by project, dated first, undated at the bottom
+// ---------------------------------------------------------------------------
+
+function buildLoopGroups(tasks: TaskRow[]) {
+  const now = Date.now();
+  const map = new Map<string, { open: TaskRow[]; done: TaskRow[] }>();
+  for (const t of tasks) {
+    const key = t.projectName ?? "Unfiled";
+    const g = map.get(key) ?? { open: [], done: [] };
+    if (OPEN.has(t.status)) g.open.push(t);
+    else if (t.status === "done" && now - new Date(t.updatedAt).getTime() < 7 * DAY) g.done.push(t);
+    map.set(key, g);
+  }
+  return [...map.entries()]
+    .filter(([, g]) => g.open.length + g.done.length > 0)
+    .map(([name, g]) => ({
+      name,
+      open: g.open.sort((a, b) => (a.dueAt ?? "9999").localeCompare(b.dueAt ?? "9999")),
+      done: g.done,
+      earliest: g.open.find((t) => t.dueAt)?.dueAt ?? null,
+    }))
+    .sort((a, b) => (a.earliest ?? "9999").localeCompare(b.earliest ?? "9999"));
+}
+
+export function OpenLoopsTable({
+  tasks,
+  crossing,
+  onDone,
+}: {
+  tasks: TaskRow[];
+  crossing: Set<string>;
+  onDone: (id: string) => void;
+}) {
+  const groups = useMemo(() => buildLoopGroups(tasks), [tasks]);
+
+  if (groups.length === 0) {
+    return (
+      <p className="rounded-2xl border border-edge bg-surface px-4 py-8 text-center text-sm text-muted">
+        Nothing yet — mention a task in chat or voice and it lands here.
+      </p>
+    );
+  }
+
+  const whenPill = (t: TaskRow) => {
+    if (!t.dueAt) return <Pill tone="warn">no date</Pill>;
+    return <Pill tone={pressureTone(dueDays(t))}>{fmtDue(t.dueAt)}</Pill>;
+  };
+
+  return (
+    <div className="overflow-x-auto rounded-2xl border border-edge bg-surface">
+      <table className="w-full min-w-[560px] border-collapse text-sm">
+        <thead>
+          <tr className="bg-surface-2 text-left text-[11px] uppercase tracking-[0.08em] text-faint">
+            <th className="w-[55%] px-4 py-2.5 font-semibold">What</th>
+            <th className="w-[25%] px-4 py-2.5 font-semibold">When</th>
+            <th className="px-4 py-2.5 font-semibold">Heard</th>
+          </tr>
+        </thead>
+        <tbody>
+          {groups.map((g) => (
+            <Fragment key={g.name}>
+              <tr className="border-y border-edge bg-surface-2/60">
+                <td colSpan={3} className="px-4 py-2">
+                  <span className="text-[13px] font-bold tracking-tight">{g.name}</span>
+                  <span className="ml-2.5 text-xs text-faint">
+                    {g.open.length} open
+                    {g.earliest
+                      ? ` · next ${fmtDue(g.earliest)}`
+                      : g.open.length
+                        ? " · no dates"
+                        : ""}
+                  </span>
+                </td>
+              </tr>
+              {g.open.map((t) => (
+                <tr key={t.id} className="border-b border-edge/50 last:border-0">
+                  <td className="px-4 py-2.5">
+                    <div className="flex items-center gap-2.5">
+                      <CheckButton t={t} onDone={onDone} />
+                      <span className={`cross-off ${crossing.has(t.id) ? "crossed text-faint" : ""}`}>
+                        {t.title}
+                      </span>
+                      <ProvenanceLink t={t} />
+                    </div>
+                  </td>
+                  <td className="px-4 py-2.5">{whenPill(t)}</td>
+                  <td className="px-4 py-2.5 text-xs text-faint">{sourceLabel(t)}</td>
+                </tr>
+              ))}
+              {g.done.map((t) => (
+                <tr key={t.id} className="border-b border-edge/50 last:border-0">
+                  <td className="px-4 py-2.5">
+                    <div className="flex items-center gap-2.5">
+                      <span className="flex h-5 w-5 flex-none items-center justify-center rounded-full border border-ok/50 bg-ok/20 text-ok">
+                        <Check size={12} strokeWidth={2.5} />
+                      </span>
+                      <span className="text-faint line-through">{t.title}</span>
+                      <ProvenanceLink t={t} />
+                    </div>
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <Pill tone="ok">done</Pill>
+                  </td>
+                  <td className="px-4 py-2.5 text-xs text-faint">{sourceLabel(t)}</td>
+                </tr>
+              ))}
+            </Fragment>
           ))}
-        </div>
-      ))}
+        </tbody>
+      </table>
     </div>
   );
 }
