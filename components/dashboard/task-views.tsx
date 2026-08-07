@@ -109,7 +109,7 @@ export function ListTable({
                     <span className="inline-flex items-center gap-1.5">
                       <span
                         className="h-2 w-2 rounded-full"
-                        style={{ background: t.projectColor ?? "#7aa2ff" }}
+                        style={{ background: t.projectColor ?? "var(--color-accent)" }}
                       />
                       {t.projectName}
                     </span>
@@ -200,7 +200,7 @@ export function BoardView({
                             <span className="inline-flex items-center gap-1">
                               <span
                                 className="h-1.5 w-1.5 rounded-full"
-                                style={{ background: t.projectColor ?? "#7aa2ff" }}
+                                style={{ background: t.projectColor ?? "var(--color-accent)" }}
                               />
                               {t.projectName}
                             </span>

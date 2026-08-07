@@ -260,7 +260,7 @@ export function ProjectGrid({ tasks }: { tasks: TaskRow[] }) {
       {[...byProject.entries()].map(([name, p]) => (
         <div key={name} className="rounded-xl border border-edge bg-surface px-4 py-3">
           <p className="mb-1.5 flex items-center gap-1.5 text-sm font-bold">
-            <span className="h-2 w-2 rounded-full" style={{ background: p.color ?? "#7aa2ff" }} />
+            <span className="h-2 w-2 rounded-full" style={{ background: p.color ?? "var(--color-accent)" }} />
             {name}
             <span className="ml-auto text-xs font-normal text-faint">
               {p.open.length} open{p.done ? ` · ${p.done} done` : ""}

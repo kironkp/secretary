@@ -4,6 +4,7 @@ import { auth } from "@/lib/auth";
 import { PasskeySection } from "@/components/settings/passkey-section";
 import { TimezoneForm } from "@/components/settings/timezone-form";
 import { SignOutButton } from "@/components/settings/sign-out-button";
+import { AppearancePicker } from "@/components/shell/theme";
 
 export default async function SettingsPage() {
   const session = await auth.api.getSession({ headers: await headers() });
@@ -19,6 +20,12 @@ export default async function SettingsPage() {
           Signed in as <span className="text-ink">{session.user.email}</span>
         </p>
       </div>
+
+      <section className="rounded-xl border border-edge bg-surface p-5">
+        <h2 className="mb-1 text-sm font-bold">Appearance</h2>
+        <p className="mb-4 text-xs text-muted">Light is the default; dark is one tap away.</p>
+        <AppearancePicker />
+      </section>
 
       <section className="rounded-xl border border-edge bg-surface p-5">
         <h2 className="mb-1 text-sm font-bold">Timezone</h2>

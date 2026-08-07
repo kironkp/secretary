@@ -68,7 +68,7 @@ export function DictationBar({
           const bars = 32;
           const step = Math.floor(data.length / bars);
           const barW = width / bars;
-          g.fillStyle = "#7aa2ff";
+          g.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--color-accent") || "#7aa2ff";
           for (let i = 0; i < bars; i++) {
             const v = data[i * step] / 255;
             const h = Math.max(3, v * height * 0.9);

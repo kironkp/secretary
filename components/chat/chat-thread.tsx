@@ -161,7 +161,7 @@ export function ChatThread({
               id={`m-${m.id}`}
               className={`max-w-[80%] rounded-xl border px-4 py-2.5 text-sm leading-relaxed transition-shadow ${
                 m.role === "user"
-                  ? "ml-auto border-accent/30 bg-[#26304a]"
+                  ? "ml-auto border-accent/30 bg-bubble"
                   : "border-edge bg-surface"
               }`}
             >

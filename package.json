@@ -17,6 +17,7 @@
     "@better-auth/passkey": "^1.6.23",
     "better-auth": "^1.6.23",
     "drizzle-orm": "^0.45.2",
+    "lucide-react": "^1.30.0",
     "next": "16.2.11",
     "openai": "^6.48.0",
     "pg": "^8.22.0",

@@ -1,20 +1,59 @@
 @import "tailwindcss";
 
-/* Dark-mode-first palette — mirrors the spec board. Light mode lands later. */
-@theme {
-  --color-bg: #0f1115;
-  --color-surface: #171a21;
-  --color-surface-2: #1e222b;
-  --color-card: #232834;
-  --color-edge: #2e3442;
-  --color-ink: #e8eaf0;
-  --color-muted: #9aa3b5;
-  --color-faint: #6b7386;
-  --color-accent: #7aa2ff;
-  --color-ok: #4ade80;
-  --color-warn: #fbbf24;
-  --color-danger: #f87171;
-  --color-grape: #c084fc;
+/* Semantic palette: light is the default, [data-theme="dark"] overrides.
+   Components only ever use the Tailwind tokens (bg-card, text-ink, …) mapped
+   below — never raw hexes. */
+:root {
+  color-scheme: light;
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --surface-2: #eef0f4;
+  --card: #ffffff;
+  --edge: #e4e7ee;
+  --ink: #171a21;
+  --muted: #5a6375;
+  --faint: #8b93a5;
+  --accent: #4a6fe8;
+  --ok: #15803d;
+  --warn: #b45309;
+  --danger: #dc2626;
+  --grape: #7e22ce;
+  --bubble: #e6ecfc;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0f1115;
+  --surface: #171a21;
+  --surface-2: #1e222b;
+  --card: #232834;
+  --edge: #2e3442;
+  --ink: #e8eaf0;
+  --muted: #9aa3b5;
+  --faint: #6b7386;
+  --accent: #7aa2ff;
+  --ok: #4ade80;
+  --warn: #fbbf24;
+  --danger: #f87171;
+  --grape: #c084fc;
+  --bubble: #26304a;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-card: var(--card);
+  --color-edge: var(--edge);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-danger: var(--danger);
+  --color-grape: var(--grape);
+  --color-bubble: var(--bubble);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -69,3 +108,11 @@ body {
   100% { box-shadow: 0 0 0 2px transparent; }
 }
 .anchor-highlight { animation: anchor-flash 2.5s ease-out; }
+
+/* New-task entrance (split-mode live updates) */
+@keyframes task-in {
+  from { opacity: 0; transform: translateY(6px); box-shadow: 0 0 0 2px var(--color-accent); }
+  60% { box-shadow: 0 0 0 2px var(--color-accent); }
+  to { opacity: 1; transform: translateY(0); box-shadow: 0 0 0 2px transparent; }
+}
+.animate-task-in { animation: task-in 0.8s ease-out; }

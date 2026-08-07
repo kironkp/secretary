@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { getTodayStrip } from "@/lib/db/queries";
 import { NavTabs } from "@/components/shell/nav-tabs";
+import { ThemeToggle } from "@/components/shell/theme";
 
 export default async function AppLayout({
   children,
@@ -46,6 +47,7 @@ export default async function AppLayout({
             <span className="whitespace-nowrap rounded-full border border-edge bg-card px-3 py-1 text-muted">
               {strip.dueTodayCount} due today
             </span>
+            <ThemeToggle />
           </div>
         </div>
         <div className="mx-auto max-w-6xl px-4">
