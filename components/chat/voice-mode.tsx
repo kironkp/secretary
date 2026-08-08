@@ -175,13 +175,32 @@ export function VoiceMode({
   useEffect(() => stopRemoteAudio, []);
 
   // D-5, the magic moment: each tool-call toast means the secretary just
-  // logged something — refresh server data so the dashboard pane updates
-  // live while the call continues. (UI-layer subscription only.)
+  // logged something — refresh server data so the dashboard pane updates live
+  // while the call continues. Debounced ~600ms so a burst of tool calls
+  // coalesces into one refresh. (UI-layer subscription only.)
   const toastCount = useRef(0);
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    if (session.toasts.length > toastCount.current) router.refresh();
+    if (session.toasts.length > toastCount.current) {
+      if (refreshTimer.current) clearTimeout(refreshTimer.current);
+      refreshTimer.current = setTimeout(() => router.refresh(), 600);
+    }
     toastCount.current = session.toasts.length;
   }, [session.toasts.length, router]);
+  useEffect(
+    () => () => {
+      if (refreshTimer.current) clearTimeout(refreshTimer.current);
+    },
+    []
+  );
+
+  // Safety net: while the call is live, re-sync the dashboard every 15s in
+  // case a tool result slipped past the toast path.
+  useEffect(() => {
+    if (session.status !== "connected") return;
+    const iv = setInterval(() => router.refresh(), 15000);
+    return () => clearInterval(iv);
+  }, [session.status, router]);
 
   const pickModel = async (m: string) => {
     setModel(m);

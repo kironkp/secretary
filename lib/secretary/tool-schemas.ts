@@ -22,6 +22,12 @@ export const toolSchemas = {
     title: z.string().optional(),
     notes: z.string().optional(),
     priority: z.number().int().min(0).max(3).optional(),
+    project: z
+      .string()
+      .optional()
+      .describe(
+        'Move the task into this project (fuzzy-matched against existing names). The literal value "none" removes it from its project.'
+      ),
     postpone_reason: z
       .string()
       .optional()
@@ -33,6 +39,20 @@ export const toolSchemas = {
   create_project: z.object({
     name: z.string().min(1),
     color: z.string().optional().describe("Hex color like #7aa2ff"),
+  }),
+  list_projects: z.object({}),
+  update_project: z.object({
+    project: z.string().min(1).describe("Existing project name (fuzzy-matched)"),
+    name: z.string().optional().describe("Rename the project to this"),
+    color: z.string().optional().describe("Hex color like #7aa2ff"),
+    merge_into: z
+      .string()
+      .optional()
+      .describe("Move ALL of its tasks into this other project, then delete it"),
+    delete: z
+      .boolean()
+      .optional()
+      .describe("Delete the project — only allowed when it has no tasks (use merge_into otherwise)"),
   }),
   create_event: z.object({
     title: z.string().min(1),
@@ -70,10 +90,15 @@ const toolDescriptions: Record<ToolName, string> = {
   create_task:
     "Log a task the user needs to do. Call this the moment a to-do, deadline, or obligation comes up in conversation — don't wait to be asked.",
   update_task:
-    "Change a task: status, due date, title, notes, or priority. Use when the user postpones ('I'll do it Friday'), starts, blocks, or edits something.",
+    "Change a task: status, due date, title, notes, priority, or MOVE IT TO ANOTHER PROJECT (project: name, or \"none\" to unfile it). Use when the user postpones ('I'll do it Friday'), starts, blocks, edits, or refiles something.",
   complete_task:
     "Mark a task done. Use when the user says they did it ('yeah I sent it this morning').",
-  create_project: "Create a project to group related tasks (e.g. 'Mexico trip').",
+  create_project:
+    "Create a project to group related tasks (e.g. 'Mexico trip'). Check list_projects first — close names are matched to existing projects instead of creating duplicates.",
+  list_projects:
+    "All projects with open/done counts. Check this before filing a task when unsure of the exact project name.",
+  update_project:
+    "Rename a project, change its color, MERGE it into another (merge_into moves all tasks then deletes the duplicate), or delete an empty one. Use this to clean up duplicate projects.",
   create_event:
     "Log a calendar event — meetings, appointments, social plans with a specific time.",
   get_agenda: "Tasks due and events happening on a given day.",

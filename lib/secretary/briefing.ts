@@ -1,9 +1,9 @@
 // Session-start briefing (Flow 3): assembled server-side before every voice
 // token mint and text chat, injected into system instructions. This is what
 // turns "hello" into "did you send the insurance form?".
-import { and, desc, eq, gte, inArray, isNotNull, lt, ne, or } from "drizzle-orm";
+import { and, count, desc, eq, gte, inArray, isNotNull, lt, ne, or } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { events, memories, tasks } from "@/lib/db/schema";
+import { events, memories, projects, tasks } from "@/lib/db/schema";
 import { dayRangeInTz } from "@/lib/time";
 import { refreshProcrastinationScores } from "./procrastination";
 import { getPendingSuggestions } from "./suggestions";
@@ -145,13 +145,28 @@ export async function buildBriefing(
   // Snapshot of what already exists, so the model updates instead of
   // duplicating ("push the expense report" must never create a second one).
   const openTasks = await db
-    .select()
+    .select({ task: tasks, projectName: projects.name })
     .from(tasks)
+    .leftJoin(projects, eq(tasks.projectId, projects.id))
     .where(
       and(eq(tasks.userId, userId), inArray(tasks.status, [...OPEN_STATUSES]), notPendingSuggestion)
     )
     .orderBy(tasks.dueAt)
     .limit(30);
+
+  // The model must know what projects exist, or it files things into
+  // near-duplicates ("Find It" next to "Find It app").
+  const projectRows = await db
+    .select()
+    .from(projects)
+    .where(and(eq(projects.userId, userId), ne(projects.status, "archived")));
+  const openCounts = await db
+    .select({ projectId: tasks.projectId, n: count() })
+    .from(tasks)
+    .where(
+      and(eq(tasks.userId, userId), inArray(tasks.status, [...OPEN_STATUSES]), notPendingSuggestion)
+    )
+    .groupBy(tasks.projectId);
   const upcomingEvents = await db
     .select()
     .from(events)
@@ -282,11 +297,21 @@ export async function buildBriefing(
     !stalledRows.length
   )
     lines.push("Nothing overdue, due, or scheduled today. A quiet day.");
+  if (projectRows.length) {
+    lines.push(
+      "",
+      "PROJECTS (file tasks into one of these EXACT names — only create a new project for a genuinely new area of life):"
+    );
+    for (const p of projectRows) {
+      const n = openCounts.find((c) => c.projectId === p.id)?.n ?? 0;
+      lines.push(`- "${p.name}" (${n} open)`);
+    }
+  }
   if (openTasks.length) {
     lines.push("", "ALL OPEN TASKS (update these — never create a duplicate):");
-    for (const t of openTasks)
+    for (const { task: t, projectName } of openTasks)
       lines.push(
-        `- [${t.id}] "${t.title}" · ${t.status}${t.dueAt ? ` · due ${fmt(t.dueAt, timezone)}` : ""}${t.postponedCount ? ` · pushed ${t.postponedCount}×` : ""}`
+        `- [${t.id}] "${t.title}" · ${t.status}${t.dueAt ? ` · due ${fmt(t.dueAt, timezone)}` : ""}${t.postponedCount ? ` · pushed ${t.postponedCount}×` : ""}${projectName ? ` · project "${projectName}"` : ""}`
       );
   }
   if (upcomingEvents.length) {

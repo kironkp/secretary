@@ -1,7 +1,7 @@
 // Tool executor — the secretary's hands. Every function is user-scoped; the
 // voice path reaches it via POST /api/secretary/tools, the text path calls
 // executeTool directly inside /api/chat.
-import { and, desc, eq, gte, ilike, inArray, isNotNull, lt, or } from "drizzle-orm";
+import { and, count, desc, eq, gte, ilike, inArray, isNotNull, lt, ne, or } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   checkins,
@@ -75,19 +75,64 @@ async function findTask(userId: string, ref: string) {
   return any[0] ?? null;
 }
 
-async function resolveProject(userId: string, name: string | undefined) {
-  if (!name) return null;
-  const existing = await db
+function normalizeProjectName(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export type ProjectResolution = {
+  project: typeof projects.$inferSelect | null;
+  /** How the name landed: exact/normalized/fuzzy match, freshly created, or null. */
+  matched: "exact" | "normalized" | "fuzzy" | "created" | null;
+};
+
+/**
+ * "Find It" must land in "Find It app", never spawn a duplicate. Exact
+ * (case-insensitive) → normalized (punctuation/whitespace-blind) → containment
+ * either way — and only when nothing is close does `create` make a new one.
+ */
+export async function resolveProject(
+  userId: string,
+  name: string | undefined,
+  opts: { create?: boolean } = {}
+): Promise<ProjectResolution> {
+  if (!name) return { project: null, matched: null };
+  const create = opts.create ?? true;
+
+  const all = await db
     .select()
     .from(projects)
-    .where(and(eq(projects.userId, userId), ilike(projects.name, name)))
-    .limit(1);
-  if (existing[0]) return existing[0];
-  const [created] = await db
-    .insert(projects)
-    .values({ userId, name })
-    .returning();
-  return created;
+    .where(and(eq(projects.userId, userId), ne(projects.status, "archived")));
+
+  const exact = all.find((p) => p.name.toLowerCase() === name.toLowerCase());
+  if (exact) return { project: exact, matched: "exact" };
+
+  const norm = normalizeProjectName(name);
+  if (norm.length >= 3) {
+    const normalized = all.find((p) => normalizeProjectName(p.name) === norm);
+    if (normalized) return { project: normalized, matched: "normalized" };
+
+    const candidates = all.filter((p) => {
+      const pn = normalizeProjectName(p.name);
+      return pn.length >= 3 && (pn.includes(norm) || norm.includes(pn));
+    });
+    if (candidates.length) {
+      // several containment hits → the one closest in length wins
+      candidates.sort(
+        (a, b) =>
+          Math.abs(normalizeProjectName(a.name).length - norm.length) -
+          Math.abs(normalizeProjectName(b.name).length - norm.length)
+      );
+      return { project: candidates[0], matched: "fuzzy" };
+    }
+  }
+
+  if (!create) return { project: null, matched: null };
+  const [created] = await db.insert(projects).values({ userId, name }).returning();
+  return { project: created, matched: "created" };
 }
 
 type Args = Record<string, unknown>;
@@ -95,7 +140,7 @@ type Args = Record<string, unknown>;
 const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolOutcome>> = {
   async create_task(ctx, args) {
     const a = toolSchemas.create_task.parse(args);
-    const project = await resolveProject(ctx.userId, a.project);
+    const { project, matched } = await resolveProject(ctx.userId, a.project);
     const dueAt = parseWhen(a.due_at);
     const [task] = await db
       .insert(tasks)
@@ -114,7 +159,13 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
       .returning();
     const due = fmtDate(task.dueAt, ctx.timezone, false);
     return {
-      result: { task_id: task.id, title: task.title, due_at: task.dueAt, project: project?.name ?? null },
+      result: {
+        task_id: task.id,
+        title: task.title,
+        due_at: task.dueAt,
+        project: project?.name ?? null,
+        project_match: matched,
+      },
       toast: { icon: "✓", text: `Added: ${task.title}${due ? ` — due ${due}` : ""}` },
     };
   },
@@ -126,6 +177,20 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
 
     const updates: Partial<typeof tasks.$inferInsert> = { updatedAt: new Date() };
     let postponed = false;
+    let movedTo: string | null | undefined;
+    let projectMatch: ProjectResolution["matched"] = null;
+
+    if (a.project !== undefined) {
+      if (a.project.trim().toLowerCase() === "none") {
+        updates.projectId = null;
+        movedTo = null;
+      } else {
+        const res = await resolveProject(ctx.userId, a.project);
+        updates.projectId = res.project!.id;
+        movedTo = res.project!.name;
+        projectMatch = res.matched;
+      }
+    }
 
     if (a.due_at) {
       const newDue = parseWhen(a.due_at)!;
@@ -169,10 +234,14 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         status: updated.status,
         due_at: updated.dueAt,
         postponed_count: updated.postponedCount,
+        ...(movedTo !== undefined ? { project: movedTo, project_match: projectMatch } : {}),
       },
-      toast: postponed
-        ? { icon: "→", text: `Pushed: ${updated.title} — now ${due}` }
-        : { icon: "✎", text: `Updated: ${updated.title}` },
+      toast:
+        movedTo !== undefined
+          ? { icon: "→", text: `Moved: ${updated.title} → ${movedTo ?? "no project"}` }
+          : postponed
+            ? { icon: "→", text: `Pushed: ${updated.title} — now ${due}` }
+            : { icon: "✎", text: `Updated: ${updated.title}` },
     };
   },
 
@@ -199,6 +268,17 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
 
   async create_project(ctx, args) {
     const a = toolSchemas.create_project.parse(args);
+    // even an explicit "create" must not spawn near-duplicates
+    const existing = await resolveProject(ctx.userId, a.name, { create: false });
+    if (existing.project) {
+      return {
+        result: {
+          project_id: existing.project.id,
+          name: existing.project.name,
+          already_existed: true,
+        },
+      };
+    }
     const [project] = await db
       .insert(projects)
       .values({ userId: ctx.userId, name: a.name, color: a.color })
@@ -206,6 +286,95 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     return {
       result: { project_id: project.id, name: project.name },
       toast: { icon: "▣", text: `New project: ${project.name}` },
+    };
+  },
+
+  async list_projects(ctx) {
+    const rows = await db
+      .select()
+      .from(projects)
+      .where(and(eq(projects.userId, ctx.userId), ne(projects.status, "archived")));
+    const taskRows = await db
+      .select({ projectId: tasks.projectId, status: tasks.status })
+      .from(tasks)
+      .where(eq(tasks.userId, ctx.userId));
+    return {
+      result: rows.map((p) => ({
+        name: p.name,
+        open: taskRows.filter(
+          (t) => t.projectId === p.id && (OPEN_STATUSES as readonly string[]).includes(t.status)
+        ).length,
+        done: taskRows.filter((t) => t.projectId === p.id && t.status === "done").length,
+      })),
+    };
+  },
+
+  async update_project(ctx, args) {
+    const a = toolSchemas.update_project.parse(args);
+    const src = await resolveProject(ctx.userId, a.project, { create: false });
+    if (!src.project) return { result: { error: `No project matching "${a.project}"` } };
+
+    if (a.merge_into) {
+      const target = await resolveProject(ctx.userId, a.merge_into, { create: false });
+      if (!target.project) return { result: { error: `No project matching "${a.merge_into}"` } };
+      if (target.project.id === src.project.id) {
+        return { result: { error: "Source and target are the same project" } };
+      }
+      const moved = await db
+        .update(tasks)
+        .set({ projectId: target.project.id, updatedAt: new Date() })
+        .where(and(eq(tasks.userId, ctx.userId), eq(tasks.projectId, src.project.id)))
+        .returning({ id: tasks.id });
+      await db
+        .delete(projects)
+        .where(and(eq(projects.userId, ctx.userId), eq(projects.id, src.project.id)));
+      return {
+        result: {
+          merged: src.project.name,
+          into: target.project.name,
+          moved_tasks: moved.length,
+        },
+        toast: { icon: "▣", text: `Merged: ${src.project.name} → ${target.project.name}` },
+      };
+    }
+
+    if (a.delete) {
+      const [attached] = await db
+        .select({ n: count() })
+        .from(tasks)
+        .where(and(eq(tasks.userId, ctx.userId), eq(tasks.projectId, src.project.id)));
+      if ((attached?.n ?? 0) > 0) {
+        return {
+          result: {
+            error: `"${src.project.name}" still has ${attached!.n} task(s) — use merge_into to move them first`,
+          },
+        };
+      }
+      await db
+        .delete(projects)
+        .where(and(eq(projects.userId, ctx.userId), eq(projects.id, src.project.id)));
+      return {
+        result: { deleted: src.project.name },
+        toast: { icon: "✕", text: `Deleted project: ${src.project.name}` },
+      };
+    }
+
+    const updates: Partial<typeof projects.$inferInsert> = {};
+    if (a.name) updates.name = a.name;
+    if (a.color) updates.color = a.color;
+    if (Object.keys(updates).length === 0) {
+      return { result: { error: "Nothing to change — give name, color, merge_into, or delete" } };
+    }
+    const [updated] = await db
+      .update(projects)
+      .set(updates)
+      .where(and(eq(projects.userId, ctx.userId), eq(projects.id, src.project.id)))
+      .returning();
+    return {
+      result: { project_id: updated.id, name: updated.name, color: updated.color },
+      toast: a.name
+        ? { icon: "✎", text: `Project: ${src.project.name} → ${updated.name}` }
+        : { icon: "✎", text: `Updated project: ${updated.name}` },
     };
   },
 
