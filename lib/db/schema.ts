@@ -190,6 +190,9 @@ export const events = pgTable("events", {
   userId: text("user_id")
     .notNull()
     .references(() => user.id, { onDelete: "cascade" }),
+  // Events are peers of tasks in the project graph — a meeting about the
+  // patent belongs to the patent project, so project views can show it.
+  projectId: text("project_id").references(() => projects.id, { onDelete: "set null" }),
   title: text("title").notNull(),
   startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
   endsAt: timestamp("ends_at", { withTimezone: true }),

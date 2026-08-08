@@ -434,11 +434,13 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
   async create_event(ctx, args) {
     const a = toolSchemas.create_event.parse(args);
     const reminders = parseReminders(a.reminders) ?? [];
+    const { project, matched } = await resolveProject(ctx.userId, a.project);
     const [event] = await db
       .insert(events)
       .values({
         userId: ctx.userId,
         title: a.title,
+        projectId: project?.id,
         startsAt: parseWhen(a.starts_at)!,
         endsAt: parseWhen(a.ends_at),
         location: a.location,
@@ -454,6 +456,8 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         event_id: event.id,
         title: event.title,
         starts_at: event.startsAt,
+        project: project?.name ?? null,
+        project_match: matched,
         ...(reminders.length ? { reminders, delivery: "logged-only" } : {}),
       },
       toast: {
@@ -474,6 +478,19 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     if (a.ends_at) updates.endsAt = parseWhen(a.ends_at);
     if (a.location !== undefined) updates.location = a.location;
     if (a.notes !== undefined) updates.notes = a.notes;
+    let movedTo: string | null | undefined;
+    let projectMatch: ProjectResolution["matched"] = null;
+    if (a.project !== undefined) {
+      if (a.project.trim().toLowerCase() === "none") {
+        updates.projectId = null;
+        movedTo = null;
+      } else {
+        const res = await resolveProject(ctx.userId, a.project);
+        updates.projectId = res.project!.id;
+        movedTo = res.project!.name;
+        projectMatch = res.matched;
+      }
+    }
     const newReminders = parseReminders(a.reminders);
     if (newReminders !== undefined) updates.reminders = newReminders;
     if (Object.keys(updates).length === 0) {
@@ -492,6 +509,7 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         title: updated.title,
         starts_at: updated.startsAt,
         notes: updated.notes,
+        ...(movedTo !== undefined ? { project: movedTo, project_match: projectMatch } : {}),
         ...(newReminders !== undefined
           ? { reminders: updated.reminders, delivery: "logged-only" }
           : {}),

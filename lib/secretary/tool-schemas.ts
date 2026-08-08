@@ -67,6 +67,12 @@ export const toolSchemas = {
     starts_at: z.string().describe("Start date/time as ISO 8601 in the user's timezone"),
     ends_at: z.string().optional(),
     location: z.string().optional(),
+    project: z
+      .string()
+      .optional()
+      .describe(
+        "Project to file it under (fuzzy-matched) — a meeting about an ongoing workstream belongs to that project"
+      ),
     notes: z
       .string()
       .optional()
@@ -83,6 +89,10 @@ export const toolSchemas = {
     ends_at: z.string().optional(),
     location: z.string().optional(),
     notes: z.string().optional(),
+    project: z
+      .string()
+      .optional()
+      .describe('Move the event into this project (fuzzy-matched); "none" unfiles it'),
     reminders: z
       .array(z.string())
       .optional()

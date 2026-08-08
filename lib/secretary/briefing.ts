@@ -189,8 +189,9 @@ export async function buildBriefing(
     )
     .groupBy(tasks.projectId);
   const upcomingEvents = await db
-    .select()
+    .select({ event: events, projectName: projects.name })
     .from(events)
+    .leftJoin(projects, eq(events.projectId, projects.id))
     .where(
       and(
         eq(events.userId, userId),
@@ -200,6 +201,19 @@ export async function buildBriefing(
     )
     .orderBy(events.startsAt)
     .limit(20);
+
+  // events per project this week, for the PROJECTS section counts
+  const eventCounts = await db
+    .select({ projectId: events.projectId, n: count() })
+    .from(events)
+    .where(
+      and(
+        eq(events.userId, userId),
+        gte(events.startsAt, now),
+        lt(events.startsAt, new Date(now.getTime() + 7 * 86400000))
+      )
+    )
+    .groupBy(events.projectId);
 
   // Nudge budget: overdue items not already nudged today, max 3.
   const nudgeable = overdueRows.filter(
@@ -330,7 +344,10 @@ export async function buildBriefing(
     );
     for (const p of projectRows) {
       const n = openCounts.find((c) => c.projectId === p.id)?.n ?? 0;
-      lines.push(`- "${p.name}" (${n} open)`);
+      const ev = eventCounts.find((c) => c.projectId === p.id)?.n ?? 0;
+      lines.push(
+        `- "${p.name}" (${n} open task${n === 1 ? "" : "s"}${ev ? ` · ${ev} event${ev === 1 ? "" : "s"} this week` : ""})`
+      );
     }
   }
   if (openTasks.length) {
@@ -342,8 +359,10 @@ export async function buildBriefing(
   }
   if (upcomingEvents.length) {
     lines.push("", "UPCOMING EVENTS (next 7 days — already logged, don't re-create):");
-    for (const e of upcomingEvents)
-      lines.push(`- [${e.id}] "${e.title}" · ${fmt(e.startsAt, timezone)}`);
+    for (const { event: e, projectName } of upcomingEvents)
+      lines.push(
+        `- [${e.id}] "${e.title}" · ${fmt(e.startsAt, timezone)}${projectName ? ` · project "${projectName}"` : ""}`
+      );
   }
   if (memoryRows.length) {
     lines.push("", "Things you know about the user:");
