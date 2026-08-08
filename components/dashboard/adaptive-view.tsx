@@ -11,6 +11,7 @@ import type { EventRow, TaskRow } from "./shared";
 import { BoardView } from "./task-views";
 import {
   CalendarStrip,
+  ComingUpStrip,
   FiveWeekTimeline,
   NextUpHero,
   OpenLoopsTable,
@@ -32,6 +33,7 @@ const DEFAULT_TITLES: Record<LayoutComponent, string | null> = {
   procrastination_zone: null,
   suggested_zone: null,
   project_grid: "Projects",
+  coming_up: "Coming up",
 };
 
 const SECTION_NOTES: Partial<Record<LayoutComponent, string>> = {
@@ -116,6 +118,8 @@ export function AdaptiveView({
         return <SuggestedZone suggestions={suggestions} />;
       case "project_grid":
         return <ProjectGrid tasks={tasks} crossing={crossing} onDone={onDone} />;
+      case "coming_up":
+        return <ComingUpStrip tasks={tasks} events={events} />;
     }
   };
 

@@ -7,9 +7,11 @@ import { ChevronDown, ChevronUp } from "lucide-react";
 import {
   CheckButton,
   ProvenanceLink,
+  ReminderChip,
   STATUS_LABEL,
   fmtDue,
   isOverdue,
+  openDetail,
   type TaskRow,
 } from "./shared";
 
@@ -102,7 +104,8 @@ export function ListTable({
             return (
               <tr
                 key={t.id}
-                className={`border-b border-edge/50 last:border-0 ${
+                onClick={() => openDetail("task", t.id)}
+                className={`cursor-pointer border-b border-edge/50 transition-colors last:border-0 hover:bg-surface-2/40 ${
                   isOverdue(t) ? "bg-danger/5" : ""
                 } ${fresh?.has(t.id) ? "animate-task-in" : ""}`}
               >
@@ -112,6 +115,7 @@ export function ListTable({
                     <span className={`cross-off ${done || crossingNow ? "crossed text-faint" : ""}`}>
                       {t.title}
                     </span>
+                    <ReminderChip reminders={t.reminders} />
                     <ProvenanceLink t={t} />
                   </div>
                 </td>
@@ -210,7 +214,8 @@ export function BoardView({
                 return (
                   <div
                     key={t.id}
-                    className={`rounded-lg border bg-card px-3 py-2.5 text-sm ${
+                    onClick={() => openDetail("task", t.id)}
+                    className={`cursor-pointer rounded-lg border bg-card px-3 py-2.5 text-sm transition-colors hover:border-faint ${
                       isOverdue(t) ? "border-danger/50" : "border-edge"
                     } ${fresh?.has(t.id) ? "animate-task-in" : ""}`}
                   >
@@ -238,6 +243,7 @@ export function BoardView({
                           {t.postponedCount > 1 && (
                             <span className="text-warn">pushed {t.postponedCount}×</span>
                           )}
+                          <ReminderChip reminders={t.reminders} />
                           <ProvenanceLink t={t} />
                         </p>
                       </div>

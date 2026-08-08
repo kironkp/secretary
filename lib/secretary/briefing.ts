@@ -142,6 +142,27 @@ export async function buildBriefing(
     .orderBy(desc(memories.createdAt))
     .limit(20);
 
+  // Today's upcoming reminders (tasks + events) — briefings are the delivery
+  // mechanism until push notifications exist.
+  const reminderRows: { at: Date; title: string }[] = [];
+  {
+    const openWithReminders = await db
+      .select({ title: tasks.title, reminders: tasks.reminders })
+      .from(tasks)
+      .where(and(eq(tasks.userId, userId), inArray(tasks.status, [...OPEN_STATUSES])));
+    const eventsWithReminders = await db
+      .select({ title: events.title, reminders: events.reminders })
+      .from(events)
+      .where(and(eq(events.userId, userId), gte(events.startsAt, new Date(now.getTime() - 86400000))));
+    for (const row of [...openWithReminders, ...eventsWithReminders]) {
+      for (const iso of row.reminders ?? []) {
+        const at = new Date(iso);
+        if (at >= now && at < today.end) reminderRows.push({ at, title: row.title });
+      }
+    }
+    reminderRows.sort((a, b) => a.at.getTime() - b.at.getTime());
+  }
+
   // Snapshot of what already exists, so the model updates instead of
   // duplicating ("push the expense report" must never create a second one).
   const openTasks = await db
@@ -275,6 +296,11 @@ export async function buildBriefing(
     lines.push(
       "Today's events: " +
         todayEvents.map((e) => `"${e.title}" at ${fmt(e.startsAt, timezone)}`).join(", ")
+    );
+  if (reminderRows.length)
+    lines.push(
+      "Reminders today (logged — mention the next one; they don't ring the device): " +
+        reminderRows.map((r) => `${fmt(r.at, timezone)} — ${r.title}`).join(", ")
     );
   if (stalledRows.length)
     lines.push("Stalled (in progress, no activity ≥3d): " + stalledRows.map((t) => `"${t.title}"`).join(", "));

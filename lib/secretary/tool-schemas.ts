@@ -12,6 +12,10 @@ export const toolSchemas = {
       .describe("Due date/time as ISO 8601 in the user's timezone, if mentioned"),
     project: z.string().optional().describe("Project name to file it under (created if new)"),
     priority: z.number().int().min(0).max(3).optional().describe("0 none · 1 low · 2 medium · 3 high"),
+    reminders: z
+      .array(z.string())
+      .optional()
+      .describe("Reminder times — exact ISO 8601 timestamps in the user's timezone"),
   }),
   update_task: z.object({
     task: z.string().min(1).describe("Task id, or a distinctive fragment of its title"),
@@ -28,6 +32,10 @@ export const toolSchemas = {
       .describe(
         'Move the task into this project (fuzzy-matched against existing names). The literal value "none" removes it from its project.'
       ),
+    reminders: z
+      .array(z.string())
+      .optional()
+      .describe("Replace the task's reminder times — exact ISO 8601 timestamps; [] clears them"),
     postpone_reason: z
       .string()
       .optional()
@@ -59,6 +67,29 @@ export const toolSchemas = {
     starts_at: z.string().describe("Start date/time as ISO 8601 in the user's timezone"),
     ends_at: z.string().optional(),
     location: z.string().optional(),
+    notes: z
+      .string()
+      .optional()
+      .describe("Detail worth keeping — e.g. timezone conversions ('11:00 AM PT / 2:00 PM ET')"),
+    reminders: z
+      .array(z.string())
+      .optional()
+      .describe("Reminder times — exact ISO 8601 timestamps in the user's timezone"),
+  }),
+  update_event: z.object({
+    event: z.string().min(1).describe("Event id, or a distinctive fragment of its title"),
+    title: z.string().optional(),
+    starts_at: z.string().optional().describe("New start, ISO 8601"),
+    ends_at: z.string().optional(),
+    location: z.string().optional(),
+    notes: z.string().optional(),
+    reminders: z
+      .array(z.string())
+      .optional()
+      .describe("Replace the event's reminder times — exact ISO 8601 timestamps; [] clears them"),
+  }),
+  delete_event: z.object({
+    event: z.string().min(1).describe("Event id, or a distinctive fragment of its title"),
   }),
   get_agenda: z.object({
     date: z
@@ -88,7 +119,7 @@ export type ToolName = keyof typeof toolSchemas;
 
 const toolDescriptions: Record<ToolName, string> = {
   create_task:
-    "Log a task the user needs to do. Call this the moment a to-do, deadline, or obligation comes up in conversation — don't wait to be asked.",
+    "Log a task the user needs to do. Call this the moment a to-do, deadline, or obligation comes up in conversation — don't wait to be asked. Supports notes and reminder times.",
   update_task:
     "Change a task: status, due date, title, notes, priority, or MOVE IT TO ANOTHER PROJECT (project: name, or \"none\" to unfile it). Use when the user postpones ('I'll do it Friday'), starts, blocks, edits, or refiles something.",
   complete_task:
@@ -100,7 +131,10 @@ const toolDescriptions: Record<ToolName, string> = {
   update_project:
     "Rename a project, change its color, MERGE it into another (merge_into moves all tasks then deletes the duplicate), or delete an empty one. Use this to clean up duplicate projects.",
   create_event:
-    "Log a calendar event — meetings, appointments, social plans with a specific time.",
+    "Log a calendar event — meetings, appointments, social plans with a specific time. Supports notes (timezone conversions, agenda) and reminder times.",
+  update_event:
+    "Edit an EXISTING event: retitle, move its time, set location, add notes (e.g. an East-Coast time conversion), or set reminder times. When the user says 'add X to that meeting', use THIS — don't create a task about it.",
+  delete_event: "Remove an event that was cancelled or logged by mistake.",
   get_agenda: "Tasks due and events happening on a given day.",
   get_overdue: "All open tasks past their due date.",
   get_tasks: "List the user's tasks, optionally filtered by status or project.",

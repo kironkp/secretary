@@ -1,6 +1,19 @@
 // Adaptive layout engine (A-1…A-4): the AI arranges the dashboard from a FIXED
 // component palette — it emits a small ordered spec, and the renderer maps it
 // onto hand-built components. Never AI-generated HTML at runtime.
+//
+// ADAPTIVE-UI PRINCIPLES (learned the hard way — the Ash-meeting incident,
+// where times/timezones/alarms got flattened into a bare task title):
+// 1. The palette is FIXED. The model routes information into it; it never
+//    invents UI. New life-patterns (recurring bills, travel, people) earn new
+//    palette components — added deliberately, in code, never improvised.
+// 2. NO WRITE-ONLY DATA. Every field a tool can write must have a visible
+//    home in the UI (detail dialogs at minimum). If the model can store it,
+//    the user can see it — otherwise the model's only move is to flatten
+//    details into titles, or drop them.
+// 3. Information that fits no structured slot goes to `notes`, and notes are
+//    always viewable. Structured slots (reminders, due dates, locations) are
+//    preferred; notes are the safety net, not the default.
 import { z } from "zod";
 
 export const COMPONENT_PALETTE = [
@@ -14,6 +27,7 @@ export const COMPONENT_PALETTE = [
   "procrastination_zone",
   "suggested_zone",
   "project_grid",
+  "coming_up",
 ] as const;
 
 export type LayoutComponent = (typeof COMPONENT_PALETTE)[number];
@@ -60,6 +74,7 @@ export type DataShape = {
   suggestions: number;
   procrastinated: number;
   done7d: number;
+  reminders24h: number;
 };
 
 /** Cheap change detector: same shape → no regeneration. */
@@ -75,5 +90,6 @@ export function dataHash(shape: DataShape): string {
     shape.suggestions > 0 ? 1 : 0,
     shape.procrastinated > 0 ? 1 : 0,
     b(shape.done7d),
+    shape.reminders24h > 0 ? 1 : 0,
   ].join("-");
 }

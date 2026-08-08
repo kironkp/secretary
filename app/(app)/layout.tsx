@@ -2,7 +2,8 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { getTodayStrip } from "@/lib/db/queries";
-import { Calendar } from "lucide-react";
+import { DetailDialog } from "@/components/shell/detail-dialog";
+import { EventChipButton } from "@/components/shell/event-chip";
 import { NavTabs } from "@/components/shell/nav-tabs";
 import { SplitToggle } from "@/components/shell/split-toggle";
 import { ThemeToggle } from "@/components/shell/theme";
@@ -32,11 +33,8 @@ export default async function AppLayout({
         <div className="mx-auto flex max-w-7xl items-center gap-4 px-4 py-3">
           <span className="text-sm font-bold tracking-tight text-accent">Secretary</span>
           <div className="flex flex-1 items-center justify-end gap-2 overflow-x-auto text-xs">
-            {nextEventLabel && (
-              <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-edge bg-card px-3 py-1 text-muted">
-                <Calendar size={11} strokeWidth={1.75} />
-                {nextEventLabel}
-              </span>
+            {nextEventLabel && strip.nextEvent && (
+              <EventChipButton id={strip.nextEvent.id} label={nextEventLabel} />
             )}
             <span
               className={`whitespace-nowrap rounded-full border px-3 py-1 ${
@@ -61,6 +59,7 @@ export default async function AppLayout({
       <main className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto h-full w-full max-w-7xl px-4">{children}</div>
       </main>
+      <DetailDialog />
     </div>
   );
 }

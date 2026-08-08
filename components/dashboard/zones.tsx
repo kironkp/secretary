@@ -7,6 +7,7 @@
 import { Fragment, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  AlarmClock,
   CalendarClock,
   CalendarX,
   Check,
@@ -17,7 +18,16 @@ import {
   TriangleAlert,
   X,
 } from "lucide-react";
-import { CheckButton, ProvenanceLink, fmtDue, isOverdue, type EventRow, type TaskRow } from "./shared";
+import {
+  CheckButton,
+  ProvenanceLink,
+  ReminderChip,
+  fmtDue,
+  isOverdue,
+  openDetail,
+  type EventRow,
+  type TaskRow,
+} from "./shared";
 
 const OPEN = new Set(["inbox", "todo", "in_progress", "blocked"]);
 const DAY = 86400000;
@@ -489,6 +499,58 @@ export function FiveWeekTimeline({ tasks }: { tasks: TaskRow[] }) {
 }
 
 // ---------------------------------------------------------------------------
+// coming up — the next reminders (tasks + events) in the next 24h
+// ---------------------------------------------------------------------------
+
+type UpcomingReminder = { at: Date; title: string; kind: "task" | "event"; id: string };
+
+function upcomingReminders(tasks: TaskRow[], events: EventRow[]): UpcomingReminder[] {
+  const now = Date.now();
+  const horizon = now + 24 * 60 * 60 * 1000;
+  const out: UpcomingReminder[] = [];
+  for (const t of tasks) {
+    if (!OPEN.has(t.status)) continue;
+    for (const iso of t.reminders) {
+      const at = new Date(iso);
+      if (at.getTime() >= now && at.getTime() <= horizon)
+        out.push({ at, title: t.title, kind: "task", id: t.id });
+    }
+  }
+  for (const e of events) {
+    for (const iso of e.reminders) {
+      const at = new Date(iso);
+      if (at.getTime() >= now && at.getTime() <= horizon)
+        out.push({ at, title: e.title, kind: "event", id: e.id });
+    }
+  }
+  return out.sort((a, b) => a.at.getTime() - b.at.getTime()).slice(0, 8);
+}
+
+export function ComingUpStrip({ tasks, events }: { tasks: TaskRow[]; events: EventRow[] }) {
+  const upcoming = useMemo(() => upcomingReminders(tasks, events), [tasks, events]);
+  if (upcoming.length === 0) return null;
+  return (
+    <div className="flex gap-2 overflow-x-auto pb-1">
+      {upcoming.map((r, i) => (
+        <button
+          key={`${r.id}-${i}`}
+          onClick={() => openDetail(r.kind, r.id)}
+          className="flex min-w-[150px] flex-none items-center gap-2.5 rounded-xl border border-edge bg-surface px-3.5 py-2.5 text-left transition-colors hover:border-faint"
+        >
+          <AlarmClock size={15} strokeWidth={1.75} className="flex-none text-warn" />
+          <span className="min-w-0">
+            <span className="block text-sm font-semibold tabular-nums leading-tight">
+              {new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(r.at)}
+            </span>
+            <span className="block max-w-[180px] truncate text-xs text-muted">{r.title}</span>
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // calendar strip (kept for AI-generated layouts)
 // ---------------------------------------------------------------------------
 
@@ -528,7 +590,11 @@ export function CalendarStrip({ events }: { events: EventRow[] }) {
             <p className="text-xs text-faint">—</p>
           ) : (
             dayEvents.map((e) => (
-              <p key={e.id} className="mb-0.5 truncate text-xs">
+              <p
+                key={e.id}
+                onClick={() => openDetail("event", e.id)}
+                className="mb-0.5 cursor-pointer truncate rounded text-xs hover:bg-surface-2/60"
+              >
                 <span className="text-muted">
                   {new Intl.DateTimeFormat("en-US", {
                     hour: "numeric",
@@ -762,12 +828,21 @@ export function ProjectGrid({
                 </li>
               ))}
               {sorted.slice(0, 3).map((t) => (
-                <li key={t.id} className="flex items-start gap-2.5 text-sm">
+                <li
+                  key={t.id}
+                  onClick={() => openDetail("task", t.id)}
+                  className="flex cursor-pointer items-start gap-2.5 rounded-md text-sm transition-colors hover:bg-surface-2/40"
+                >
                   <span className="mt-0.5">
                     <CheckButton t={t} onDone={onDone} />
                   </span>
                   <span className={`cross-off min-w-0 ${crossing.has(t.id) ? "crossed text-faint" : ""}`}>
                     {t.title}
+                    {t.reminders.length > 0 && (
+                      <span className="ml-1.5 inline-block align-middle">
+                        <ReminderChip reminders={t.reminders} />
+                      </span>
+                    )}
                     {t.dueAt && (
                       <span className={`ml-1.5 text-xs ${isOverdue(t) ? "text-danger" : "text-faint"}`}>
                         {fmtDue(t.dueAt)}
@@ -881,7 +956,8 @@ export function OpenLoopsTable({
               {g.open.map((t) => (
                 <tr
                   key={t.id}
-                  className={`border-b border-edge/50 last:border-0 ${
+                  onClick={() => openDetail("task", t.id)}
+                  className={`cursor-pointer border-b border-edge/50 transition-colors last:border-0 hover:bg-surface-2/40 ${
                     fresh?.has(t.id) ? "animate-task-in" : ""
                   }`}
                 >
@@ -891,6 +967,7 @@ export function OpenLoopsTable({
                       <span className={`cross-off ${crossing.has(t.id) ? "crossed text-faint" : ""}`}>
                         {t.title}
                       </span>
+                      <ReminderChip reminders={t.reminders} />
                       <ProvenanceLink t={t} />
                     </div>
                   </td>

@@ -46,6 +46,49 @@ function parseWhen(iso: string | undefined): Date | undefined {
   return d;
 }
 
+/** Validate + normalize reminder timestamps. Undefined = leave unchanged. */
+function parseReminders(list: string[] | undefined): string[] | undefined {
+  if (list === undefined) return undefined;
+  return list.map((iso) => {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) throw new Error(`Unparseable reminder time: ${iso}`);
+    return d.toISOString();
+  });
+}
+
+function fmtReminders(list: string[], tz: string): string {
+  return list.map((iso) => fmtDate(new Date(iso), tz)).join(", ");
+}
+
+async function findEvent(userId: string, ref: string) {
+  const byId = await db
+    .select()
+    .from(events)
+    .where(and(eq(events.userId, userId), eq(events.id, ref)))
+    .limit(1);
+  if (byId[0]) return byId[0];
+  const upcoming = await db
+    .select()
+    .from(events)
+    .where(
+      and(
+        eq(events.userId, userId),
+        ilike(events.title, `%${ref}%`),
+        gte(events.startsAt, new Date(Date.now() - 86400000))
+      )
+    )
+    .orderBy(events.startsAt)
+    .limit(1);
+  if (upcoming[0]) return upcoming[0];
+  const any = await db
+    .select()
+    .from(events)
+    .where(and(eq(events.userId, userId), ilike(events.title, `%${ref}%`)))
+    .orderBy(desc(events.startsAt))
+    .limit(1);
+  return any[0] ?? null;
+}
+
 async function findTask(userId: string, ref: string) {
   const byId = await db
     .select()
@@ -142,6 +185,7 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     const a = toolSchemas.create_task.parse(args);
     const { project, matched } = await resolveProject(ctx.userId, a.project);
     const dueAt = parseWhen(a.due_at);
+    const reminders = parseReminders(a.reminders) ?? [];
     const [task] = await db
       .insert(tasks)
       .values({
@@ -151,6 +195,7 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         projectId: project?.id,
         dueAt,
         priority: a.priority ?? 0,
+        reminders,
         status: "todo",
         source: ctx.conversationId ? "spoken" : "typed",
         createdFromConversationId: ctx.conversationId,
@@ -165,6 +210,7 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         due_at: task.dueAt,
         project: project?.name ?? null,
         project_match: matched,
+        ...(reminders.length ? { reminders, delivery: "logged-only" } : {}),
       },
       toast: { icon: "✓", text: `Added: ${task.title}${due ? ` — due ${due}` : ""}` },
     };
@@ -208,6 +254,8 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     if (a.title) updates.title = a.title;
     if (a.notes) updates.notes = a.notes;
     if (a.priority !== undefined) updates.priority = a.priority;
+    const newReminders = parseReminders(a.reminders);
+    if (newReminders !== undefined) updates.reminders = newReminders;
 
     const [updated] = await db
       .update(tasks)
@@ -235,13 +283,18 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         due_at: updated.dueAt,
         postponed_count: updated.postponedCount,
         ...(movedTo !== undefined ? { project: movedTo, project_match: projectMatch } : {}),
+        ...(newReminders !== undefined
+          ? { reminders: updated.reminders, delivery: "logged-only" }
+          : {}),
       },
       toast:
         movedTo !== undefined
           ? { icon: "→", text: `Moved: ${updated.title} → ${movedTo ?? "no project"}` }
           : postponed
             ? { icon: "→", text: `Pushed: ${updated.title} — now ${due}` }
-            : { icon: "✎", text: `Updated: ${updated.title}` },
+            : newReminders !== undefined
+              ? { icon: "✓", text: `Reminders set: ${updated.title}` }
+              : { icon: "✎", text: `Updated: ${updated.title}` },
     };
   },
 
@@ -380,6 +433,7 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
 
   async create_event(ctx, args) {
     const a = toolSchemas.create_event.parse(args);
+    const reminders = parseReminders(a.reminders) ?? [];
     const [event] = await db
       .insert(events)
       .values({
@@ -388,17 +442,78 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         startsAt: parseWhen(a.starts_at)!,
         endsAt: parseWhen(a.ends_at),
         location: a.location,
+        notes: a.notes,
+        reminders,
         source: ctx.conversationId ? "spoken" : "typed",
         conversationId: ctx.conversationId,
         messageId: ctx.anchorMessageId,
       })
       .returning();
     return {
-      result: { event_id: event.id, title: event.title, starts_at: event.startsAt },
+      result: {
+        event_id: event.id,
+        title: event.title,
+        starts_at: event.startsAt,
+        ...(reminders.length ? { reminders, delivery: "logged-only" } : {}),
+      },
       toast: {
         icon: "📅",
         text: `${event.title} — ${fmtDate(event.startsAt, ctx.timezone)}`,
       },
+    };
+  },
+
+  async update_event(ctx, args) {
+    const a = toolSchemas.update_event.parse(args);
+    const event = await findEvent(ctx.userId, a.event);
+    if (!event) return { result: { error: `No event matching "${a.event}"` } };
+
+    const updates: Partial<typeof events.$inferInsert> = {};
+    if (a.title) updates.title = a.title;
+    if (a.starts_at) updates.startsAt = parseWhen(a.starts_at)!;
+    if (a.ends_at) updates.endsAt = parseWhen(a.ends_at);
+    if (a.location !== undefined) updates.location = a.location;
+    if (a.notes !== undefined) updates.notes = a.notes;
+    const newReminders = parseReminders(a.reminders);
+    if (newReminders !== undefined) updates.reminders = newReminders;
+    if (Object.keys(updates).length === 0) {
+      return { result: { error: "Nothing to change — give a field to update" } };
+    }
+
+    const [updated] = await db
+      .update(events)
+      .set(updates)
+      .where(and(eq(events.userId, ctx.userId), eq(events.id, event.id)))
+      .returning();
+
+    return {
+      result: {
+        event_id: updated.id,
+        title: updated.title,
+        starts_at: updated.startsAt,
+        notes: updated.notes,
+        ...(newReminders !== undefined
+          ? { reminders: updated.reminders, delivery: "logged-only" }
+          : {}),
+      },
+      toast: {
+        icon: "📅",
+        text:
+          newReminders !== undefined && newReminders.length
+            ? `${updated.title} — reminders ${fmtReminders(updated.reminders, ctx.timezone)}`
+            : `Updated: ${updated.title}`,
+      },
+    };
+  },
+
+  async delete_event(ctx, args) {
+    const a = toolSchemas.delete_event.parse(args);
+    const event = await findEvent(ctx.userId, a.event);
+    if (!event) return { result: { error: `No event matching "${a.event}"` } };
+    await db.delete(events).where(and(eq(events.userId, ctx.userId), eq(events.id, event.id)));
+    return {
+      result: { deleted: event.title },
+      toast: { icon: "✕", text: `Removed event: ${event.title}` },
     };
   },
 

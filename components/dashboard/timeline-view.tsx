@@ -6,8 +6,10 @@ import { Calendar } from "lucide-react";
 import {
   CheckButton,
   ProvenanceLink,
+  ReminderChip,
   fmtDue,
   isOverdue,
+  openDetail,
   type EventRow,
   type TaskRow,
 } from "./shared";
@@ -94,7 +96,8 @@ export function TimelineView({
                 e.kind === "event" ? (
                   <div
                     key={`e-${e.event.id}`}
-                    className="flex items-center gap-2 rounded-lg border border-edge bg-surface px-3 py-2 text-sm"
+                    onClick={() => openDetail("event", e.event.id)}
+                    className="flex cursor-pointer items-center gap-2 rounded-lg border border-edge bg-surface px-3 py-2 text-sm transition-colors hover:border-faint"
                   >
                     <Calendar size={14} strokeWidth={1.75} className="flex-none text-muted" />
                     <span>{e.event.title}</span>
@@ -105,11 +108,13 @@ export function TimelineView({
                       }).format(e.at)}
                       {e.event.location ? ` · ${e.event.location}` : ""}
                     </span>
+                    <ReminderChip reminders={e.event.reminders} />
                   </div>
                 ) : (
                   <div
                     key={`t-${e.task.id}`}
-                    className={`flex items-center gap-2 rounded-lg border bg-surface px-3 py-2 text-sm ${
+                    onClick={() => openDetail("task", e.task.id)}
+                    className={`flex cursor-pointer items-center gap-2 rounded-lg border bg-surface px-3 py-2 text-sm transition-colors hover:border-faint ${
                       isOverdue(e.task) ? "border-danger/50" : "border-edge"
                     }`}
                   >
@@ -123,6 +128,7 @@ export function TimelineView({
                     {e.task.postponedCount > 0 && (
                       <span className="text-xs text-warn">pushed {e.task.postponedCount}×</span>
                     )}
+                    <ReminderChip reminders={e.task.reminders} />
                     <ProvenanceLink t={e.task} />
                   </div>
                 )

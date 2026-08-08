@@ -4,7 +4,7 @@
 // Timeline/Adaptive): row types, due-date formatting, the cross-off button,
 // and provenance links.
 import Link from "next/link";
-import { Check, MessageSquare } from "lucide-react";
+import { AlarmClock, Check, MessageSquare } from "lucide-react";
 
 export type TaskRow = {
   id: string;
@@ -17,6 +17,7 @@ export type TaskRow = {
   procrastinationScore: number;
   source: "spoken" | "typed" | "inferred" | "suggested";
   notes: string | null;
+  reminders: string[];
   projectName: string | null;
   projectColor: string | null;
   conversationId: string | null;
@@ -30,7 +31,27 @@ export type EventRow = {
   startsAt: string;
   endsAt: string | null;
   location: string | null;
+  reminders: string[];
 };
+
+/** Open the global detail dialog (mounted in the app shell) for any item. */
+export function openDetail(kind: "task" | "event", id: string) {
+  window.dispatchEvent(new CustomEvent("secretary:open-detail", { detail: { kind, id } }));
+}
+
+/** Small clock chip for rows/cards that carry reminders. */
+export function ReminderChip({ reminders }: { reminders?: string[] }) {
+  if (!reminders || reminders.length === 0) return null;
+  return (
+    <span
+      title={`${reminders.length} reminder${reminders.length > 1 ? "s" : ""}`}
+      className="inline-flex flex-none items-center gap-0.5 rounded-full bg-surface-2 px-1.5 py-px text-[10px] text-muted"
+    >
+      <AlarmClock size={10} strokeWidth={2} />
+      {reminders.length}
+    </span>
+  );
+}
 
 export const STATUS_LABEL: Record<TaskRow["status"], string> = {
   inbox: "inbox",
@@ -66,6 +87,7 @@ export function ProvenanceLink({ t }: { t: TaskRow }) {
       href={`/chat?c=${t.conversationId}${t.messageId ? `&m=${t.messageId}` : ""}`}
       title={t.conversationLabel ?? "From a conversation"}
       aria-label={t.conversationLabel ?? "From a conversation"}
+      onClick={(e) => e.stopPropagation()}
       className="text-faint transition-colors hover:text-accent"
     >
       <MessageSquare size={13} strokeWidth={1.75} />
@@ -84,7 +106,10 @@ export function CheckButton({
   return (
     <button
       disabled={done}
-      onClick={() => onDone(t.id)}
+      onClick={(e) => {
+        e.stopPropagation();
+        onDone(t.id);
+      }}
       title="Mark done"
       aria-label="Mark done"
       className={`flex h-5 w-5 flex-none items-center justify-center rounded-full border transition-colors ${

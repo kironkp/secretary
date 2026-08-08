@@ -175,6 +175,9 @@ export const tasks = pgTable("tasks", {
   }),
   startedAt: timestamp("started_at", { withTimezone: true }),
   completedAt: timestamp("completed_at", { withTimezone: true }),
+  // Reminder times as ISO timestamps. No push delivery yet — surfaced in the
+  // briefing and the dashboard (supersedes the never-used remindAt column).
+  reminders: jsonb("reminders").$type<string[]>().notNull().default([]),
   postponedCount: integer("postponed_count").notNull().default(0),
   lastNudgedAt: timestamp("last_nudged_at", { withTimezone: true }),
   procrastinationScore: real("procrastination_score").notNull().default(0),
@@ -191,6 +194,9 @@ export const events = pgTable("events", {
   startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
   endsAt: timestamp("ends_at", { withTimezone: true }),
   location: text("location"),
+  // Free-form detail that fits no structured slot (e.g. "11:00 AM PT / 2:00 PM ET")
+  notes: text("notes"),
+  reminders: jsonb("reminders").$type<string[]>().notNull().default([]),
   source: itemSource("source").notNull().default("typed"),
   conversationId: text("conversation_id").references(() => conversations.id, {
     onDelete: "set null",

@@ -35,6 +35,7 @@ export async function DashboardPanel({
     procrastinationScore: task.procrastinationScore,
     source: task.source,
     notes: task.notes,
+    reminders: task.reminders ?? [],
     projectName,
     projectColor,
     conversationId: task.createdFromConversationId,
@@ -59,6 +60,7 @@ export async function DashboardPanel({
     startsAt: e.startsAt.toISOString(),
     endsAt: e.endsAt?.toISOString() ?? null,
     location: e.location,
+    reminders: e.reminders ?? [],
   }));
 
   return (

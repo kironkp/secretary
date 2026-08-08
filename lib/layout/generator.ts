@@ -26,6 +26,7 @@ const GENERATOR_PROMPT = `You arrange a personal-assistant dashboard from a fixe
 - project_grid when projects >= 1.
 - Include exactly ONE of list | kanban as the main work surface: list by default; kanban only when openTasks >= 10.
 - suggested_zone only when suggestions > 0; procrastination_zone only when procrastinated > 0.
+- coming_up (a small strip of the next reminders) only when reminders24h > 0 — near the top when present.
 - calendar_strip only when events7d > 0 and it isn't redundant with focus_card.
 - 4–8 sections total. Titles: null unless a custom heading genuinely helps.`;
 
@@ -95,6 +96,23 @@ export async function getDataShape(userId: string): Promise<DataShape> {
     .from(tasks)
     .where(and(eq(tasks.userId, userId), eq(tasks.status, "done"), gte(tasks.completedAt, ago7d)));
 
+  // reminders in the next 24h (jsonb arrays — filtered in JS, user-scale data)
+  const in24h = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+  const taskReminders = await db
+    .select({ reminders: tasks.reminders })
+    .from(tasks)
+    .where(and(eq(tasks.userId, userId), inArray(tasks.status, [...OPEN_STATUSES])));
+  const eventReminders = await db
+    .select({ reminders: events.reminders })
+    .from(events)
+    .where(and(eq(events.userId, userId), gte(events.startsAt, now)));
+  const reminders24h = [...taskReminders, ...eventReminders]
+    .flatMap((r) => r.reminders ?? [])
+    .filter((iso) => {
+      const d = new Date(iso);
+      return d >= now && d <= in24h;
+    }).length;
+
   return {
     openTasks: open?.n ?? 0,
     overdue: overdue?.n ?? 0,
@@ -104,6 +122,7 @@ export async function getDataShape(userId: string): Promise<DataShape> {
     suggestions: suggestions?.n ?? 0,
     procrastinated: procrastinated?.n ?? 0,
     done7d: done7d?.n ?? 0,
+    reminders24h,
   };
 }
 

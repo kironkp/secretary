@@ -2,7 +2,7 @@
 
 // Phase 9: month-grid calendar over real events + task due dates.
 import { useState } from "react";
-import { isOverdue, type EventRow, type TaskRow } from "./shared";
+import { isOverdue, openDetail, type EventRow, type TaskRow } from "./shared";
 
 export function CalendarView({ tasks, events }: { tasks: TaskRow[]; events: EventRow[] }) {
   const today = new Date();
@@ -91,7 +91,8 @@ export function CalendarView({ tasks, events }: { tasks: TaskRow[]; events: Even
                 <p
                   key={e.id}
                   title={e.title}
-                  className="mb-0.5 truncate rounded bg-accent/15 px-1 py-px text-[10px] leading-tight text-accent"
+                  onClick={() => openDetail("event", e.id)}
+                  className="mb-0.5 cursor-pointer truncate rounded bg-accent/15 px-1 py-px text-[10px] leading-tight text-accent hover:bg-accent/25"
                 >
                   {e.title}
                 </p>
@@ -100,8 +101,9 @@ export function CalendarView({ tasks, events }: { tasks: TaskRow[]; events: Even
                 <p
                   key={t.id}
                   title={t.title}
-                  className={`mb-0.5 truncate rounded px-1 py-px text-[10px] leading-tight ${
-                    isOverdue(t) ? "bg-danger/15 text-danger" : "bg-surface-2 text-muted"
+                  onClick={() => openDetail("task", t.id)}
+                  className={`mb-0.5 cursor-pointer truncate rounded px-1 py-px text-[10px] leading-tight ${
+                    isOverdue(t) ? "bg-danger/15 text-danger hover:bg-danger/25" : "bg-surface-2 text-muted hover:bg-surface-2/70"
                   }`}
                 >
                   {t.title}

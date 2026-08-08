@@ -1,9 +1,38 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { checkins, tasks } from "@/lib/db/schema";
+import { checkins, projects, tasks } from "@/lib/db/schema";
 import { isErrorResponse, parseBody, requireSession } from "@/lib/api";
+
+/** Full detail for the task dialog: every tool-writable field + history. */
+export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const user = await requireSession();
+  if (isErrorResponse(user)) return user;
+  const { id } = await params;
+
+  const [row] = await db
+    .select({ task: tasks, projectName: projects.name, projectColor: projects.color })
+    .from(tasks)
+    .leftJoin(projects, eq(tasks.projectId, projects.id))
+    .where(and(eq(tasks.id, id), eq(tasks.userId, user.id)))
+    .limit(1);
+  if (!row) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  const history = await db
+    .select()
+    .from(checkins)
+    .where(and(eq(checkins.userId, user.id), eq(checkins.taskId, id)))
+    .orderBy(desc(checkins.at))
+    .limit(30);
+
+  return NextResponse.json({
+    task: row.task,
+    projectName: row.projectName,
+    projectColor: row.projectColor,
+    history: history.map((h) => ({ id: h.id, type: h.type, note: h.note, at: h.at })),
+  });
+}
 
 const bodySchema = z.object({
   status: z.enum(["inbox", "todo", "in_progress", "blocked", "done", "dropped"]).optional(),
