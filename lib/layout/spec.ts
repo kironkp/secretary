@@ -14,6 +14,22 @@
 // 3. Information that fits no structured slot goes to `notes`, and notes are
 //    always viewable. Structured slots (reminders, due dates, locations) are
 //    preferred; notes are the safety net, not the default.
+// 4. RENDER COMPLETENESS (the Ash-meeting-invisible-on-Open-Loops incident):
+//    every zone renders every entity type within its declared scope. A new
+//    entity or field ships only together with its appearance in ALL covering
+//    zones — "it's in the calendar" is not visibility. Current contract
+//    (tripwired by tests/zone-completeness.test.ts):
+//
+//      component            | must display
+//      ---------------------|-------------------------------------------
+//      list (open loops)    | open tasks + upcoming events, w/ reminders
+//      project_grid         | tasks + each project's next event
+//      focus_card           | soonest of tasks AND events, w/ reminders+notes
+//      coming_up            | task AND event reminders (48h)
+//      timeline (5-week)    | task deadline pressure + event markers
+//      calendar/calendar_strip | events + dated tasks
+//      stat_tiles           | counts over tasks + events (next commitment)
+//      kanban/board, procrastination_zone, suggested_zone | tasks by scope
 import { z } from "zod";
 
 export const COMPONENT_PALETTE = [
