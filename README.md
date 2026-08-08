@@ -77,6 +77,35 @@ Postgres · Resend · OpenAI Realtime
 
 4. **Run** — `npm run dev` → http://localhost:3000
 
+## Testing from a phone (no Tailscale)
+
+`npm run dev:public` — publishes the dev server with **Tailscale Funnel** at
+
+    https://kironkps-macbook-pro-1.taildfcf4.ts.net:8443
+
+Open that in any phone browser — cellular or Wi-Fi, no VPN or client app
+needed. Sign in with email/password (passkeys are currently bound to the
+localhost origin, so they won't prompt here).
+
+- **First run**: Funnel needs a one-time tailnet approval — the script prints
+  the approval link; open it, enable Funnel for this machine, re-run. Public
+  DNS for the URL can take ~10 min to propagate on the first publish.
+- **Known issue**: some macOS Tailscale builds accept the Funnel config and
+  then silently drop it — `dev:public` detects this and tells you. Update the
+  Tailscale app (menu bar icon → Check for Updates) and re-run; until then
+  `npm run tunnel:cf` is the working public path.
+- **Check / stop**: `npm run funnel:status` · `npm run funnel:off`. While
+  Funnel is on the URL is reachable by anyone — the app is sign-in-gated and
+  voice minting is quota'd, but treat the URL as private and run
+  `npm run funnel:off` when you're done testing.
+- On the tailnet, Funnel serves the same `:8443` URL, so `npm run https-proxy`
+  is only needed as a fallback when Funnel is off.
+- **Fallback for networks that block `*.ts.net`**: `npm run tunnel:cf`
+  (requires `brew install cloudflared`) prints a random
+  `https://<something>.trycloudflare.com` URL. Append that origin to
+  `TRUSTED_ORIGINS` in `.env.local` for the run and restart the dev server,
+  or sign-in POSTs from it will be rejected.
+
 ## Tests
 
 `npm test` — user-scoping (user A can never read user B's data), extraction

@@ -11,7 +11,11 @@
     "db:studio": "drizzle-kit studio",
     "test": "vitest run",
     "db:local": "node scripts/local-postgres.mjs",
-    "https-proxy": "node scripts/https-proxy.mjs"
+    "https-proxy": "node scripts/https-proxy.mjs",
+    "dev:public": "node scripts/funnel.mjs up && next dev",
+    "funnel:status": "node scripts/funnel.mjs status",
+    "funnel:off": "node scripts/funnel.mjs off",
+    "tunnel:cf": "cloudflared tunnel --url http://localhost:3000"
   },
   "dependencies": {
     "@better-auth/passkey": "^1.6.23",
