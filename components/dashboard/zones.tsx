@@ -109,32 +109,99 @@ export function OverdueCallout({ tasks }: { tasks: TaskRow[] }) {
 // stat tiles — compact single row, accent only where it means something
 // ---------------------------------------------------------------------------
 
+type StatDetail = { key: string; title: string; detail?: string; tone?: Tone; pill?: string };
+
 function computeStats(tasks: TaskRow[], events: EventRow[]) {
   const now = Date.now();
   const open = tasks.filter((t) => OPEN.has(t.status));
-  const overdue = tasks.filter(isOverdue).length;
-  const undated = open.filter((t) => !t.dueAt).length;
-  const projects = new Set(open.map((t) => t.projectName).filter(Boolean)).size;
-  const datedFuture = [
-    ...open.filter((t) => t.dueAt && new Date(t.dueAt).getTime() >= now).map((t) => t.dueAt!),
-    ...events.filter((e) => new Date(e.startsAt).getTime() >= now).map((e) => e.startsAt),
-  ].sort();
-  const nextInDays = datedFuture.length ? daysUntil(datedFuture[0], now) : null;
-  return { open: open.length, overdue, undated, projects, nextInDays };
+  const overdueTasks = tasks.filter(isOverdue);
+  const undatedTasks = open.filter((t) => !t.dueAt);
+
+  const projectMap = new Map<string, { count: number; soonest: string | null }>();
+  for (const t of open) {
+    if (!t.projectName) continue;
+    const p = projectMap.get(t.projectName) ?? { count: 0, soonest: null };
+    p.count++;
+    if (t.dueAt && (!p.soonest || t.dueAt < p.soonest)) p.soonest = t.dueAt;
+    projectMap.set(t.projectName, p);
+  }
+
+  const upcoming = [
+    ...events
+      .filter((e) => new Date(e.startsAt).getTime() >= now)
+      .map((e) => ({ title: e.title, at: e.startsAt, kind: "event" })),
+    ...open
+      .filter((t) => t.dueAt && new Date(t.dueAt).getTime() >= now)
+      .map((t) => ({ title: t.title, at: t.dueAt!, kind: "task" })),
+  ].sort((a, b) => a.at.localeCompare(b.at));
+
+  const details: Record<string, StatDetail[]> = {
+    projects: [...projectMap.entries()].map(([name, p]) => ({
+      key: name,
+      title: name,
+      detail: `${p.count} open`,
+      pill: p.soonest ? fmtDue(p.soonest) : "undated",
+      tone: p.soonest ? pressureTone(daysUntil(p.soonest, now)) : "warn",
+    })),
+    next: upcoming.slice(0, 6).map((u, i) => ({
+      key: `${u.title}-${i}`,
+      title: u.title,
+      detail: u.kind,
+      pill: fmtDue(u.at),
+      tone: pressureTone(daysUntil(u.at, now)),
+    })),
+    overdue: overdueTasks.map((t) => ({
+      key: t.id,
+      title: t.title,
+      detail: t.projectName ?? undefined,
+      pill: fmtDue(t.dueAt),
+      tone: "danger" as Tone,
+    })),
+    open: open
+      .slice()
+      .sort((a, b) => (a.dueAt ?? "9999").localeCompare(b.dueAt ?? "9999"))
+      .map((t) => ({
+        key: t.id,
+        title: t.title,
+        detail: t.projectName ?? undefined,
+        pill: t.dueAt ? fmtDue(t.dueAt) : "no date",
+        tone: t.dueAt ? pressureTone(daysUntil(t.dueAt, now)) : ("warn" as Tone),
+      })),
+    undated: undatedTasks.map((t) => ({
+      key: t.id,
+      title: t.title,
+      detail: t.projectName ?? undefined,
+      pill: "no date",
+      tone: "warn" as Tone,
+    })),
+  };
+
+  const nextInDays = upcoming.length ? daysUntil(upcoming[0].at, now) : null;
+  return {
+    open: open.length,
+    overdue: overdueTasks.length,
+    undated: undatedTasks.length,
+    projects: projectMap.size,
+    nextInDays,
+    details,
+  };
 }
 
 export function StatTiles({ tasks, events }: { tasks: TaskRow[]; events: EventRow[] }) {
   const s = useMemo(() => computeStats(tasks, events), [tasks, events]);
+  const [expanded, setExpanded] = useState<string | null>(null);
 
   const tiles: {
+    id: string;
     value: string;
     unit?: string;
     label: string;
     Icon: typeof ListTodo;
     tone?: string;
   }[] = [
-    { value: String(s.projects), label: "active projects", Icon: FolderKanban },
+    { id: "projects", value: String(s.projects), label: "active projects", Icon: FolderKanban },
     {
+      id: "next",
       value: s.nextInDays === null ? "—" : String(Math.max(0, s.nextInDays)),
       unit: s.nextInDays === null ? undefined : "d",
       label: "to your next commitment",
@@ -142,13 +209,15 @@ export function StatTiles({ tasks, events }: { tasks: TaskRow[]; events: EventRo
       tone: s.nextInDays !== null && s.nextInDays <= 3 ? "text-danger" : undefined,
     },
     {
+      id: "overdue",
       value: String(s.overdue),
       label: "overdue",
       Icon: TriangleAlert,
       tone: s.overdue > 0 ? "text-danger" : undefined,
     },
-    { value: String(s.open), label: "open next-actions", Icon: ListTodo },
+    { id: "open", value: String(s.open), label: "open next-actions", Icon: ListTodo },
     {
+      id: "undated",
       value: String(s.undated),
       label: "items with no date on them",
       Icon: CalendarX,
@@ -156,20 +225,67 @@ export function StatTiles({ tasks, events }: { tasks: TaskRow[]; events: EventRo
     },
   ];
 
+  const detail = expanded ? (s.details[expanded] ?? []) : [];
+
   return (
-    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-      {tiles.map((t) => (
-        <div key={t.label} className="rounded-xl border border-edge bg-surface px-4 py-3.5">
-          <div className="flex items-start justify-between gap-2">
-            <p className={`text-[26px] font-bold leading-none tracking-tight ${t.tone ?? ""}`}>
-              {t.value}
-              {t.unit && <span className="text-base font-semibold text-faint">{t.unit}</span>}
+    <div>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+        {tiles.map((t) => {
+          const active = expanded === t.id;
+          return (
+            <button
+              key={t.id}
+              onClick={() => setExpanded(active ? null : t.id)}
+              aria-expanded={active}
+              className={`rounded-xl border px-4 py-3.5 text-left transition-colors ${
+                active
+                  ? "border-accent bg-surface ring-2 ring-accent/20"
+                  : "border-edge bg-surface hover:border-faint"
+              }`}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <p className={`text-[26px] font-bold leading-none tracking-tight ${t.tone ?? ""}`}>
+                  {t.value}
+                  {t.unit && <span className="text-base font-semibold text-faint">{t.unit}</span>}
+                </p>
+                <t.Icon size={15} strokeWidth={1.75} className="mt-0.5 flex-none text-faint" />
+              </div>
+              <p className="mt-1.5 text-xs leading-tight text-faint">{t.label}</p>
+            </button>
+          );
+        })}
+      </div>
+
+      {expanded && (
+        <div className="animate-rise-in mt-2 rounded-xl border border-edge bg-surface px-4 py-3">
+          {detail.length === 0 ? (
+            <p className="py-1 text-sm text-faint">
+              {expanded === "overdue"
+                ? "Nothing overdue — clean slate."
+                : expanded === "undated"
+                  ? "Everything has a date. As it should."
+                  : "Nothing here yet."}
             </p>
-            <t.Icon size={15} strokeWidth={1.75} className="mt-0.5 flex-none text-faint" />
-          </div>
-          <p className="mt-1.5 text-xs leading-tight text-faint">{t.label}</p>
+          ) : (
+            <ul className="divide-y divide-edge/50">
+              {detail.slice(0, 8).map((d) => (
+                <li key={d.key} className="flex flex-wrap items-baseline gap-2 py-1.5 text-sm">
+                  <span className="font-medium">{d.title}</span>
+                  {d.detail && <span className="text-xs text-faint">{d.detail}</span>}
+                  {d.pill && (
+                    <span className="ml-auto">
+                      <Pill tone={d.tone ?? "neut"}>{d.pill}</Pill>
+                    </span>
+                  )}
+                </li>
+              ))}
+              {detail.length > 8 && (
+                <li className="py-1.5 text-xs text-faint">+ {detail.length - 8} more</li>
+              )}
+            </ul>
+          )}
         </div>
-      ))}
+      )}
     </div>
   );
 }
