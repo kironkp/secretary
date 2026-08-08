@@ -19,6 +19,7 @@ import type { BriefingCard } from "@/lib/secretary/briefing";
 import { unlockRemoteAudio } from "@/lib/realtime/remote-audio";
 import { DictationBar } from "./dictation-bar";
 import { useSplit } from "./split-context";
+import type { TranscriptLine } from "./use-voice-session";
 import { VoiceMode } from "./voice-mode";
 
 type Message = {
@@ -77,6 +78,9 @@ export function ChatThread({
   const [msgs, setMsgs] = useState<Message[]>(initialMessages);
   const [input, setInput] = useState("");
   const [mode, setMode] = useState<"idle" | "dictation" | "voice">("idle");
+  // Live voice transcript, streamed into the thread as it happens — the call
+  // and the chat are one conversation, not two worlds.
+  const [liveLines, setLiveLines] = useState<TranscriptLine[]>([]);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -97,7 +101,7 @@ export function ChatThread({
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [msgs.length]);
+  }, [msgs.length, liveLines.length]);
 
   const send = async () => {
     const text = input.trim();
@@ -135,6 +139,7 @@ export function ChatThread({
   const closeVoice = useCallback(
     async (voiceConversationId: string | null) => {
       setMode("idle");
+      setLiveLines([]); // persisted voice messages replace the live stream
       if (voiceConversationId) {
         setConversationId(voiceConversationId);
         const res = await fetch(`/api/conversations/${voiceConversationId}/messages`);
@@ -235,6 +240,28 @@ export function ChatThread({
                 <span className="whitespace-pre-wrap">{m.content}</span>
               </div>
             ))}
+          {mode === "voice" &&
+            liveLines
+              .filter((l) => l.text.trim())
+              .map((l, i) => (
+                <div
+                  key={`live-${i}`}
+                  className={`max-w-[85%] rounded-[14px] px-4 py-2.5 text-[15px] leading-relaxed ${
+                    l.role === "user"
+                      ? "ml-auto bg-bubble text-ink"
+                      : "border border-edge bg-surface"
+                  } ${l.final ? "" : "opacity-80"}`}
+                >
+                  <span className="mb-1 flex items-center gap-1 text-[10px] uppercase tracking-wide text-faint">
+                    <Mic size={10} strokeWidth={2} className={l.final ? "" : "animate-pulse"} />
+                    voice
+                  </span>
+                  <span className="whitespace-pre-wrap">
+                    {l.text}
+                    {!l.final && <span className="animate-pulse">…</span>}
+                  </span>
+                </div>
+              ))}
           {sending && (
             <div className="max-w-[85%] rounded-[14px] border border-edge bg-surface px-4 py-2.5 text-sm text-faint">
               <span className="animate-pulse">…</span>
@@ -249,7 +276,7 @@ export function ChatThread({
           {error && <p className="mb-2 text-xs text-danger">{error}</p>}
 
           {mode === "voice" ? (
-            <VoiceMode docked={dockVoice} onClose={closeVoice} />
+            <VoiceMode docked={dockVoice} onClose={closeVoice} onTranscript={setLiveLines} />
           ) : mode === "dictation" ? (
             <DictationBar
               onCancel={() => setMode("idle")}

@@ -29,7 +29,7 @@ import {
   stopRemoteAudio,
   unlockRemoteAudio,
 } from "@/lib/realtime/remote-audio";
-import { useVoiceSession } from "./use-voice-session";
+import { useVoiceSession, type TranscriptLine } from "./use-voice-session";
 import { Button } from "@/components/ui";
 
 // Tool toasts arrive from the server with a legacy glyph string — map it to
@@ -63,14 +63,22 @@ const MODELS = [
 export function VoiceMode({
   onClose,
   docked = false,
+  onTranscript,
 }: {
   onClose: (conversationId: string | null) => void;
   /** Split-workspace mode: compact dock inside the chat pane instead of the
    *  full-screen overlay. Same session, same unlock, same plumbing. */
   docked?: boolean;
+  /** Live transcript stream — lets the chat thread render voice lines as
+   *  messages while the call is running (one conversation, not two worlds). */
+  onTranscript?: (lines: TranscriptLine[]) => void;
 }) {
   const session = useVoiceSession();
   const router = useRouter();
+
+  useEffect(() => {
+    onTranscript?.(session.transcript);
+  }, [session.transcript, onTranscript]);
   const [showTranscript, setShowTranscript] = useState(false);
   const [model, setModel] = useState(
     () => (typeof window !== "undefined" && localStorage.getItem("voice-model")) || MODELS[0].id
@@ -212,21 +220,6 @@ export function VoiceMode({
     const lastToast = session.toasts[session.toasts.length - 1];
     return (
       <div className="rounded-2xl border border-accent/40 bg-surface shadow-sm">
-        {showTranscript && (
-          <div className="max-h-40 overflow-y-auto border-b border-edge px-4 py-2.5 text-sm">
-            {session.transcript.length === 0 && (
-              <p className="text-xs text-faint">Transcript will appear here.</p>
-            )}
-            {session.transcript.map((line, i) => (
-              <p key={i} className={`mb-1.5 ${line.role === "user" ? "text-ink" : "text-muted"}`}>
-                <span className="mr-2 text-[10px] uppercase text-faint">
-                  {line.role === "user" ? "You" : "Sec"}
-                </span>
-                {line.text}
-              </p>
-            ))}
-          </div>
-        )}
         {debugOn && (
           <pre
             onClick={() => void navigator.clipboard?.writeText(debugJson).catch(() => {})}
@@ -312,18 +305,6 @@ export function VoiceMode({
                 ) : (
                   <Mic size={15} strokeWidth={1.75} />
                 )}
-              </button>
-              <button
-                onClick={() => setShowTranscript((s) => !s)}
-                title="Live transcript"
-                aria-label="Live transcript"
-                className={`flex h-9 w-9 flex-none items-center justify-center rounded-full border transition-colors ${
-                  showTranscript
-                    ? "border-accent bg-accent/20 text-accent"
-                    : "border-edge bg-card text-ink hover:border-faint"
-                }`}
-              >
-                <AlignLeft size={15} strokeWidth={1.75} />
               </button>
               <button
                 onClick={endCall}
