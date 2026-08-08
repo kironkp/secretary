@@ -4,6 +4,7 @@ import { auth } from "@/lib/auth";
 import { getTodayStrip } from "@/lib/db/queries";
 import { Calendar } from "lucide-react";
 import { NavTabs } from "@/components/shell/nav-tabs";
+import { SplitToggle } from "@/components/shell/split-toggle";
 import { ThemeToggle } from "@/components/shell/theme";
 
 export default async function AppLayout({
@@ -28,7 +29,7 @@ export default async function AppLayout({
   return (
     <div className="flex h-dvh flex-col">
       <header className="z-10 flex-none border-b border-edge bg-surface/90 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl items-center gap-4 px-4 py-3">
+        <div className="mx-auto flex max-w-7xl items-center gap-4 px-4 py-3">
           <span className="text-sm font-bold tracking-tight text-accent">Secretary</span>
           <div className="flex flex-1 items-center justify-end gap-2 overflow-x-auto text-xs">
             {nextEventLabel && (
@@ -49,15 +50,16 @@ export default async function AppLayout({
             <span className="whitespace-nowrap rounded-full border border-edge bg-card px-3 py-1 text-muted">
               {strip.dueTodayCount} due today
             </span>
+            <SplitToggle />
             <ThemeToggle />
           </div>
         </div>
-        <div className="mx-auto max-w-6xl px-4">
+        <div className="mx-auto max-w-7xl px-4">
           <NavTabs />
         </div>
       </header>
       <main className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto h-full w-full max-w-6xl px-4">{children}</div>
+        <div className="mx-auto h-full w-full max-w-7xl px-4">{children}</div>
       </main>
     </div>
   );

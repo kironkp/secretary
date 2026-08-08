@@ -18,6 +18,7 @@ import {
 import type { BriefingCard } from "@/lib/secretary/briefing";
 import { unlockRemoteAudio } from "@/lib/realtime/remote-audio";
 import { DictationBar } from "./dictation-bar";
+import { useSplit } from "./split-context";
 import { VoiceMode } from "./voice-mode";
 
 type Message = {
@@ -71,6 +72,7 @@ export function ChatThread({
   anchorMessageId?: string;
 }) {
   const router = useRouter();
+  const { dockVoice } = useSplit();
   const [conversationId, setConversationId] = useState(initialConversationId);
   const [msgs, setMsgs] = useState<Message[]>(initialMessages);
   const [input, setInput] = useState("");
@@ -246,7 +248,9 @@ export function ChatThread({
         <div className="mx-auto max-w-2xl px-1">
           {error && <p className="mb-2 text-xs text-danger">{error}</p>}
 
-          {mode === "dictation" ? (
+          {mode === "voice" ? (
+            <VoiceMode docked={dockVoice} onClose={closeVoice} />
+          ) : mode === "dictation" ? (
             <DictationBar
               onCancel={() => setMode("idle")}
               onText={(text) => {
@@ -318,8 +322,6 @@ export function ChatThread({
           )}
         </div>
       </div>
-
-      {mode === "voice" && <VoiceMode onClose={closeVoice} />}
     </div>
   );
 }

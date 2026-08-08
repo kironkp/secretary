@@ -714,10 +714,12 @@ export function OpenLoopsTable({
   tasks,
   crossing,
   onDone,
+  fresh,
 }: {
   tasks: TaskRow[];
   crossing: Set<string>;
   onDone: (id: string) => void;
+  fresh?: Set<string>;
 }) {
   const groups = useMemo(() => buildLoopGroups(tasks), [tasks]);
 
@@ -761,7 +763,12 @@ export function OpenLoopsTable({
                 </td>
               </tr>
               {g.open.map((t) => (
-                <tr key={t.id} className="border-b border-edge/50 last:border-0">
+                <tr
+                  key={t.id}
+                  className={`border-b border-edge/50 last:border-0 ${
+                    fresh?.has(t.id) ? "animate-task-in" : ""
+                  }`}
+                >
                   <td className="px-4 py-2.5">
                     <div className="flex items-center gap-2.5">
                       <CheckButton t={t} onDone={onDone} />

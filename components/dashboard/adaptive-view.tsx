@@ -51,6 +51,7 @@ export function AdaptiveView({
   events,
   crossing,
   onDone,
+  fresh,
 }: {
   layout: LayoutSpec;
   version: number;
@@ -61,6 +62,7 @@ export function AdaptiveView({
   events: EventRow[];
   crossing: Set<string>;
   onDone: (id: string) => void;
+  fresh?: Set<string>;
 }) {
   const router = useRouter();
   const [pinned, setPinned] = useState<Set<string>>(new Set(initialPinned));
@@ -101,9 +103,9 @@ export function AdaptiveView({
       case "focus_card":
         return <NextUpHero tasks={tasks} events={events} />;
       case "kanban":
-        return <BoardView tasks={tasks} crossing={crossing} onDone={onDone} />;
+        return <BoardView tasks={tasks} crossing={crossing} onDone={onDone} fresh={fresh} />;
       case "list":
-        return <OpenLoopsTable tasks={tasks} crossing={crossing} onDone={onDone} />;
+        return <OpenLoopsTable tasks={tasks} crossing={crossing} onDone={onDone} fresh={fresh} />;
       case "calendar_strip":
         return <CalendarStrip events={events} />;
       case "timeline":

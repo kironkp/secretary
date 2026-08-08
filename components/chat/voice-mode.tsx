@@ -8,6 +8,7 @@
 // session and can silence the outbound track (dictation is unaffected because
 // it has no WebRTC). Levels come from RTCPeerConnection.getStats() instead.
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   AlignLeft,
   ArrowRight,
@@ -61,10 +62,15 @@ const MODELS = [
 
 export function VoiceMode({
   onClose,
+  docked = false,
 }: {
   onClose: (conversationId: string | null) => void;
+  /** Split-workspace mode: compact dock inside the chat pane instead of the
+   *  full-screen overlay. Same session, same unlock, same plumbing. */
+  docked?: boolean;
 }) {
   const session = useVoiceSession();
+  const router = useRouter();
   const [showTranscript, setShowTranscript] = useState(false);
   const [model, setModel] = useState(
     () => (typeof window !== "undefined" && localStorage.getItem("voice-model")) || MODELS[0].id
@@ -160,6 +166,15 @@ export function VoiceMode({
   // Stop the voice when leaving voice mode.
   useEffect(() => stopRemoteAudio, []);
 
+  // D-5, the magic moment: each tool-call toast means the secretary just
+  // logged something — refresh server data so the dashboard pane updates
+  // live while the call continues. (UI-layer subscription only.)
+  const toastCount = useRef(0);
+  useEffect(() => {
+    if (session.toasts.length > toastCount.current) router.refresh();
+    toastCount.current = session.toasts.length;
+  }, [session.toasts.length, router]);
+
   const pickModel = async (m: string) => {
     setModel(m);
     localStorage.setItem("voice-model", m);
@@ -192,6 +207,138 @@ export function VoiceMode({
             : connected
               ? "Listening…"
               : "";
+
+  if (docked) {
+    const lastToast = session.toasts[session.toasts.length - 1];
+    return (
+      <div className="rounded-2xl border border-accent/40 bg-surface shadow-sm">
+        {showTranscript && (
+          <div className="max-h-40 overflow-y-auto border-b border-edge px-4 py-2.5 text-sm">
+            {session.transcript.length === 0 && (
+              <p className="text-xs text-faint">Transcript will appear here.</p>
+            )}
+            {session.transcript.map((line, i) => (
+              <p key={i} className={`mb-1.5 ${line.role === "user" ? "text-ink" : "text-muted"}`}>
+                <span className="mr-2 text-[10px] uppercase text-faint">
+                  {line.role === "user" ? "You" : "Sec"}
+                </span>
+                {line.text}
+              </p>
+            ))}
+          </div>
+        )}
+        {debugOn && (
+          <pre
+            onClick={() => void navigator.clipboard?.writeText(debugJson).catch(() => {})}
+            className="max-h-32 overflow-y-auto border-b border-warn/40 bg-black/70 px-2 py-1 text-[9px] leading-tight text-warn"
+            title="Tap to copy"
+          >
+            {debugJson || "collecting…"}
+          </pre>
+        )}
+        <div className="flex items-center gap-3 px-3 py-2.5">
+          {session.status === "error" && session.error ? (
+            <>
+              <TriangleAlert size={18} strokeWidth={1.75} className="flex-none text-warn" />
+              <p className="min-w-0 flex-1 truncate text-sm text-muted">{session.error.message}</p>
+              {session.error.kind === "network" && (
+                <button
+                  onClick={() => {
+                    unlockRemoteAudio();
+                    session.start(model);
+                  }}
+                  className="rounded-full bg-accent px-3 py-1.5 text-xs font-bold text-bg"
+                >
+                  Try again
+                </button>
+              )}
+              <button
+                onClick={() => onClose(null)}
+                className="rounded-full border border-edge px-3 py-1.5 text-xs text-muted hover:text-ink"
+              >
+                Close
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="relative h-12 w-12 flex-none">
+                <div
+                  className="absolute inset-0 rounded-full border-2 border-accent/30 transition-transform duration-75"
+                  style={{ transform: `scale(${1 + Math.min(micLevel * 2.2, 0.35)})` }}
+                />
+                <div
+                  className="absolute inset-1 rounded-full transition-transform duration-75"
+                  style={{
+                    transform: `scale(${1 + Math.min(remoteLevel * 1.4, 0.25)})`,
+                    background:
+                      "radial-gradient(circle at 35% 35%, #8fb0ff, #3d5bd9 60%, #22307a)",
+                    boxShadow: `0 0 ${10 + remoteLevel * 40}px rgba(122,162,255,${0.3 + remoteLevel * 0.4})`,
+                    animation:
+                      connected && !session.assistantSpeaking
+                        ? "breathe 3s ease-in-out infinite"
+                        : undefined,
+                  }}
+                />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold">{statusHint || "On a call"}</p>
+                {lastToast ? (
+                  <p className="flex items-center gap-1.5 truncate text-xs text-faint">
+                    <ToastIcon glyph={lastToast.icon} />
+                    <span className="truncate">{lastToast.text}</span>
+                  </p>
+                ) : micSilent ? (
+                  <p className="truncate text-xs text-warn">
+                    Can&apos;t hear you — try ending and restarting the call.
+                  </p>
+                ) : (
+                  <p className="truncate text-xs text-faint">
+                    Watch tasks land on the dashboard as you talk →
+                  </p>
+                )}
+              </div>
+              <button
+                onClick={session.toggleMute}
+                title={session.muted ? "Unmute" : "Mute"}
+                aria-label={session.muted ? "Unmute" : "Mute"}
+                className={`flex h-9 w-9 flex-none items-center justify-center rounded-full border transition-colors ${
+                  session.muted
+                    ? "border-warn bg-warn/20 text-warn"
+                    : "border-edge bg-card text-ink hover:border-faint"
+                }`}
+              >
+                {session.muted ? (
+                  <MicOff size={15} strokeWidth={1.75} />
+                ) : (
+                  <Mic size={15} strokeWidth={1.75} />
+                )}
+              </button>
+              <button
+                onClick={() => setShowTranscript((s) => !s)}
+                title="Live transcript"
+                aria-label="Live transcript"
+                className={`flex h-9 w-9 flex-none items-center justify-center rounded-full border transition-colors ${
+                  showTranscript
+                    ? "border-accent bg-accent/20 text-accent"
+                    : "border-edge bg-card text-ink hover:border-faint"
+                }`}
+              >
+                <AlignLeft size={15} strokeWidth={1.75} />
+              </button>
+              <button
+                onClick={endCall}
+                title="End call"
+                aria-label="End call"
+                className="flex h-9 w-9 flex-none items-center justify-center rounded-full border border-danger/50 bg-danger/15 text-danger transition-colors hover:bg-danger/25"
+              >
+                <PhoneOff size={15} strokeWidth={1.75} />
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-bg">

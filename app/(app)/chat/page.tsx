@@ -4,6 +4,8 @@ import { auth } from "@/lib/auth";
 import { getConversationWithMessages, getLatestConversation } from "@/lib/db/queries";
 import { buildBriefing } from "@/lib/secretary/briefing";
 import { ChatThread } from "@/components/chat/chat-thread";
+import { ChatWorkspace } from "@/components/chat/chat-workspace";
+import { DashboardPanel } from "@/components/dashboard/dashboard-panel";
 
 export default async function ChatPage({
   searchParams,
@@ -22,16 +24,21 @@ export default async function ChatPage({
   const briefing = await buildBriefing(userId, timezone);
 
   return (
-    <ChatThread
-      initialConversationId={thread?.conversation.id ?? null}
-      initialMessages={(thread?.messages ?? []).map((msg) => ({
-        id: msg.id,
-        role: msg.role,
-        content: msg.content,
-        mode: msg.mode,
-      }))}
-      briefing={briefing.card}
-      anchorMessageId={m}
+    <ChatWorkspace
+      chat={
+        <ChatThread
+          initialConversationId={thread?.conversation.id ?? null}
+          initialMessages={(thread?.messages ?? []).map((msg) => ({
+            id: msg.id,
+            role: msg.role,
+            content: msg.content,
+            mode: msg.mode,
+          }))}
+          briefing={briefing.card}
+          anchorMessageId={m}
+        />
+      }
+      dashboard={<DashboardPanel userId={userId} timezone={timezone} compact />}
     />
   );
 }

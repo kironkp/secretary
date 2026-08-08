@@ -26,10 +26,12 @@ export function ListTable({
   tasks,
   crossing,
   onDone,
+  fresh,
 }: {
   tasks: TaskRow[];
   crossing: Set<string>;
   onDone: (id: string) => void;
+  fresh?: Set<string>;
 }) {
   const [sortKey, setSortKey] = useState<SortKey>("dueAt");
   const [sortAsc, setSortAsc] = useState(true);
@@ -102,7 +104,7 @@ export function ListTable({
                 key={t.id}
                 className={`border-b border-edge/50 last:border-0 ${
                   isOverdue(t) ? "bg-danger/5" : ""
-                }`}
+                } ${fresh?.has(t.id) ? "animate-task-in" : ""}`}
               >
                 <td className="px-4 py-2.5">
                   <div className="flex items-center gap-2.5">
@@ -167,10 +169,12 @@ export function BoardView({
   tasks,
   crossing,
   onDone,
+  fresh,
 }: {
   tasks: TaskRow[];
   crossing: Set<string>;
   onDone: (id: string) => void;
+  fresh?: Set<string>;
 }) {
   // never render hollow columns for a handful of tasks — collapse empties
   const populated = BOARD_COLUMNS.filter((col) =>
@@ -208,7 +212,7 @@ export function BoardView({
                     key={t.id}
                     className={`rounded-lg border bg-card px-3 py-2.5 text-sm ${
                       isOverdue(t) ? "border-danger/50" : "border-edge"
-                    }`}
+                    } ${fresh?.has(t.id) ? "animate-task-in" : ""}`}
                   >
                     <div className="flex items-start gap-2">
                       <CheckButton t={t} onDone={onDone} />
