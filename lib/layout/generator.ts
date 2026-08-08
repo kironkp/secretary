@@ -18,14 +18,16 @@ import {
 const OPEN_STATUSES = ["inbox", "todo", "in_progress", "blocked"] as const;
 const MIN_AGE_MS = 60 * 60 * 1000; // never rearrange more than once an hour
 
-const GENERATOR_PROMPT = `You arrange a personal-assistant dashboard from a fixed component palette. Given the shape of the user's data, return the sections in the order they should appear (top = most important right now). Rules:
+const GENERATOR_PROMPT = `You arrange a personal-assistant dashboard from a fixed component palette. Given the shape of the user's data, return the sections in the order they should appear (top = most important right now). Component meanings: focus_card = "Next up" hero (the single nearest commitment); timeline = 5-week deadline-pressure overview per project (handles undated work too); list = grouped "Open loops" table (the main work surface); kanban = status board; project_grid = per-project cards with progress + next actions. Rules:
 - overdue_callout MUST be first whenever overdue > 0; omit it when overdue = 0.
+- stat_tiles near the top, almost always.
+- focus_card whenever anything dated is upcoming (events7d > 0 or dueToday > 0 or openTasks > 0).
+- timeline whenever openTasks > 0 — deadline pressure is the point of the dashboard.
+- project_grid when projects >= 1.
+- Include exactly ONE of list | kanban as the main work surface: list by default; kanban only when openTasks >= 10.
 - suggested_zone only when suggestions > 0; procrastination_zone only when procrastinated > 0.
-- Include exactly ONE of kanban | list as the main work surface: kanban when projects >= 2, else list.
-- calendar_strip earns a high slot when events7d > 0; omit it when 0.
-- focus_card when there's something urgent (overdue or dueToday > 0); project_grid only when projects >= 3; timeline only when openTasks >= 8.
-- stat_tiles is almost always useful, near the top.
-- 4–7 sections total. Titles: null unless a custom heading genuinely helps.`;
+- calendar_strip only when events7d > 0 and it isn't redundant with focus_card.
+- 4–8 sections total. Titles: null unless a custom heading genuinely helps.`;
 
 export async function getDataShape(userId: string): Promise<DataShape> {
   const now = new Date();
@@ -145,11 +147,23 @@ export async function maybeRegenerateLayout(userId: string): Promise<void> {
     const shape = await getDataShape(userId);
     const hash = dataHash(shape);
 
-    if (head) {
-      const stored = head.spec as StoredLayout;
-      if (stored.dataHash === hash) return; // nothing changed
-      if (Date.now() - head.createdAt.getTime() < MIN_AGE_MS) return; // debounce
+    if (!head) {
+      // First sight of this user: store the DESIGNED default as the baseline
+      // (version 0, no banner) instead of letting the AI immediately override
+      // the reference layout. Regeneration then only fires when the data
+      // shape actually changes from here.
+      await db.insert(layoutSpecs).values({
+        userId,
+        version: 0,
+        spec: { sections: DEFAULT_SPEC.sections, dataHash: hash } satisfies StoredLayout,
+        pinned: [],
+      });
+      return;
     }
+
+    const stored = head.spec as StoredLayout;
+    if (stored.dataHash === hash) return; // nothing changed
+    if (Date.now() - head.createdAt.getTime() < MIN_AGE_MS) return; // debounce
 
     const response = await openai.responses.create({
       model: TEXT_MODEL,
