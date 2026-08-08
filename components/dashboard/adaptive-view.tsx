@@ -107,17 +107,25 @@ export function AdaptiveView({
       case "kanban":
         return <BoardView tasks={tasks} crossing={crossing} onDone={onDone} fresh={fresh} />;
       case "list":
-        return <OpenLoopsTable tasks={tasks} crossing={crossing} onDone={onDone} fresh={fresh} />;
+        return (
+          <OpenLoopsTable
+            tasks={tasks}
+            events={events}
+            crossing={crossing}
+            onDone={onDone}
+            fresh={fresh}
+          />
+        );
       case "calendar_strip":
         return <CalendarStrip events={events} />;
       case "timeline":
-        return <FiveWeekTimeline tasks={tasks} />;
+        return <FiveWeekTimeline tasks={tasks} events={events} />;
       case "procrastination_zone":
         return <ProcrastinationZone tasks={tasks} />;
       case "suggested_zone":
         return <SuggestedZone suggestions={suggestions} />;
       case "project_grid":
-        return <ProjectGrid tasks={tasks} crossing={crossing} onDone={onDone} />;
+        return <ProjectGrid tasks={tasks} events={events} crossing={crossing} onDone={onDone} />;
       case "coming_up":
         return <ComingUpStrip tasks={tasks} events={events} />;
     }

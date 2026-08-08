@@ -2,7 +2,7 @@
 // client views. Used by /dashboard and by the chat split workspace, so both
 // stay in lockstep.
 import { after } from "next/server";
-import { getEvents, getTasksWithContext } from "@/lib/db/queries";
+import { getEventsWithProject, getTasksWithContext } from "@/lib/db/queries";
 import { getCurrentLayout, maybeRegenerateLayout } from "@/lib/layout/generator";
 import { DashboardViews, type EventRow, type TaskRow } from "./dashboard-views";
 
@@ -17,7 +17,7 @@ export async function DashboardPanel({
 }) {
   const [rows, eventRows, layout] = await Promise.all([
     getTasksWithContext(userId),
-    getEvents(userId),
+    getEventsWithProject(userId),
     getCurrentLayout(userId),
   ]);
 
@@ -54,13 +54,17 @@ export async function DashboardPanel({
   const suggestions = allTasks.filter((t) => t.source === "suggested" && t.status === "inbox");
   const tasks = allTasks.filter((t) => !(t.source === "suggested" && t.status === "inbox"));
 
-  const events: EventRow[] = eventRows.map((e) => ({
+  const events: EventRow[] = eventRows.map(({ event: e, projectName }) => ({
     id: e.id,
     title: e.title,
     startsAt: e.startsAt.toISOString(),
     endsAt: e.endsAt?.toISOString() ?? null,
     location: e.location,
+    notes: e.notes,
     reminders: e.reminders ?? [],
+    projectName,
+    source: e.source,
+    createdAt: e.createdAt.toISOString(),
   }));
 
   return (

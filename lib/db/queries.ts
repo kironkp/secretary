@@ -42,6 +42,16 @@ export function getEvents(userId: string) {
   return db.select().from(events).where(eq(events.userId, userId)).orderBy(asc(events.startsAt));
 }
 
+/** Events with their project name — events are peers of tasks in every view. */
+export function getEventsWithProject(userId: string) {
+  return db
+    .select({ event: events, projectName: projects.name })
+    .from(events)
+    .leftJoin(projects, eq(events.projectId, projects.id))
+    .where(eq(events.userId, userId))
+    .orderBy(asc(events.startsAt));
+}
+
 export function getConversations(userId: string) {
   return db
     .select()

@@ -32,6 +32,20 @@ import {
 const OPEN = new Set(["inbox", "todo", "in_progress", "blocked"]);
 const DAY = 86400000;
 
+/** "Upcoming" for event visibility in task-centric zones: the next 14 days. */
+export const UPCOMING_EVENT_DAYS = 14;
+
+function upcomingEventsOf(events: EventRow[], days = UPCOMING_EVENT_DAYS): EventRow[] {
+  const now = Date.now();
+  const horizon = now + days * DAY;
+  return events
+    .filter((e) => {
+      const t = new Date(e.startsAt).getTime();
+      return t >= now - 60 * 60000 && t <= horizon; // still show for an hour after start
+    })
+    .sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+}
+
 // ---------------------------------------------------------------------------
 // shared bits
 // ---------------------------------------------------------------------------
@@ -69,6 +83,11 @@ function daysUntil(iso: string, now: number): number {
 /** Days until a task's due date, measured now (helper keeps render pure). */
 function dueDays(t: TaskRow): number {
   return daysUntil(t.dueAt!, Date.now());
+}
+
+/** Days until an event starts, measured now (helper keeps render pure). */
+function eventDays(e: EventRow): number {
+  return daysUntil(e.startsAt, Date.now());
 }
 
 /** Deadline pressure → tone (colour is pressure, never project identity). */
@@ -304,15 +323,34 @@ export function StatTiles({ tasks, events }: { tasks: TaskRow[]; events: EventRo
 // next-up hero — the one thing that matters before anything else does
 // ---------------------------------------------------------------------------
 
-function findNextUp(
+export function findNextUp(
   tasks: TaskRow[],
   events: EventRow[]
-): { at: Date; title: string; meta: string; days: number } | null {
+): {
+  kind: "task" | "event";
+  id: string;
+  at: Date;
+  title: string;
+  meta: string;
+  notes: string | null;
+  reminders: string[];
+  days: number;
+} | null {
   const now = Date.now();
-  const candidates: { at: Date; title: string; meta: string }[] = [
+  const candidates: {
+    kind: "task" | "event";
+    id: string;
+    at: Date;
+    title: string;
+    meta: string;
+    notes: string | null;
+    reminders: string[];
+  }[] = [
     ...events
       .filter((e) => new Date(e.startsAt).getTime() >= now)
       .map((e) => ({
+        kind: "event" as const,
+        id: e.id,
         at: new Date(e.startsAt),
         title: e.title,
         meta: [
@@ -320,18 +358,25 @@ function findNextUp(
             new Date(e.startsAt)
           ),
           e.location,
+          e.projectName,
         ]
           .filter(Boolean)
           .join(" · "),
+        notes: e.notes,
+        reminders: e.reminders,
       })),
     ...tasks
       .filter((t) => OPEN.has(t.status) && t.dueAt && new Date(t.dueAt).getTime() >= now)
       .map((t) => ({
+        kind: "task" as const,
+        id: t.id,
         at: new Date(t.dueAt!),
         title: t.title,
         meta: [t.projectName, t.postponedCount ? `pushed ${t.postponedCount}×` : "due"]
           .filter(Boolean)
           .join(" · "),
+        notes: t.notes,
+        reminders: t.reminders,
       })),
   ].sort((a, b) => a.at.getTime() - b.at.getTime());
   const first = candidates[0];
@@ -344,7 +389,10 @@ export function NextUpHero({ tasks, events }: { tasks: TaskRow[]; events: EventR
   if (!next) return null;
   const days = next.days;
   return (
-    <div className="flex flex-wrap items-center gap-5 rounded-2xl border border-edge bg-gradient-to-b from-surface-2 to-surface px-6 py-5">
+    <div
+      onClick={() => openDetail(next.kind, next.id)}
+      className="flex cursor-pointer flex-wrap items-center gap-5 rounded-2xl border border-edge bg-gradient-to-b from-surface-2 to-surface px-6 py-5 transition-colors hover:border-faint"
+    >
       <div className="min-w-[76px]">
         <p className="text-4xl font-bold leading-none tracking-tight">{next.at.getDate()}</p>
         <p className="mt-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-faint">
@@ -355,7 +403,22 @@ export function NextUpHero({ tasks, events }: { tasks: TaskRow[]; events: EventR
       <div className="w-px self-stretch bg-edge" aria-hidden />
       <div className="min-w-[220px] flex-1">
         <p className="text-lg font-semibold tracking-tight">{next.title}</p>
-        <p className="mt-1 text-sm text-muted">{next.meta}</p>
+        <p className="mt-1 text-sm text-muted">
+          {next.notes ? `${next.meta} · ${next.notes}` : next.meta}
+        </p>
+        {next.reminders.length > 0 && (
+          <p className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-muted">
+            <AlarmClock size={12} strokeWidth={2} className="text-warn" />
+            {[...next.reminders]
+              .sort()
+              .map((r) =>
+                new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(
+                  new Date(r)
+                )
+              )
+              .join(" · ")}
+          </p>
+        )}
       </div>
       <Pill tone={pressureTone(days)}>{pressureLabel(days)}</Pill>
     </div>
@@ -368,9 +431,15 @@ export function NextUpHero({ tasks, events }: { tasks: TaskRow[]; events: EventR
 
 const HORIZON_DAYS = 35;
 
-type TlRow = { name: string; days: number | null; label: string };
+type TlRow = {
+  name: string;
+  days: number | null;
+  label: string;
+  /** meetings on this project's row — subtle markers, pressure stays the star */
+  eventMarks: { pct: number; label: string }[];
+};
 
-function timelineRows(tasks: TaskRow[]): TlRow[] {
+export function timelineRows(tasks: TaskRow[], events: EventRow[] = []): TlRow[] {
   const now = Date.now();
   const byProject = new Map<string, TaskRow[]>();
   for (const t of tasks) {
@@ -378,17 +447,40 @@ function timelineRows(tasks: TaskRow[]): TlRow[] {
     const key = t.projectName ?? "Unfiled";
     byProject.set(key, [...(byProject.get(key) ?? []), t]);
   }
+  const marksFor = (name: string) =>
+    events
+      .filter((e) => (e.projectName ?? "Unfiled") === name)
+      .map((e) => ({ at: new Date(e.startsAt).getTime(), title: e.title, startsAt: e.startsAt }))
+      .filter((e) => e.at >= now && e.at <= now + HORIZON_DAYS * DAY)
+      .map((e) => ({
+        pct: Math.min(100, Math.max(1, ((e.at - now) / (HORIZON_DAYS * DAY)) * 100)),
+        label: `${e.title} · ${fmtDue(e.startsAt)}`,
+      }));
+
   const rows: TlRow[] = [];
   for (const [name, rowTasks] of byProject) {
     const dated = rowTasks
       .filter((t) => t.dueAt)
       .sort((a, b) => a.dueAt!.localeCompare(b.dueAt!));
     if (dated.length === 0) {
-      rows.push({ name: `${name} ×${rowTasks.length}`, days: null, label: "no dates" });
+      rows.push({
+        name: `${name} ×${rowTasks.length}`,
+        days: null,
+        label: "no dates",
+        eventMarks: marksFor(name),
+      });
     } else {
       const t = dated[0];
       const days = daysUntil(t.dueAt!, now);
-      rows.push({ name, days, label: `${t.title} · ${fmtDue(t.dueAt)}` });
+      rows.push({ name, days, label: `${t.title} · ${fmtDue(t.dueAt)}`, eventMarks: marksFor(name) });
+    }
+  }
+  // projects that only have events still deserve a row
+  for (const e of events) {
+    const key = e.projectName ?? "Unfiled";
+    if (!byProject.has(key) && !rows.some((r) => r.name === key)) {
+      const marks = marksFor(key);
+      if (marks.length) rows.push({ name: key, days: null, label: "events only", eventMarks: marks });
     }
   }
   return rows
@@ -404,8 +496,8 @@ function weekTicks() {
   }));
 }
 
-export function FiveWeekTimeline({ tasks }: { tasks: TaskRow[] }) {
-  const rows = useMemo(() => timelineRows(tasks), [tasks]);
+export function FiveWeekTimeline({ tasks, events }: { tasks: TaskRow[]; events: EventRow[] }) {
+  const rows = useMemo(() => timelineRows(tasks, events), [tasks, events]);
   const ticks = useMemo(() => weekTicks(), []);
   if (rows.length === 0) return null;
 
@@ -460,6 +552,14 @@ export function FiveWeekTimeline({ tasks }: { tasks: TaskRow[] }) {
                     />
                   </>
                 )}
+                {r.eventMarks.map((m, i) => (
+                  <div
+                    key={i}
+                    title={m.label}
+                    className="absolute top-1/2 z-[1] h-2 w-2 -translate-x-1/2 -translate-y-1/2 rotate-45 border border-surface bg-accent"
+                    style={{ left: `${m.pct}%` }}
+                  />
+                ))}
               </div>
             );
           })}
@@ -493,6 +593,9 @@ export function FiveWeekTimeline({ tasks }: { tasks: TaskRow[] }) {
         <span className="inline-flex items-center gap-1.5">
           <i className="h-0.5 w-2.5 border-t-2 border-dashed border-faint" /> undated
         </span>
+        <span className="inline-flex items-center gap-1.5">
+          <i className="h-2 w-2 rotate-45 bg-accent" /> meeting/event
+        </span>
       </div>
     </div>
   );
@@ -504,9 +607,12 @@ export function FiveWeekTimeline({ tasks }: { tasks: TaskRow[] }) {
 
 type UpcomingReminder = { at: Date; title: string; kind: "task" | "event"; id: string };
 
-function upcomingReminders(tasks: TaskRow[], events: EventRow[]): UpcomingReminder[] {
+/** Next-48h reminder horizon for the coming-up strip. */
+const COMING_UP_HOURS = 48;
+
+export function upcomingReminders(tasks: TaskRow[], events: EventRow[]): UpcomingReminder[] {
   const now = Date.now();
-  const horizon = now + 24 * 60 * 60 * 1000;
+  const horizon = now + COMING_UP_HOURS * 60 * 60 * 1000;
   const out: UpcomingReminder[] = [];
   for (const t of tasks) {
     if (!OPEN.has(t.status)) continue;
@@ -540,7 +646,11 @@ export function ComingUpStrip({ tasks, events }: { tasks: TaskRow[]; events: Eve
           <AlarmClock size={15} strokeWidth={1.75} className="flex-none text-warn" />
           <span className="min-w-0">
             <span className="block text-sm font-semibold tabular-nums leading-tight">
-              {new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(r.at)}
+              {new Intl.DateTimeFormat("en-US", {
+                weekday: "short",
+                hour: "numeric",
+                minute: "2-digit",
+              }).format(r.at)}
             </span>
             <span className="block max-w-[180px] truncate text-xs text-muted">{r.title}</span>
           </span>
@@ -709,26 +819,31 @@ type ProjectCard = {
   doneCount: number;
   earliestDays: number | null;
   latestSource: TaskRow | null;
+  nextEvent: EventRow | null;
 };
 
-function buildProjects(tasks: TaskRow[]): ProjectCard[] {
+export function buildProjects(tasks: TaskRow[], events: EventRow[] = []): ProjectCard[] {
   const now = Date.now();
   const map = new Map<string, ProjectCard>();
-  for (const t of tasks) {
-    const key = t.projectName ?? "Unfiled";
+  const ensure = (key: string, color: string | null) => {
     let p = map.get(key);
     if (!p) {
       p = {
         name: key,
-        color: t.projectColor,
+        color,
         open: [],
         doneRecent: [],
         doneCount: 0,
         earliestDays: null,
         latestSource: null,
+        nextEvent: null,
       };
       map.set(key, p);
     }
+    return p;
+  };
+  for (const t of tasks) {
+    const p = ensure(t.projectName ?? "Unfiled", t.projectColor);
     if (OPEN.has(t.status)) {
       p.open.push(t);
       if (t.dueAt) {
@@ -746,21 +861,30 @@ function buildProjects(tasks: TaskRow[]): ProjectCard[] {
       p.latestSource = t;
     }
   }
+  // events are peers: they set the project's next date and appear on its card
+  for (const e of upcomingEventsOf(events)) {
+    const p = ensure(e.projectName ?? "Unfiled", null);
+    if (!p.nextEvent || e.startsAt < p.nextEvent.startsAt) p.nextEvent = e;
+    const d = daysUntil(e.startsAt, now);
+    if (p.earliestDays === null || d < p.earliestDays) p.earliestDays = d;
+  }
   return [...map.values()]
-    .filter((p) => p.open.length > 0 || p.doneRecent.length > 0)
+    .filter((p) => p.open.length > 0 || p.doneRecent.length > 0 || p.nextEvent !== null)
     .sort((a, b) => (a.earliestDays ?? Infinity) - (b.earliestDays ?? Infinity));
 }
 
 export function ProjectGrid({
   tasks,
+  events,
   crossing,
   onDone,
 }: {
   tasks: TaskRow[];
+  events: EventRow[];
   crossing: Set<string>;
   onDone: (id: string) => void;
 }) {
-  const projects = useMemo(() => buildProjects(tasks), [tasks]);
+  const projects = useMemo(() => buildProjects(tasks, events), [tasks, events]);
   if (projects.length === 0) return null;
 
   return (
@@ -818,6 +942,23 @@ export function ProjectGrid({
               </div>
             </div>
 
+            {p.nextEvent && (
+              <button
+                onClick={() => openDetail("event", p.nextEvent!.id)}
+                className="flex items-center gap-2 rounded-lg border border-accent/30 bg-accent/5 px-2.5 py-1.5 text-left text-sm transition-colors hover:border-accent/60"
+              >
+                <CalendarClock size={14} strokeWidth={1.75} className="flex-none text-accent" />
+                <span className="min-w-0 flex-1 truncate">{p.nextEvent.title}</span>
+                <span className="flex-none text-xs text-muted">
+                  {new Intl.DateTimeFormat("en-US", {
+                    weekday: "short",
+                    hour: "numeric",
+                    minute: "2-digit",
+                  }).format(new Date(p.nextEvent.startsAt))}
+                </span>
+                <ReminderChip reminders={p.nextEvent.reminders} />
+              </button>
+            )}
             <ul className="flex flex-col gap-2">
               {p.doneRecent.slice(0, 1).map((t) => (
                 <li key={t.id} className="flex items-start gap-2.5 text-sm">
@@ -880,39 +1021,55 @@ export function ProjectGrid({
 // open loops — grouped by project, dated first, undated at the bottom
 // ---------------------------------------------------------------------------
 
-function buildLoopGroups(tasks: TaskRow[]) {
+export type LoopItem =
+  | { kind: "task"; date: string | null; task: TaskRow }
+  | { kind: "event"; date: string; event: EventRow };
+
+/** Open loops = open tasks + upcoming events (next 14 days), grouped by
+ *  project, date-sorted together; undated tasks sink to the group's bottom. */
+export function buildLoopGroups(tasks: TaskRow[], events: EventRow[] = []) {
   const now = Date.now();
-  const map = new Map<string, { open: TaskRow[]; done: TaskRow[] }>();
-  for (const t of tasks) {
-    const key = t.projectName ?? "Unfiled";
-    const g = map.get(key) ?? { open: [], done: [] };
-    if (OPEN.has(t.status)) g.open.push(t);
-    else if (t.status === "done" && now - new Date(t.updatedAt).getTime() < 7 * DAY) g.done.push(t);
+  const map = new Map<string, { items: LoopItem[]; done: TaskRow[] }>();
+  const ensure = (key: string) => {
+    const g = map.get(key) ?? { items: [], done: [] };
     map.set(key, g);
+    return g;
+  };
+  for (const t of tasks) {
+    const g = ensure(t.projectName ?? "Unfiled");
+    if (OPEN.has(t.status)) g.items.push({ kind: "task", date: t.dueAt, task: t });
+    else if (t.status === "done" && now - new Date(t.updatedAt).getTime() < 7 * DAY) g.done.push(t);
+  }
+  for (const e of upcomingEventsOf(events)) {
+    ensure(e.projectName ?? "Unfiled").items.push({ kind: "event", date: e.startsAt, event: e });
   }
   return [...map.entries()]
-    .filter(([, g]) => g.open.length + g.done.length > 0)
+    .filter(([, g]) => g.items.length + g.done.length > 0)
     .map(([name, g]) => ({
       name,
-      open: g.open.sort((a, b) => (a.dueAt ?? "9999").localeCompare(b.dueAt ?? "9999")),
+      items: g.items.sort((a, b) => (a.date ?? "9999").localeCompare(b.date ?? "9999")),
       done: g.done,
-      earliest: g.open.find((t) => t.dueAt)?.dueAt ?? null,
+      earliest: g.items.map((i) => i.date).find(Boolean) ?? null,
+      openCount: g.items.filter((i) => i.kind === "task").length,
+      eventCount: g.items.filter((i) => i.kind === "event").length,
     }))
     .sort((a, b) => (a.earliest ?? "9999").localeCompare(b.earliest ?? "9999"));
 }
 
 export function OpenLoopsTable({
   tasks,
+  events,
   crossing,
   onDone,
   fresh,
 }: {
   tasks: TaskRow[];
+  events: EventRow[];
   crossing: Set<string>;
   onDone: (id: string) => void;
   fresh?: Set<string>;
 }) {
-  const groups = useMemo(() => buildLoopGroups(tasks), [tasks]);
+  const groups = useMemo(() => buildLoopGroups(tasks, events), [tasks, events]);
 
   if (groups.length === 0) {
     return (
@@ -925,6 +1082,18 @@ export function OpenLoopsTable({
   const whenPill = (t: TaskRow) => {
     if (!t.dueAt) return <Pill tone="warn">no date</Pill>;
     return <Pill tone={pressureTone(dueDays(t))}>{fmtDue(t.dueAt)}</Pill>;
+  };
+
+  const eventWhenPill = (e: EventRow) => {
+    return (
+      <Pill tone={pressureTone(eventDays(e))}>
+        {new Intl.DateTimeFormat("en-US", {
+          weekday: "short",
+          hour: "numeric",
+          minute: "2-digit",
+        }).format(new Date(e.startsAt))}
+      </Pill>
+    );
   };
 
   return (
@@ -944,37 +1113,71 @@ export function OpenLoopsTable({
                 <td colSpan={3} className="px-4 py-2">
                   <span className="text-[13px] font-bold tracking-tight">{g.name}</span>
                   <span className="ml-2.5 text-xs text-faint">
-                    {g.open.length} open
+                    {g.openCount} open
+                    {g.eventCount
+                      ? ` · ${g.eventCount} event${g.eventCount > 1 ? "s" : ""}`
+                      : ""}
                     {g.earliest
                       ? ` · next ${fmtDue(g.earliest)}`
-                      : g.open.length
+                      : g.openCount
                         ? " · no dates"
                         : ""}
                   </span>
                 </td>
               </tr>
-              {g.open.map((t) => (
-                <tr
-                  key={t.id}
-                  onClick={() => openDetail("task", t.id)}
-                  className={`cursor-pointer border-b border-edge/50 transition-colors last:border-0 hover:bg-surface-2/40 ${
-                    fresh?.has(t.id) ? "animate-task-in" : ""
-                  }`}
-                >
-                  <td className="px-4 py-2.5">
-                    <div className="flex items-center gap-2.5">
-                      <CheckButton t={t} onDone={onDone} />
-                      <span className={`cross-off ${crossing.has(t.id) ? "crossed text-faint" : ""}`}>
-                        {t.title}
-                      </span>
-                      <ReminderChip reminders={t.reminders} />
-                      <ProvenanceLink t={t} />
-                    </div>
-                  </td>
-                  <td className="px-4 py-2.5">{whenPill(t)}</td>
-                  <td className="px-4 py-2.5 text-xs text-faint">{sourceLabel(t)}</td>
-                </tr>
-              ))}
+              {g.items.map((item) =>
+                item.kind === "event" ? (
+                  <tr
+                    key={`e-${item.event.id}`}
+                    onClick={() => openDetail("event", item.event.id)}
+                    className={`cursor-pointer border-b border-edge/50 transition-colors last:border-0 hover:bg-surface-2/40 ${
+                      fresh?.has(item.event.id) ? "animate-task-in" : ""
+                    }`}
+                  >
+                    <td className="px-4 py-2.5">
+                      <div className="flex items-center gap-2.5">
+                        <span className="flex h-5 w-5 flex-none items-center justify-center text-accent">
+                          <CalendarClock size={14} strokeWidth={1.75} />
+                        </span>
+                        <span>{item.event.title}</span>
+                        {item.event.notes && (
+                          <span className="max-w-[220px] truncate text-xs text-faint">
+                            {item.event.notes}
+                          </span>
+                        )}
+                        <ReminderChip reminders={item.event.reminders} />
+                      </div>
+                    </td>
+                    <td className="px-4 py-2.5">{eventWhenPill(item.event)}</td>
+                    <td className="px-4 py-2.5 text-xs text-faint">
+                      {item.event.source} · {shortDate(new Date(item.event.createdAt))}
+                    </td>
+                  </tr>
+                ) : (
+                  <tr
+                    key={item.task.id}
+                    onClick={() => openDetail("task", item.task.id)}
+                    className={`cursor-pointer border-b border-edge/50 transition-colors last:border-0 hover:bg-surface-2/40 ${
+                      fresh?.has(item.task.id) ? "animate-task-in" : ""
+                    }`}
+                  >
+                    <td className="px-4 py-2.5">
+                      <div className="flex items-center gap-2.5">
+                        <CheckButton t={item.task} onDone={onDone} />
+                        <span
+                          className={`cross-off ${crossing.has(item.task.id) ? "crossed text-faint" : ""}`}
+                        >
+                          {item.task.title}
+                        </span>
+                        <ReminderChip reminders={item.task.reminders} />
+                        <ProvenanceLink t={item.task} />
+                      </div>
+                    </td>
+                    <td className="px-4 py-2.5">{whenPill(item.task)}</td>
+                    <td className="px-4 py-2.5 text-xs text-faint">{sourceLabel(item.task)}</td>
+                  </tr>
+                )
+              )}
               {g.done.map((t) => (
                 <tr key={t.id} className="border-b border-edge/50 last:border-0">
                   <td className="px-4 py-2.5">

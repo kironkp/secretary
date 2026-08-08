@@ -31,7 +31,11 @@ export type EventRow = {
   startsAt: string;
   endsAt: string | null;
   location: string | null;
+  notes: string | null;
   reminders: string[];
+  projectName: string | null;
+  source: string;
+  createdAt: string;
 };
 
 /** Open the global detail dialog (mounted in the app shell) for any item. */

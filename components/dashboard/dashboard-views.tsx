@@ -60,22 +60,25 @@ export function DashboardViews({
     [serverTasks, doneIds]
   );
 
-  // Entrance animation: ids that appeared after this component mounted
-  // (i.e. the secretary logged them live). `seen` absorbs them shortly after
-  // so the class drops once the animation has played.
+  // Entrance animation: ids (tasks AND events) that appeared after this
+  // component mounted — i.e. the secretary logged them live. `seen` absorbs
+  // them shortly after so the class drops once the animation has played.
   const [seen, setSeen] = useState<Set<string> | null>(null);
   const fresh = useMemo(() => {
     if (!seen) return new Set<string>();
-    return new Set(serverTasks.filter((t) => !seen.has(t.id)).map((t) => t.id));
-  }, [serverTasks, seen]);
+    return new Set(
+      [...serverTasks, ...events].filter((x) => !seen.has(x.id)).map((x) => x.id)
+    );
+  }, [serverTasks, events, seen]);
   useEffect(() => {
+    const ids = [...serverTasks.map((x) => x.id), ...events.map((x) => x.id)];
     const t = setTimeout(
-      () => setSeen((prev) => new Set([...(prev ?? []), ...serverTasks.map((x) => x.id)])),
+      () => setSeen((prev) => new Set([...(prev ?? []), ...ids])),
       seen === null ? 0 : 1500
     );
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serverTasks]);
+  }, [serverTasks, events]);
 
   const markDone = async (id: string) => {
     setCrossing((s) => new Set(s).add(id));

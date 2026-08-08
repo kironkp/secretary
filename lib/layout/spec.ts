@@ -41,7 +41,7 @@ export const layoutSpecSchema = z.object({
       })
     )
     .min(1)
-    .max(8),
+    .max(9),
 });
 
 export type LayoutSpec = z.infer<typeof layoutSpecSchema>;
@@ -56,6 +56,8 @@ export const DEFAULT_SPEC: LayoutSpec = {
   sections: [
     { component: "overdue_callout", title: null },
     { component: "stat_tiles", title: null },
+    // renders nothing unless a reminder falls in the next 48h — safe to keep high
+    { component: "coming_up", title: null },
     { component: "focus_card", title: null },
     { component: "timeline", title: null },
     { component: "project_grid", title: null },
