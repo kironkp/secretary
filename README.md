@@ -30,6 +30,14 @@ secretary has captured — every task/event/fact with its source (spoken, typed,
 inferred, suggested), the accountability log of check-ins, full conversation
 transcripts, and cross-entity search.
 
+UI (Aug 2026 redesign): light + dark themes (light default, cookie-persisted,
+toggle in header/settings); lucide icon system (no emoji in chrome); dashboard
+default is the designed **Overview** (stat tiles · next-up hero · 5-week
+pressure timeline · project cards · open-loops table — see
+`planning-documents/secretary-target.html`); on large screens `/chat` is a
+split workspace with a live-updating dashboard pane and voice docked into the
+chat column (toggle: panel icon in the header).
+
 How the background intelligence runs (no cron needed):
 - **Extraction** (`lib/secretary/extraction.ts`) fires via `after()` when a
   voice session ends and after each text turn; `conversations.extracted_at` is
