@@ -2,8 +2,9 @@
 // client views. Used by /dashboard and by the chat split workspace, so both
 // stay in lockstep.
 import { after } from "next/server";
-import { getEventsWithProject, getTasksWithContext } from "@/lib/db/queries";
+import { getDocumentsWithProject, getEventsWithProject, getTasksWithContext } from "@/lib/db/queries";
 import { getCurrentLayout, maybeRegenerateLayout } from "@/lib/layout/generator";
+import type { DocRow } from "./shared";
 import { DashboardViews, type EventRow, type TaskRow } from "./dashboard-views";
 
 export async function DashboardPanel({
@@ -15,9 +16,10 @@ export async function DashboardPanel({
   timezone: string;
   compact?: boolean;
 }) {
-  const [rows, eventRows, layout] = await Promise.all([
+  const [rows, eventRows, docRows, layout] = await Promise.all([
     getTasksWithContext(userId),
     getEventsWithProject(userId),
+    getDocumentsWithProject(userId),
     getCurrentLayout(userId),
   ]);
 
@@ -36,6 +38,8 @@ export async function DashboardPanel({
     source: task.source,
     notes: task.notes,
     reminders: task.reminders ?? [],
+    stages: task.stages ?? [],
+    recurrence: task.recurrence,
     projectName,
     projectColor,
     conversationId: task.createdFromConversationId,
@@ -67,11 +71,22 @@ export async function DashboardPanel({
     createdAt: e.createdAt.toISOString(),
   }));
 
+  const docs: DocRow[] = docRows.map(({ doc, projectName }) => ({
+    id: doc.id,
+    title: doc.title,
+    projectName,
+    headings: doc.sections.map((s) => s.heading),
+    updatedAt: doc.updatedAt.toISOString(),
+    sectionCount: doc.sections.length,
+    hasContent: doc.sections.some((s) => s.content.trim().length > 0),
+  }));
+
   return (
     <DashboardViews
       tasks={tasks}
       suggestions={suggestions}
       events={events}
+      docs={docs}
       layout={layout.spec}
       layoutVersion={layout.version}
       layoutPinned={layout.pinned}

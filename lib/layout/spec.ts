@@ -30,6 +30,9 @@
 //      calendar/calendar_strip | events + dated tasks
 //      stat_tiles           | counts over tasks + events (next commitment)
 //      kanban/board, procrastination_zone, suggested_zone | tasks by scope
+//      documents            | all docs w/ project, freshness, outline
+//      (task rows anywhere) | stage progress + recurrence + reminder chips
+//    Full principles: planning-documents/adaptive-ui-principles.md
 import { z } from "zod";
 
 export const COMPONENT_PALETTE = [
@@ -44,6 +47,7 @@ export const COMPONENT_PALETTE = [
   "suggested_zone",
   "project_grid",
   "coming_up",
+  "documents",
 ] as const;
 
 export type LayoutComponent = (typeof COMPONENT_PALETTE)[number];
@@ -57,7 +61,7 @@ export const layoutSpecSchema = z.object({
       })
     )
     .min(1)
-    .max(9),
+    .max(10),
 });
 
 export type LayoutSpec = z.infer<typeof layoutSpecSchema>;
@@ -77,6 +81,7 @@ export const DEFAULT_SPEC: LayoutSpec = {
     { component: "focus_card", title: null },
     { component: "timeline", title: null },
     { component: "project_grid", title: null },
+    { component: "documents", title: null },
     { component: "suggested_zone", title: null },
     { component: "procrastination_zone", title: null },
     { component: "list", title: null },
@@ -93,6 +98,7 @@ export type DataShape = {
   procrastinated: number;
   done7d: number;
   reminders24h: number;
+  documents: number;
 };
 
 /** Cheap change detector: same shape → no regeneration. */
@@ -109,5 +115,6 @@ export function dataHash(shape: DataShape): string {
     shape.procrastinated > 0 ? 1 : 0,
     b(shape.done7d),
     shape.reminders24h > 0 ? 1 : 0,
+    b(shape.documents),
   ].join("-");
 }

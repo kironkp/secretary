@@ -4,7 +4,7 @@
 // Timeline/Adaptive): row types, due-date formatting, the cross-off button,
 // and provenance links.
 import Link from "next/link";
-import { AlarmClock, Check, MessageSquare } from "lucide-react";
+import { AlarmClock, Check, MessageSquare, Repeat } from "lucide-react";
 
 export type TaskRow = {
   id: string;
@@ -18,6 +18,8 @@ export type TaskRow = {
   source: "spoken" | "typed" | "inferred" | "suggested";
   notes: string | null;
   reminders: string[];
+  stages: { name: string; done: boolean }[];
+  recurrence: string | null;
   projectName: string | null;
   projectColor: string | null;
   conversationId: string | null;
@@ -38,9 +40,56 @@ export type EventRow = {
   createdAt: string;
 };
 
+export type DocRow = {
+  id: string;
+  title: string;
+  projectName: string | null;
+  headings: string[];
+  updatedAt: string;
+  sectionCount: number;
+  hasContent: boolean;
+};
+
 /** Open the global detail dialog (mounted in the app shell) for any item. */
 export function openDetail(kind: "task" | "event", id: string) {
   window.dispatchEvent(new CustomEvent("secretary:open-detail", { detail: { kind, id } }));
+}
+
+/** Stage progress at a glance: 2/4 with a segmented micro-bar. */
+export function StageDots({ stages }: { stages: { name: string; done: boolean }[] }) {
+  if (!stages || stages.length === 0) return null;
+  const done = stages.filter((s) => s.done).length;
+  const next = stages.find((s) => !s.done);
+  return (
+    <span
+      title={next ? `Next: ${next.name}` : "All stages done"}
+      className="inline-flex flex-none items-center gap-1 rounded-full bg-surface-2 px-1.5 py-px text-[10px] text-muted"
+    >
+      <span className="flex gap-[2px]">
+        {stages.map((s, i) => (
+          <span
+            key={i}
+            className={`h-[7px] w-[7px] rounded-[2px] ${s.done ? "bg-ok" : "bg-faint/40"}`}
+          />
+        ))}
+      </span>
+      {done}/{stages.length}
+    </span>
+  );
+}
+
+/** Marks recurring tasks so the dashboard makes them recognizable. */
+export function RepeatChip({ recurrence }: { recurrence: string | null }) {
+  if (!recurrence) return null;
+  return (
+    <span
+      title={`Repeats ${recurrence}`}
+      className="inline-flex flex-none items-center gap-0.5 rounded-full bg-surface-2 px-1.5 py-px text-[10px] text-muted"
+    >
+      <Repeat size={10} strokeWidth={2} />
+      {recurrence}
+    </span>
+  );
 }
 
 /** Small clock chip for rows/cards that carry reminders. */

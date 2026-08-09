@@ -7,13 +7,16 @@
 // shell; re-fetches on window focus so live updates don't show stale detail.
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   AlarmClock,
   Calendar,
+  Check,
   Flag,
   FolderKanban,
   MapPin,
   MessageSquare,
+  Repeat,
   X,
 } from "lucide-react";
 
@@ -27,6 +30,8 @@ type TaskDetail = {
     dueAt: string | null;
     priority: number;
     reminders: string[];
+    stages: { name: string; done: boolean }[];
+    recurrence: string | null;
     source: string;
     postponedCount: number;
     createdAt: string;
@@ -78,9 +83,28 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 }
 
 export function DetailDialog() {
+  const router = useRouter();
   const [target, setTarget] = useState<{ kind: "task" | "event"; id: string } | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [error, setError] = useState(false);
+  const [togglingStage, setTogglingStage] = useState<string | null>(null);
+
+  const toggleStage = async (taskId: string, stages: { name: string; done: boolean }[], name: string) => {
+    setTogglingStage(name);
+    const next = stages.map((s) => (s.name === name ? { ...s, done: !s.done } : s));
+    const res = await fetch(`/api/tasks/${taskId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stages: next }),
+    });
+    setTogglingStage(null);
+    if (res.ok) {
+      setDetail((d) =>
+        d?.kind === "task" ? { ...d, task: { ...d.task, stages: next } } : d
+      );
+      router.refresh();
+    }
+  };
 
   const load = useCallback(async (kind: "task" | "event", id: string) => {
     try {
@@ -218,7 +242,42 @@ export function DetailDialog() {
                 ) : (
                   <span className="text-warn">no date</span>
                 )}
+                {detail.task.recurrence && (
+                  <span className="ml-2 inline-flex items-center gap-1 text-xs text-muted">
+                    <Repeat size={11} strokeWidth={2} />
+                    repeats {detail.task.recurrence}
+                  </span>
+                )}
               </Row>
+              {(detail.task.stages ?? []).length > 0 && (
+                <div className="py-1.5">
+                  <p className="mb-1.5 text-xs text-faint">
+                    Stages ({detail.task.stages.filter((s) => s.done).length}/
+                    {detail.task.stages.length})
+                  </p>
+                  <div className="flex flex-col gap-1.5">
+                    {detail.task.stages.map((s) => (
+                      <button
+                        key={s.name}
+                        disabled={togglingStage !== null}
+                        onClick={() => toggleStage(detail.task.id, detail.task.stages, s.name)}
+                        className="flex items-center gap-2.5 text-left text-sm disabled:opacity-60"
+                      >
+                        <span
+                          className={`flex h-[18px] w-[18px] flex-none items-center justify-center rounded-md border transition-colors ${
+                            s.done
+                              ? "border-ok bg-ok text-bg"
+                              : "border-edge text-transparent hover:border-ok"
+                          }`}
+                        >
+                          <Check size={11} strokeWidth={3} />
+                        </span>
+                        <span className={s.done ? "text-faint line-through" : ""}>{s.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               {detail.task.priority > 0 && (
                 <Row label="Priority">
                   <span className="inline-flex items-center gap-1.5">

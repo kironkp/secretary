@@ -17,7 +17,17 @@ import {
   or,
 } from "drizzle-orm";
 import { db } from "./index";
-import { checkins, conversations, events, memories, messages, projects, tasks } from "./schema";
+import {
+  checkins,
+  conversations,
+  documents,
+  documentVersions,
+  events,
+  memories,
+  messages,
+  projects,
+  tasks,
+} from "./schema";
 import { dayRangeInTz } from "@/lib/time";
 
 const OPEN_STATUSES = ["inbox", "todo", "in_progress", "blocked"] as const;
@@ -228,6 +238,33 @@ export async function searchAll(userId: string, query: string) {
       .limit(20),
   ]);
   return { tasks: taskRows, events: eventRows, memories: memoryRows, messages: messageRows };
+}
+
+/** Documents with their project name, newest-edited first. */
+export function getDocumentsWithProject(userId: string) {
+  return db
+    .select({ doc: documents, projectName: projects.name })
+    .from(documents)
+    .leftJoin(projects, eq(documents.projectId, projects.id))
+    .where(eq(documents.userId, userId))
+    .orderBy(desc(documents.updatedAt));
+}
+
+/** One document + its version history (for the document page). */
+export async function getDocumentDetail(userId: string, id: string) {
+  const [row] = await db
+    .select({ doc: documents, projectName: projects.name })
+    .from(documents)
+    .leftJoin(projects, eq(documents.projectId, projects.id))
+    .where(and(eq(documents.id, id), eq(documents.userId, userId)))
+    .limit(1);
+  if (!row) return null;
+  const versions = await db
+    .select()
+    .from(documentVersions)
+    .where(and(eq(documentVersions.userId, userId), eq(documentVersions.documentId, id)))
+    .orderBy(desc(documentVersions.savedAt));
+  return { ...row, versions };
 }
 
 export function getOpenTaskCount(userId: string) {

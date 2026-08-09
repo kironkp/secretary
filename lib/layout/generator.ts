@@ -4,7 +4,7 @@
 import { z } from "zod";
 import { and, count, desc, eq, gte, inArray, isNotNull, lt, ne, or } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { events, layoutSpecs, projects, tasks, usage } from "@/lib/db/schema";
+import { documents, events, layoutSpecs, projects, tasks, usage } from "@/lib/db/schema";
 import { openai, TEXT_MODEL } from "@/lib/openai";
 import {
   DEFAULT_SPEC,
@@ -27,8 +27,9 @@ const GENERATOR_PROMPT = `You arrange a personal-assistant dashboard from a fixe
 - Include exactly ONE of list | kanban as the main work surface: list by default; kanban only when openTasks >= 10.
 - suggested_zone only when suggestions > 0; procrastination_zone only when procrastinated > 0.
 - coming_up (a small strip of the next reminders) only when reminders24h > 0 — near the top when present.
+- documents (living document cards) whenever documents > 0 — near the projects.
 - calendar_strip only when events7d > 0 and it isn't redundant with focus_card.
-- 4–8 sections total. Titles: null unless a custom heading genuinely helps.`;
+- 4–9 sections total. Titles: null unless a custom heading genuinely helps.`;
 
 export async function getDataShape(userId: string): Promise<DataShape> {
   const now = new Date();
@@ -113,6 +114,11 @@ export async function getDataShape(userId: string): Promise<DataShape> {
       return d >= now && d <= in24h;
     }).length;
 
+  const [docCount] = await db
+    .select({ n: count() })
+    .from(documents)
+    .where(eq(documents.userId, userId));
+
   return {
     openTasks: open?.n ?? 0,
     overdue: overdue?.n ?? 0,
@@ -123,6 +129,7 @@ export async function getDataShape(userId: string): Promise<DataShape> {
     procrastinated: procrastinated?.n ?? 0,
     done7d: done7d?.n ?? 0,
     reminders24h,
+    documents: docCount?.n ?? 0,
   };
 }
 

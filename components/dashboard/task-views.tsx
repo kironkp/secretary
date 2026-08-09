@@ -8,7 +8,9 @@ import {
   CheckButton,
   ProvenanceLink,
   ReminderChip,
+  RepeatChip,
   STATUS_LABEL,
+  StageDots,
   fmtDue,
   isOverdue,
   openDetail,
@@ -115,6 +117,8 @@ export function ListTable({
                     <span className={`cross-off ${done || crossingNow ? "crossed text-faint" : ""}`}>
                       {t.title}
                     </span>
+                    <StageDots stages={t.stages} />
+                    <RepeatChip recurrence={t.recurrence} />
                     <ReminderChip reminders={t.reminders} />
                     <ProvenanceLink t={t} />
                   </div>
@@ -243,6 +247,8 @@ export function BoardView({
                           {t.postponedCount > 1 && (
                             <span className="text-warn">pushed {t.postponedCount}×</span>
                           )}
+                          <StageDots stages={t.stages} />
+                          <RepeatChip recurrence={t.recurrence} />
                           <ReminderChip reminders={t.reminders} />
                           <ProvenanceLink t={t} />
                         </p>

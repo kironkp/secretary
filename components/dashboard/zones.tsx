@@ -18,13 +18,18 @@ import {
   TriangleAlert,
   X,
 } from "lucide-react";
+import Link from "next/link";
+import { FileText } from "lucide-react";
 import {
   CheckButton,
   ProvenanceLink,
   ReminderChip,
+  RepeatChip,
+  StageDots,
   fmtDue,
   isOverdue,
   openDetail,
+  type DocRow,
   type EventRow,
   type TaskRow,
 } from "./shared";
@@ -602,6 +607,54 @@ export function FiveWeekTimeline({ tasks, events }: { tasks: TaskRow[]; events: 
 }
 
 // ---------------------------------------------------------------------------
+// documents — living documents, where work actually happens
+// ---------------------------------------------------------------------------
+
+function editedAgo(iso: string): string {
+  const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+  if (mins < 2) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+export function DocumentsZone({ docs, fresh }: { docs: DocRow[]; fresh?: Set<string> }) {
+  if (docs.length === 0) return null;
+  return (
+    <div className="grid gap-3 md:grid-cols-2">
+      {docs.map((d) => (
+        <Link
+          key={d.id}
+          href={`/documents/${d.id}`}
+          className={`flex flex-col gap-2 rounded-2xl border border-edge bg-surface p-5 transition-colors hover:border-faint ${
+            fresh?.has(d.id) ? "animate-task-in" : ""
+          }`}
+        >
+          <div className="flex items-start gap-2.5">
+            <FileText size={16} strokeWidth={1.75} className="mt-0.5 flex-none text-accent" />
+            <div className="min-w-0 flex-1">
+              <p className="text-[15px] font-semibold tracking-tight">{d.title}</p>
+              <p className="mt-0.5 text-xs text-faint">
+                {d.projectName ?? "unfiled"} · {d.sectionCount} section
+                {d.sectionCount === 1 ? "" : "s"} · edited {editedAgo(d.updatedAt)}
+              </p>
+            </div>
+          </div>
+          {d.headings.length > 0 && (
+            <p className="truncate text-xs text-muted">{d.headings.join(" · ")}</p>
+          )}
+          {!d.hasContent && (
+            <p className="text-xs text-warn">Outline only — no content yet</p>
+          )}
+        </Link>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // coming up — the next reminders (tasks + events) in the next 24h
 // ---------------------------------------------------------------------------
 
@@ -979,6 +1032,16 @@ export function ProjectGrid({
                   </span>
                   <span className={`cross-off min-w-0 ${crossing.has(t.id) ? "crossed text-faint" : ""}`}>
                     {t.title}
+                    {t.stages.length > 0 && (
+                      <span className="ml-1.5 inline-block align-middle">
+                        <StageDots stages={t.stages} />
+                      </span>
+                    )}
+                    {t.recurrence && (
+                      <span className="ml-1.5 inline-block align-middle">
+                        <RepeatChip recurrence={t.recurrence} />
+                      </span>
+                    )}
                     {t.reminders.length > 0 && (
                       <span className="ml-1.5 inline-block align-middle">
                         <ReminderChip reminders={t.reminders} />
@@ -1169,6 +1232,8 @@ export function OpenLoopsTable({
                         >
                           {item.task.title}
                         </span>
+                        <StageDots stages={item.task.stages} />
+                        <RepeatChip recurrence={item.task.recurrence} />
                         <ReminderChip reminders={item.task.reminders} />
                         <ProvenanceLink t={item.task} />
                       </div>

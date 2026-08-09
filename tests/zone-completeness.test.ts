@@ -30,6 +30,11 @@ const task: TaskRow = {
   source: "spoken",
   notes: null,
   reminders: [iso(20 * HOUR)],
+  stages: [
+    { name: "Outline", done: true },
+    { name: "Draft", done: false },
+  ],
+  recurrence: null,
   projectName: "DAW patent",
   projectColor: null,
   conversationId: "conv-1",

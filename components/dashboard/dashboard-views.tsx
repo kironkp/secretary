@@ -9,7 +9,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { LayoutSpec } from "@/lib/layout/spec";
 import { RefreshOnFocus } from "@/components/shell/refresh-on-focus";
-import type { EventRow, TaskRow } from "./shared";
+import type { DocRow, EventRow, TaskRow } from "./shared";
 import { AdaptiveView } from "./adaptive-view";
 import { CalendarView } from "./calendar-view";
 import { TimelineView } from "./timeline-view";
@@ -31,6 +31,7 @@ export function DashboardViews({
   tasks: serverTasks,
   suggestions,
   events,
+  docs,
   layout,
   layoutVersion,
   layoutPinned,
@@ -40,6 +41,7 @@ export function DashboardViews({
   tasks: TaskRow[];
   suggestions: TaskRow[];
   events: EventRow[];
+  docs: DocRow[];
   layout: LayoutSpec;
   layoutVersion: number;
   layoutPinned: string[];
@@ -67,18 +69,22 @@ export function DashboardViews({
   const fresh = useMemo(() => {
     if (!seen) return new Set<string>();
     return new Set(
-      [...serverTasks, ...events].filter((x) => !seen.has(x.id)).map((x) => x.id)
+      [...serverTasks, ...events, ...docs].filter((x) => !seen.has(x.id)).map((x) => x.id)
     );
-  }, [serverTasks, events, seen]);
+  }, [serverTasks, events, docs, seen]);
   useEffect(() => {
-    const ids = [...serverTasks.map((x) => x.id), ...events.map((x) => x.id)];
+    const ids = [
+      ...serverTasks.map((x) => x.id),
+      ...events.map((x) => x.id),
+      ...docs.map((x) => x.id),
+    ];
     const t = setTimeout(
       () => setSeen((prev) => new Set([...(prev ?? []), ...ids])),
       seen === null ? 0 : 1500
     );
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serverTasks, events]);
+  }, [serverTasks, events, docs]);
 
   const markDone = async (id: string) => {
     setCrossing((s) => new Set(s).add(id));
@@ -136,6 +142,7 @@ export function DashboardViews({
           tasks={tasks}
           suggestions={suggestions}
           events={events}
+          docs={docs}
           crossing={crossing}
           onDone={markDone}
           fresh={fresh}

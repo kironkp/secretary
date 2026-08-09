@@ -7,11 +7,12 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Pin, Sparkles, Undo2 } from "lucide-react";
 import type { LayoutComponent, LayoutSpec } from "@/lib/layout/spec";
-import type { EventRow, TaskRow } from "./shared";
+import type { DocRow, EventRow, TaskRow } from "./shared";
 import { BoardView } from "./task-views";
 import {
   CalendarStrip,
   ComingUpStrip,
+  DocumentsZone,
   FiveWeekTimeline,
   NextUpHero,
   OpenLoopsTable,
@@ -34,6 +35,7 @@ const DEFAULT_TITLES: Record<LayoutComponent, string | null> = {
   suggested_zone: null,
   project_grid: "Projects",
   coming_up: "Coming up",
+  documents: "Documents",
 };
 
 const SECTION_NOTES: Partial<Record<LayoutComponent, string>> = {
@@ -51,6 +53,7 @@ export function AdaptiveView({
   tasks,
   suggestions,
   events,
+  docs,
   crossing,
   onDone,
   fresh,
@@ -62,6 +65,7 @@ export function AdaptiveView({
   tasks: TaskRow[];
   suggestions: TaskRow[];
   events: EventRow[];
+  docs: DocRow[];
   crossing: Set<string>;
   onDone: (id: string) => void;
   fresh?: Set<string>;
@@ -128,6 +132,8 @@ export function AdaptiveView({
         return <ProjectGrid tasks={tasks} events={events} crossing={crossing} onDone={onDone} />;
       case "coming_up":
         return <ComingUpStrip tasks={tasks} events={events} />;
+      case "documents":
+        return <DocumentsZone docs={docs} fresh={fresh} />;
     }
   };
 
