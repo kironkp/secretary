@@ -5,13 +5,17 @@ import { and, count, desc, eq, gte, ilike, inArray, isNotNull, lt, ne, or } from
 import { db } from "@/lib/db";
 import {
   checkins,
+  documents,
+  documentVersions,
   events,
   memories,
   messages,
   projects,
   tasks,
+  type DocSection,
 } from "@/lib/db/schema";
 import { dayRangeInTz } from "@/lib/time";
+import { spawnNextOccurrence } from "./recurrence";
 import { toolSchemas, type ToolName } from "./tool-schemas";
 
 export type ToolContext = {
@@ -178,6 +182,84 @@ export async function resolveProject(
   return { project: created, matched: "created" };
 }
 
+// --- documents: voice-first helpers -----------------------------------------
+
+/** Above this total size, read_document returns headings only — a long doc
+ *  must never flood the realtime session. */
+const DOC_FULL_READ_CHARS = 1500;
+/** Hard cap on any single section returned to the model. */
+const SECTION_READ_CHARS = 4000;
+const DOC_VERSIONS_KEPT = 20;
+
+async function findDocument(userId: string, ref: string) {
+  const byId = await db
+    .select()
+    .from(documents)
+    .where(and(eq(documents.userId, userId), eq(documents.id, ref)))
+    .limit(1);
+  if (byId[0]) return byId[0];
+  const byTitle = await db
+    .select()
+    .from(documents)
+    .where(and(eq(documents.userId, userId), ilike(documents.title, `%${ref}%`)))
+    .orderBy(desc(documents.updatedAt))
+    .limit(1);
+  return byTitle[0] ?? null;
+}
+
+/** Section by fuzzy heading match or 1-based number ("2", "section 2"). */
+function findSection(sections: DocSection[], ref: string): number {
+  const numMatch = ref.match(/^\s*(?:section\s*)?(\d{1,2})\s*$/i);
+  if (numMatch) {
+    const idx = Number(numMatch[1]) - 1;
+    return idx >= 0 && idx < sections.length ? idx : -1;
+  }
+  const needle = ref.toLowerCase().trim();
+  let idx = sections.findIndex((s) => s.heading.toLowerCase() === needle);
+  if (idx === -1)
+    idx = sections.findIndex(
+      (s) =>
+        s.heading.toLowerCase().includes(needle) || needle.includes(s.heading.toLowerCase())
+    );
+  return idx;
+}
+
+/** Snapshot the document's current state before a mutation (revert safety). */
+async function snapshotDocument(doc: typeof documents.$inferSelect, note: string) {
+  await db.insert(documentVersions).values({
+    userId: doc.userId,
+    documentId: doc.id,
+    title: doc.title,
+    sections: doc.sections,
+    note,
+  });
+  const versions = await db
+    .select({ id: documentVersions.id })
+    .from(documentVersions)
+    .where(eq(documentVersions.documentId, doc.id))
+    .orderBy(desc(documentVersions.savedAt));
+  if (versions.length > DOC_VERSIONS_KEPT) {
+    await db.delete(documentVersions).where(
+      inArray(
+        documentVersions.id,
+        versions.slice(DOC_VERSIONS_KEPT).map((v) => v.id)
+      )
+    );
+  }
+}
+
+function docSummary(doc: typeof documents.$inferSelect) {
+  return {
+    document_id: doc.id,
+    title: doc.title,
+    sections: doc.sections.map((s, i) => ({
+      number: i + 1,
+      heading: s.heading,
+      words: s.content.split(/\s+/).filter(Boolean).length,
+    })),
+  };
+}
+
 type Args = Record<string, unknown>;
 
 const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolOutcome>> = {
@@ -196,6 +278,8 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         dueAt,
         priority: a.priority ?? 0,
         reminders,
+        stages: (a.stages ?? []).map((name) => ({ name, done: false })),
+        recurrence: a.recurrence,
         status: "todo",
         source: ctx.conversationId ? "spoken" : "typed",
         createdFromConversationId: ctx.conversationId,
@@ -210,6 +294,8 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         due_at: task.dueAt,
         project: project?.name ?? null,
         project_match: matched,
+        ...(task.stages.length ? { stages: task.stages.map((s) => s.name) } : {}),
+        ...(task.recurrence ? { recurrence: task.recurrence } : {}),
         ...(reminders.length ? { reminders, delivery: "logged-only" } : {}),
       },
       toast: { icon: "✓", text: `Added: ${task.title}${due ? ` — due ${due}` : ""}` },
@@ -256,12 +342,51 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     if (a.priority !== undefined) updates.priority = a.priority;
     const newReminders = parseReminders(a.reminders);
     if (newReminders !== undefined) updates.reminders = newReminders;
+    if (a.recurrence !== undefined) {
+      updates.recurrence = a.recurrence === "none" ? null : a.recurrence;
+    }
+    if (a.stages !== undefined) {
+      // replace the stage list, preserving done-ness of stages that survive
+      updates.stages = a.stages.map((name) => ({
+        name,
+        done: task.stages.some((s) => s.name.toLowerCase() === name.toLowerCase() && s.done),
+      }));
+    }
+    let stageAdvanced: string | null = null;
+    if (a.stage_done) {
+      const list = (updates.stages ?? task.stages).map((s) => ({ ...s }));
+      const needle = a.stage_done.toLowerCase();
+      const hit =
+        list.find((s) => s.name.toLowerCase() === needle) ??
+        list.find(
+          (s) => s.name.toLowerCase().includes(needle) || needle.includes(s.name.toLowerCase())
+        );
+      if (!hit) {
+        return {
+          result: {
+            error: `No stage matching "${a.stage_done}" on "${task.title}" — stages: ${
+              list.map((s) => s.name).join(", ") || "(none defined)"
+            }`,
+          },
+        };
+      }
+      hit.done = true;
+      updates.stages = list;
+      stageAdvanced = hit.name;
+    }
 
     const [updated] = await db
       .update(tasks)
       .set(updates)
       .where(and(eq(tasks.userId, ctx.userId), eq(tasks.id, task.id)))
       .returning();
+
+    // completing a recurring task spawns its next occurrence
+    let spawnedNext: string | null = null;
+    if (a.status === "done" && task.status !== "done") {
+      const next = await spawnNextOccurrence(updated);
+      if (next) spawnedNext = fmtDate(next.dueAt, ctx.timezone, false) ?? "soon";
+    }
 
     if (postponed || a.status) {
       await db.insert(checkins).values({
@@ -283,18 +408,32 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         due_at: updated.dueAt,
         postponed_count: updated.postponedCount,
         ...(movedTo !== undefined ? { project: movedTo, project_match: projectMatch } : {}),
+        ...(updated.stages.length
+          ? {
+              stages: updated.stages,
+              stages_done: `${updated.stages.filter((s) => s.done).length}/${updated.stages.length}`,
+            }
+          : {}),
+        ...(a.recurrence !== undefined ? { recurrence: updated.recurrence } : {}),
+        ...(spawnedNext ? { next_occurrence_due: spawnedNext } : {}),
         ...(newReminders !== undefined
           ? { reminders: updated.reminders, delivery: "logged-only" }
           : {}),
       },
-      toast:
-        movedTo !== undefined
-          ? { icon: "→", text: `Moved: ${updated.title} → ${movedTo ?? "no project"}` }
-          : postponed
-            ? { icon: "→", text: `Pushed: ${updated.title} — now ${due}` }
-            : newReminders !== undefined
-              ? { icon: "✓", text: `Reminders set: ${updated.title}` }
-              : { icon: "✎", text: `Updated: ${updated.title}` },
+      toast: stageAdvanced
+        ? {
+            icon: "✓",
+            text: `Stage done: ${stageAdvanced} (${updated.stages.filter((s) => s.done).length}/${updated.stages.length}) — ${updated.title}`,
+          }
+        : spawnedNext
+          ? { icon: "✓", text: `Done: ${updated.title} — next one due ${spawnedNext}` }
+          : movedTo !== undefined
+            ? { icon: "→", text: `Moved: ${updated.title} → ${movedTo ?? "no project"}` }
+            : postponed
+              ? { icon: "→", text: `Pushed: ${updated.title} — now ${due}` }
+              : newReminders !== undefined
+                ? { icon: "✓", text: `Reminders set: ${updated.title}` }
+                : { icon: "✎", text: `Updated: ${updated.title}` },
     };
   },
 
@@ -313,9 +452,19 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
       type: "user_update",
       note: "Marked done",
     });
+    const next = task.status !== "done" ? await spawnNextOccurrence(updated) : null;
+    const nextDue = next ? fmtDate(next.dueAt, ctx.timezone, false) : null;
     return {
-      result: { task_id: updated.id, title: updated.title, status: "done" },
-      toast: { icon: "✓", text: `Done: ${updated.title}` },
+      result: {
+        task_id: updated.id,
+        title: updated.title,
+        status: "done",
+        ...(nextDue ? { next_occurrence_due: nextDue } : {}),
+      },
+      toast: {
+        icon: "✓",
+        text: nextDue ? `Done: ${updated.title} — next one due ${nextDue}` : `Done: ${updated.title}`,
+      },
     };
   },
 
@@ -532,6 +681,251 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     return {
       result: { deleted: event.title },
       toast: { icon: "✕", text: `Removed event: ${event.title}` },
+    };
+  },
+
+  async create_document(ctx, args) {
+    const a = toolSchemas.create_document.parse(args);
+    const { project, matched } = await resolveProject(ctx.userId, a.project);
+    const [doc] = await db
+      .insert(documents)
+      .values({
+        userId: ctx.userId,
+        title: a.title,
+        projectId: project?.id,
+        sections: (a.sections ?? []).map((s) => ({ heading: s.heading, content: s.content })),
+        source: ctx.conversationId ? "spoken" : "typed",
+        conversationId: ctx.conversationId,
+      })
+      .returning();
+    return {
+      result: { ...docSummary(doc), project: project?.name ?? null, project_match: matched },
+      toast: { icon: "✎", text: `New document: ${doc.title}` },
+    };
+  },
+
+  async list_documents(ctx) {
+    const rows = await db
+      .select({ doc: documents, projectName: projects.name })
+      .from(documents)
+      .leftJoin(projects, eq(documents.projectId, projects.id))
+      .where(eq(documents.userId, ctx.userId))
+      .orderBy(desc(documents.updatedAt));
+    return {
+      result: rows.map(({ doc, projectName }) => ({
+        document_id: doc.id,
+        title: doc.title,
+        project: projectName,
+        headings: doc.sections.map((s) => s.heading),
+        last_edited: fmtDate(doc.updatedAt, ctx.timezone),
+      })),
+    };
+  },
+
+  async read_document(ctx, args) {
+    const a = toolSchemas.read_document.parse(args);
+    const doc = await findDocument(ctx.userId, a.document);
+    if (!doc) return { result: { error: `No document matching "${a.document}"` } };
+
+    if (a.section) {
+      const idx = findSection(doc.sections, a.section);
+      if (idx === -1) {
+        return {
+          result: {
+            error: `No section matching "${a.section}" — sections: ${doc.sections.map((s) => s.heading).join(", ")}`,
+          },
+        };
+      }
+      const s = doc.sections[idx];
+      const truncated = s.content.length > SECTION_READ_CHARS;
+      return {
+        result: {
+          document_id: doc.id,
+          title: doc.title,
+          section: { number: idx + 1, heading: s.heading, content: s.content.slice(0, SECTION_READ_CHARS) },
+          ...(truncated ? { note: "truncated — very long section" } : {}),
+        },
+      };
+    }
+
+    const totalChars = doc.sections.reduce((n, s) => n + s.content.length, 0);
+    if (totalChars > DOC_FULL_READ_CHARS) {
+      return {
+        result: {
+          ...docSummary(doc),
+          note: "Long document — headings only. Read one section at a time (read_document with section).",
+        },
+      };
+    }
+    return {
+      result: {
+        document_id: doc.id,
+        title: doc.title,
+        sections: doc.sections.map((s, i) => ({ number: i + 1, heading: s.heading, content: s.content })),
+      },
+    };
+  },
+
+  async edit_document_section(ctx, args) {
+    const a = toolSchemas.edit_document_section.parse(args);
+    if (a.content === undefined && a.append === undefined && a.heading === undefined) {
+      return { result: { error: "Give content (replace), append, or heading (rename)" } };
+    }
+    const doc = await findDocument(ctx.userId, a.document);
+    if (!doc) return { result: { error: `No document matching "${a.document}"` } };
+    const idx = findSection(doc.sections, a.section);
+    if (idx === -1) {
+      return {
+        result: {
+          error: `No section matching "${a.section}" — sections: ${doc.sections.map((s) => s.heading).join(", ")}`,
+        },
+      };
+    }
+    const old = doc.sections[idx];
+    await snapshotDocument(doc, `before edit of "${old.heading}"`);
+    const sections = doc.sections.map((s) => ({ ...s }));
+    if (a.heading) sections[idx].heading = a.heading;
+    if (a.content !== undefined) sections[idx].content = a.content;
+    else if (a.append !== undefined)
+      sections[idx].content = `${sections[idx].content}${sections[idx].content ? "\n" : ""}${a.append}`;
+    const [updated] = await db
+      .update(documents)
+      .set({ sections, updatedAt: new Date() })
+      .where(and(eq(documents.userId, ctx.userId), eq(documents.id, doc.id)))
+      .returning();
+    const s = updated.sections[idx];
+    return {
+      result: {
+        document_id: updated.id,
+        section: { number: idx + 1, heading: s.heading },
+        chars_before: old.content.length,
+        chars_after: s.content.length,
+        revertible: true,
+      },
+      toast: { icon: "✎", text: `${updated.title}: "${s.heading}" updated` },
+    };
+  },
+
+  async add_document_section(ctx, args) {
+    const a = toolSchemas.add_document_section.parse(args);
+    const doc = await findDocument(ctx.userId, a.document);
+    if (!doc) return { result: { error: `No document matching "${a.document}"` } };
+    await snapshotDocument(doc, `before adding "${a.heading}"`);
+    const sections = doc.sections.map((s) => ({ ...s }));
+    let at = sections.length;
+    if (a.after) {
+      const idx = findSection(sections, a.after);
+      if (idx !== -1) at = idx + 1;
+    }
+    sections.splice(at, 0, { heading: a.heading, content: a.content ?? "" });
+    const [updated] = await db
+      .update(documents)
+      .set({ sections, updatedAt: new Date() })
+      .where(and(eq(documents.userId, ctx.userId), eq(documents.id, doc.id)))
+      .returning();
+    return {
+      result: { ...docSummary(updated), added: a.heading, revertible: true },
+      toast: { icon: "✎", text: `${updated.title}: added "${a.heading}"` },
+    };
+  },
+
+  async remove_document_section(ctx, args) {
+    const a = toolSchemas.remove_document_section.parse(args);
+    const doc = await findDocument(ctx.userId, a.document);
+    if (!doc) return { result: { error: `No document matching "${a.document}"` } };
+    const idx = findSection(doc.sections, a.section);
+    if (idx === -1) {
+      return {
+        result: {
+          error: `No section matching "${a.section}" — sections: ${doc.sections.map((s) => s.heading).join(", ")}`,
+        },
+      };
+    }
+    const removed = doc.sections[idx];
+    await snapshotDocument(doc, `before removing "${removed.heading}"`);
+    const sections = doc.sections.filter((_, i) => i !== idx);
+    const [updated] = await db
+      .update(documents)
+      .set({ sections, updatedAt: new Date() })
+      .where(and(eq(documents.userId, ctx.userId), eq(documents.id, doc.id)))
+      .returning();
+    return {
+      result: { ...docSummary(updated), removed: removed.heading, revertible: true },
+      toast: { icon: "✕", text: `${updated.title}: removed "${removed.heading}"` },
+    };
+  },
+
+  async revert_document(ctx, args) {
+    const a = toolSchemas.revert_document.parse(args);
+    const doc = await findDocument(ctx.userId, a.document);
+    if (!doc) return { result: { error: `No document matching "${a.document}"` } };
+    const [latest] = await db
+      .select()
+      .from(documentVersions)
+      .where(
+        and(eq(documentVersions.userId, ctx.userId), eq(documentVersions.documentId, doc.id))
+      )
+      .orderBy(desc(documentVersions.savedAt))
+      .limit(1);
+    if (!latest) return { result: { error: `"${doc.title}" has no earlier version to revert to` } };
+    // snapshot the current state too, so a revert is itself revertible
+    await snapshotDocument(doc, "before revert");
+    const [updated] = await db
+      .update(documents)
+      .set({ title: latest.title, sections: latest.sections, updatedAt: new Date() })
+      .where(and(eq(documents.userId, ctx.userId), eq(documents.id, doc.id)))
+      .returning();
+    await db
+      .delete(documentVersions)
+      .where(and(eq(documentVersions.userId, ctx.userId), eq(documentVersions.id, latest.id)));
+    return {
+      result: { ...docSummary(updated), restored: latest.note ?? "previous version" },
+      toast: { icon: "→", text: `${updated.title}: reverted (${latest.note ?? "previous version"})` },
+    };
+  },
+
+  async update_document(ctx, args) {
+    const a = toolSchemas.update_document.parse(args);
+    const doc = await findDocument(ctx.userId, a.document);
+    if (!doc) return { result: { error: `No document matching "${a.document}"` } };
+    const updates: Partial<typeof documents.$inferInsert> = { updatedAt: new Date() };
+    let movedTo: string | null | undefined;
+    if (a.title) updates.title = a.title;
+    if (a.project !== undefined) {
+      if (a.project.trim().toLowerCase() === "none") {
+        updates.projectId = null;
+        movedTo = null;
+      } else {
+        const res = await resolveProject(ctx.userId, a.project);
+        updates.projectId = res.project!.id;
+        movedTo = res.project!.name;
+      }
+    }
+    const [updated] = await db
+      .update(documents)
+      .set(updates)
+      .where(and(eq(documents.userId, ctx.userId), eq(documents.id, doc.id)))
+      .returning();
+    return {
+      result: {
+        document_id: updated.id,
+        title: updated.title,
+        ...(movedTo !== undefined ? { project: movedTo } : {}),
+      },
+      toast: { icon: "✎", text: `Document updated: ${updated.title}` },
+    };
+  },
+
+  async delete_document(ctx, args) {
+    const a = toolSchemas.delete_document.parse(args);
+    const doc = await findDocument(ctx.userId, a.document);
+    if (!doc) return { result: { error: `No document matching "${a.document}"` } };
+    await db
+      .delete(documents)
+      .where(and(eq(documents.userId, ctx.userId), eq(documents.id, doc.id)));
+    return {
+      result: { deleted: doc.title },
+      toast: { icon: "✕", text: `Deleted document: ${doc.title}` },
     };
   },
 

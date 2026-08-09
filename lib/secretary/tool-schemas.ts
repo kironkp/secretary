@@ -16,6 +16,16 @@ export const toolSchemas = {
       .array(z.string())
       .optional()
       .describe("Reminder times — exact ISO 8601 timestamps in the user's timezone"),
+    stages: z
+      .array(z.string())
+      .optional()
+      .describe(
+        "For genuinely multi-step deliverables: ordered stage names, e.g. ['Outline','Draft','Review with Marissa','Submit']"
+      ),
+    recurrence: z
+      .enum(["daily", "weekly", "monthly", "yearly"])
+      .optional()
+      .describe("Recurring task: completing it spawns the next occurrence from its due date"),
   }),
   update_task: z.object({
     task: z.string().min(1).describe("Task id, or a distinctive fragment of its title"),
@@ -36,6 +46,18 @@ export const toolSchemas = {
       .array(z.string())
       .optional()
       .describe("Replace the task's reminder times — exact ISO 8601 timestamps; [] clears them"),
+    stages: z
+      .array(z.string())
+      .optional()
+      .describe("Replace the task's stage list (ordered names); [] removes staging"),
+    stage_done: z
+      .string()
+      .optional()
+      .describe("Mark this stage complete (fuzzy name match), e.g. user says 'outline's done'"),
+    recurrence: z
+      .enum(["daily", "weekly", "monthly", "yearly", "none"])
+      .optional()
+      .describe('Make the task recurring, or "none" to stop it recurring'),
     postpone_reason: z
       .string()
       .optional()
@@ -101,6 +123,56 @@ export const toolSchemas = {
   delete_event: z.object({
     event: z.string().min(1).describe("Event id, or a distinctive fragment of its title"),
   }),
+  create_document: z.object({
+    title: z.string().min(1),
+    project: z.string().optional().describe("Project it belongs to (fuzzy-matched)"),
+    sections: z
+      .array(z.object({ heading: z.string().min(1), content: z.string() }))
+      .optional()
+      .describe("Initial outline — headings with content (content may be empty to start)"),
+  }),
+  list_documents: z.object({}),
+  read_document: z.object({
+    document: z.string().min(1).describe("Document id, or a fragment of its title ('the budget doc')"),
+    section: z
+      .string()
+      .optional()
+      .describe("Read just this section (fuzzy heading match, or a number like '2'). Long docs REQUIRE section-level reads."),
+  }),
+  edit_document_section: z.object({
+    document: z.string().min(1).describe("Document id or title fragment"),
+    section: z.string().min(1).describe("Section heading (fuzzy) or number"),
+    content: z
+      .string()
+      .optional()
+      .describe("The section's NEW full text (replaces the old text)"),
+    heading: z.string().optional().describe("Rename the section to this"),
+    append: z
+      .string()
+      .optional()
+      .describe("Text to add to the END of the section instead of replacing"),
+  }),
+  add_document_section: z.object({
+    document: z.string().min(1).describe("Document id or title fragment"),
+    heading: z.string().min(1),
+    content: z.string().optional(),
+    after: z.string().optional().describe("Insert after this existing section (fuzzy); default: at the end"),
+  }),
+  remove_document_section: z.object({
+    document: z.string().min(1).describe("Document id or title fragment"),
+    section: z.string().min(1).describe("Section heading (fuzzy) or number"),
+  }),
+  revert_document: z.object({
+    document: z.string().min(1).describe("Document id or title fragment"),
+  }),
+  update_document: z.object({
+    document: z.string().min(1).describe("Document id or title fragment"),
+    title: z.string().optional(),
+    project: z.string().optional().describe('Move to this project (fuzzy); "none" unfiles it'),
+  }),
+  delete_document: z.object({
+    document: z.string().min(1).describe("Document id or title fragment"),
+  }),
   get_agenda: z.object({
     date: z
       .string()
@@ -129,9 +201,9 @@ export type ToolName = keyof typeof toolSchemas;
 
 const toolDescriptions: Record<ToolName, string> = {
   create_task:
-    "Log a task the user needs to do. Call this the moment a to-do, deadline, or obligation comes up in conversation — don't wait to be asked. Supports notes and reminder times.",
+    "Log a task the user needs to do. Call this the moment a to-do, deadline, or obligation comes up in conversation — don't wait to be asked. Supports notes, reminder times, stages (multi-step deliverables), and recurrence (e.g. rent monthly).",
   update_task:
-    "Change a task: status, due date, title, notes, priority, or MOVE IT TO ANOTHER PROJECT (project: name, or \"none\" to unfile it). Use when the user postpones ('I'll do it Friday'), starts, blocks, edits, or refiles something.",
+    "Change a task: status, due date, title, notes, priority, MOVE IT TO ANOTHER PROJECT (project: name, or \"none\"), define stages, mark a stage done (stage_done: 'outline'), or set/clear recurrence. Use when the user postpones, starts, advances a stage, or edits anything.",
   complete_task:
     "Mark a task done. Use when the user says they did it ('yeah I sent it this morning').",
   create_project:
@@ -145,6 +217,19 @@ const toolDescriptions: Record<ToolName, string> = {
   update_event:
     "Edit an EXISTING event: retitle, move its time, set location, add notes (e.g. an East-Coast time conversion), or set reminder times. When the user says 'add X to that meeting', use THIS — don't create a task about it.",
   delete_event: "Remove an event that was cancelled or logged by mistake.",
+  create_document:
+    "Start a real living document under a project — duty statements, budgets, drafts. Give it outline sections up front when the shape is known.",
+  list_documents: "All documents with their project, section headings, and last-edited time.",
+  read_document:
+    "Read a document. For long documents you get headings only — read one section at a time (section: heading fragment or number). Summarize aloud; don't recite long text verbatim unless asked.",
+  edit_document_section:
+    "Rewrite one section of a document (content replaces the section's text; append adds to it). The previous state is snapshotted — edits are always revertible. Confirm briefly what changed.",
+  add_document_section: "Add a new section to a document.",
+  remove_document_section: "Remove a section (snapshotted first — revertible).",
+  revert_document:
+    "Undo the last change to a document, restoring the previous version. Use when the user says 'go back to how it was'.",
+  update_document: "Rename a document or move it to another project.",
+  delete_document: "Delete a document entirely. Confirm with the user first.",
   get_agenda: "Tasks due and events happening on a given day.",
   get_overdue: "All open tasks past their due date.",
   get_tasks: "List the user's tasks, optionally filtered by status or project.",

@@ -3,7 +3,7 @@
 // turns "hello" into "did you send the insurance form?".
 import { and, count, desc, eq, gte, inArray, isNotNull, lt, ne, or } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { events, memories, projects, tasks } from "@/lib/db/schema";
+import { documents, events, memories, projects, tasks } from "@/lib/db/schema";
 import { dayRangeInTz } from "@/lib/time";
 import { refreshProcrastinationScores } from "./procrastination";
 import { getPendingSuggestions } from "./suggestions";
@@ -202,6 +202,22 @@ export async function buildBriefing(
     .orderBy(events.startsAt)
     .limit(20);
 
+  // Documents: the model must know what exists to find "the duty statement",
+  // and stale ones feed the quiet nudge.
+  const docRows = await db
+    .select({ doc: documents, projectName: projects.name })
+    .from(documents)
+    .leftJoin(projects, eq(documents.projectId, projects.id))
+    .where(eq(documents.userId, userId))
+    .orderBy(desc(documents.updatedAt))
+    .limit(10);
+  const STALE_DOC_DAYS = 4;
+  const staleDocs = docRows.filter(
+    ({ doc }) =>
+      doc.sections.some((s) => s.content.trim()) &&
+      now.getTime() - doc.updatedAt.getTime() > STALE_DOC_DAYS * 86400000
+  );
+
   // events per project this week, for the PROJECTS section counts
   const eventCounts = await db
     .select({ projectId: events.projectId, n: count() })
@@ -352,11 +368,30 @@ export async function buildBriefing(
   }
   if (openTasks.length) {
     lines.push("", "ALL OPEN TASKS (update these — never create a duplicate):");
-    for (const { task: t, projectName } of openTasks)
+    for (const { task: t, projectName } of openTasks) {
+      const stages = t.stages ?? [];
+      const stageInfo = stages.length
+        ? ` · stage ${stages.filter((s) => s.done).length}/${stages.length}${
+            stages.find((s) => !s.done) ? ` (next: ${stages.find((s) => !s.done)!.name})` : ""
+          }`
+        : "";
       lines.push(
-        `- [${t.id}] "${t.title}" · ${t.status}${t.dueAt ? ` · due ${fmt(t.dueAt, timezone)}` : ""}${t.postponedCount ? ` · pushed ${t.postponedCount}×` : ""}${projectName ? ` · project "${projectName}"` : ""}`
+        `- [${t.id}] "${t.title}" · ${t.status}${t.dueAt ? ` · due ${fmt(t.dueAt, timezone)}` : ""}${t.postponedCount ? ` · pushed ${t.postponedCount}×` : ""}${projectName ? ` · project "${projectName}"` : ""}${stageInfo}${t.recurrence ? ` · repeats ${t.recurrence}` : ""}`
+      );
+    }
+  }
+  if (docRows.length) {
+    lines.push("", "DOCUMENTS (living documents — read/edit by section with the document tools):");
+    for (const { doc, projectName } of docRows)
+      lines.push(
+        `- [${doc.id}] "${doc.title}"${projectName ? ` · project "${projectName}"` : ""} · sections: ${doc.sections.map((s) => s.heading).join(", ") || "(empty)"} · last edited ${fmt(doc.updatedAt, timezone)}`
       );
   }
+  if (staleDocs.length)
+    lines.push(
+      "Documents not moving (mention ONE conversationally if it fits — 'want to work on it?'): " +
+        staleDocs.map(({ doc }) => `"${doc.title}" (last edited ${fmt(doc.updatedAt, timezone)})`).join(", ")
+    );
   if (upcomingEvents.length) {
     lines.push("", "UPCOMING EVENTS (next 7 days — already logged, don't re-create):");
     for (const { event: e, projectName } of upcomingEvents)

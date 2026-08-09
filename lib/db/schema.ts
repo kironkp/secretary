@@ -178,6 +178,12 @@ export const tasks = pgTable("tasks", {
   // Reminder times as ISO timestamps. No push delivery yet — surfaced in the
   // briefing and the dashboard (supersedes the never-used remindAt column).
   reminders: jsonb("reminders").$type<string[]>().notNull().default([]),
+  // Multi-step work shows its stages: ordered checklist, e.g. outline →
+  // draft → review → submit. Empty = plain single-step task.
+  stages: jsonb("stages").$type<{ name: string; done: boolean }[]>().notNull().default([]),
+  // 'daily' | 'weekly' | 'monthly' | 'yearly' — completing the task spawns
+  // the next occurrence (lib/secretary/recurrence.ts). Null = one-shot.
+  recurrence: text("recurrence"),
   postponedCount: integer("postponed_count").notNull().default(0),
   lastNudgedAt: timestamp("last_nudged_at", { withTimezone: true }),
   procrastinationScore: real("procrastination_score").notNull().default(0),
@@ -241,6 +247,46 @@ export const layoutSpecs = pgTable("layout_specs", {
   spec: jsonb("spec").notNull(),
   pinned: jsonb("pinned").$type<string[]>().notNull().default([]),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// ---------------------------------------------------------------------------
+// Documents: real living documents that belong to projects. Sections are the
+// unit of voice work (read/edit one section, never ship a whole doc through a
+// realtime session); every mutation snapshots the prior state to
+// document_versions so nothing said on a call can permanently destroy writing.
+// ---------------------------------------------------------------------------
+
+export type DocSection = { heading: string; content: string };
+
+export const documents = pgTable("documents", {
+  id: text("id").primaryKey().$defaultFn(uuid),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  projectId: text("project_id").references(() => projects.id, { onDelete: "set null" }),
+  title: text("title").notNull(),
+  sections: jsonb("sections").$type<DocSection[]>().notNull().default([]),
+  source: itemSource("source").notNull().default("typed"),
+  conversationId: text("conversation_id").references(() => conversations.id, {
+    onDelete: "set null",
+  }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const documentVersions = pgTable("document_versions", {
+  id: text("id").primaryKey().$defaultFn(uuid),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  documentId: text("document_id")
+    .notNull()
+    .references(() => documents.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  sections: jsonb("sections").$type<DocSection[]>().notNull().default([]),
+  // what edit replaced this state, e.g. 'rewrote "Primary responsibilities"'
+  note: text("note"),
+  savedAt: timestamp("saved_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 export const usage = pgTable("usage", {

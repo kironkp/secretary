@@ -4,6 +4,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { checkins, projects, tasks } from "@/lib/db/schema";
 import { isErrorResponse, parseBody, requireSession } from "@/lib/api";
+import { spawnNextOccurrence } from "@/lib/secretary/recurrence";
 
 /** Full detail for the task dialog: every tool-writable field + history. */
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -40,6 +41,7 @@ const bodySchema = z.object({
   notes: z.string().nullable().optional(),
   dueAt: z.string().datetime({ offset: true }).nullable().optional(),
   priority: z.number().int().min(0).max(3).optional(),
+  stages: z.array(z.object({ name: z.string().min(1), done: z.boolean() })).optional(),
 });
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -66,6 +68,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (parsed.title) updates.title = parsed.title;
   if (parsed.notes !== undefined) updates.notes = parsed.notes;
   if (parsed.priority !== undefined) updates.priority = parsed.priority;
+  if (parsed.stages !== undefined) updates.stages = parsed.stages;
   if (parsed.dueAt !== undefined) {
     const newDue = parsed.dueAt ? new Date(parsed.dueAt) : null;
     if (newDue && existing.dueAt && newDue.getTime() > existing.dueAt.getTime()) {
@@ -87,6 +90,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       type: "user_update",
       note: "Marked done from dashboard",
     });
+    if (existing.status !== "done") await spawnNextOccurrence(updated);
   }
 
   return NextResponse.json({ task: updated });

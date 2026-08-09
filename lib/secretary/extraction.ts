@@ -187,6 +187,12 @@ export async function applyExtraction(
       updates.status = "done";
       updates.completedAt = new Date();
       note = "Marked done (detected in conversation)";
+      if (target.status !== "done") {
+        const { spawnNextOccurrence } = await import("./recurrence");
+        // spawn after the update below would be cleaner, but the helper only
+        // needs the row's own fields — apply the status locally
+        await spawnNextOccurrence({ ...target, status: "done" });
+      }
     } else if (s.signal === "dropped") {
       updates.status = "dropped";
       note = "Dropped (detected in conversation)";
