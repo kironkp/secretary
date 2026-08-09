@@ -16,6 +16,10 @@ const suggestionSchema = z.object({
       title: z.string(),
       reason: z.string().describe("One short sentence: why this is being suggested"),
       due_at: z.string().nullable().describe("ISO 8601 if there is a natural deadline"),
+      project: z
+        .string()
+        .nullable()
+        .describe("EXACT name of the existing project this belongs to, or null"),
     })
   ),
 });
@@ -25,7 +29,7 @@ const SUGGESTION_PROMPT = `You are the predictive layer of a personal secretary.
 - implied prerequisites (booked a flight → check passport validity, arrange airport transfer)
 - seasonal/annual obligations (taxes, renewals, birthdays present in the facts)
 
-Rules: only suggest things with a concrete basis in the data — never generic advice ("exercise more"). Nothing that overlaps an existing task. Quality over quantity; an empty list is the right answer most days.`;
+Rules: only suggest things with a concrete basis in the data — never generic advice ("exercise more"). Nothing that overlaps an existing task. Every suggestion that belongs to an ongoing workstream MUST carry that project's EXACT name from the task list (a prerequisite for a patent meeting belongs to the patent project); use null only for genuinely standalone life admin. Quality over quantity; an empty list is the right answer most days.`;
 
 const MIN_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
@@ -93,19 +97,7 @@ export async function generateSuggestions(userId: string, timezone: string): Pro
       },
     });
     const { suggestions } = suggestionSchema.parse(JSON.parse(response.output_text || "{}"));
-
-    for (const s of suggestions.slice(0, 3)) {
-      if (findDuplicate({ title: s.title }, allTasks)) continue;
-      const dueAt = s.due_at ? new Date(s.due_at) : null;
-      await db.insert(tasks).values({
-        userId,
-        title: s.title,
-        notes: `Suggested: ${s.reason}`,
-        dueAt: dueAt && !Number.isNaN(dueAt.getTime()) ? dueAt : undefined,
-        status: "inbox",
-        source: "suggested",
-      });
-    }
+    await insertSuggestions(userId, suggestions.slice(0, 3), allTasks);
 
     await db.insert(usage).values({
       userId,
@@ -117,6 +109,39 @@ export async function generateSuggestions(userId: string, timezone: string): Pro
   } catch (e) {
     console.error("suggestion pass failed:", e instanceof Error ? e.message : e);
   }
+}
+
+/**
+ * Insert suggestion rows, filed into their (existing) projects via the same
+ * fuzzy resolution tasks use — accepted suggestions must never land Unfiled
+ * when they clearly belong to a workstream. Exported for tests.
+ */
+export async function insertSuggestions(
+  userId: string,
+  list: { title: string; reason: string; due_at: string | null; project: string | null }[],
+  existingTasks: { title: string; dueAt: Date | null }[]
+): Promise<number> {
+  const { resolveProject } = await import("./tools");
+  let inserted = 0;
+  for (const s of list) {
+    if (findDuplicate({ title: s.title }, existingTasks)) continue;
+    const dueAt = s.due_at ? new Date(s.due_at) : null;
+    // never CREATE a project from a guess — file only into existing ones
+    const { project } = s.project
+      ? await resolveProject(userId, s.project, { create: false })
+      : { project: null };
+    await db.insert(tasks).values({
+      userId,
+      title: s.title,
+      notes: `Suggested: ${s.reason}`,
+      projectId: project?.id,
+      dueAt: dueAt && !Number.isNaN(dueAt.getTime()) ? dueAt : undefined,
+      status: "inbox",
+      source: "suggested",
+    });
+    inserted++;
+  }
+  return inserted;
 }
 
 /** Pending suggestions (the holding pen) for the dashboard zone + briefing. */
