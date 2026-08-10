@@ -15,8 +15,14 @@ import {
   type DocSection,
 } from "@/lib/db/schema";
 import { dayRangeInTz } from "@/lib/time";
+import { findDuplicate, findDuplicateEvent } from "./dedupe";
 import { spawnNextOccurrence } from "./recurrence";
 import { toolSchemas, type ToolName } from "./tool-schemas";
+
+/** Live create-guard threshold: only near-identical titles count as dupes —
+ *  the realtime model sometimes re-issues a create after a barge-in, and that
+ *  must be idempotent, but "Email Ash" vs "Call Ash" must both go through. */
+const CREATE_GUARD_SIMILARITY = 0.85;
 
 export type ToolContext = {
   userId: string;
@@ -265,6 +271,28 @@ type Args = Record<string, unknown>;
 const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolOutcome>> = {
   async create_task(ctx, args) {
     const a = toolSchemas.create_task.parse(args);
+    const dueAtGuard = parseWhen(a.due_at) ?? null;
+    // Idempotency guard: a re-issued create (double tool call, reconnect)
+    // must return the existing task, never insert a twin.
+    const openNow = await db
+      .select()
+      .from(tasks)
+      .where(and(eq(tasks.userId, ctx.userId), inArray(tasks.status, [...OPEN_STATUSES])));
+    const twin = findDuplicate(
+      { title: a.title, dueAt: dueAtGuard },
+      openNow,
+      CREATE_GUARD_SIMILARITY
+    );
+    if (twin) {
+      return {
+        result: {
+          task_id: twin.id,
+          title: twin.title,
+          already_existed: true,
+          note: "An open task with this title already exists — nothing was created. Use update_task to change it.",
+        },
+      };
+    }
     const { project, matched } = await resolveProject(ctx.userId, a.project);
     const dueAt = parseWhen(a.due_at);
     const reminders = parseReminders(a.reminders) ?? [];
@@ -582,6 +610,30 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
 
   async create_event(ctx, args) {
     const a = toolSchemas.create_event.parse(args);
+    const startsAtGuard = parseWhen(a.starts_at)!;
+    // Same idempotency guard as create_task.
+    const upcomingNow = await db
+      .select()
+      .from(events)
+      .where(
+        and(eq(events.userId, ctx.userId), gte(events.startsAt, new Date(Date.now() - 86400000)))
+      );
+    const twin = findDuplicateEvent(
+      { title: a.title, startsAt: startsAtGuard },
+      upcomingNow,
+      CREATE_GUARD_SIMILARITY
+    );
+    if (twin) {
+      return {
+        result: {
+          event_id: twin.id,
+          title: twin.title,
+          starts_at: twin.startsAt,
+          already_existed: true,
+          note: "This event already exists — nothing was created. Use update_event to change it.",
+        },
+      };
+    }
     const reminders = parseReminders(a.reminders) ?? [];
     const { project, matched } = await resolveProject(ctx.userId, a.project);
     const [event] = await db

@@ -22,6 +22,10 @@ export const extractionSchema = z.object({
       title: z.string(),
       notes: z.string().nullable(),
       due_at: z.string().nullable().describe("ISO 8601 in the user's timezone, if a deadline was stated"),
+      project: z
+        .string()
+        .nullable()
+        .describe("EXACT name of the existing project this belongs to, or null"),
     })
   ),
   events: z.array(
@@ -30,6 +34,10 @@ export const extractionSchema = z.object({
       starts_at: z.string().describe("ISO 8601"),
       ends_at: z.string().nullable(),
       location: z.string().nullable(),
+      project: z
+        .string()
+        .nullable()
+        .describe("EXACT name of the existing project this belongs to, or null"),
     })
   ),
   status_updates: z.array(
@@ -53,7 +61,7 @@ Return:
 - status_updates: signals about EXISTING tasks — "yeah I sent it" (done), "I'll do it Friday" (postponed + new_due_at), "started on it" (started), "forget that" (dropped). Refer to the task by its title from the KNOWN OPEN TASKS list when possible.
 - facts: durable personal facts (names, preferences, constraints) — not one-off logistics.
 
-Anything already in KNOWN OPEN TASKS or KNOWN EVENTS must NOT reappear in tasks/events (report status changes about them via status_updates instead). Dates: resolve relative expressions against the conversation date given. If no timezone-certain time, use 17:00 local. Empty arrays are fine — most conversations produce nothing.`;
+Anything already in KNOWN OPEN TASKS or KNOWN EVENTS must NOT reappear in tasks/events (report status changes about them via status_updates instead). Every task/event that belongs to an ongoing workstream carries that project's EXACT name from the PROJECTS list; null only for standalone life admin. Dates: resolve relative expressions against the conversation date given. If no timezone-certain time, use 17:00 local. Empty arrays are fine — most conversations produce nothing.`;
 
 const OPEN_STATUSES = ["inbox", "todo", "in_progress", "blocked"] as const;
 
@@ -64,6 +72,7 @@ export async function extractFromTranscript(opts: {
   conversationDate: Date;
   knownTasks: { title: string; dueAt: Date | null }[];
   knownEvents: { title: string; startsAt: Date }[];
+  projectNames: string[];
 }): Promise<{ result: ExtractionResult; inputTokens: number; outputTokens: number }> {
   const fmt = (d: Date) =>
     new Intl.DateTimeFormat("en-US", {
@@ -72,8 +81,13 @@ export async function extractFromTranscript(opts: {
       timeStyle: "short",
     }).format(d);
 
+  const projectLines =
+    opts.projectNames.length > 0
+      ? ["", "PROJECTS (use these EXACT names):", ...opts.projectNames.map((n) => `- ${n}`)]
+      : [];
   const context = [
     `Conversation date: ${fmt(opts.conversationDate)} (timezone ${opts.timezone})`,
+    ...projectLines,
     "",
     "KNOWN OPEN TASKS:",
     ...opts.knownTasks.map((t) => `- ${t.title}${t.dueAt ? ` (due ${fmt(t.dueAt)})` : ""}`),
@@ -145,6 +159,14 @@ export async function applyExtraction(
   let updatedTasks = 0;
   let savedFacts = 0;
 
+  // File into EXISTING projects only — an extraction guess never creates one.
+  const { resolveProject } = await import("./tools");
+  const projectIdFor = async (name: string | null) => {
+    if (!name) return undefined;
+    const { project } = await resolveProject(userId, name, { create: false });
+    return project?.id;
+  };
+
   for (const t of result.tasks) {
     const dueAt = parseIso(t.due_at);
     // dedupe against every recent task (done ones included — "book flights"
@@ -154,6 +176,7 @@ export async function applyExtraction(
       userId,
       title: t.title,
       notes: t.notes ?? undefined,
+      projectId: await projectIdFor(t.project),
       dueAt: dueAt ?? undefined,
       status: "todo",
       source: "inferred",
@@ -169,6 +192,7 @@ export async function applyExtraction(
     await db.insert(events).values({
       userId,
       title: e.title,
+      projectId: await projectIdFor(e.project),
       startsAt,
       endsAt: parseIso(e.ends_at) ?? undefined,
       location: e.location ?? undefined,
@@ -275,11 +299,18 @@ export async function runExtraction(
       .select({ title: events.title, startsAt: events.startsAt })
       .from(events)
       .where(and(eq(events.userId, userId), gte(events.startsAt, new Date(Date.now() - 86400000))));
+    const { projects: projectsTable } = await import("@/lib/db/schema");
+    const { ne: neOp } = await import("drizzle-orm");
+    const projectRows = await db
+      .select({ name: projectsTable.name })
+      .from(projectsTable)
+      .where(and(eq(projectsTable.userId, userId), neOp(projectsTable.status, "archived")));
 
     const markerTime = rows[rows.length - 1].createdAt;
     const { result, inputTokens, outputTokens } = await extractFromTranscript({
       transcript,
       timezone,
+      projectNames: projectRows.map((p) => p.name),
       conversationDate: conv.startedAt,
       knownTasks,
       knownEvents,

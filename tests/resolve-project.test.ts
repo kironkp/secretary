@@ -1,7 +1,7 @@
 // "Find It" must never spawn a duplicate next to "Find It app" — fuzzy
 // project resolution, task moves, and merge, against the real database.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { projects, tasks, user } from "@/lib/db/schema";
 import { executeTool, resolveProject } from "@/lib/secretary/tools";
@@ -69,6 +69,43 @@ describe("resolveProject", () => {
     expect(r.project).toBeNull();
     const rb = await resolveProject(B.id, "secret plan", { create: false });
     expect(rb.project?.name).toBe("B's Secret Plan");
+  });
+});
+
+describe("create idempotency guard (the double-tool-call bug)", () => {
+  it("an identical re-issued create_task returns the existing task, no twin", async () => {
+    const first = await executeTool(ctx, "create_task", {
+      title: "Run reference patents through Art Bot",
+    });
+    const second = await executeTool(ctx, "create_task", {
+      title: "Run reference patents through Art Bot",
+    });
+    expect((second.result as { already_existed: boolean }).already_existed).toBe(true);
+    expect((second.result as { task_id: string }).task_id).toBe(
+      (first.result as { task_id: string }).task_id
+    );
+    expect(second.toast).toBeUndefined(); // nothing happened, no toast
+    const rows = await db
+      .select()
+      .from(tasks)
+      .where(and(eq(tasks.userId, A.id), eq(tasks.title, "Run reference patents through Art Bot")));
+    expect(rows).toHaveLength(1);
+  });
+
+  it("similar-but-distinct tasks still both go through", async () => {
+    await executeTool(ctx, "create_task", { title: "Email Ash about the patent" });
+    const second = await executeTool(ctx, "create_task", { title: "Call Ash about the patent" });
+    expect((second.result as { already_existed?: boolean }).already_existed).toBeUndefined();
+  });
+
+  it("an identical re-issued create_event returns the existing event", async () => {
+    const at = new Date(Date.now() + 3 * 86400000).toISOString();
+    const first = await executeTool(ctx, "create_event", { title: "Sync with Jazz", starts_at: at });
+    const second = await executeTool(ctx, "create_event", { title: "Sync with Jazz", starts_at: at });
+    expect((second.result as { already_existed: boolean }).already_existed).toBe(true);
+    expect((second.result as { event_id: string }).event_id).toBe(
+      (first.result as { event_id: string }).event_id
+    );
   });
 });
 

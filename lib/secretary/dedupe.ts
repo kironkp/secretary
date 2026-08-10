@@ -40,19 +40,22 @@ function datesMatch(a: Date | null | undefined, b: Date | null | undefined): boo
 export type DedupeCandidate = { title: string; dueAt?: Date | null };
 
 /**
- * Is `candidate` already represented in `existing`? Title similarity ≥ 0.6 and
- * (if both sides have one) a due date within ~a day. Returns the matched row
- * so status signals can target it.
+ * Is `candidate` already represented in `existing`? Title similarity ≥
+ * `minScore` (default 0.6 — extraction's net) and (if both sides have one) a
+ * due date within ~a day. Returns the matched row so callers can target it.
+ * Live create-guards pass a stricter minScore so genuinely distinct-but-
+ * similar tasks aren't blocked.
  */
 export function findDuplicate<T extends DedupeCandidate>(
   candidate: DedupeCandidate,
-  existing: T[]
+  existing: T[],
+  minScore: number = SIMILAR
 ): T | null {
   let best: T | null = null;
   let bestScore = 0;
   for (const row of existing) {
     const score = titleSimilarity(candidate.title, row.title);
-    if (score >= SIMILAR && datesMatch(candidate.dueAt, row.dueAt) && score > bestScore) {
+    if (score >= minScore && datesMatch(candidate.dueAt, row.dueAt) && score > bestScore) {
       best = row;
       bestScore = score;
     }
@@ -65,14 +68,15 @@ export type EventCandidate = { title: string; startsAt: Date };
 /** Events dedupe on similar title + start within the same-day tolerance. */
 export function findDuplicateEvent<T extends EventCandidate>(
   candidate: EventCandidate,
-  existing: T[]
+  existing: T[],
+  minScore: number = SIMILAR
 ): T | null {
   let best: T | null = null;
   let bestScore = 0;
   for (const row of existing) {
     const score = titleSimilarity(candidate.title, row.title);
     if (
-      score >= SIMILAR &&
+      score >= minScore &&
       Math.abs(candidate.startsAt.getTime() - row.startsAt.getTime()) <= DATE_TOLERANCE_MS &&
       score > bestScore
     ) {

@@ -130,12 +130,18 @@ describe("applyExtraction (real database)", () => {
     const result: ExtractionResult = {
       tasks: [
         // duplicate of the existing row — must be dropped
-        { title: "renew my passport", notes: null, due_at: "2026-09-02T10:00:00Z" },
+        { title: "renew my passport", notes: null, due_at: "2026-09-02T10:00:00Z", project: null },
         // genuinely new — must be inserted with source='inferred'
-        { title: "Book dentist appointment", notes: "molar hurts", due_at: null },
+        { title: "Book dentist appointment", notes: "molar hurts", due_at: null, project: null },
       ],
       events: [
-        { title: "Lunch with Sam", starts_at: LUNCH_AT.toISOString(), ends_at: null, location: null },
+        {
+          title: "Lunch with Sam",
+          starts_at: LUNCH_AT.toISOString(),
+          ends_at: null,
+          location: null,
+          project: null,
+        },
       ],
       status_updates: [
         { task: "insurance form", signal: "done", new_due_at: null, reason: null },
@@ -171,19 +177,40 @@ describe("applyExtraction (real database)", () => {
 
   it("running the same extraction again changes nothing (idempotent via dedupe)", async () => {
     const again = await applyExtraction(U.id, convId, {
-      tasks: [{ title: "book a dentist appointment", notes: null, due_at: null }],
+      tasks: [{ title: "book a dentist appointment", notes: null, due_at: null, project: null }],
       events: [
         {
           title: "lunch w/ Sam",
           starts_at: LUNCH_AT_LATER.toISOString(),
           ends_at: null,
           location: null,
+          project: null,
         },
       ],
       status_updates: [],
       facts: ["The user's dentist is Dr. Patel"],
     });
     expect(again).toEqual({ createdTasks: 0, createdEvents: 0, updatedTasks: 0, savedFacts: 0 });
+  });
+
+  it("inferred tasks file into EXISTING projects only (fuzzy, never creating)", async () => {
+    const { projects } = await import("@/lib/db/schema");
+    await db.insert(projects).values({ userId: U.id, name: "Mexico trip" });
+    const summary = await applyExtraction(U.id, convId, {
+      tasks: [
+        { title: "Buy travel insurance", notes: null, due_at: null, project: "mexico" },
+        { title: "Random errand", notes: null, due_at: null, project: "Nonexistent Project" },
+      ],
+      events: [],
+      status_updates: [],
+      facts: [],
+    });
+    expect(summary.createdTasks).toBe(2);
+    const rows = await db.select().from(tasks).where(eq(tasks.userId, U.id));
+    expect(rows.find((t) => t.title === "Buy travel insurance")?.projectId).toBeTruthy();
+    expect(rows.find((t) => t.title === "Random errand")?.projectId).toBeNull();
+    const projRows = await db.select().from(projects).where(eq(projects.userId, U.id));
+    expect(projRows.map((p) => p.name)).toEqual(["Mexico trip"]); // no phantom project
   });
 
   it("postpone signal bumps postponedCount and moves the due date", async () => {
