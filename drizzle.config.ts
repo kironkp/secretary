@@ -8,6 +8,9 @@ export default defineConfig({
   out: "./drizzle",
   dialect: "postgresql",
   dbCredentials: {
-    url: process.env.DATABASE_URL!,
+    // On Heroku (release phase) the PG proxy needs SSL without CA verification.
+    url: process.env.ON_HEROKU
+      ? `${process.env.DATABASE_URL!}?sslmode=no-verify`
+      : process.env.DATABASE_URL!,
   },
 });
