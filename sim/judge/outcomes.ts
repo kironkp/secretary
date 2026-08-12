@@ -8,11 +8,13 @@ import type { Row, StateDiff } from "../snapshot";
 const DAY = 86400000;
 const TOLERANCE = 36 * 60 * 60 * 1000; // matches extraction's DATE_TOLERANCE_MS
 
+/** Fuzzy match; `b` may hold alternatives ("grocer|food") — any may match. */
 function like(a: string, b: string): boolean {
-  return (
-    a.toLowerCase().includes(b.toLowerCase()) ||
-    b.toLowerCase().includes(a.toLowerCase()) ||
-    titleSimilarity(a, b) >= 0.6
+  return b.split("|").some(
+    (alt) =>
+      a.toLowerCase().includes(alt.toLowerCase()) ||
+      alt.toLowerCase().includes(a.toLowerCase()) ||
+      titleSimilarity(a, alt) >= 0.6
   );
 }
 
