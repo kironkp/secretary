@@ -19,7 +19,7 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { FileText } from "lucide-react";
+import { ChevronRight, FileText } from "lucide-react";
 import {
   CheckButton,
   ProvenanceLink,
@@ -865,6 +865,7 @@ export function SuggestedZone({ suggestions }: { suggestions: TaskRow[] }) {
 // ---------------------------------------------------------------------------
 
 type ProjectCard = {
+  id: string | null; // null for the synthetic "Unfiled" card
   name: string;
   color: string | null;
   open: TaskRow[];
@@ -878,10 +879,11 @@ type ProjectCard = {
 export function buildProjects(tasks: TaskRow[], events: EventRow[] = []): ProjectCard[] {
   const now = Date.now();
   const map = new Map<string, ProjectCard>();
-  const ensure = (key: string, color: string | null) => {
+  const ensure = (key: string, color: string | null, id: string | null = null) => {
     let p = map.get(key);
     if (!p) {
       p = {
+        id,
         name: key,
         color,
         open: [],
@@ -896,7 +898,8 @@ export function buildProjects(tasks: TaskRow[], events: EventRow[] = []): Projec
     return p;
   };
   for (const t of tasks) {
-    const p = ensure(t.projectName ?? "Unfiled", t.projectColor);
+    const p = ensure(t.projectName ?? "Unfiled", t.projectColor, t.projectId);
+    if (!p.id && t.projectId) p.id = t.projectId;
     if (OPEN.has(t.status)) {
       p.open.push(t);
       if (t.dueAt) {
@@ -916,7 +919,8 @@ export function buildProjects(tasks: TaskRow[], events: EventRow[] = []): Projec
   }
   // events are peers: they set the project's next date and appear on its card
   for (const e of upcomingEventsOf(events)) {
-    const p = ensure(e.projectName ?? "Unfiled", null);
+    const p = ensure(e.projectName ?? "Unfiled", null, e.projectId);
+    if (!p.id && e.projectId) p.id = e.projectId;
     if (!p.nextEvent || e.startsAt < p.nextEvent.startsAt) p.nextEvent = e;
     const d = daysUntil(e.startsAt, now);
     if (p.earliestDays === null || d < p.earliestDays) p.earliestDays = d;
@@ -962,13 +966,31 @@ export function ProjectGrid({
           >
             <div className="flex items-start gap-2.5">
               <div className="min-w-0 flex-1">
-                <h3 className="flex items-center gap-2 text-[17px] font-semibold tracking-tight">
-                  <span
-                    className="h-2 w-2 flex-none rounded-full"
-                    style={{ background: p.color ?? "var(--color-accent)" }}
-                  />
-                  {p.name}
-                </h3>
+                {p.id ? (
+                  <Link
+                    href={`/projects/${p.id}`}
+                    className="group/title flex items-center gap-2 text-[17px] font-semibold tracking-tight hover:text-accent"
+                  >
+                    <span
+                      className="h-2 w-2 flex-none rounded-full"
+                      style={{ background: p.color ?? "var(--color-accent)" }}
+                    />
+                    {p.name}
+                    <ChevronRight
+                      size={14}
+                      strokeWidth={2}
+                      className="opacity-0 transition-opacity group-hover/title:opacity-70"
+                    />
+                  </Link>
+                ) : (
+                  <h3 className="flex items-center gap-2 text-[17px] font-semibold tracking-tight">
+                    <span
+                      className="h-2 w-2 flex-none rounded-full"
+                      style={{ background: p.color ?? "var(--color-accent)" }}
+                    />
+                    {p.name}
+                  </h3>
+                )}
                 <p className="mt-0.5 text-xs text-faint">
                   {p.open.length} open{p.doneCount ? ` · ${p.doneCount} done` : ""}
                 </p>
@@ -1092,24 +1114,28 @@ export type LoopItem =
  *  project, date-sorted together; undated tasks sink to the group's bottom. */
 export function buildLoopGroups(tasks: TaskRow[], events: EventRow[] = []) {
   const now = Date.now();
-  const map = new Map<string, { items: LoopItem[]; done: TaskRow[] }>();
+  const map = new Map<string, { items: LoopItem[]; done: TaskRow[]; projectId: string | null }>();
   const ensure = (key: string) => {
-    const g = map.get(key) ?? { items: [], done: [] };
+    const g = map.get(key) ?? { items: [], done: [], projectId: null as string | null };
     map.set(key, g);
     return g;
   };
   for (const t of tasks) {
     const g = ensure(t.projectName ?? "Unfiled");
+    if (t.projectId) g.projectId = t.projectId;
     if (OPEN.has(t.status)) g.items.push({ kind: "task", date: t.dueAt, task: t });
     else if (t.status === "done" && now - new Date(t.updatedAt).getTime() < 7 * DAY) g.done.push(t);
   }
   for (const e of upcomingEventsOf(events)) {
-    ensure(e.projectName ?? "Unfiled").items.push({ kind: "event", date: e.startsAt, event: e });
+    const g = ensure(e.projectName ?? "Unfiled");
+    if (e.projectId) g.projectId = e.projectId;
+    g.items.push({ kind: "event", date: e.startsAt, event: e });
   }
   return [...map.entries()]
     .filter(([, g]) => g.items.length + g.done.length > 0)
     .map(([name, g]) => ({
       name,
+      projectId: g.projectId,
       items: g.items.sort((a, b) => (a.date ?? "9999").localeCompare(b.date ?? "9999")),
       done: g.done,
       earliest: g.items.map((i) => i.date).find(Boolean) ?? null,
@@ -1174,7 +1200,16 @@ export function OpenLoopsTable({
             <Fragment key={g.name}>
               <tr className="border-y border-edge bg-surface-2/60">
                 <td colSpan={3} className="px-4 py-2">
-                  <span className="text-[13px] font-bold tracking-tight">{g.name}</span>
+                  {g.projectId ? (
+                    <Link
+                      href={`/projects/${g.projectId}`}
+                      className="text-[13px] font-bold tracking-tight hover:text-accent hover:underline"
+                    >
+                      {g.name}
+                    </Link>
+                  ) : (
+                    <span className="text-[13px] font-bold tracking-tight">{g.name}</span>
+                  )}
                   <span className="ml-2.5 text-xs text-faint">
                     {g.openCount} open
                     {g.eventCount

@@ -20,7 +20,8 @@ const MIN_AGE_MS = 60 * 60 * 1000; // never rearrange more than once an hour
 
 const GENERATOR_PROMPT = `You arrange a personal-assistant dashboard from a fixed component palette. Given the shape of the user's data, return the sections in the order they should appear (top = most important right now). Component meanings: focus_card = "Next up" hero (the single nearest commitment); timeline = 5-week deadline-pressure overview per project (handles undated work too); list = grouped "Open loops" table (the main work surface); kanban = status board; project_grid = per-project cards with progress + next actions. Rules:
 - overdue_callout MUST be first whenever overdue > 0; omit it when overdue = 0.
-- stat_tiles near the top, almost always.
+- THE USER'S STATED PREFERENCE: project_grid and list (Open loops) are their primary working views — keep them at or near the top, in that order, whenever they have content.
+- stat_tiles is secondary — below the working views.
 - focus_card whenever anything dated is upcoming (events7d > 0 or dueToday > 0 or openTasks > 0).
 - timeline whenever openTasks > 0 — deadline pressure is the point of the dashboard.
 - project_grid when projects >= 1.

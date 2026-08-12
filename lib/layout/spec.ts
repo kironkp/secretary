@@ -72,19 +72,21 @@ export type StoredLayout = LayoutSpec & { dataHash: string };
 /** The designed Overview (planning-documents/secretary-target.html): stats →
  *  next-up hero → 5-week pressure timeline → project cards → zones → open
  *  loops. This is what users see before the AI ever rearranges anything. */
+// Kiron's stated preference (2026-08-11): projects and open loops are the
+// views he actually works from — they lead the dashboard.
 export const DEFAULT_SPEC: LayoutSpec = {
   sections: [
     { component: "overdue_callout", title: null },
-    { component: "stat_tiles", title: null },
-    // renders nothing unless a reminder falls in the next 48h — safe to keep high
+    { component: "project_grid", title: null },
+    { component: "list", title: null },
+    { component: "suggested_zone", title: null },
+    // renders nothing unless a reminder falls in the next 48h
     { component: "coming_up", title: null },
     { component: "focus_card", title: null },
-    { component: "timeline", title: null },
-    { component: "project_grid", title: null },
     { component: "documents", title: null },
-    { component: "suggested_zone", title: null },
+    { component: "stat_tiles", title: null },
+    { component: "timeline", title: null },
     { component: "procrastination_zone", title: null },
-    { component: "list", title: null },
   ],
 };
 

@@ -20,6 +20,7 @@ export type TaskRow = {
   reminders: string[];
   stages: { name: string; done: boolean }[];
   recurrence: string | null;
+  projectId: string | null;
   projectName: string | null;
   projectColor: string | null;
   conversationId: string | null;
@@ -35,6 +36,7 @@ export type EventRow = {
   location: string | null;
   notes: string | null;
   reminders: string[];
+  projectId: string | null;
   projectName: string | null;
   source: string;
   createdAt: string;

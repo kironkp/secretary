@@ -60,6 +60,13 @@ export async function generateSuggestions(userId: string, timezone: string): Pro
       .orderBy(events.startsAt)
       .limit(30);
     const facts = await db.select().from(memories).where(eq(memories.userId, userId)).limit(50);
+    const { projects } = await import("@/lib/db/schema");
+    const { ne } = await import("drizzle-orm");
+    const projectRows = await db
+      .select()
+      .from(projects)
+      .where(and(eq(projects.userId, userId), ne(projects.status, "archived")));
+    const projectName = new Map(projectRows.map((p) => [p.id, p.name]));
 
     // Not enough signal to predict from — don't waste a model call.
     if (allTasks.length < 3 && upcoming.length === 0) return;
@@ -70,10 +77,16 @@ export async function generateSuggestions(userId: string, timezone: string): Pro
     const context = [
       `Today: ${fmt(now)} (${timezone})`,
       "",
-      "TASKS (newest first, with status):",
+      // the model can only file suggestions correctly if it can SEE which
+      // project each existing task belongs to (learned from the DTC-budget
+      // suggestion landing Unfiled)
+      "PROJECTS (exact names):",
+      ...projectRows.map((p) => `- "${p.name}"`),
+      "",
+      "TASKS (newest first, with status and project):",
       ...allTasks.map(
         (t) =>
-          `- ${t.title} · ${t.status}${t.dueAt ? ` · due ${fmt(t.dueAt)}` : ""}${t.completedAt ? ` · done ${fmt(t.completedAt)}` : ""}`
+          `- ${t.title} · ${t.status}${t.dueAt ? ` · due ${fmt(t.dueAt)}` : ""}${t.completedAt ? ` · done ${fmt(t.completedAt)}` : ""}${t.projectId && projectName.get(t.projectId) ? ` · project "${projectName.get(t.projectId)}"` : ""}`
       ),
       "",
       "UPCOMING EVENTS:",
