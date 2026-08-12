@@ -106,6 +106,23 @@ localhost origin, so they won't prompt here).
   `TRUSTED_ORIGINS` in `.env.local` for the run and restart the dev server,
   or sign-in POSTs from it will be rejected.
 
+## Deployment (Heroku mirror)
+
+**Local is the source of truth.** The Mac's dev database holds the real data;
+`https://secretary-kiron-606a3b1e1a65.herokuapp.com` is a nightly mirror.
+**Never enter real data on the Heroku URL — the 3:00 AM sync overwrites it.**
+
+- Code: private GitHub repo (`kironkp/secretary`); deploy with
+  `git push heroku main` (Procfile release phase runs `drizzle-kit push`).
+- Nightly sync: `com.secretary.dailysync` (launchd, 3:00 AM) runs
+  `scripts/sync-to-heroku.mjs` — JSON snapshot to `~/secretary-backups/`
+  (14 kept) → transactional local→Heroku mirror → per-table count verify
+  (non-zero exit on mismatch). Log: `~/secretary-backups/sync.log`.
+  Unattended auth token: `~/.config/secretary/heroku.env` (chmod 600).
+- Heroku-side: daily Postgres backups at 2:00 AM LA
+  (`heroku pg:backups -a secretary-kiron`).
+- Manual sync anytime: `node scripts/sync-to-heroku.mjs`.
+
 ## Tests
 
 `npm test` — user-scoping (user A can never read user B's data), extraction
