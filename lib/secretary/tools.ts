@@ -153,6 +153,12 @@ export async function resolveProject(
   opts: { create?: boolean } = {}
 ): Promise<ProjectResolution> {
   if (!name) return { project: null, matched: null };
+  // The model sometimes passes the "no project" sentinel into CREATE paths —
+  // that must mean unfiled, never a project literally named "none".
+  // (Found by the simulation harness: a project called "none" was created.)
+  if (/^(none|null|no project|n\/a|unfiled)$/i.test(name.trim())) {
+    return { project: null, matched: null };
+  }
   const create = opts.create ?? true;
 
   const all = await db

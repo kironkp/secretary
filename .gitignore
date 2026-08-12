@@ -28,3 +28,11 @@ next-env.d.ts
 .vercel
 .pgdata/
 .certs/
+
+# simulation harness
+.pgdata-sim/
+.next-sim/
+sim/reports/
+sim/.instance.json
+sim/.run.lock
+sim/.disabled

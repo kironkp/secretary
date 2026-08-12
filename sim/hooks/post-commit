@@ -1,0 +1,27 @@
+#!/bin/sh
+# Simulation flywheel: fire the smoke fleet in the background after every
+# commit. Never blocks or fails a commit. Disable: touch sim/.disabled,
+# or SIM_DISABLE=1, or delete .git/hooks/post-commit.
+[ -n "$SIM_DISABLE" ] && exit 0
+root="$(git rev-parse --show-toplevel)"
+[ -f "$root/sim/.disabled" ] && exit 0
+gitdir="$(git rev-parse --git-dir)"
+if [ -d "$gitdir/rebase-merge" ] || [ -d "$gitdir/rebase-apply" ] || [ -f "$gitdir/MERGE_HEAD" ]; then
+  exit 0
+fi
+cd "$root" || exit 0
+if ! grep -q '^OPENAI_API_KEY=.' .env.local 2>/dev/null && [ -z "$OPENAI_API_KEY" ]; then
+  echo "sim: skipped (no OPENAI_API_KEY)"
+  exit 0
+fi
+if [ -f sim/.run.lock ]; then
+  pid="$(node -e 'try{console.log(JSON.parse(require("fs").readFileSync("sim/.run.lock","utf8")).pid)}catch{console.log(0)}' 2>/dev/null)"
+  if [ -n "$pid" ] && [ "$pid" != "0" ] && kill -0 "$pid" 2>/dev/null; then
+    echo "sim: run already in progress, skipped"
+    exit 0
+  fi
+fi
+mkdir -p sim/reports
+nohup npx tsx sim/run.ts --fleet smoke --trigger post-commit >> sim/reports/hook.log 2>&1 &
+echo "sim: smoke fleet launched in background → sim/reports/latest.md"
+exit 0

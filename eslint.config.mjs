@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Simulation harness artifacts (generated build output + reports):
+    ".next-sim/**",
+    ".pgdata-sim/**",
+    "sim/reports/**",
   ]),
 ]);
 

@@ -59,6 +59,15 @@ describe("resolveProject", () => {
     expect(r.project?.name).toBe("Mexico trip");
   });
 
+  it('the "none" sentinel never creates a project (found by the sim harness)', async () => {
+    for (const sentinel of ["none", "None", "no project", "null"]) {
+      const r = await resolveProject(A.id, sentinel);
+      expect(r.project).toBeNull();
+    }
+    const all = await db.select().from(projects).where(eq(projects.userId, A.id));
+    expect(all.some((p) => /^(none|null|no project)$/i.test(p.name))).toBe(false);
+  });
+
   it("create:false returns null instead of creating", async () => {
     const r = await resolveProject(A.id, "Nonexistent Thing", { create: false });
     expect(r.project).toBeNull();

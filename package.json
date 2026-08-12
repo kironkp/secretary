@@ -15,7 +15,15 @@
     "dev:public": "node scripts/funnel.mjs up && next dev",
     "funnel:status": "node scripts/funnel.mjs status",
     "funnel:off": "node scripts/funnel.mjs off",
-    "tunnel:cf": "cloudflared tunnel --url http://localhost:3000"
+    "tunnel:cf": "cloudflared tunnel --url http://localhost:3000",
+    "sim:up": "tsx sim/instance/up.ts",
+    "sim:down": "tsx sim/instance/down.ts",
+    "sim:smoke": "tsx sim/run.ts --fleet smoke",
+    "sim:run": "tsx sim/run.ts",
+    "sim:replay": "tsx sim/run.ts --replay",
+    "sim:gen": "tsx sim/generate-personas.ts",
+    "sim:selftest": "tsx sim/run.ts --selftest",
+    "sim:hook:install": "sh sim/hooks/install.sh"
   },
   "dependencies": {
     "@better-auth/passkey": "^1.6.23",
@@ -42,6 +50,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.11",
     "tailwindcss": "^4",
+    "tsx": "^4.23.12",
     "typescript": "^5",
     "vitest": "^4.1.10"
   }

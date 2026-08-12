@@ -47,6 +47,9 @@ const allowedDevOrigins = (process.env.TRUSTED_ORIGINS ?? "")
 
 const nextConfig: NextConfig = {
   devIndicators: false,
+  // The simulation harness runs a second dev server from this checkout —
+  // separate dist dirs keep the two Next processes from fighting over .next.
+  distDir: process.env.NEXT_DIST_DIR ?? ".next",
   ...(allowedDevOrigins.length ? { allowedDevOrigins } : {}),
   async headers() {
     return [{ source: "/(.*)", headers: securityHeaders }];
