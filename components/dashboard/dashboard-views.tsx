@@ -8,6 +8,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { LayoutSpec } from "@/lib/layout/spec";
+import type { LayoutPlan } from "@/lib/layout/plan";
+import { PlanView, type PlanProject } from "./plan-view";
 import { RefreshOnFocus } from "@/components/shell/refresh-on-focus";
 import type { DocRow, EventRow, TaskRow } from "./shared";
 import { AdaptiveView } from "./adaptive-view";
@@ -36,6 +38,10 @@ export function DashboardViews({
   layoutVersion,
   layoutPinned,
   layoutUpdatedAt,
+  plan = null,
+  planVersion = 0,
+  planPinned = [],
+  planProjects = [],
   compact = false,
 }: {
   tasks: TaskRow[];
@@ -46,6 +52,10 @@ export function DashboardViews({
   layoutVersion: number;
   layoutPinned: string[];
   layoutUpdatedAt: string | null;
+  plan?: LayoutPlan | null;
+  planVersion?: number;
+  planPinned?: string[];
+  planProjects?: PlanProject[];
   compact?: boolean;
 }) {
   const router = useRouter();
@@ -134,19 +144,36 @@ export function DashboardViews({
       </div>
 
       {view === "adaptive" ? (
-        <AdaptiveView
-          layout={layout}
-          version={layoutVersion}
-          pinned={layoutPinned}
-          updatedAt={layoutUpdatedAt}
-          tasks={tasks}
-          suggestions={suggestions}
-          events={events}
-          docs={docs}
-          crossing={crossing}
-          onDone={markDone}
-          fresh={fresh}
-        />
+        plan ? (
+          <PlanView
+            plan={plan}
+            version={planVersion}
+            pinned={planPinned}
+            updatedAt={layoutUpdatedAt}
+            projects={planProjects}
+            tasks={tasks}
+            suggestions={suggestions}
+            events={events}
+            docs={docs}
+            crossing={crossing}
+            onDone={markDone}
+            fresh={fresh}
+          />
+        ) : (
+          <AdaptiveView
+            layout={layout}
+            version={layoutVersion}
+            pinned={layoutPinned}
+            updatedAt={layoutUpdatedAt}
+            tasks={tasks}
+            suggestions={suggestions}
+            events={events}
+            docs={docs}
+            crossing={crossing}
+            onDone={markDone}
+            fresh={fresh}
+          />
+        )
       ) : (
         <>
           <OverdueCallout tasks={tasks} />

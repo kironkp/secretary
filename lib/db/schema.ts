@@ -22,6 +22,9 @@ export const user = pgTable("user", {
   // Captured at signup from the browser (Intl.DateTimeFormat().resolvedOptions().timeZone),
   // editable in settings. Every briefing / due-date / overdue computation uses it.
   timezone: text("timezone").notNull().default("UTC"),
+  // SPEC §1 invariant 7: calm mode renders DEFAULT_PLAN unconditionally and
+  // the planner is never called. Toggled in Settings.
+  calmMode: boolean("calm_mode").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -150,6 +153,13 @@ export const projects = pgTable("projects", {
   name: text("name").notNull(),
   color: text("color"),
   status: projectStatus("status").notNull().default("active"),
+  // SPEC §4: a project-level deadline. "committed" = the user said so (set via
+  // chat tools); when null, signals infer one from the earliest dated open
+  // task/event and report deadline_type "inferred".
+  deadline: timestamp("deadline", { withTimezone: true }),
+  deadlineKind: text("deadline_kind").$type<"committed" | null>(),
+  // Subprojects (SPEC §4/§5 rule 4): a project may nest under a parent.
+  parentId: text("parent_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -246,6 +256,29 @@ export const layoutSpecs = pgTable("layout_specs", {
   version: integer("version").notNull(),
   spec: jsonb("spec").notNull(),
   pinned: jsonb("pinned").$type<string[]>().notNull().default([]),
+  // "v0" rows hold the legacy LayoutSpec; "plan" rows hold a SPEC §3
+  // LayoutPlan. Both share the version sequence so revert works uniformly.
+  kind: text("kind").$type<"v0" | "plan">().notNull().default("v0"),
+  // Decision log (SPEC §6): what the plan was built from and what became of it.
+  signalsHash: text("signals_hash"),
+  reasonSummary: text("reason_summary"),
+  outcome: text("outcome").$type<"accepted" | "reverted" | "pinned_over" | null>(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Durable layout constraints from chat/Settings (SPEC §7.5 tier 1): one row
+// per preference, e.g. {kind:"ban_component", component:"people_index"}.
+// Injected into every planner call and enforced by the validator; listed and
+// removable in Settings so a dislike stated once never re-annoys.
+export const layoutPreferences = pgTable("layout_preferences", {
+  id: text("id").primaryKey().$defaultFn(uuid),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  kind: text("kind")
+    .$type<"ban_component" | "pin_section" | "default_variant_for" | "accent_policy">()
+    .notNull(),
+  value: jsonb("value").$type<Record<string, string>>().notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

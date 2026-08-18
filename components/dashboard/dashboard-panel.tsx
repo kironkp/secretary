@@ -2,10 +2,20 @@
 // client views. Used by /dashboard and by the chat split workspace, so both
 // stay in lockstep.
 import { after } from "next/server";
+import { eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { projects as projectsTable } from "@/lib/db/schema";
 import { getDocumentsWithProject, getEventsWithProject, getTasksWithContext } from "@/lib/db/queries";
 import { getCurrentLayout, maybeRegenerateLayout } from "@/lib/layout/generator";
+import { computeCurrentPlan, persistPlan } from "@/lib/layout/plan-store";
+import type { PlanBundle } from "@/lib/layout/plan-store";
+import type { PlanProject } from "./plan-view";
 import type { DocRow } from "./shared";
 import { DashboardViews, type EventRow, type TaskRow } from "./dashboard-views";
+
+// SPEC Phase 1 feature flag: "plan" = LayoutPlan v2 pipeline (registry v2,
+// rules planner, validator); unset/other = the v0 arranger, untouched.
+const ADAPTIVE_V2 = process.env.ADAPTIVE_V2 === "true";
 
 export async function DashboardPanel({
   userId,
@@ -16,15 +26,32 @@ export async function DashboardPanel({
   timezone: string;
   compact?: boolean;
 }) {
-  const [rows, eventRows, docRows, layout] = await Promise.all([
+  const [rows, eventRows, docRows, layout, planBundle, projectRows] = await Promise.all([
     getTasksWithContext(userId),
     getEventsWithProject(userId),
     getDocumentsWithProject(userId),
     getCurrentLayout(userId),
+    ADAPTIVE_V2 ? computeCurrentPlan(userId) : Promise.resolve(null),
+    ADAPTIVE_V2
+      ? db
+          .select({
+            id: projectsTable.id,
+            name: projectsTable.name,
+            color: projectsTable.color,
+            parentId: projectsTable.parentId,
+          })
+          .from(projectsTable)
+          .where(eq(projectsTable.userId, userId))
+      : Promise.resolve([] as PlanProject[]),
   ]);
 
-  // Refresh the AI arrangement in the background when the data shape changed.
-  after(() => maybeRegenerateLayout(userId));
+  if (ADAPTIVE_V2 && planBundle) {
+    // Persist plan history in the background; render never waits on writes.
+    after(() => persistPlan(userId, planBundle as PlanBundle));
+  } else {
+    // v0: refresh the AI arrangement in the background when the data shape changed.
+    after(() => maybeRegenerateLayout(userId));
+  }
 
   const allTasks: TaskRow[] = rows.map(({ task, projectName, projectColor, fromConversationAt }) => ({
     id: task.id,
@@ -93,6 +120,10 @@ export async function DashboardPanel({
       layoutVersion={layout.version}
       layoutPinned={layout.pinned}
       layoutUpdatedAt={layout.updatedAt?.toISOString() ?? null}
+      plan={planBundle?.plan ?? null}
+      planVersion={planBundle?.version ?? 0}
+      planPinned={planBundle?.pinned ?? []}
+      planProjects={projectRows}
       compact={compact}
     />
   );

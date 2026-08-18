@@ -78,6 +78,14 @@ version number; the validator loads prop-schemas from it.
 Adding a component = bump registry version + add prop schema + add render fn +
 mention in planner prompt. Never mid-session.
 
+**v1.2 refinements (Phase 1 implementation):** (a) all props are optional — a
+section with omitted props renders its computed-from-data default, which is
+what DEFAULT_PLAN relies on; the planner sets props only to deviate. (b) Per
+INTEGRATION Decision 2, the registry also carries this app's five pre-existing
+zones (`documents`, `coming_up`, `kanban`, `procrastination_zone`,
+`suggested_zone`), props-less; v0's `overdue_callout` retires into
+`focus_banner`.
+
 ---
 
 ## 3. LayoutPlan schema

@@ -1,6 +1,10 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
+import { db } from "@/lib/db";
+import { user } from "@/lib/db/schema";
+import { CalmModeToggle } from "@/components/settings/calm-mode-toggle";
 import { PasskeySection } from "@/components/settings/passkey-section";
 import { TimezoneForm } from "@/components/settings/timezone-form";
 import { SignOutButton } from "@/components/settings/sign-out-button";
@@ -11,6 +15,10 @@ export default async function SettingsPage() {
   if (!session) redirect("/sign-in");
 
   const timezone = (session.user as { timezone?: string }).timezone ?? "UTC";
+  const [userRow] = await db
+    .select({ calmMode: user.calmMode })
+    .from(user)
+    .where(eq(user.id, session.user.id));
 
   return (
     <div className="mx-auto max-w-xl space-y-6 py-6">
@@ -34,6 +42,15 @@ export default async function SettingsPage() {
           It was captured from your browser at signup.
         </p>
         <TimezoneForm current={timezone} />
+      </section>
+
+      <section className="rounded-xl border border-edge bg-surface p-5">
+        <h2 className="mb-1 text-sm font-bold">Dashboard</h2>
+        <p className="mb-4 text-xs text-muted">
+          Calm mode freezes the dashboard in its default arrangement — the
+          secretary stops rearranging until you switch it back.
+        </p>
+        <CalmModeToggle initial={userRow?.calmMode ?? false} />
       </section>
 
       <section className="rounded-xl border border-edge bg-surface p-5">
