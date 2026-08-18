@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Adaptive UI architecture — Secretary app</title>
+<style>
+  :root{
+    --plane:#0b1220; --s1:#131c2b; --s2:#1a2434; --s3:#212c3e;
+    --line:rgba(255,255,255,0.08); --line-2:rgba(255,255,255,0.14);
+    --t1:#eef2f8; --t2:#a9b6c9; --t3:#8494a9;
+    --accent:#5b8def; --accent-dim:rgba(91,141,239,0.14);
+    --good:#0ca30c; --warn:#fab219; --serious:#ec835a; --crit:#d03b3b;
+    --r:14px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{background:var(--plane);color:var(--t1);
+    font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+    font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1180px;margin:0 auto;padding:40px 28px 90px}
+  h1{font-size:26px;letter-spacing:-0.02em;margin:0 0 6px;font-weight:650}
+  h2{font-size:13px;letter-spacing:.10em;text-transform:uppercase;color:var(--t3);font-weight:600;margin:0 0 14px}
+  h3{font-size:16px;margin:0 0 6px;font-weight:600;letter-spacing:-0.01em}
+  p{margin:0}
+  .sub{color:var(--t2);font-size:14px}
+  .mut{color:var(--t3)}
+  .tiny{font-size:12.5px}
+  section{margin-top:46px}
+  .sec-head{display:flex;align-items:baseline;gap:12px;margin-bottom:14px}
+  .sec-head h2{margin:0}
+  .sec-note{font-size:12.5px;color:var(--t3);margin-left:auto;text-align:right;max-width:52%}
+  .badge{font-size:11px;letter-spacing:.09em;text-transform:uppercase;font-weight:650;
+         color:var(--accent);background:var(--accent-dim);padding:5px 10px;border-radius:999px;
+         display:inline-block;margin-bottom:12px}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.92em;
+       background:var(--s3);border-radius:4px;padding:1px 5px;color:#9db8e8}
+  pre{background:#0a1017;border:1px solid var(--line-2);border-radius:12px;padding:18px 20px;
+      overflow:auto;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;
+      line-height:1.6;color:#c7d4e8;margin:0}
+  pre .c{color:#61728a}
+  pre .k{color:#8fb5f5}
+  pre .s{color:#c9a9f0}
+
+  /* verdict */
+  .verdict{background:var(--s1);border:1px solid var(--line-2);border-radius:18px;padding:24px 26px;margin-top:22px}
+  .verdict .row{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-top:16px}
+  .v-col{border:1px solid var(--line);border-radius:12px;padding:16px 18px;background:var(--s2)}
+  .v-col .h{font-size:13px;font-weight:650;margin-bottom:8px;display:flex;gap:8px;align-items:center}
+  .v-col p{font-size:13.5px;color:var(--t2)}
+  .no{color:#f19a9a}.yes{color:#71d071}
+
+  /* pipeline */
+  .pipe{background:var(--s1);border:1px solid var(--line);border-radius:var(--r);padding:26px}
+  .flow{display:flex;align-items:stretch;gap:0;flex-wrap:wrap}
+  .node{background:var(--s2);border:1px solid var(--line-2);border-radius:12px;padding:13px 16px;
+        min-width:150px;flex:1}
+  .node .nh{font-size:13px;font-weight:650}
+  .node .nd{font-size:11.5px;color:var(--t3);margin-top:4px;line-height:1.45}
+  .node.llm{border-color:rgba(91,141,239,.5);background:linear-gradient(180deg,rgba(91,141,239,.10),var(--s2))}
+  .node.det{border-color:rgba(12,163,12,.4)}
+  .arrow{display:flex;align-items:center;padding:0 10px;color:var(--t3);font-size:18px;flex:none}
+  .looplbl{font-size:11px;letter-spacing:.09em;text-transform:uppercase;font-weight:650;margin-bottom:10px}
+  .fast .looplbl{color:var(--accent)}
+  .slow{margin-top:18px;padding-top:18px;border-top:1px dashed var(--line-2)}
+  .slow .looplbl{color:#f6cd77}
+  .pipe-note{font-size:12.5px;color:var(--t3);margin-top:14px;line-height:1.55}
+
+  /* demo */
+  .demo{background:var(--s1);border:1px solid var(--line-2);border-radius:18px;padding:22px;margin-top:6px}
+  .presets{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}
+  .preset{font-size:13px;font-weight:560;color:var(--t2);background:var(--s2);
+          border:1px solid var(--line-2);border-radius:10px;padding:9px 14px;cursor:pointer;
+          transition:all .15s}
+  .preset:hover{border-color:var(--accent);color:var(--t1)}
+  .preset.on{background:var(--accent-dim);border-color:var(--accent);color:#a9c5f7}
+  .demo-grid{display:grid;grid-template-columns:360px 1fr;gap:16px}
+  @media(max-width:860px){.demo-grid{grid-template-columns:1fr}}
+  .plan-col{display:flex;flex-direction:column;gap:10px;min-width:0}
+  .sig{background:var(--s2);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+  .sig .sh{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--t3);font-weight:650;margin-bottom:7px}
+  .sig ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:5px}
+  .sig li{font-size:12.5px;color:var(--t2);display:flex;gap:7px}
+  .sig li::before{content:"·";color:var(--accent);font-weight:700}
+  .plan-json{flex:1;min-height:0}
+  .plan-json pre{max-height:430px;font-size:11.5px}
+  /* mini dashboard */
+  .screen{background:var(--plane);border:1px solid var(--line-2);border-radius:14px;overflow:hidden;
+          display:flex;flex-direction:column}
+  .chrome{background:var(--s2);border-bottom:1px solid var(--line-2);padding:9px 14px;
+          display:flex;gap:14px;align-items:center;flex:none}
+  .chrome .t{font-size:11.5px;font-weight:600;color:var(--t2)}
+  .chrome .t.on{color:var(--accent)}
+  .chrome .srch{margin-left:auto;background:var(--s3);border:1px solid var(--line);border-radius:6px;
+                font-size:10.5px;color:var(--t3);padding:3px 9px}
+  .chrome-lock{font-size:9.5px;color:var(--t3);letter-spacing:.06em;text-transform:uppercase}
+  .canvas{padding:13px;display:flex;flex-direction:column;gap:9px;min-height:480px}
+  .ms{border-radius:10px;position:relative;animation:in .28s ease}
+  @keyframes in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+  .why{position:absolute;top:-8px;right:8px;font-size:9.5px;background:#0a1017;color:#a9c5f7;
+       border:1px solid rgba(91,141,239,.5);border-radius:999px;padding:2px 8px;z-index:2;max-width:75%;
+       white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* mini components */
+  .m-banner{background:linear-gradient(90deg,rgba(236,131,90,.2),transparent);border:1px solid rgba(236,131,90,.4);
+            padding:8px 12px;font-size:12px;font-weight:600}
+  .m-hero{background:linear-gradient(180deg,#182338,var(--s1));border:1px solid var(--line-2);
+          padding:10px 13px;display:flex;gap:11px;align-items:center}
+  .m-hero .d{font-size:19px;font-weight:660}
+  .m-hero .dm{font-size:8.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--t3)}
+  .m-hero .tt{font-size:12px;font-weight:600}
+  .m-hero .ts{font-size:10.5px;color:var(--t3)}
+  .m-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}
+  .m-stat{background:var(--s1);border:1px solid var(--line);border-radius:8px;padding:7px 10px}
+  .m-stat .v{font-size:15px;font-weight:650}
+  .m-stat .l{font-size:9px;color:var(--t3);margin-top:1px}
+  .m-card{background:var(--s1);border:1px solid var(--line);padding:10px 13px}
+  .m-card.accent{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent),0 0 18px rgba(91,141,239,.18)}
+  .m-card .head{display:flex;align-items:center;gap:8px}
+  .m-card .nm{font-size:12.5px;font-weight:640}
+  .m-card .pl{font-size:9px;font-weight:650;border-radius:999px;padding:2px 7px;margin-left:auto;white-space:nowrap}
+  .pl.crit{color:#f19a9a;background:rgba(208,59,59,.14);border:1px solid rgba(208,59,59,.4)}
+  .pl.ser{color:#f3b596;background:rgba(236,131,90,.13);border:1px solid rgba(236,131,90,.4)}
+  .pl.warn{color:#f6cd77;background:rgba(250,178,25,.12);border:1px solid rgba(250,178,25,.35)}
+  .m-track{height:4px;background:var(--s3);border-radius:3px;margin-top:8px;overflow:hidden}
+  .m-fill{height:100%;border-radius:3px}
+  .m-kv{font-size:10.5px;color:var(--t3);margin-top:7px;line-height:1.5}
+  .m-kv b{color:var(--t2);font-weight:560}
+  .m-loops-inline{margin-top:8px;border-top:1px solid var(--line);padding-top:7px;display:flex;flex-direction:column;gap:4px}
+  .m-loop{font-size:10.5px;color:var(--t2);display:flex;gap:6px;align-items:center}
+  .m-loop .bx{width:8px;height:8px;border:1px solid var(--t3);border-radius:2.5px;flex:none}
+  .m-sub{margin-top:8px;border-top:1px solid var(--line);padding-top:8px;display:flex;flex-direction:column;gap:6px}
+  .m-subrow{display:flex;align-items:center;gap:8px;font-size:10.5px;color:var(--t2)}
+  .m-subrow .sn{width:86px;flex:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .m-subrow .m-track{flex:1;margin:0}
+  .m-subrow .pc{font-size:9px;color:var(--t3);width:28px;text-align:right}
+  .m-cards2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .m-tl{background:var(--s1);border:1px solid var(--line);padding:11px 13px}
+  .m-tl.expanded{padding:14px 13px}
+  .m-tl .tlh{font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--t3);font-weight:650;margin-bottom:8px;display:flex}
+  .m-tl .tlh .sp{margin-left:auto;color:var(--accent)}
+  .m-tlrow{display:flex;align-items:center;gap:8px;height:20px}
+  .m-tl.expanded .m-tlrow{height:26px}
+  .m-tlrow .n{font-size:10px;color:var(--t2);width:76px;flex:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .m-tlplot{flex:1;position:relative;height:100%}
+  .m-tlbar{position:absolute;top:50%;transform:translateY(-50%);height:6px;border-radius:3px}
+  .m-tl.expanded .m-tlbar{height:8px}
+  .m-tldot{position:absolute;top:50%;transform:translate(-50%,-50%);width:8px;height:8px;border-radius:50%;border:1.5px solid var(--s1)}
+  .m-tabl{background:var(--s1);border:1px solid var(--line);overflow:hidden}
+  .m-grow{background:var(--s2);padding:5px 12px;font-size:10px;font-weight:650}
+  .m-grow span{color:var(--t3);font-weight:400;margin-left:7px;font-size:9.5px}
+  .m-irow{padding:5px 12px;font-size:10.5px;color:var(--t2);border-top:1px solid var(--line);display:flex;gap:8px}
+  .m-irow .w{margin-left:auto;color:var(--t3);font-size:9.5px;white-space:nowrap}
+  .m-chase{display:flex;gap:7px;flex-wrap:wrap}
+  .m-chip{font-size:10px;color:#f6cd77;background:rgba(250,178,25,.1);border:1px solid rgba(250,178,25,.35);
+          border-radius:8px;padding:5px 9px}
+  .m-people{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}
+  .m-person{background:var(--s1);border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-size:10.5px}
+  .m-person b{font-weight:620;font-size:11px}
+  .m-person .r{color:var(--t3);font-size:9.5px;margin-top:1px}
+  .demo-note{font-size:12.5px;color:var(--t3);margin-top:14px;line-height:1.6}
+
+  /* rules */
+  .rules{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:760px){.rules{grid-template-columns:1fr}}
+  .rule{background:var(--s1);border:1px solid var(--line);border-radius:var(--r);padding:16px 18px}
+  .rule h3{font-size:14.5px}
+  .rule p{font-size:13px;color:var(--t2);margin-top:5px}
+  .rcpt{font-size:11.5px;color:var(--t3);margin-top:9px;padding-top:9px;border-top:1px solid var(--line)}
+  .rcpt b{color:var(--t2);font-weight:600}
+
+  /* build order */
+  .steps{display:flex;flex-direction:column;gap:10px}
+  .step{background:var(--s1);border:1px solid var(--line);border-radius:12px;padding:15px 18px;display:flex;gap:16px;align-items:flex-start}
+  .step .vn{font-size:12px;font-weight:700;color:var(--accent);background:var(--accent-dim);
+            border-radius:8px;padding:4px 9px;flex:none;margin-top:1px}
+  .step .b{flex:1}
+  .step .h{font-size:14.5px;font-weight:600}
+  .step p{font-size:13px;color:var(--t2);margin-top:4px}
+
+  .srcs{margin-top:46px;padding-top:20px;border-top:1px solid var(--line)}
+  .srcs ol{margin:10px 0 0;padding-left:20px;display:flex;flex-direction:column;gap:6px}
+  .srcs li{font-size:12.5px;color:var(--t3)}
+  .srcs a{color:#9db8e8;text-decoration:none}
+  .srcs a:hover{text-decoration:underline}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <span class="badge">Architecture · researched Aug 18, 2026</span>
+  <h1>Making the secretary's UI legitimately adaptive</h1>
+  <p class="sub">Your idea — an AI that looks at the user's situation and reshapes the dashboard — is exactly where the industry landed in the last year. The research is unusually clear about <em>which half of your idea to run at runtime and which half to run offline.</em></p>
+
+  <!-- VERDICT -->
+  <div class="verdict">
+    <h3>The one correction that makes it work</h3>
+    <p class="sub" style="margin-top:6px">
+      You proposed: designer AI writes a prompt → coding agent regenerates the UI. Google shipped exactly that
+      (Gemini's generative UI) and reports <strong style="color:var(--t1)">a minute-plus per render</strong>, with output that beats markdown but
+      still loses to human-designed layouts half the time. Anthropic built the same thing (Imagine with Claude) and shipped it as a
+      <strong style="color:var(--t1)">five-day research demo</strong>, not a feature. Meanwhile Google's <em>production</em> answer for agent-driven
+      interfaces — A2UI, now in Gemini Enterprise — does something different: the model emits a <strong style="color:var(--t1)">declarative JSON plan
+      over a fixed catalog of components</strong>, and a dumb renderer executes it. Fast, safe, and still genuinely model-driven.
+      So: keep both of your AIs — but only one of them runs while you're looking.
+    </p>
+    <div class="row">
+      <div class="v-col">
+        <div class="h"><span class="yes">●</span> Fast loop — every session (runtime)</div>
+        <p>A <strong>layout planner</strong> LLM reads your life-signals and emits a <code>LayoutPlan</code> JSON: which components, what order, what emphasis, and a user-visible <em>why</em> for every deviation. A deterministic renderer draws it. ~1 second, pennies, can't break the app — a bad plan fails validation and falls back to yesterday's.</p>
+      </div>
+      <div class="v-col">
+        <div class="h"><span class="no">●</span> Slow loop — nightly/weekly (offline)</div>
+        <p>Your <strong>coding agent</strong> lives here. When the planner keeps wanting a component that doesn't exist, it logs a <em>wishlist entry</em> instead of improvising. The coding agent turns accumulated wishes into new components — versioned, previewed, approved by you — and the planner's vocabulary grows. The UI evolves; it just never mutates mid-use.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- PIPELINE -->
+  <section>
+    <div class="sec-head"><h2>The pipeline</h2>
+      <div class="sec-note">Blue nodes are model calls. Green nodes are deterministic code. Nothing generated runs unreviewed.</div></div>
+    <div class="pipe">
+      <div class="fast">
+        <div class="looplbl">Fast loop · on session open / signal change</div>
+        <div class="flow">
+          <div class="node det"><div class="nh">Signals</div><div class="nd">projects, deadlines, engagement per project, today's chat topics, unanswered date-asks — all already in your DB</div></div>
+          <div class="arrow">→</div>
+          <div class="node llm"><div class="nh">Layout planner (LLM)</div><div class="nd">small model, JSON mode. "Given this person's situation, compose the dashboard" — against the registry only</div></div>
+          <div class="arrow">→</div>
+          <div class="node det"><div class="nh">Validate</div><div class="nd">schema + rules. Unknown component? Urgent item hidden? → reject section or whole plan, fall back</div></div>
+          <div class="arrow">→</div>
+          <div class="node det"><div class="nh">Render</div><div class="nd">deterministic: plan → components. Same input, same pixels. Testable</div></div>
+        </div>
+      </div>
+      <div class="slow">
+        <div class="looplbl">Slow loop · nightly, or when wishlist ≥ 3</div>
+        <div class="flow">
+          <div class="node det"><div class="nh">Wishlist</div><div class="nd">planner's logged gaps: "wanted per-track progress; nearest was project_card:nested"</div></div>
+          <div class="arrow">→</div>
+          <div class="node llm"><div class="nh">Coding agent</div><div class="nd">your original idea — writes the new component against your design tokens, with a preview</div></div>
+          <div class="arrow">→</div>
+          <div class="node det"><div class="nh">You approve</div><div class="nd">a diff + rendered preview. One tap. Rejected = deleted</div></div>
+          <div class="arrow">→</div>
+          <div class="node det"><div class="nh">Registry v+1</div><div class="nd">planner is told about its new building block next morning</div></div>
+        </div>
+      </div>
+      <div class="pipe-note">
+        Why this split wins: the fast path is the A2UI/thesys pattern — model-driven composition with client-owned rendering, which is what
+        survived contact with production. The slow path is where free-form code generation is actually good (no user waiting, human review,
+        versioned artifacts). Latency ~1s vs ~60s+, and the failure mode is "default layout" instead of "broken app."
+      </div>
+    </div>
+  </section>
+
+  <!-- DEMO -->
+  <section>
+    <div class="sec-head"><h2>Live demo — one renderer, four situations</h2>
+      <div class="sec-note">These are your three examples plus a baseline. The JSON is the actual LayoutPlan; the renderer on this page is ~150 lines of vanilla JS. No code is generated when you click.</div></div>
+    <div class="demo">
+      <div class="presets" id="presets"></div>
+      <div class="demo-grid">
+        <div class="plan-col">
+          <div class="sig"><div class="sh">Signals in</div><ul id="sigList"></ul></div>
+          <div class="plan-json"><pre id="planJson"></pre></div>
+        </div>
+        <div class="screen">
+          <div class="chrome">
+            <span class="t on">Dashboard</span><span class="t">Chat</span><span class="t">Spreadsheet</span><span class="t">Settings</span>
+            <span class="srch">Search everything…</span>
+            <span class="chrome-lock">🔒 never moves</span>
+          </div>
+          <div class="canvas" id="canvas"></div>
+        </div>
+      </div>
+      <div class="demo-note" id="demoNote"></div>
+    </div>
+  </section>
+
+  <!-- STABILITY RULES -->
+  <section>
+    <div class="sec-head"><h2>What keeps it from being annoying</h2>
+      <div class="sec-note">Twenty years of adaptive-UI research compresses into six rules. Bake them into the planner prompt <em>and</em> the validator.</div></div>
+    <div class="rules">
+      <div class="rule">
+        <h3>0 · The Spreadsheet never adapts</h3>
+        <p>One surface stays a boring, complete, chronological ledger. When the dashboard reshapes itself, the user can always drop to the Spreadsheet and verify nothing was lost. Adaptation is only trustable when there's a non-adaptive floor under it.</p>
+        <div class="rcpt"><b>Why:</b> trust in adaptive systems collapses when users can't audit what the adaptation hid.</div>
+      </div>
+      <div class="rule">
+        <h3>1 · Anchors are sacred, emphasis is free</h3>
+        <p>Tabs, search, and the section vocabulary never move. Within sections: accent, size, expand/collapse, inline detail — adapt freely, every render. Reordering sections needs a reason and is rate-limited to once a day (mornings are the natural boundary).</p>
+        <div class="rcpt"><b>Receipt:</b> Findlater &amp; McGrenere (CHI '09) — adaptive menus that <em>move</em> items degrade badly when predictions miss; spatially-stable adaptation degrades gracefully. Prediction accuracy is never 100%, so buy the graceful failure.</div>
+      </div>
+      <div class="rule">
+        <h3>2 · Confidence gates aggressiveness</h3>
+        <p>Weak signal → emphasis only. Strong signal → reordering allowed. A wrong accent costs the user nothing; a wrong rearrangement costs them their spatial memory of your app.</p>
+        <div class="rcpt"><b>Receipt:</b> same study — at 50% prediction accuracy, moving-adaptations were <em>slower than no adaptation at all</em>.</div>
+      </div>
+      <div class="rule">
+        <h3>3 · Suggest-and-approve beats silent morphing</h3>
+        <p>Big reshapes arrive as a one-line offer: "You broke the album into 4 tracks — want the album card expanded into a tracker?" One tap. Small emphasis changes just happen.</p>
+        <div class="rcpt"><b>Receipt:</b> Lavie &amp; Meyer (IJHCS '10) — intermediate adaptivity (system proposes, user approves) beat full automation everywhere except perfectly routine tasks, and full automation degraded users' own skills.</div>
+      </div>
+      <div class="rule">
+        <h3>4 · Every deviation wears its why</h3>
+        <p>Each adapted section carries a chip: "Timeline first — you asked 3 schedule questions this morning." Your app's whole ethos is provenance on every fact; the layout is just another fact. It also makes bad guesses cheap to catch.</p>
+        <div class="rcpt"><b>Receipt:</b> your own Aug 7 design decision — provenance on every captured item. This extends it to the frame itself.</div>
+      </div>
+      <div class="rule">
+        <h3>5 · Attention ≠ recolor</h3>
+        <p>Engagement emphasis = position, size, accent ring, inlined detail. Never a repaint: color keeps encoding deadline pressure, identity stays with the entity. (Also: highlighting alone measurably doesn't speed people up — pair it with size/position.)</p>
+        <div class="rcpt"><b>Receipt:</b> Findlater — color highlighting showed no performance gain despite users liking it; and your palette already assigns color to pressure semantics.</div>
+      </div>
+      <div class="rule">
+        <h3>6 · Pin, revert, calm</h3>
+        <p>User can pin any section (a hard constraint fed back into the planner), revert to yesterday's layout, or switch to calm mode (the static default, forever). Measure reverts — a revert is a labeled wrong prediction, and it's your accuracy metric for free.</p>
+        <div class="rcpt"><b>Receipt:</b> mixed-initiative principle — adaptation must be interruptible and reversible or users route around the whole feature.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PLANNER PROMPT -->
+  <section>
+    <div class="sec-head"><h2>The planner prompt — paste-ready</h2>
+      <div class="sec-note">This is your "AI that feeds the other AI." Small/fast model, JSON output mode, temperature low. One call per dashboard open, cached on a hash of the signals.</div></div>
+<pre>
+<span class="c">## ROLE</span>
+You are the layout planner for a personal secretary dashboard. You never write
+code or HTML. You emit exactly one LayoutPlan JSON object and nothing else.
+
+<span class="c">## INPUT SIGNALS (precomputed by the app — you do not fetch anything)</span>
+projects[]     {id, name, kind, deadline, deadline_type: committed|inferred|none,
+                days_left, open_count, done_count, subprojects[], momentum, people[]}
+engagement     {project_id → mentions_24h, baseline_mentions, last_touched}
+conversation   {today_topics[], schedule_word_share, questions_today[]}
+pending        {items_missing_dates[], unanswered_asks[]}
+calendar       {next_hard_commitment, days_to_it, density_14d}
+context        {date, weekday, time_of_day, days_since_layout_change, pinned_sections[]}
+
+<span class="c">## REGISTRY v1 — the only building blocks. Unknown components are rejected.</span>
+focus_banner   {text, tone: info|serious|critical}
+hero_next_up   {event_id}
+stat_row       {tiles[]: {value, label, tone?}}
+project_card   {project_id, variant: full|compact|nested, accent?: bool, inline_loops?: bool}
+timeline       {span_days: 14|21|35, expanded: bool}
+open_loops     {group_by: project|date, include_done: bool}
+date_chase     {item_ids[]}
+people_index   {}
+
+<span class="c">## HARD RULES (the validator enforces these too — violating them wastes the call)</span>
+1. Tabs, search, chrome: not yours. Never reference them.
+2. pinned_sections keep their position and variant. Non-negotiable.
+3. Reordering sections requires days_since_layout_change >= 1 AND a "why" on the
+   moved section. Emphasis changes (variant/accent/expanded/inline_loops) are always allowed.
+4. Any item with days_left <= 7 stays above the fold. Compact is fine; absent is not.
+5. accent: true on at most ONE project_card. Accent means attention. Color always
+   means deadline pressure — never reassign it.
+6. Weak or ambiguous signal → emphasis only, no reordering. When torn, don't.
+7. If the situation wants a component that doesn't exist, use the closest one and
+   add a wishlist entry {need, closest_component, signals}. Never improvise structure.
+8. Every section that deviates from DEFAULT_PLAN carries "why": one short sentence
+   addressed to the user, naming the signal ("you asked 3 schedule questions today").
+9. reason_summary: one line for the morning banner ("Reshaped for the album sprint").
+10. On any doubt, emit DEFAULT_PLAN unchanged.
+
+<span class="c">## DEFAULT_PLAN (also the fallback and the user's calm mode)</span>
+[hero_next_up, stat_row, project_card × each active (full), timeline(21d),
+ open_loops(group_by: project), date_chase, people_index]
+
+<span class="c">## OUTPUT</span>
+LayoutPlan JSON only. It must validate against LayoutPlan.schema.json.
+</pre>
+  </section>
+
+  <!-- SCHEMA -->
+  <section>
+    <div class="sec-head"><h2>LayoutPlan — the contract between the two AIs and the renderer</h2>
+      <div class="sec-note">Small enough that a cheap model reliably emits it; strict enough that the renderer can't be surprised.</div></div>
+<pre>
+{
+  <span class="k">"plan_id"</span>: <span class="s">"2026-08-18-a"</span>,
+  <span class="k">"reason_summary"</span>: <span class="s">"Timeline day — you were scheduling all morning"</span>,
+  <span class="k">"sections"</span>: [
+    { <span class="k">"component"</span>: <span class="s">"timeline"</span>,
+      <span class="k">"props"</span>: { <span class="k">"span_days"</span>: 21, <span class="k">"expanded"</span>: true },
+      <span class="k">"why"</span>: <span class="s">"You asked 3 schedule questions this morning"</span> },
+    { <span class="k">"component"</span>: <span class="s">"project_card"</span>,
+      <span class="k">"props"</span>: { <span class="k">"project_id"</span>: <span class="s">"jazz-album"</span>, <span class="k">"variant"</span>: <span class="s">"compact"</span> } }
+  ],
+  <span class="k">"wishlist"</span>: [
+    { <span class="k">"need"</span>: <span class="s">"per-track progress bars inside the album card"</span>,
+      <span class="k">"closest_component"</span>: <span class="s">"project_card variant:nested"</span>,
+      <span class="k">"signals"</span>: <span class="s">"4 subprojects with own open/done counts since Aug 17"</span> }
+  ]
+}
+
+<span class="c">// Renderer contract:
+//   unknown component or prop        → drop that section, log it
+//   plan fails schema / rules 2–5    → render yesterday's plan, log it
+//   model returns prose or markdown  → DEFAULT_PLAN
+//   wishlist                         → append to wishlist.jsonl for the slow loop
+// The model's output is DATA, never markup. Nothing it says reaches innerHTML.</span>
+</pre>
+  </section>
+
+  <!-- BUILD ORDER -->
+  <section>
+    <div class="sec-head"><h2>Build order</h2>
+      <div class="sec-note">Each version is useful on its own; each is one evening-sized step.</div></div>
+    <div class="steps">
+      <div class="step"><span class="vn">v1</span><div class="b">
+        <div class="h">Plumbing, no LLM — this weekend</div>
+        <p>Build the registry + renderer + LayoutPlan format, but generate the plan from five hand-written rules (deadline ≤ 3d → accent that card; schedule_word_share &gt; 0.3 → expand timeline; subprojects exist → nested variant…). You get 80% of the felt adaptivity, prove the plumbing, and this <em>is</em> the research-approved intermediate-adaptivity system already.</p>
+      </div></div>
+      <div class="step"><span class="vn">v2</span><div class="b">
+        <div class="h">Swap rules for the planner LLM</div>
+        <p>One Haiku-class call on session open, JSON mode, cached on a signal hash so a quiet day costs zero calls. Add why-chips, the morning reason_summary banner, pin/revert/calm. Log every revert as a wrong prediction.</p>
+      </div></div>
+      <div class="step"><span class="vn">v3</span><div class="b">
+        <div class="h">The slow loop — your coding agent</div>
+        <p>Nightly job: if wishlist has ≥3 entries for the same need, hand it + your design tokens + component source to the coding agent. It PRs a new component with a preview screenshot. You approve from the dashboard. Registry bumps, planner prompt gets the new block appended. This is the part that makes it <em>legitimately</em> adaptive — the vocabulary itself grows out of observed need.</p>
+      </div></div>
+      <div class="step"><span class="vn">v4</span><div class="b">
+        <div class="h">Optional: one-off generated views, sandboxed</div>
+        <p>For explicit asks — "show me the album like a release war-room" — let the coding agent generate a full free-form view on demand, rendered in a sandboxed iframe, saved as an artifact. That's the Imagine-with-Claude / MCP-Apps end of the spectrum: fine as a special move the user invokes, wrong as the default dashboard.</p>
+      </div></div>
+    </div>
+  </section>
+
+  <!-- SOURCES -->
+  <div class="srcs">
+    <h2>Receipts</h2>
+    <ol>
+      <li><a href="https://research.google/blog/generative-ui-a-rich-custom-visual-interactive-user-experience-for-any-prompt/">Google Research — Generative UI (Gemini 3)</a> — full runtime code-gen: "can take a minute or more," post-processing required, preferred over markdown but below expert designs.</li>
+      <li><a href="https://arxiv.org/abs/2604.09577">arXiv 2604.09577 — "Generative UI: LLMs are Effective UI Generators"</a> — the PAGEN eval behind that blog; comparable-to-expert in only ~half of cases.</li>
+      <li><a href="https://developers.googleblog.com/introducing-a2ui-an-open-project-for-agent-driven-interfaces/">Google Developers — A2UI</a> — the production pattern: declarative JSON over a client-owned component catalog; adopted by Gemini Enterprise, Flutter GenUI, CopilotKit.</li>
+      <li><a href="https://www.copilotkit.ai/blog/the-developer-s-guide-to-generative-ui-in-2026">CopilotKit — Developer's Guide to Generative UI 2026</a> — the three-pattern taxonomy (static / declarative / open-ended) and their tradeoffs.</li>
+      <li><a href="https://www.testingcatalog.com/anthropic-experiments-with-an-agent-for-gereating-ui-on-the-fly/">TestingCatalog — Imagine with Claude</a> — Anthropic's full runtime-gen experiment, positioned as a temporary demo; notably it also composes from predefined building blocks.</li>
+      <li><a href="https://www.cs.ubc.ca/~joanna/papers/CHI2009_Findlater.pdf">Findlater &amp; McGrenere, CHI 2009 — Ephemeral Adaptation</a> — spatial stability makes adaptation fail gracefully; moving items hurts at realistic accuracy; highlighting alone doesn't help performance.</li>
+      <li><a href="http://www.cs.tufts.edu/~jacob/250aui/AdaptiveBenefits_Lavie_IJoHCI10.pdf">Lavie &amp; Meyer, IJHCS 2010 — Benefits and costs of adaptive user interfaces</a> — intermediate adaptivity beats full automation outside routine situations.</li>
+      <li><a href="https://www.infoworld.com/article/3971182/thesys-introduces-generative-ui-api-for-building-ai-apps.html">InfoWorld — thesys C1</a> — commercial API doing the declarative pattern (LLM → UI spec → renderer), if you ever want this off-the-shelf.</li>
+    </ol>
+  </div>
+</div>
+
+<script>
+(function(){
+/* ---------------- data: the four situations ---------------- */
+var P = {
+  patent:  {name:"VR DAW patent", pill:["crit","Mon 11 AM"], prog:38, col:"var(--crit)",
+            kv:"<b>Ash</b> · Stephens Law · prep questions open",
+            loops:["Prep questions on prior art results","Meet Ash — Mon Aug 10, 11 AM"]},
+  album:   {name:"Jazz album", pill:["ser","committed Aug 18"], prog:80, col:"var(--serious)",
+            kv:"<b>Jazz</b> · committed Aug 18 · define “done”",
+            subs:[["Track 4 mixdown",60],["Master",20],["Artwork",90],["Distribution",0]]},
+  findit:  {name:"Find It", pill:["warn","≈ Sep 7"], prog:65, col:"var(--warn)",
+            kv:"prototype works · bug list pending"},
+  caltrans:{name:"Caltrans", pill:["warn","no dates"], prog:6, col:"var(--warn)",
+            kv:"<b>Marissa</b> duty statement · DTC budget"}
+};
+
+var PRESETS = [
+ {label:"Quiet Tuesday (default)",
+  sig:["no unusual engagement — all projects near baseline","no schedule talk today","next commitment: patent meeting in 3d","layout unchanged for 2 days"],
+  note:"Baseline = DEFAULT_PLAN. Nothing earned a deviation, so nothing deviates — rule 10. A plan with zero why-chips is the system working, not the system idle.",
+  plan:{reason:null, sections:[
+    {c:"hero"},{c:"stats"},
+    {c:"cards2",items:[["patent","full"],["album","full"]]},
+    {c:"cards2",items:[["findit","full"],["caltrans","full"]]},
+    {c:"tl",span:21,exp:false},
+    {c:"loops"},{c:"chase"},{c:"people"}]}},
+
+ {label:"Talked timelines all morning",
+  sig:["schedule_word_share: 0.42 (typ. 0.08)","3 questions today contained “when / by / before”","album D-day minus 0 — ships today","strong signal → reorder permitted"],
+  note:"Your example: “they're talking about schedules today → emphasize timelines instead of checklists.” Timeline promoted to the top and expanded; checklists survive but compact. Position change carries its why (rule 3, 8).",
+  plan:{reason:"Timeline day — you were scheduling all morning", sections:[
+    {c:"banner",text:"Album ships today · patent meeting Mon 11 AM",why:null},
+    {c:"tl",span:14,exp:true,why:"You asked 3 schedule questions this morning"},
+    {c:"hero"},
+    {c:"cards2",items:[["album","compact"],["patent","compact"]],why:"Compact — details are one tap away, the calendar is today's language"},
+    {c:"cards2",items:[["findit","compact"],["caltrans","compact"]]},
+    {c:"chase"},{c:"loops"}]}},
+
+ {label:"Deep in the patent today",
+  sig:["patent mentions_24h: 14 (baseline 2)","meeting with Ash in 3 days","other projects at baseline","engagement strong + dated event → promote"],
+  note:"Your example: “really engaged in this project today → make it stand out.” Note what standing out means: first position, full variant, accent ring, loops inlined — but the card is NOT recolored. Color still means deadline pressure (rule 5); the ring means attention.",
+  plan:{reason:"Patent front and center — it's all you've talked about", sections:[
+    {c:"hero"},
+    {c:"card",id:"patent",variant:"full",accent:true,inline:true,why:"14 patent mentions today vs 2 typical — and Ash is Monday"},
+    {c:"cards2",items:[["album","compact"],["findit","compact"]]},
+    {c:"card",id:"caltrans",variant:"compact"},
+    {c:"tl",span:21,exp:false},
+    {c:"chase"}]}},
+
+ {label:"The album grew sub-projects",
+  sig:["album now has 4 subprojects with own counts","registry has variant:nested (fits)","if it didn't fit → wishlist entry, not improvisation","committed deadline 11 days out"],
+  note:"Your example: “a project has multiple projects in it → distinguish and list what's inside.” The nested variant renders per-track progress. If the planner had wanted something the registry lacks — say, a burndown — it logs a wishlist entry and the coding agent builds it tonight, for tomorrow.",
+  plan:{reason:"Album expanded into a tracker — 4 pieces, 11 days", sections:[
+    {c:"hero"},
+    {c:"card",id:"album",variant:"nested",accent:true,why:"You broke the album into 4 tracks yesterday — 11 days to the committed date"},
+    {c:"cards2",items:[["patent","compact"],["findit","compact"]]},
+    {c:"card",id:"caltrans",variant:"compact"},
+    {c:"tl",span:14,exp:false},
+    {c:"loops"}],
+    wishlist:{need:"per-track burndown vs days-remaining", closest:"project_card variant:nested"}}}
+];
+
+/* ---------------- mini renderer ---------------- */
+function el(cls,html){var d=document.createElement('div');d.className=cls;if(html!=null)d.innerHTML=html;return d;}
+function why(s){return s?'<span class="why">'+s+'</span>':'';}
+
+function card(id,variant,accent,inline,whyTxt){
+  var p=P[id];
+  var d=el('ms m-card'+(accent?' accent':''));
+  var h='<div class="head"><span class="nm">'+p.name+'</span><span class="pl '+p.pill[0]+'">'+p.pill[1]+'</span></div>';
+  h+='<div class="m-track"><div class="m-fill" style="width:'+p.prog+'%;background:'+p.col+'"></div></div>';
+  if(variant!=='compact') h+='<div class="m-kv">'+p.kv+'</div>';
+  if(variant==='nested'&&p.subs){
+    h+='<div class="m-sub">'+p.subs.map(function(s){
+      return '<div class="m-subrow"><span class="sn">'+s[0]+'</span><div class="m-track"><div class="m-fill" style="width:'+s[1]+'%;background:'+p.col+'"></div></div><span class="pc">'+s[1]+'%</span></div>';
+    }).join('')+'</div>';
+  }
+  if(inline&&p.loops){
+    h+='<div class="m-loops-inline">'+p.loops.map(function(l){return '<div class="m-loop"><span class="bx"></span>'+l+'</div>';}).join('')+'</div>';
+  }
+  d.innerHTML=why(whyTxt)+h;
+  return d;
+}
+
+var R={
+  banner:function(s){return el('ms m-banner',why(s.why)+s.text);},
+  hero:function(s){return el('ms m-hero',why(s.why)+
+    '<div><div class="d">10</div><div class="dm">Mon·Aug</div></div><div style="width:1px;background:var(--line-2);align-self:stretch"></div>'+
+    '<div><div class="tt">11:00 — Ash · Stephens Law</div><div class="ts">VR DAW patent · in 3 days</div></div>');},
+  stats:function(s){return el('ms m-stats',why(s.why)+
+    [['4','projects'],['3d','next commit'],['2','promises'],['3','undated']].map(function(t){
+      return '<div class="m-stat"><div class="v">'+t[0]+'</div><div class="l">'+t[1]+'</div></div>';}).join(''));},
+  card:function(s){return card(s.id,s.variant,s.accent,s.inline,s.why);},
+  cards2:function(s){var w=el('ms m-cards2');w.innerHTML=why(s.why);
+    s.items.forEach(function(it){w.appendChild(card(it[0],it[1],false,false,null));});return w;},
+  tl:function(s){
+    var rows=[["Patent",[8.8,"var(--crit)","dot"]],["Album",[32.4,"var(--serious)","bar"]],["Find It",[91,"var(--warn)","bar"]],["Caltrans",[100,"#3a4a5e","dash"]]];
+    var d=el('ms m-tl'+(s.exp?' expanded':''));
+    var h=why(s.why)+'<div class="tlh">Next '+s.span+' days <span class="sp">'+(s.exp?'expanded':'')+'</span></div>';
+    rows.forEach(function(r){
+      var m=r[1];
+      var plot = m[2]==='dot'
+        ? '<div class="m-tldot" style="left:'+m[0]+'%;background:'+m[1]+'"></div>'
+        : m[2]==='dash'
+        ? '<div class="m-tlbar" style="left:0;width:'+m[0]+'%;background:transparent;border-top:2px dashed #3a4a5e;height:0"></div>'
+        : '<div class="m-tlbar" style="left:0;width:'+m[0]+'%;background:'+m[1]+'"></div>';
+      h+='<div class="m-tlrow"><span class="n">'+r[0]+'</span><div class="m-tlplot">'+plot+'</div></div>';
+    });
+    d.innerHTML=h;return d;},
+  loops:function(s){return el('ms m-tabl',why(s.why)+
+    '<div class="m-grow">VR DAW patent <span>2 open · next in 3d</span></div>'+
+    '<div class="m-irow">Prep questions on prior art<span class="w">before Mon</span></div>'+
+    '<div class="m-grow">Jazz album <span>committed Aug 18</span></div>'+
+    '<div class="m-irow">Finish and release<span class="w">Tue Aug 18</span></div>'+
+    '<div class="m-grow">Caltrans <span>2 open · undated</span></div>'+
+    '<div class="m-irow">Duty statement → Marissa<span class="w">no date</span></div>');},
+  chase:function(s){return el('ms m-chase',why(s.why)+
+    ['Marissa duty statement — when?','DTC budget — when?','Find It ship date — real date?'].map(function(c){
+      return '<span class="m-chip">'+c+'</span>';}).join(''));},
+  people:function(s){return el('ms m-people',why(s.why)+
+    [['Ash','patent attorney'],['Jazz','album co-creator'],['Marissa','Caltrans']].map(function(p){
+      return '<div class="m-person"><b>'+p[0]+'</b><div class="r">'+p[1]+'</div></div>';}).join(''));}
+};
+
+/* ---------------- plan → pretty JSON ---------------- */
+function planToJson(pr){
+  var o={plan_id:"demo", reason_summary:pr.plan.reason,
+    sections:pr.plan.sections.map(function(s){
+      var m={component:{banner:"focus_banner",hero:"hero_next_up",stats:"stat_row",card:"project_card",
+             cards2:"project_card ×2",tl:"timeline",loops:"open_loops",chase:"date_chase",people:"people_index"}[s.c]};
+      var props={};
+      if(s.c==='card'){props.project_id=s.id;props.variant=s.variant;if(s.accent)props.accent=true;if(s.inline)props.inline_loops=true;}
+      if(s.c==='cards2'){props.projects=s.items.map(function(i){return i[0]+":"+i[1];});}
+      if(s.c==='tl'){props.span_days=s.span;props.expanded=!!s.exp;}
+      if(s.c==='loops'){props.group_by="project";}
+      if(s.c==='banner'){props.text=s.text;}
+      if(Object.keys(props).length)m.props=props;
+      if(s.why)m.why=s.why;
+      return m;})};
+  if(pr.plan.wishlist)o.wishlist=[pr.plan.wishlist];
+  return JSON.stringify(o,null,2);
+}
+
+/* ---------------- wire up ---------------- */
+var cur=0;
+var presetsEl=document.getElementById('presets');
+PRESETS.forEach(function(p,i){
+  var b=document.createElement('button');
+  b.className='preset'+(i===0?' on':'');b.textContent=p.label;
+  b.onclick=function(){cur=i;render();};
+  presetsEl.appendChild(b);
+});
+function render(){
+  Array.prototype.forEach.call(presetsEl.children,function(b,i){b.className='preset'+(i===cur?' on':'');});
+  var pr=PRESETS[cur];
+  document.getElementById('sigList').innerHTML=pr.sig.map(function(s){return '<li>'+s+'</li>';}).join('');
+  document.getElementById('planJson').textContent=planToJson(pr);
+  var cv=document.getElementById('canvas');cv.innerHTML='';
+  pr.plan.sections.forEach(function(s){cv.appendChild(R[s.c](s));});
+  document.getElementById('demoNote').innerHTML='<strong style="color:var(--t2)">What just happened:</strong> '+pr.note;
+}
+render();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Two surfaces — Canvas vs Dashboard</title>
+<style>
+  :root{
+    --plane:#0b1220; --s1:#131c2b; --s2:#1a2434; --s3:#212c3e;
+    --line:rgba(255,255,255,0.08); --line-2:rgba(255,255,255,0.14);
+    --t1:#eef2f8; --t2:#a9b6c9; --t3:#8494a9;
+    --accent:#5b8def; --accent-dim:rgba(91,141,239,0.14);
+    --good:#0ca30c; --warn:#fab219; --serious:#ec835a; --crit:#d03b3b;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{background:var(--plane);color:var(--t1);
+    font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+    font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1180px;margin:0 auto;padding:40px 28px 90px}
+  h1{font-size:26px;letter-spacing:-0.02em;margin:0 0 6px;font-weight:650}
+  h2{font-size:13px;letter-spacing:.10em;text-transform:uppercase;color:var(--t3);font-weight:600;margin:0 0 14px}
+  p{margin:0}
+  .sub{color:var(--t2);font-size:14px}
+  .mut{color:var(--t3)}
+  .tiny{font-size:12.5px}
+  section{margin-top:46px}
+  .sec-head{display:flex;align-items:baseline;gap:12px;margin-bottom:14px}
+  .sec-head h2{margin:0}
+  .sec-note{font-size:12.5px;color:var(--t3);margin-left:auto;text-align:right;max-width:52%}
+  .badge{font-size:11px;letter-spacing:.09em;text-transform:uppercase;font-weight:650;
+         color:var(--accent);background:var(--accent-dim);padding:5px 10px;border-radius:999px;
+         display:inline-block;margin-bottom:12px}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.92em;
+       background:var(--s3);border-radius:4px;padding:1px 5px;color:#9db8e8}
+
+  /* verdict */
+  .axis{background:var(--s1);border:1px solid var(--line-2);border-radius:18px;padding:22px 26px;margin-top:20px}
+  .lev{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:16px}
+  @media(max-width:820px){.lev{grid-template-columns:1fr}}
+  .lv{border:1px solid var(--line);border-radius:12px;padding:14px 16px;background:var(--s2)}
+  .lv .h{font-size:13px;font-weight:650;display:flex;align-items:center;gap:8px}
+  .lv .sp{font-size:11px;font-weight:700;border-radius:999px;padding:2px 9px;margin-left:auto}
+  .sp.a{color:#71d071;background:rgba(12,163,12,.13);border:1px solid rgba(12,163,12,.4)}
+  .sp.b{color:#a9c5f7;background:var(--accent-dim);border:1px solid rgba(91,141,239,.45)}
+  .sp.c{color:#f6cd77;background:rgba(250,178,25,.11);border:1px solid rgba(250,178,25,.35)}
+  .lv p{font-size:12.5px;color:var(--t2);margin-top:7px}
+
+  /* demo shells */
+  .duo{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:980px){.duo{grid-template-columns:1fr}}
+  .pane{background:var(--s1);border:1px solid var(--line-2);border-radius:16px;overflow:hidden;display:flex;flex-direction:column}
+  .pane-h{background:var(--s2);border-bottom:1px solid var(--line-2);padding:11px 16px;display:flex;align-items:center;gap:10px}
+  .pane-h .t{font-size:13.5px;font-weight:650}
+  .pane-h .d{font-size:11px;color:var(--t3)}
+  .lat{margin-left:auto;font-size:10.5px;font-weight:650;letter-spacing:.03em;border-radius:999px;padding:3px 9px;white-space:nowrap}
+  .lat.fast{color:#71d071;background:rgba(12,163,12,.12);border:1px solid rgba(12,163,12,.4)}
+  .lat.mid{color:#a9c5f7;background:var(--accent-dim);border:1px solid rgba(91,141,239,.45)}
+  .say-row{display:flex;gap:7px;flex-wrap:wrap;padding:12px 14px;border-bottom:1px solid var(--line)}
+  .say{font-size:12px;color:var(--t2);background:var(--s2);border:1px solid var(--line-2);
+       border-radius:999px;padding:7px 13px;cursor:pointer;transition:all .15s}
+  .say:hover{border-color:var(--accent);color:var(--t1)}
+  .say.on{background:var(--accent-dim);border-color:var(--accent);color:#a9c5f7}
+  .say::before{content:"🗣 ";font-size:11px}
+  .stage{position:relative;flex:1;min-height:430px;padding:14px;display:flex;flex-direction:column}
+  .paintbar{position:absolute;top:0;left:0;height:2px;background:var(--accent);width:0%;z-index:5;transition:none}
+  .painting .paintbar{animation:paint 1.1s ease-out forwards}
+  @keyframes paint{0%{width:0}70%{width:82%}100%{width:100%;opacity:0}}
+  .foot{border-top:1px solid var(--line);padding:10px 16px;font-size:11.5px;color:var(--t3);display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+  .foot b{color:var(--t2);font-weight:600}
+  .lock{font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:var(--t3)}
+
+  /* ---- canvas painted content ---- */
+  .cv{flex:1;display:flex;flex-direction:column;gap:10px}
+  .cv > *{animation:arrive .5s ease backwards}
+  .cv > *:nth-child(1){animation-delay:.15s}.cv > *:nth-child(2){animation-delay:.3s}
+  .cv > *:nth-child(3){animation-delay:.45s}.cv > *:nth-child(4){animation-delay:.6s}
+  .cv > *:nth-child(5){animation-delay:.75s}
+  @keyframes arrive{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  /* balanced poster */
+  .cv-hero{background:linear-gradient(180deg,#182338,var(--s2));border:1px solid var(--line-2);
+           border-radius:12px;padding:13px 16px;display:flex;align-items:baseline;gap:12px}
+  .cv-hero .big{font-size:21px;font-weight:660;letter-spacing:-0.02em}
+  .cv-hero .rest{font-size:12px;color:var(--t3)}
+  .cv-week{background:var(--s2);border:1px solid var(--line);border-radius:12px;padding:11px 14px}
+  .cv-week .lbl{font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--t3);font-weight:650;margin-bottom:8px}
+  .days{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}
+  .day{background:var(--s3);border-radius:7px;padding:6px 4px;text-align:center;font-size:9.5px;color:var(--t3);min-height:44px}
+  .day b{display:block;font-size:11px;color:var(--t2);font-weight:640;margin-bottom:3px}
+  .day.hot{background:rgba(208,59,59,.16);border:1px solid rgba(208,59,59,.45);color:#f19a9a}
+  .day.warm{border:1px solid rgba(236,131,90,.4)}
+  .tile4{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+  .ctile{background:var(--s2);border:1px solid var(--line);border-radius:11px;padding:11px 13px;cursor:default}
+  .ctile[data-expand]{cursor:pointer}
+  .ctile .nm{font-size:12.5px;font-weight:640;display:flex;align-items:center;gap:7px}
+  .ctile .st{font-size:11px;color:var(--t3);margin-top:3px}
+  .dot{width:8px;height:8px;border-radius:3px;flex:none}
+  .ctile .more{display:none;margin-top:9px;border-top:1px solid var(--line);padding-top:8px}
+  .ctile.open .more{display:block}
+  .ctile .hint{font-size:9px;color:var(--t3);letter-spacing:.05em;text-transform:uppercase;margin-top:7px}
+  .trk{display:flex;align-items:center;gap:8px;font-size:10.5px;color:var(--t2);margin-top:5px}
+  .trk .n{width:80px;flex:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .bar{flex:1;height:4px;background:var(--s3);border-radius:3px;overflow:hidden}
+  .bar i{display:block;height:100%;border-radius:3px}
+  .trk .p{width:28px;text-align:right;font-size:9.5px;color:var(--t3)}
+  /* war-room poster */
+  .war{display:grid;grid-template-columns:1.7fr 1fr;gap:10px;flex:1}
+  @media(max-width:560px){.war{grid-template-columns:1fr}}
+  .war-main{background:linear-gradient(180deg,rgba(236,131,90,.10),var(--s2));border:1px solid rgba(236,131,90,.45);
+            border-radius:13px;padding:16px 18px;display:flex;flex-direction:column}
+  .war-main .ttl{font-size:16px;font-weight:660;display:flex;align-items:center;gap:10px}
+  .cnt{margin-left:auto;text-align:right}
+  .cnt .n{font-size:30px;font-weight:680;letter-spacing:-0.03em;color:#f3b596;line-height:1}
+  .cnt .l{font-size:9px;letter-spacing:.09em;text-transform:uppercase;color:var(--t3)}
+  .war-main .risk{margin-top:12px;background:rgba(250,178,25,.09);border:1px solid rgba(250,178,25,.35);
+                  border-radius:9px;padding:9px 12px;font-size:11.5px;color:#f6cd77}
+  .war-main .tracks{margin-top:12px}
+  .war-side{display:flex;flex-direction:column;gap:9px}
+  .strip{background:var(--s2);border:1px solid var(--line);border-radius:11px;padding:10px 13px}
+  .strip .h{font-size:11.5px;font-weight:640;display:flex;gap:7px;align-items:center}
+  .strip .b{font-size:10.5px;color:var(--t3);margin-top:3px}
+  .strip.urgent{border-color:rgba(208,59,59,.45)}
+  .footnote-row{background:var(--s2);border:1px solid var(--line);border-radius:11px;padding:8px 13px;
+                font-size:10.5px;color:var(--t3)}
+  /* calm poster */
+  .calm{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:18px;padding:30px 20px}
+  .calm .when{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--t3)}
+  .calm .what{font-size:26px;font-weight:660;letter-spacing:-0.02em;line-height:1.25}
+  .calm .then{font-size:13.5px;color:var(--t2)}
+  .calm .rest{font-size:11.5px;color:var(--t3);border-top:1px solid var(--line);padding-top:14px;max-width:420px}
+
+  /* ---- dashboard mini (data-driven) ---- */
+  .db{flex:1;display:flex;flex-direction:column;gap:8px}
+  .db > *{transition:all .3s ease}
+  .m-hero{background:linear-gradient(180deg,#182338,var(--s1));border:1px solid var(--line-2);border-radius:10px;
+          padding:9px 13px;display:flex;gap:11px;align-items:center}
+  .m-hero .d{font-size:17px;font-weight:660}
+  .m-hero .dm{font-size:8px;letter-spacing:.1em;text-transform:uppercase;color:var(--t3)}
+  .m-hero .tt{font-size:11.5px;font-weight:600}
+  .m-hero .ts{font-size:10px;color:var(--t3)}
+  .m-card{background:var(--s2);border:1px solid var(--line);border-radius:10px;padding:9px 12px}
+  .m-card .head{display:flex;align-items:center;gap:8px}
+  .m-card .nm{font-size:11.5px;font-weight:640}
+  .m-card .pl{font-size:8.5px;font-weight:650;border-radius:999px;padding:2px 7px;margin-left:auto;white-space:nowrap}
+  .pl.crit{color:#f19a9a;background:rgba(208,59,59,.14);border:1px solid rgba(208,59,59,.4)}
+  .pl.ser{color:#f3b596;background:rgba(236,131,90,.13);border:1px solid rgba(236,131,90,.4)}
+  .pl.warn{color:#f6cd77;background:rgba(250,178,25,.12);border:1px solid rgba(250,178,25,.35)}
+  .m-track{height:3.5px;background:var(--s3);border-radius:3px;margin-top:7px;overflow:hidden}
+  .m-fill{height:100%;border-radius:3px}
+  .m-2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .m-tl{background:var(--s2);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+  .m-tl .h{font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--t3);font-weight:650;margin-bottom:7px}
+  .m-tlrow{display:flex;align-items:center;gap:8px;height:17px}
+  .m-tl.big .m-tlrow{height:24px}
+  .m-tlrow .n{font-size:9.5px;color:var(--t2);width:64px;flex:none}
+  .m-plot{flex:1;position:relative;height:100%}
+  .m-bar{position:absolute;top:50%;transform:translateY(-50%);height:5px;border-radius:3px}
+  .m-tl.big .m-bar{height:7px}
+  .m-dot{position:absolute;top:50%;transform:translate(-50%,-50%);width:7px;height:7px;border-radius:50%;border:1.5px solid var(--s1)}
+  .m-people{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}
+  .m-person{background:var(--s2);border:1px solid var(--line);border-radius:8px;padding:6px 9px;font-size:10px}
+  .m-person b{font-weight:620;font-size:10.5px}
+  .m-person .r{color:var(--t3);font-size:9px}
+  .gone{opacity:0;transform:scale(.97);height:0!important;padding-top:0!important;padding-bottom:0!important;
+        margin:0!important;border-width:0!important;overflow:hidden}
+  .whychip{font-size:9px;background:#0a1017;color:#a9c5f7;border:1px solid rgba(91,141,239,.5);
+           border-radius:999px;padding:2px 8px;margin-left:8px;font-weight:400}
+
+  /* routing table */
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  .tbl{background:var(--s1);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  th{text-align:left;font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--t3);
+     font-weight:600;padding:11px 16px;background:var(--s2);border-bottom:1px solid var(--line)}
+  td{padding:12px 16px;border-bottom:1px solid var(--line);vertical-align:top}
+  tr:last-child td{border-bottom:none}
+  td.u{font-weight:560}
+  td .sf{font-size:10.5px;font-weight:650;border-radius:999px;padding:2px 9px;white-space:nowrap}
+  .sf.dash{color:#71d071;background:rgba(12,163,12,.12);border:1px solid rgba(12,163,12,.4)}
+  .sf.canv{color:#a9c5f7;background:var(--accent-dim);border:1px solid rgba(91,141,239,.45)}
+  .sf.slow{color:#f6cd77;background:rgba(250,178,25,.11);border:1px solid rgba(250,178,25,.35)}
+  td.n{color:var(--t2);font-size:12.5px}
+  td.spd{white-space:nowrap;color:var(--t2);font-size:12.5px}
+
+  /* feed loop */
+  .feed{background:var(--s1);border:1px solid var(--line);border-radius:14px;padding:20px 22px}
+  .chain{display:flex;align-items:center;gap:0;flex-wrap:wrap}
+  .ch{background:var(--s2);border:1px solid var(--line-2);border-radius:11px;padding:11px 14px;flex:1;min-width:140px}
+  .ch .h{font-size:12.5px;font-weight:650}
+  .ch .d{font-size:11px;color:var(--t3);margin-top:3px;line-height:1.45}
+  .arr{padding:0 9px;color:var(--t3);font-size:16px;flex:none}
+  .feed p{font-size:12.5px;color:var(--t3);margin-top:13px}
+
+  details{background:var(--s1);border:1px solid var(--line);border-radius:12px;margin-top:12px}
+  summary{cursor:pointer;padding:12px 16px;font-size:13px;color:var(--t2);font-weight:560}
+  details pre{margin:0 16px 14px;background:#0a1017;border:1px solid var(--line-2);border-radius:10px;
+              padding:14px 16px;overflow:auto;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;
+              line-height:1.55;color:#c7d4e8}
+  details pre .c{color:#61728a}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <span class="badge">Answering: “should the dashboard just be visual?”</span>
+  <h1>Two surfaces, one secretary</h1>
+  <p class="sub">Your instinct is right — but the axis isn't <em>visual vs. interactive</em>. It's <em>what the AI has to touch</em> to make a change. Touching data is instant. Touching markup is seconds. Touching code is minutes. So: keep the dashboard interactive (its changes were already instant), and add the thing you're actually describing — a page the secretary <em>paints</em>.</p>
+
+  <div class="axis">
+    <h2 style="margin-bottom:4px">The real axis: what changes when you ask for a change</h2>
+    <div class="lev">
+      <div class="lv"><div class="h">Dashboard <span class="sp a">instant</span></div>
+        <p>AI edits <strong>data</strong> — the LayoutPlan JSON. Hand-built components rearrange. Checkboxes, pins, revert all keep working because the AI never rewrites them; it repositions them. This is what we've specced.</p></div>
+      <div class="lv"><div class="h">Canvas <span class="sp b">seconds</span></div>
+        <p>AI writes <strong>markup</strong> — sanitized, script-free HTML it streams onto a page. Any shape it wants: posters, war-rooms, one big number. Click-to-expand only, provided by the app shell, never by the model. This is your “just visual” page.</p></div>
+      <div class="lv"><div class="h">New components <span class="sp c">minutes</span></div>
+        <p>AI writes <strong>code</strong> — the slow loop. Sandboxed, previewed, approved. The only tier where “redesigning the structures” happens, and the user never waits on it.</p></div>
+    </div>
+  </div>
+
+  <!-- LIVE DEMO -->
+  <section>
+    <div class="sec-head"><h2>Feel the difference</h2>
+      <div class="sec-note">Left: the Canvas repaints its whole shape per utterance. Right: the Dashboard applies data edits in place. Both are “talk → see it change” — different freedoms, different guarantees.</div></div>
+    <div class="duo">
+
+      <!-- CANVAS PANE -->
+      <div class="pane">
+        <div class="pane-h"><span class="t">Canvas</span><span class="d">free-form · painted</span>
+          <span class="lat mid" id="cvLat">~4s · streams in</span></div>
+        <div class="say-row" id="cvSays"></div>
+        <div class="stage" id="cvStage"><div class="paintbar"></div><div class="cv" id="cvBody"></div></div>
+        <div class="foot"><b id="cvFoot"></b><span class="lock" style="margin-left:auto">🔒 no scripts · sandboxed iframe · expand = shell primitive</span></div>
+      </div>
+
+      <!-- DASHBOARD PANE -->
+      <div class="pane">
+        <div class="pane-h"><span class="t">Dashboard</span><span class="d">data-driven · interactive</span>
+          <span class="lat fast" id="dbLat">&lt;1s · no repaint</span></div>
+        <div class="say-row" id="dbSays"></div>
+        <div class="stage"><div class="db" id="dbBody"></div></div>
+        <div class="foot"><b id="dbFoot"></b><span class="lock" style="margin-left:auto">🔒 registry components · validator-checked</span></div>
+      </div>
+
+    </div>
+    <details>
+      <summary>What the model actually wrote for the “album war-room” paint (this is why it's fast)</summary>
+      <pre><span class="c">&lt;!-- 2.8 KB of sanitized markup. No scripts, no handlers, no fetches.
+     Every number comes from the signals JSON it was handed. --&gt;</span>
+&lt;div class="poster war"&gt;
+  &lt;div class="main" style="--tone:serious"&gt;
+    &lt;h1&gt;Jazz album&lt;/h1&gt; &lt;div class="count"&gt;11 &lt;small&gt;days — committed&lt;/small&gt;&lt;/div&gt;
+    &lt;p class="risk"&gt;Biggest risk: “done” is still undefined — mix? master? artwork?&lt;/p&gt;
+    &lt;ul class="tracks"&gt;
+      &lt;li data-pct="60"&gt;Track 4 mixdown&lt;/li&gt; &lt;li data-pct="20"&gt;Master&lt;/li&gt;
+      &lt;li data-pct="90"&gt;Artwork&lt;/li&gt;       &lt;li data-pct="0"&gt;Distribution&lt;/li&gt;
+    &lt;/ul&gt;
+  &lt;/div&gt;
+  &lt;aside&gt;
+    &lt;div class="strip urgent" data-expand&gt;Patent — Ash, Mon 11 AM. Don't drop.&lt;/div&gt;
+    &lt;div class="strip"&gt;Find It — parked until the 18th&lt;/div&gt;
+    &lt;div class="strip"&gt;Caltrans ×2 — still undated&lt;/div&gt;
+  &lt;/aside&gt;
+&lt;/div&gt;</pre>
+    </details>
+  </section>
+
+  <!-- ROUTING -->
+  <section>
+    <div class="sec-head"><h2>Which surface hears which sentence</h2>
+      <div class="sec-note">The chat agent routes automatically. The user never picks a surface — they just talk.</div></div>
+    <div class="tbl">
+      <table>
+        <thead><tr><th style="width:34%">You say</th><th>Surface</th><th>What the AI touches</th><th>Felt speed</th></tr></thead>
+        <tbody>
+          <tr><td class="u">“Make the timeline the main thing”</td><td><span class="sf dash">Dashboard</span></td><td class="n">6 lines of LayoutPlan JSON</td><td class="spd">instant</td></tr>
+          <tr><td class="u">“Stop showing me people — ever”</td><td><span class="sf dash">Dashboard</span></td><td class="n">1 stored preference, enforced by the validator forever</td><td class="spd">instant, permanent</td></tr>
+          <tr><td class="u">“Paint my week as one page”</td><td><span class="sf canv">Canvas</span></td><td class="n">~3 KB of sanitized markup, streamed</td><td class="spd">3–6s</td></tr>
+          <tr><td class="u">“Show the album like a burndown”</td><td><span class="sf canv">Canvas</span> <span class="mut">+</span> <span class="sf slow">slow loop</span></td><td class="n">markup now; a real registry component by morning</td><td class="spd">5s now, real tomorrow</td></tr>
+          <tr><td class="u">“Add a pomodoro timer to my dashboard”</td><td><span class="sf slow">Slow loop</span></td><td class="n">new component code — sandboxed, previewed, approved in chat</td><td class="spd">minutes, arrives as a proposal</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- FEED LOOP -->
+  <section>
+    <div class="sec-head"><h2>Why having both makes each better</h2>
+      <div class="sec-note">The Canvas is the audition room. The registry is where auditions that keep getting called back become furniture.</div></div>
+    <div class="feed">
+      <div class="chain">
+        <div class="ch"><div class="h">Canvas sketch</div><div class="d">“show it like a burndown” — painted in seconds, zero risk, zero commitment</div></div>
+        <div class="arr">→</div>
+        <div class="ch"><div class="h">Recurrence</div><div class="d">same shape painted 3+ times → auto wishlist entry. Demand is measured, not guessed</div></div>
+        <div class="arr">→</div>
+        <div class="ch"><div class="h">Slow loop builds it</div><div class="d">born <em>visual-only</em> — a picture first. Interactivity is added only after it survives a week of real use</div></div>
+        <div class="arr">→</div>
+        <div class="ch"><div class="h">Registry furniture</div><div class="d">now the planner can use it, the validator knows it, checkboxes and pins work</div></div>
+      </div>
+      <p>This also answers the generatability problem quietly: coding agents are dramatically more reliable at generating a <em>picture of your data</em> than a stateful interactive widget. Letting new things be born visual is how the self-redesigning app stays trustworthy while it grows.</p>
+    </div>
+  </section>
+
+  <p class="tiny mut" style="margin-top:36px;padding-top:18px;border-top:1px solid var(--line)">
+    Same fictional data as the rest of this project (as-of Aug 7). The Canvas pane above is a simulation of the paint feel —
+    in the real app it's model-streamed markup into a sandboxed iframe. Spec §7.6 and Phase 2.5 in the updated kit make it buildable.
+  </p>
+</div>
+
+<script>
+(function(){
+/* ---------------- CANVAS side ---------------- */
+var cvBody=document.getElementById('cvBody'), cvStage=document.getElementById('cvStage'),
+    cvFoot=document.getElementById('cvFoot'), cvSays=document.getElementById('cvSays');
+
+var albumTracks='<div class="trk"><span class="n">Track 4 mixdown</span><div class="bar"><i style="width:60%;background:var(--serious)"></i></div><span class="p">60%</span></div>'+
+ '<div class="trk"><span class="n">Master</span><div class="bar"><i style="width:20%;background:var(--serious)"></i></div><span class="p">20%</span></div>'+
+ '<div class="trk"><span class="n">Artwork</span><div class="bar"><i style="width:90%;background:var(--serious)"></i></div><span class="p">90%</span></div>'+
+ '<div class="trk"><span class="n">Distribution</span><div class="bar"><i style="width:0%;background:var(--serious)"></i></div><span class="p">0%</span></div>';
+
+var CANVASES=[
+ {say:"Paint my week",foot:"repaint · 3.1 KB markup · 0 lines of code",html:
+  '<div class="cv-hero"><span class="big">Mon 11:00 — Ash</span><span class="rest">Stephens Law · VR DAW patent · in 3 days</span></div>'+
+  '<div class="cv-week"><div class="lbl">This week</div><div class="days">'+
+    '<div class="day"><b>Fri</b>today</div><div class="day"><b>Sat</b></div><div class="day"><b>Sun</b>prep Ash</div>'+
+    '<div class="day hot"><b>Mon</b>Ash 11a</div><div class="day"><b>Tue</b></div><div class="day"><b>Wed</b>album wk</div><div class="day warm"><b>Thu</b>album wk</div>'+
+  '</div></div>'+
+  '<div class="tile4">'+
+   '<div class="ctile" data-expand><div class="nm"><span class="dot" style="background:var(--serious)"></span>Jazz album</div><div class="st">committed Aug 18 · “almost done”</div><div class="more">'+albumTracks+'</div><div class="hint">click to expand — shell primitive, not model code</div></div>'+
+   '<div class="ctile"><div class="nm"><span class="dot" style="background:var(--crit)"></span>VR DAW patent</div><div class="st">prior art done · meeting Mon</div></div>'+
+   '<div class="ctile"><div class="nm"><span class="dot" style="background:var(--warn)"></span>Find It</div><div class="st">bug tail · ≈ Sep 7</div></div>'+
+   '<div class="ctile"><div class="nm"><span class="dot" style="background:var(--warn)"></span>Caltrans</div><div class="st">2 items, 0 dates</div></div>'+
+  '</div>'},
+ {say:"The album is everything this week",foot:"full reshape · 2.8 KB markup · same signals, new shape",html:
+  '<div class="war"><div class="war-main">'+
+    '<div class="ttl"><span class="dot" style="background:var(--serious)"></span>Jazz album<div class="cnt"><div class="n">11</div><div class="l">days · committed</div></div></div>'+
+    '<div class="risk">Biggest risk: “done” is still undefined — mix? master? artwork? Decide this before the weekend ends.</div>'+
+    '<div class="tracks">'+albumTracks+'</div></div>'+
+   '<div class="war-side">'+
+    '<div class="strip urgent"><div class="h"><span class="dot" style="background:var(--crit)"></span>Don’t drop: Ash, Mon 11 AM</div><div class="b">only hard commitment before the 18th</div></div>'+
+    '<div class="strip"><div class="h">Find It</div><div class="b">parked until after the 18th</div></div>'+
+    '<div class="strip"><div class="h">Caltrans ×2</div><div class="b">undated — safe to ignore this week</div></div>'+
+   '</div></div>'},
+ {say:"Calm it down — just what's next",foot:"repaint · 0.9 KB markup · almost everything omitted on purpose",html:
+  '<div class="calm">'+
+   '<div class="when">Next</div>'+
+   '<div class="what">Monday 11:00<br>Ash · Stephens Law</div>'+
+   '<div class="then">then: album — 11 days, committed</div>'+
+   '<div class="rest">Everything else is quiet. Find It ≈ Sep 7 · Caltrans has no dates · 3 things still need dates when you’re ready.</div>'+
+  '</div>'}
+];
+
+function paintCanvas(i){
+  Array.prototype.forEach.call(cvSays.children,function(b,j){b.className='say'+(j===i?' on':'');});
+  cvStage.classList.remove('painting');void cvStage.offsetWidth;
+  cvStage.classList.add('painting');
+  cvBody.style.opacity=0;
+  setTimeout(function(){
+    cvBody.innerHTML=CANVASES[i].html;cvBody.style.opacity=1;
+    cvFoot.textContent=CANVASES[i].foot;
+  },420);
+}
+CANVASES.forEach(function(c,i){
+  var b=document.createElement('button');b.className='say';b.textContent=c.say;
+  b.onclick=function(){paintCanvas(i);};cvSays.appendChild(b);
+});
+/* shell-owned expand primitive — the ONLY interactivity on the canvas */
+document.getElementById('cvStage').addEventListener('click',function(e){
+  var t=e.target.closest('[data-expand]');if(t)t.classList.toggle('open');
+});
+paintCanvas(0);
+
+/* ---------------- DASHBOARD side ---------------- */
+var dbBody=document.getElementById('dbBody'),dbFoot=document.getElementById('dbFoot'),
+    dbSays=document.getElementById('dbSays');
+
+function dbRender(){
+  dbBody.innerHTML=
+   '<div class="m-hero" id="s-hero"><div><div class="d">10</div><div class="dm">Mon·Aug</div></div>'+
+    '<div style="width:1px;background:var(--line-2);align-self:stretch"></div>'+
+    '<div><div class="tt">11:00 — Ash · Stephens Law</div><div class="ts">VR DAW patent · in 3 days</div></div></div>'+
+   '<div class="m-tl" id="s-tl"><div class="h">Next 21 days <span class="whychip" id="tlWhy" style="display:none"></span></div>'+
+    '<div class="m-tlrow"><span class="n">Patent</span><div class="m-plot"><div class="m-dot" style="left:8.8%;background:var(--crit)"></div></div></div>'+
+    '<div class="m-tlrow"><span class="n">Album</span><div class="m-plot"><div class="m-bar" style="left:0;width:32.4%;background:var(--serious)"></div></div></div>'+
+    '<div class="m-tlrow"><span class="n">Find It</span><div class="m-plot"><div class="m-bar" style="left:0;width:91%;background:var(--warn)"></div></div></div>'+
+   '</div>'+
+   '<div class="m-2" id="s-cards">'+
+    '<div class="m-card"><div class="head"><span class="nm">Jazz album</span><span class="pl ser">Aug 18</span></div><div class="m-track"><div class="m-fill" style="width:80%;background:var(--serious)"></div></div></div>'+
+    '<div class="m-card"><div class="head"><span class="nm">VR DAW patent</span><span class="pl crit">Mon 11a</span></div><div class="m-track"><div class="m-fill" style="width:38%;background:var(--crit)"></div></div></div>'+
+   '</div>'+
+   '<div class="m-people" id="s-people">'+
+    '<div class="m-person"><b>Ash</b><div class="r">patent attorney</div></div>'+
+    '<div class="m-person"><b>Jazz</b><div class="r">co-creator</div></div>'+
+    '<div class="m-person"><b>Marissa</b><div class="r">Caltrans</div></div>'+
+   '</div>';
+}
+dbRender();
+dbFoot.textContent='default plan · registry v1';
+
+var DB=[
+ {say:"Make the timeline the main thing",foot:"plan edit: timeline → position 0, expanded · 6 lines of JSON",
+  run:function(){
+    var tl=document.getElementById('s-tl');
+    tl.classList.add('big');
+    dbBody.insertBefore(tl,dbBody.firstChild);
+    var w=document.getElementById('tlWhy');w.style.display='inline';w.textContent='you asked';
+  }},
+ {say:"Stop showing me people",foot:"preference stored: ban people_index · validator enforces it on every future plan",
+  run:function(){document.getElementById('s-people').classList.add('gone');}},
+ {say:"Reset",foot:"revert → previous good plan (reverts are logged — that's the accuracy metric)",
+  run:function(){dbRender();}}
+];
+DB.forEach(function(c,i){
+  var b=document.createElement('button');b.className='say';b.textContent=c.say;
+  b.onclick=function(){
+    Array.prototype.forEach.call(dbSays.children,function(x){x.className='say';});
+    b.className='say on';c.run();dbFoot.textContent=c.foot;
+  };
+  dbSays.appendChild(b);
+});
+})();
+</script>
+</body>
+</html>

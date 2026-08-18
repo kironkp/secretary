@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Aug 18 conversation, replayed through the finished build</title>
+<style>
+  :root{
+    --plane:#0b1220; --s1:#131c2b; --s2:#1a2434; --s3:#212c3e;
+    --line:rgba(255,255,255,0.08); --line-2:rgba(255,255,255,0.14);
+    --t1:#eef2f8; --t2:#a9b6c9; --t3:#8494a9;
+    --accent:#5b8def; --accent-dim:rgba(91,141,239,0.14);
+    --good:#0ca30c; --warn:#fab219; --serious:#ec835a; --crit:#d03b3b;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{background:var(--plane);color:var(--t1);
+    font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+    font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1180px;margin:0 auto;padding:40px 28px 90px}
+  h1{font-size:26px;letter-spacing:-0.02em;margin:0 0 6px;font-weight:650}
+  h2{font-size:13px;letter-spacing:.10em;text-transform:uppercase;color:var(--t3);font-weight:600;margin:0}
+  h3{font-size:15.5px;margin:0;font-weight:600;letter-spacing:-0.01em}
+  p{margin:0}
+  .sub{color:var(--t2);font-size:14px}
+  .mut{color:var(--t3)}
+  .tiny{font-size:12.5px}
+  section{margin-top:46px}
+  .sec-head{display:flex;align-items:baseline;gap:12px;margin-bottom:14px}
+  .sec-note{font-size:12.5px;color:var(--t3);margin-left:auto;text-align:right;max-width:52%}
+  .badge{font-size:11px;letter-spacing:.09em;text-transform:uppercase;font-weight:650;
+         color:var(--accent);background:var(--accent-dim);padding:5px 10px;border-radius:999px;
+         display:inline-block;margin-bottom:12px}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9em;
+       background:var(--s3);border-radius:4px;padding:1px 5px;color:#9db8e8}
+
+  /* keep / hiccups */
+  .duo{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:900px){.duo{grid-template-columns:1fr}}
+  .panel{background:var(--s1);border:1px solid var(--line);border-radius:16px;padding:18px 20px}
+  .panel .ph{font-size:12px;letter-spacing:.09em;text-transform:uppercase;font-weight:650;margin-bottom:12px}
+  .panel.keep .ph{color:#71d071}
+  .panel.fix .ph{color:#f19a9a}
+  .kl{display:flex;flex-direction:column;gap:9px}
+  .ki{display:flex;gap:10px;font-size:13px;color:var(--t2);line-height:1.5}
+  .ki .m{flex:none;width:16px;text-align:center}
+  .ki b{color:var(--t1);font-weight:600}
+  .ki .fixto{display:block;font-size:11.5px;color:var(--t3);margin-top:2px}
+  .ki .fixto b{color:#9db8e8;font-weight:600}
+
+  /* replay */
+  .beat{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;align-items:start}
+  @media(max-width:900px){.beat{grid-template-columns:1fr}}
+  .said{background:var(--s1);border:1px solid var(--line);border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;gap:10px}
+  .said .who{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--t3);font-weight:650}
+  .q{font-size:13.5px;color:var(--t2);border-left:2px solid var(--line-2);padding-left:12px;line-height:1.55}
+  .q.you{border-left-color:var(--accent)}
+  .q.cl{border-left-color:var(--t3)}
+  .q .asr{color:#f6cd77;border-bottom:1px dashed rgba(250,178,25,.5)}
+  .sys{background:linear-gradient(180deg,rgba(91,141,239,.05),var(--s1));border:1px solid rgba(91,141,239,.3);
+       border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;gap:9px}
+  .sys .sh{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--accent);font-weight:650}
+  .act{display:flex;gap:9px;align-items:flex-start;font-size:12.5px;color:var(--t2);line-height:1.5}
+  .tag{flex:none;font-size:9px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;border-radius:5px;
+       padding:2.5px 7px;margin-top:1.5px;white-space:nowrap}
+  .tg-x{color:#a9c5f7;background:var(--accent-dim);border:1px solid rgba(91,141,239,.4)}
+  .tg-e{color:#71d071;background:rgba(12,163,12,.12);border:1px solid rgba(12,163,12,.4)}
+  .tg-a{color:#f6cd77;background:rgba(250,178,25,.11);border:1px solid rgba(250,178,25,.35)}
+  .tg-c{color:#d9b8f5;background:rgba(144,133,233,.14);border:1px solid rgba(144,133,233,.4)}
+  .tg-n{color:#f3b596;background:rgba(236,131,90,.12);border:1px solid rgba(236,131,90,.4)}
+  .act b{color:var(--t1);font-weight:600}
+  .payload{background:#0a1017;border:1px solid var(--line-2);border-radius:9px;padding:10px 13px;
+           font-family:ui-monospace,Menlo,monospace;font-size:11px;line-height:1.55;color:#c7d4e8;overflow:auto}
+  .payload .k{color:#8fb5f5}.payload .s{color:#c9a9f0}.payload .c{color:#61728a}
+
+  /* canvas mock */
+  .cmock{background:var(--plane);border:1px solid var(--line-2);border-radius:12px;padding:12px;margin-top:4px}
+  .cm-h{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--t3);font-weight:650;margin-bottom:9px;display:flex}
+  .cm-h .r{margin-left:auto;color:var(--accent)}
+  .cpo2{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+  @media(max-width:560px){.cpo2{grid-template-columns:1fr}}
+  .cpo{background:var(--s2);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+  .cpo .nm{font-size:11.5px;font-weight:640;display:flex;align-items:center;gap:7px}
+  .cpo .nm .ord{font-size:8.5px;font-weight:700;color:#f3b596;background:rgba(236,131,90,.12);
+               border:1px solid rgba(236,131,90,.4);border-radius:999px;padding:1.5px 6px;margin-left:auto}
+  .stp{display:flex;gap:8px;align-items:center;font-size:10.5px;color:var(--t2);margin-top:6px}
+  .bx{width:10px;height:10px;border:1.5px solid var(--t3);border-radius:3px;flex:none}
+  .bx.on{background:var(--accent);border-color:var(--accent)}
+  .stp .d{margin-left:auto;font-size:9px;color:var(--t3);white-space:nowrap}
+  .stp.hot .d{color:#f19a9a;font-weight:650}
+  .cm-f{margin-top:9px;border-top:1px solid var(--line);padding-top:8px;font-size:10px;color:var(--t3)}
+  .cm-f b{color:#f6cd77;font-weight:600}
+
+  /* realtime split */
+  .rt{background:var(--s1);border:1px solid var(--line);border-radius:16px;padding:22px}
+  .rt-flow{display:flex;gap:0;align-items:stretch;flex-wrap:wrap}
+  .rt-n{background:var(--s2);border:1px solid var(--line-2);border-radius:12px;padding:13px 15px;flex:1;min-width:200px}
+  .rt-n .h{font-size:13px;font-weight:650;display:flex;gap:8px;align-items:center}
+  .rt-n .d{font-size:11.5px;color:var(--t3);margin-top:5px;line-height:1.5}
+  .rt-n ul{margin:7px 0 0;padding-left:16px;font-size:11.5px;color:var(--t2);line-height:1.6}
+  .rt-arr{display:flex;flex-direction:column;justify-content:center;padding:0 10px;color:var(--t3);font-size:15px;flex:none;gap:4px;text-align:center}
+  .rt-arr small{font-size:9px;color:var(--t3);letter-spacing:.04em}
+  .rt-note{font-size:12.5px;color:var(--t3);margin-top:14px;line-height:1.6}
+  .rt-note b{color:var(--t2)}
+
+  .srcs{margin-top:40px;padding-top:16px;border-top:1px solid var(--line);font-size:12px;color:var(--t3)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <span class="badge">Trace · your Aug 18 voice session vs the finished build</span>
+  <h1>The same conversation, run through the dream build</h1>
+  <p class="sub">You just gave the secretary its best test fixture yet. Below: every beat of the real transcript, what claude.ai did with it, and what the finished build does instead — with the exact writes, questions, and timers it would fire. Nothing here needs new invention; it's all subsystems we've already specced, plus four additions now folded into SPEC §11.</p>
+
+  <!-- SCORE -->
+  <section>
+    <div class="sec-head"><h2>The score</h2>
+      <div class="sec-note">Keep the behaviors on the left — they're system rules now, not personality luck. Each hiccup on the right names the subsystem that deletes it.</div></div>
+    <div class="duo">
+      <div class="panel keep">
+        <div class="ph">✓ What it got right — keep as rules</div>
+        <div class="kl">
+          <div class="ki"><span class="m">1</span><span><b>Intake posture.</b> "What's on the books and what have you been avoiding" — opens by hunting deadlines and dodged items, not waiting for them.</span></div>
+          <div class="ki"><span class="m">2</span><span><b>Read-backs.</b> Repeated both CPOs, names, and the 2026→2027 action back for confirmation. The build does this selectively — highest for low-confidence extractions.</span></div>
+          <div class="ki"><span class="m">3</span><span><b>One question per turn, ending in a directive.</b> "Which first, and who's the signer?" → "Go update it." Stern persona done right: sequence, owner, status — never a lecture.</span></div>
+          <div class="ki"><span class="m">4</span><span><b>Date math out loud.</b> "The twenty-first — that's three days out." Distances, not dates, create urgency.</span></div>
+          <div class="ki"><span class="m">5</span><span><b>Honest failure disclosure.</b> Said plainly that Reminders was denied and where the list actually lives.</span></div>
+          <div class="ki"><span class="m">6</span><span><b>A promised follow-up.</b> "I'll be asking either way." The build makes this literal — see beat 7.</span></div>
+        </div>
+      </div>
+      <div class="panel fix">
+        <div class="ph">✗ The hiccups — and what deletes each</div>
+        <div class="kl">
+          <div class="ki"><span class="m">1</span><span><b>"A chart I can't draw for you out loud — ask me in the text window."</b><span class="fixto">→ <b>Canvas.</b> Voice stays short; the chart paints itself on screen mid-sentence. The modality split is the whole point of the two-surface design.</span></span></div>
+          <div class="ki"><span class="m">2</span><span><b>Reminders permission denied → "I'm holding this list myself."</b><span class="fixto">→ <b>Own system of record.</b> Capture never depends on someone else's app. Rows hit your Spreadsheet instantly; integrations are exports, not storage.</span></span></div>
+          <div class="ki"><span class="m">3</span><span><b>"Marissa, Teresa Mahers, my boss" → Marissa silently vanished.</b><span class="fixto">→ <b>Entity store.</b> Marissa has existed in your data since Jul 30 (duty statement). A known person can't be silently dropped — ambiguity becomes a question.</span></span></div>
+          <div class="ki"><span class="m">4</span><span><b>ASR garble: "CPU" for CPO, "calc card," "pay I test."</b><span class="fixto">→ <b>Lexicon biasing.</b> The realtime session is fed your vocabulary (CPO, CalCard, Teresa Mahers…) so half the garble never happens; what's left is kept as flagged [unclear] spans, not guessed.</span></span></div>
+          <div class="ki"><span class="m">5</span><span><b>"This one is finished" — ignored entirely.</b><span class="fixto">→ <b>Unresolved-referent flag.</b> "This one," said while you look at a screen it can't see, is stored as a dangling fact and asked about at the next pause — not discarded.</span></span></div>
+          <div class="ki"><span class="m">6</span><span><b>"Created a memory · Edited a memory" — opaque blobs.</b><span class="fixto">→ <b>Structured store with provenance.</b> Every write is a typed row you can see, correct, and trace to the sentence that caused it. That's your Spreadsheet tab, doing its job.</span></span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- REPLAY -->
+  <section>
+    <div class="sec-head"><h2>The replay</h2>
+      <div class="sec-note">Left: what was said (garble underlined). Right: what the finished build fires at that moment — while the voice keeps talking.</div></div>
+
+    <!-- beat 1 -->
+    <div class="beat">
+      <div class="said">
+        <div class="who">You · setting the persona</div>
+        <div class="q you">"…a stern secretary… I hired you because you're gonna be on my ass… keep nagging me… professional… given how scatterbrained I am."</div>
+      </div>
+      <div class="sys">
+        <div class="sh">Finished build</div>
+        <div class="act"><span class="tag tg-e">write</span><span><b>Persona becomes config, not a per-call request.</b> Stored once, editable in Settings, applied to voice, chat, and even UI copy — the nag engine's intensity dial reads it.</span></div>
+        <div class="payload">persona_config {
+  <span class="k">strictness</span>: <span class="s">"high"</span>, <span class="k">tone</span>: <span class="s">"professional"</span>, <span class="k">praise</span>: <span class="s">"minimal"</span>,
+  <span class="k">followup_aggressiveness</span>: <span class="s">"nagging"</span>, <span class="k">quiet_hours</span>: <span class="s">"22:00–08:00"</span> }</div>
+      </div>
+    </div>
+
+    <!-- beat 2 -->
+    <div class="beat">
+      <div class="said">
+        <div class="who">You · the CPO dump</div>
+        <div class="q you">"…some of the <span class="asr">CPUs</span>… CPO ending two one one zero… lenses and camera accessories… <span class="asr">this one is finished</span>… ending two zero seven three, production monitor… <span class="asr">I'm gonna refer me to pay I test</span>… I'm pretty sure that's it."</div>
+      </div>
+      <div class="sys">
+        <div class="sh">Finished build</div>
+        <div class="act"><span class="tag tg-e">write</span><span>Two commitments created under Caltrans, provenance = this audio span, transcription pre-corrected by <b>lexicon biasing</b> (CPO, CalCard are in your vocabulary feed).</span></div>
+        <div class="act"><span class="tag tg-a">flag</span><span><b>"This one is finished"</b> — dangling referent (you were reading a screen it can't see). Kept, not guessed at.</span></div>
+        <div class="act"><span class="tag tg-a">flag</span><span><b>"pay I test"</b> — unparseable span kept as [unclear] with audio offset. Both flags go to the clarification queue — asked at the next pause, one at a time, never mid-flow.</span></div>
+        <div class="payload">commitments += [
+ {<span class="k">id</span>:<span class="s">"cpo-2110"</span>, <span class="k">title</span>:<span class="s">"Lenses &amp; camera accessories"</span>, <span class="k">action</span>:<span class="s">"update CPO 2026→2027"</span>},
+ {<span class="k">id</span>:<span class="s">"cpo-2073"</span>, <span class="k">title</span>:<span class="s">"Production monitor"</span>, <span class="k">action</span>:<span class="s">"update CPO 2026→2027"</span>}]
+clarify_queue += [<span class="s">"which one did you say was already finished?"</span>]</div>
+      </div>
+    </div>
+
+    <!-- beat 3 -->
+    <div class="beat">
+      <div class="said">
+        <div class="who">Claude · the tool failure</div>
+        <div class="q cl">"I couldn't get into your Reminders app, permission was denied, so I'm holding this list myself rather than in your app."</div>
+      </div>
+      <div class="sys">
+        <div class="sh">Finished build</div>
+        <div class="act"><span class="tag tg-e">write</span><span><b>This failure mode doesn't exist.</b> The secretary's store is the system of record — rows appear on your Spreadsheet tab as you speak. Reminders/Calendar become optional <em>exports</em>; if one fails, the failure itself becomes a visible pending item, mentioned once.</span></div>
+      </div>
+    </div>
+
+    <!-- beat 4 -->
+    <div class="beat">
+      <div class="said">
+        <div class="who">You · the chart ask + the pipeline + the stakes</div>
+        <div class="q you">"…make that into a little chart so I can remember which one's which… update the CPO, get it signed, pay <span class="asr">attach</span> with the CalCard… statement on the twenty-first… reconcile before the eighth of September… send documents to headquarters… so I don't get a strike."</div>
+        <div class="q cl" style="margin-top:2px">"A chart I can't draw for you out loud — ask me in the text window and I'll lay it out properly."</div>
+      </div>
+      <div class="sys">
+        <div class="sh">Finished build — the modality moment</div>
+        <div class="act"><span class="tag tg-c">canvas</span><span><b>The chart paints itself while you're still talking.</b> Voice says: "On your screen." A pipeline template is instantiated twice — 8 steps, dependencies, dates — and rendered. If this tracker keeps getting used, the audition-room rule hardens it into a registry component.</span></div>
+        <div class="act"><span class="tag tg-e">write</span><span><b>Stakes captured:</b> "avoid a strike" is stored on the commitment — it's what makes the nagging honest later.</span></div>
+        <div class="act"><span class="tag tg-a">ask</span><span><b>Dependency inference queued:</b> statement lands Fri the 21st — do the CalCard payments need to happen <em>before</em> it to ride this cycle? If yes, the real payment deadline is Wed the 20th, not "sometime." The build proposes that date instead of discovering it in September.</span></div>
+        <div class="cmock">
+          <div class="cm-h">Canvas · painted at 0:04 <span class="r">CPO tracker — Aug cycle</span></div>
+          <div class="cpo2">
+            <div class="cpo"><div class="nm">CPO …2073 · Production monitor <span class="ord">first</span></div>
+              <div class="stp"><span class="bx"></span>Update CPO to 2027 <span class="d">today</span></div>
+              <div class="stp"><span class="bx"></span>Signatures: Teresa · Walter <span class="d">by Wed?</span></div>
+              <div class="stp hot"><span class="bx"></span>Pay on CalCard <span class="d">before Fri 21?</span></div>
+              <div class="stp"><span class="bx"></span>Reconcile + send to HQ <span class="d">by Tue Sep 8</span></div>
+            </div>
+            <div class="cpo"><div class="nm">CPO …2110 · Lenses &amp; camera acc.</div>
+              <div class="stp"><span class="bx"></span>Update CPO to 2027 <span class="d">after 2073</span></div>
+              <div class="stp"><span class="bx"></span>Signatures: Teresa · Walter <span class="d">—</span></div>
+              <div class="stp"><span class="bx"></span>Pay on CalCard <span class="d">—</span></div>
+              <div class="stp"><span class="bx"></span>Reconcile + send to HQ <span class="d">by Tue Sep 8</span></div>
+            </div>
+          </div>
+          <div class="cm-f">Stakes: <b>miss the Sep 8 reconcile → a strike from HQ.</b> Statement arrives Fri Aug 21 · monthly cycle → offering to make this recurring.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- beat 5 -->
+    <div class="beat">
+      <div class="said">
+        <div class="who">You · the signers</div>
+        <div class="q you">"…has to get signed by <span class="asr">Marissa, Teresa Mahers, my boss</span>, and then <span class="asr">Walter Maiara</span>, who's like the CalCard manager."</div>
+        <div class="q cl" style="margin-top:2px">"Both need Teresa Mahers and Walter to sign off." <span class="mut">← Marissa silently dropped</span></div>
+      </div>
+      <div class="sys">
+        <div class="sh">Finished build — the entity store earns its keep</div>
+        <div class="act"><span class="tag tg-x">xref</span><span><b>Marissa already exists</b> — Caltrans, duty-statement recipient, on file since Jul 30. A name with a record cannot be silently dropped. Was that a correction ("Marissa— I mean Teresa, my boss") or two people?</span></div>
+        <div class="act"><span class="tag tg-a">ask</span><span>One question at the next pause: <em>"Signers — Marissa and Teresa both, or did you correct yourself? I have a Marissa at Caltrans already."</em></span></div>
+        <div class="act"><span class="tag tg-a">flag</span><span><b>"Walter Maiara"</b> — new person, spelling low-confidence. Confirmed before it ever lands in a document that gets signed.</span></div>
+        <div class="payload">people[<span class="s">"marissa"</span>].seen += this_session   <span class="c">// known since Jul 30</span>
+people += {<span class="k">name</span>:<span class="s">"Walter Maiara?"</span>, <span class="k">role</span>:<span class="s">"CalCard manager"</span>, <span class="k">conf</span>:0.62}
+clarify_queue += [<span class="s">"Marissa + Teresa, or just Teresa?"</span>, <span class="s">"spelling: Maiara?"</span>]</div>
+      </div>
+    </div>
+
+    <!-- beat 6 -->
+    <div class="beat">
+      <div class="said">
+        <div class="who">You · the real request under it all</div>
+        <div class="q you">"…if you could just retain all that information so I can work with you to remember where I'm at… there's a lot of steps involved."</div>
+      </div>
+      <div class="sys">
+        <div class="sh">Finished build</div>
+        <div class="act"><span class="tag tg-e">write</span><span><b>"Where am I" stops being a memory question and becomes a read.</b> The tracker <em>is</em> the state. Tomorrow, in any modality, on any device: "You're mid-pipeline on 2073 — updated but unsigned. Teresa hasn't seen it." No blobs, no vibes — pipeline rows with provenance.</span></div>
+      </div>
+    </div>
+
+    <!-- beat 7 -->
+    <div class="beat">
+      <div class="said">
+        <div class="who">Claude · the promise</div>
+        <div class="q cl">"Go update two-zero-seven-three. When you check back in, tell me plainly whether it's updated and whether Teresa's seen it — I'll be asking either way."</div>
+      </div>
+      <div class="sys">
+        <div class="sh">Finished build — "I'll be asking" is a timer, not a vibe</div>
+        <div class="act"><span class="tag tg-n">nag</span><span>An <b>expectation</b> is scheduled the moment the sentence is spoken. Report first and it clears silently; go quiet and it fires — naming the stakes, because they're stored: <em>"2073 — updated? Has Teresa seen it? This is the one with the strike attached."</em></span></div>
+        <div class="act"><span class="tag tg-n">nag</span><span>Nag engine rules: batched (one ping, not five), respects quiet hours, escalates by persona setting — yours says nagging, so it follows up next morning too.</span></div>
+        <div class="payload">expectations += {
+  <span class="k">commitment</span>: <span class="s">"cpo-2073.update+sign"</span>,
+  <span class="k">expected_update_by</span>: <span class="s">"2026-08-18T18:00"</span>,
+  <span class="k">on_miss</span>: {<span class="k">push</span>: <span class="s">"18:15"</span>, <span class="k">then</span>: <span class="s">"morning brief, top slot"</span>},
+  <span class="k">stakes_ref</span>: <span class="s">"HQ strike"</span> }</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- REALTIME -->
+  <section>
+    <div class="sec-head"><h2>Where your GPT realtime API finally earns its place</h2>
+      <div class="sec-note">The voice model shouldn't be the brain. It's the mouth and ears; the extractor runs 2–5s behind it; the store is the only truth. This division is what makes realtime useful instead of decorative.</div></div>
+    <div class="rt">
+      <div class="rt-flow">
+        <div class="rt-n">
+          <div class="h">🎙 Realtime voice <span class="mut tiny">(GPT realtime)</span></div>
+          <div class="d">Fast, warm, dumb on purpose. Its session config carries:</div>
+          <ul>
+            <li>the persona card</li>
+            <li>today's brief (~1 KB, from the store)</li>
+            <li><b>the entity lexicon</b> — CPO, CalCard, Teresa Mahers, Marissa, DTC… fed in for transcription biasing</li>
+            <li>thin tools: <code>log_status</code>, <code>create_commitment</code>, <code>schedule_checkin</code>, <code>paint_canvas</code></li>
+          </ul>
+          <div class="d" style="margin-top:7px">Rule: replies ≤ 2 sentences + at most 1 question. Anything visual → surface, and say "on your screen."</div>
+        </div>
+        <div class="rt-arr">⇄<small>utterances<br>context injections</small></div>
+        <div class="rt-n">
+          <div class="h">🧠 Extractor <span class="mut tiny">(Claude, async)</span></div>
+          <div class="d">Runs behind every utterance. Does the careful work the voice model must not slow down for:</div>
+          <ul>
+            <li>entity writes + reconciliation against existing state</li>
+            <li>cross-refs ("Marissa exists — ambiguity!")</li>
+            <li>dependency inference (pay before the 21st?)</li>
+            <li>fills the clarification queue → injected back so the voice asks at the next natural pause</li>
+          </ul>
+        </div>
+        <div class="rt-arr">⇄<small>reads<br>writes</small></div>
+        <div class="rt-n">
+          <div class="h">🗄 The store</div>
+          <div class="d">Entities, commitments, pipelines, expectations, preferences — every row with provenance. The Dashboard plans from it, the Canvas paints from it, the morning brief reads from it, the nag engine fires from it.</div>
+          <div class="d" style="margin-top:7px">The voice session can die mid-sentence and nothing is lost — the store already has everything up to 5 seconds ago.</div>
+        </div>
+      </div>
+      <div class="rt-note"><b>Why this fixes "integrated but not useful yet":</b> a realtime model alone has nowhere to put what it hears and nothing smart behind it. Give it the lexicon (garble drops), thin tools (it can act without thinking), and the async extractor (someone smart catches what it misses) — and the same API becomes the front half of a real secretary.</div>
+    </div>
+  </section>
+
+  <div class="srcs">
+    Folded into the kit as SPEC §11: persona config · stakes on commitments · pipeline templates with dependencies + recurrence ·
+    expectations/nag engine · clarification queue (batched, one per pause) · ASR lexicon export · unresolved-referent + low-confidence-name flags ·
+    the voice modality rule. Source transcript: your claude.ai session, Aug 18 2026.
+  </div>
+</div>
+</body>
+</html>
