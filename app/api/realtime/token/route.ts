@@ -9,6 +9,7 @@ import { conversations, usage, user as userTable } from "@/lib/db/schema";
 import { isErrorResponse, parseBody, requireSession } from "@/lib/api";
 import { checkVoiceQuota } from "@/lib/rate-limit";
 import { buildBriefing } from "@/lib/secretary/briefing";
+import { buildLexicon, lexiconPrompt } from "@/lib/secretary/lexicon";
 import { buildInstructions } from "@/lib/secretary/persona";
 import { openAIToolDefs } from "@/lib/secretary/tool-schemas";
 import {
@@ -71,14 +72,15 @@ export async function POST(req: Request) {
   const briefing = await buildBriefing(user.id, user.timezone, {
     consumeNudges: !parsed.reconnect,
   });
-  const [userRow] = await db
-    .select({ persona: userTable.persona })
-    .from(userTable)
-    .where(eq(userTable.id, user.id));
+  const [[userRow], lexicon] = await Promise.all([
+    db.select({ persona: userTable.persona }).from(userTable).where(eq(userTable.id, user.id)),
+    buildLexicon(user.id),
+  ]);
   const instructions = buildInstructions(briefing.text, {
     reconnect: parsed.reconnect,
     persona: userRow?.persona,
   });
+  const transcriptionPrompt = lexiconPrompt(lexicon);
 
   const res = await fetch("https://api.openai.com/v1/realtime/client_secrets", {
     method: "POST",
@@ -96,7 +98,12 @@ export async function POST(req: Request) {
         tool_choice: "auto",
         audio: {
           input: {
-            transcription: { model: TRANSCRIBE_MODEL },
+            // SPEC §11 ASR lexicon: bias transcription toward the entity
+            // store's exact spellings (CPO not CPU, CalCard not calc card).
+            transcription: {
+              model: TRANSCRIBE_MODEL,
+              ...(transcriptionPrompt ? { prompt: transcriptionPrompt } : {}),
+            },
             turn_detection: { type: "semantic_vad" },
           },
           output: { voice: REALTIME_VOICE },
