@@ -86,6 +86,19 @@ zones (`documents`, `coming_up`, `kanban`, `procrastination_zone`,
 `suggested_zone`), props-less; v0's `overdue_callout` retires into
 `focus_banner`.
 
+**v1.3 refinements (Phase 3 implementation):** (a) the wishlist lives in a
+`wishlist` DB table (not a .jsonl file) — same dedupe-by-need + tombstone
+semantics, but durable, user-scoped, and included in the nightly Heroku
+mirror. (b) Slow-loop components are **templates, not code**: the generation
+job authors a declarative HTML template (canvas-sanitizer vocabulary +
+`{{signals.path}}` slots and `{{#each}}` loops) plus meta + preview. Approval
+inserts it into a `dynamic_components` table and bumps the registry version —
+hot-registration with no restart, and the runtime never executes generated
+JS; it interpolates + sanitizes, exactly like the Canvas. This is §7.6's
+"born visual" rule made structural. (c) The planner prompt's registry table
+is augmented at load time from `dynamic_components` rather than by editing
+the prompt file on disk.
+
 ---
 
 ## 3. LayoutPlan schema

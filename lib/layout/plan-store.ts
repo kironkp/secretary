@@ -9,6 +9,7 @@ import { REGISTRY_VERSION } from "./registry";
 import { defaultPlan, sectionKey, type LayoutPlan } from "./plan";
 import { planWithFallback } from "./plan-from-llm";
 import { computeSignals, signalsHash, type Signals } from "./signals";
+import { listDynamicComponents, openPriorityWishes } from "./slow-loop";
 import { applyBans, type LayoutPreference } from "./validator";
 
 export type PlanBundle = {
@@ -72,8 +73,22 @@ export async function computeCurrentPlan(userId: string): Promise<PlanBundle> {
       preferences,
       pinnedSections: head?.pinned ?? [],
       llmEnabled: false, // rules only on the render path
+      dynamicComponents: await listDynamicComponents(userId),
     }));
     wantsLlmRefinement = true;
+  }
+
+  // F8 interim substitution (SPEC §7.5 tier 2): while a wished view is being
+  // built, its closest component stands in — emphasized, with an honest why.
+  if (!signals.context.calm_mode) {
+    for (const wish of await openPriorityWishes(userId)) {
+      const stand = plan.sections.find((s) => s.component === wish.closestComponent);
+      if (!stand) continue;
+      if (stand.component === "timeline") {
+        stand.props = { ...stand.props, span_days: 14, expanded: true };
+      }
+      stand.why = `closest I have until the ${wish.need.split("—")[0].trim()} view is built`.slice(0, 140);
+    }
   }
 
   // A plan is "new" when its content differs — sections or reason. plan_id
@@ -133,6 +148,7 @@ export async function persistPlan(userId: string, bundle: PlanBundle): Promise<v
       preferences,
       pinnedSections: bundle.pinned,
       llmEnabled: true,
+      dynamicComponents: await listDynamicComponents(userId),
     });
     if (refined.source !== "llm" && refined.source !== "llm-cache") return;
     if (planContent(refined.plan) === planContent(bundle.plan)) return;

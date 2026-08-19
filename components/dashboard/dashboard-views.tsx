@@ -42,6 +42,7 @@ export function DashboardViews({
   planVersion = 0,
   planPinned = [],
   planProjects = [],
+  planDynamicHtml = {},
   compact = false,
 }: {
   tasks: TaskRow[];
@@ -56,6 +57,7 @@ export function DashboardViews({
   planVersion?: number;
   planPinned?: string[];
   planProjects?: PlanProject[];
+  planDynamicHtml?: Record<string, string>;
   compact?: boolean;
 }) {
   const router = useRouter();
@@ -151,6 +153,7 @@ export function DashboardViews({
             pinned={planPinned}
             updatedAt={layoutUpdatedAt}
             projects={planProjects}
+            dynamicHtml={planDynamicHtml}
             tasks={tasks}
             suggestions={suggestions}
             events={events}

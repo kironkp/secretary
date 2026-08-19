@@ -16,6 +16,13 @@ import {
 } from "@/lib/db/schema";
 import { layoutPreferences } from "@/lib/db/schema";
 import { latestSnapshot, paintCanvas } from "@/lib/canvas/painter";
+import {
+  addWish,
+  approveProposal,
+  enqueueBuild,
+  listDynamicComponents,
+  rejectProposal,
+} from "@/lib/layout/slow-loop";
 import { dayRangeInTz } from "@/lib/time";
 import { defaultPlan, sectionKey, type LayoutPlan, type PlanSection } from "@/lib/layout/plan";
 import { getPlanHead, getPreferences, savePlanAsHead } from "@/lib/layout/plan-store";
@@ -1158,16 +1165,19 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
   // planner output; user-initiated changes apply immediately (invariant 3). ---
 
   async get_current_plan(ctx) {
-    const [head, prefs, signals] = await Promise.all([
+    const [head, prefs, signals, dynamic] = await Promise.all([
       getPlanHead(ctx.userId),
       getPreferences(ctx.userId),
       computeSignals(ctx.userId),
+      listDynamicComponents(ctx.userId),
     ]);
     const plan = head ? (head.spec as LayoutPlan) : defaultPlan(signals);
     return {
       result: {
-        registry_version: REGISTRY_VERSION,
-        components: REGISTRY_COMPONENTS,
+        registry_version: dynamic.length
+          ? Math.max(...dynamic.map((d) => d.registryVersion))
+          : REGISTRY_VERSION,
+        components: [...REGISTRY_COMPONENTS, ...dynamic.map((d) => d.name)],
         sections: plan.sections.map((s, i) => ({ position: i, key: sectionKey(s), ...s })),
         reason_summary: plan.reason_summary ?? null,
         pinned: head?.pinned ?? [],
@@ -1210,6 +1220,7 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     };
     // User-initiated: pins and movement rationing don't constrain the user's
     // own request (invariant 3), but structural rules and preferences still do.
+    const dynamic = await listDynamicComponents(ctx.userId);
     const v = validatePlan(candidate, {
       signals,
       previousPlan: current,
@@ -1217,6 +1228,7 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
       pinnedSections: [],
       defaultPlan: defaultPlan(signals),
       userInitiated: true,
+      dynamicComponents: dynamic.map((d) => d.name),
     });
     if (!v.ok) {
       return {
@@ -1266,6 +1278,60 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     return {
       result: { painting: true, note: "Patch is landing on the Canvas tab now." },
       toast: { icon: "🎨", text: "Updating the canvas…" },
+    };
+  },
+
+  // --- Slow loop, tier 2 (SPEC §7.5): registry-outside asks become proposals ---
+
+  async request_new_component(ctx, args) {
+    const a = toolSchemas.request_new_component.parse(args);
+    if (!REGISTRY_COMPONENTS.includes(a.closest_component as never)) {
+      return { result: { error: `closest_component must be a registry component` } };
+    }
+    const signals = await computeSignals(ctx.userId);
+    const wish = await addWish(ctx.userId, {
+      need: a.sketch ? `${a.need} — ${a.sketch}` : a.need,
+      closestComponent: a.closest_component,
+      signals: `requested in chat; ${signals.projects.length} active projects`,
+      priority: true,
+    });
+    if (wish.tombstoned) {
+      return {
+        result: {
+          declined: true,
+          note: "The user previously rejected this view — don't rebuild it unless they clearly want it back.",
+        },
+      };
+    }
+    await enqueueBuild(ctx.userId, wish.id);
+    return {
+      result: {
+        building: true,
+        wish_id: wish.id,
+        note: "Build started (a few minutes). Now ALSO call paint_canvas with this ask so the user sees something immediately, and tell them the nearest dashboard view stands in meanwhile.",
+      },
+      toast: { icon: "🛠", text: "Building that view — a few minutes" },
+    };
+  },
+
+  async review_proposed_component(ctx, args) {
+    const a = toolSchemas.review_proposed_component.parse(args);
+    if (a.decision === "approve") {
+      const res = await approveProposal(ctx.userId, a.name);
+      if (!res.ok) return { result: { error: res.error } };
+      return {
+        result: {
+          approved: true,
+          registry_version: res.registryVersion,
+          note: "Registered — the planner can use it from the next plan on. No restart needed.",
+        },
+        toast: { icon: "✓", text: `New view "${a.name}" is live` },
+      };
+    }
+    await rejectProposal(ctx.userId, a.name);
+    return {
+      result: { rejected: true, note: "Tombstoned — this need won't be re-proposed." },
+      toast: { icon: "🗑", text: `Proposal "${a.name}" rejected` },
     };
   },
 

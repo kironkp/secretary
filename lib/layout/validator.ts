@@ -30,6 +30,8 @@ export type ValidationContext = {
   defaultPlan: LayoutPlan;
   /** User-initiated changes are exempt from movement rationing (invariant 3). */
   userInitiated?: boolean;
+  /** Names of approved dynamic components (SPEC v1.3) — valid section names. */
+  dynamicComponents?: string[];
 };
 
 /** Longest common subsequence of two key arrays — sections outside it "moved". */
@@ -96,6 +98,12 @@ export function validatePlan(input: unknown, ctx: ValidationContext): Validation
   const sections: PlanSection[] = [];
   for (const s of parsed.data.sections) {
     if (!isRegistryComponent(s.component)) {
+      // Approved dynamic components (SPEC v1.3) are valid; props free-form
+      // (their output is interpolated + sanitized, never executed).
+      if (ctx.dynamicComponents?.includes(s.component)) {
+        sections.push({ component: s.component, props: s.props, why: s.why });
+        continue;
+      }
       warnings.push(`dropped unknown component "${s.component}"`);
       continue;
     }
@@ -187,6 +195,15 @@ export function validatePlan(input: unknown, ctx: ValidationContext): Validation
   if (!ctx.userInitiated && ctx.previousPlan) {
     const prevKeys = ctx.previousPlan.sections.map(sectionKey);
     const newKeys = plan.sections.map(sectionKey);
+    // Invariant 8: same-day system plans may add or re-emphasize, but
+    // removals wait — a section the user saw today can't silently vanish.
+    if (ctx.signals.context.days_since_layout_change < 1) {
+      for (const key of prevKeys) {
+        if (!newKeys.includes(key)) {
+          reasons.push(`removal is rationed today: "${key}" would vanish`);
+        }
+      }
+    }
     const common = new Set(prevKeys.filter((k) => newKeys.includes(k)));
     const prevSeq = prevKeys.filter((k) => common.has(k));
     const newSeq = newKeys.filter((k) => common.has(k));

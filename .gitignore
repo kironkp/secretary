@@ -36,3 +36,6 @@ sim/reports/
 sim/.instance.json
 sim/.run.lock
 sim/.disabled
+
+# slow-loop proposals are transient review artifacts; approved ones live in the DB
+components/proposed/

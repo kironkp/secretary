@@ -23,7 +23,8 @@
     "sim:replay": "tsx sim/run.ts --replay",
     "sim:gen": "tsx sim/generate-personas.ts",
     "sim:selftest": "tsx sim/run.ts --selftest",
-    "sim:hook:install": "sh sim/hooks/install.sh"
+    "sim:hook:install": "sh sim/hooks/install.sh",
+    "slow-loop:nightly": "tsx --env-file=.env.local scripts/slow-loop.ts --nightly"
   },
   "dependencies": {
     "@better-auth/passkey": "^1.6.23",

@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { user } from "@/lib/db/schema";
 import { CalmModeToggle } from "@/components/settings/calm-mode-toggle";
 import { LayoutPreferences } from "@/components/settings/layout-preferences";
+import { ProposalReview } from "@/components/settings/proposal-review";
 import { layoutPreferences } from "@/lib/db/schema";
 import { PasskeySection } from "@/components/settings/passkey-section";
 import { TimezoneForm } from "@/components/settings/timezone-form";
@@ -60,6 +61,10 @@ export default async function SettingsPage() {
           Layout preferences
         </h3>
         <LayoutPreferences initial={prefRows} />
+        <h3 className="mb-1 mt-4 text-xs font-bold uppercase tracking-wide text-muted">
+          Proposed components
+        </h3>
+        <ProposalReview />
       </section>
 
       <section className="rounded-xl border border-edge bg-surface p-5">

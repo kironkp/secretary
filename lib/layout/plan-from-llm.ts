@@ -59,6 +59,8 @@ export async function planWithFallback(
     pinnedSections: string[];
     call?: PlannerCall;
     llmEnabled?: boolean;
+    /** Approved dynamic components (SPEC v1.3): valid names + prompt rows. */
+    dynamicComponents?: { name: string; description: string }[];
   }
 ): Promise<{ plan: LayoutPlan; source: "llm" | "llm-cache" | "rules" | "previous" | "default" }> {
   const ctx = {
@@ -67,6 +69,7 @@ export async function planWithFallback(
     preferences: opts.preferences,
     pinnedSections: opts.pinnedSections,
     defaultPlan: defaultPlan(signals),
+    dynamicComponents: opts.dynamicComponents?.map((d) => d.name),
   };
   const key = cacheKey(signals);
 
@@ -78,8 +81,15 @@ export async function planWithFallback(
     }
     try {
       const call = opts.call ?? livePlannerCall;
+      // Approved dynamic components join the prompt's registry table at load
+      // time (SPEC v1.3c) — the prompt file on disk is never mutated.
+      const prompt = opts.dynamicComponents?.length
+        ? `${plannerPrompt()}\n## Approved dynamic components (also valid, props-less)\n${opts.dynamicComponents
+            .map((d) => `| ${d.name} | — | ${d.description} |`)
+            .join("\n")}\n`
+        : plannerPrompt();
       const raw = await Promise.race([
-        call(plannerPrompt(), JSON.stringify(signals)),
+        call(prompt, JSON.stringify(signals)),
         new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error("planner timeout")), LLM_TIMEOUT_MS)
         ),

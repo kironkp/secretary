@@ -119,6 +119,17 @@ describe("invariant 3: movement rationing (system-initiated)", () => {
     if (!res.ok) expect(res.reasons.join(" ")).toContain("no why");
   });
 
+  it("rejects a same-day system plan that REMOVES a section (invariant 8: removals wait)", () => {
+    const signals = baseSignals();
+    signals.context.days_since_layout_change = 0;
+    const previous = planFromRules(signals);
+    const removed = structuredClone(previous);
+    removed.sections = removed.sections.filter((s) => s.component !== "date_chase");
+    const res = validatePlan(removed, ctx({ signals, previousPlan: previous }));
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reasons.join(" ")).toContain("removal is rationed");
+  });
+
   it("lets the same reorder through when user-initiated", () => {
     const signals = baseSignals();
     signals.context.days_since_layout_change = 0;

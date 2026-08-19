@@ -31,7 +31,9 @@ export const layoutPlanSchema = z
   .strict();
 
 export type PlanSection = {
-  component: RegistryComponent;
+  // A base registry component, or the name of an approved dynamic component
+  // (SPEC v1.3) — validated against the dynamic list, never free-form.
+  component: RegistryComponent | (string & {});
   props?: Record<string, unknown>;
   why?: string;
 };

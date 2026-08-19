@@ -242,6 +242,22 @@ export const toolSchemas = {
       .min(1)
       .describe("The targeted change, e.g. 'make the album section bigger' — the rest stays"),
   }),
+  // --- Slow loop, tier 2 (SPEC §7.5): asks OUTSIDE the registry become code ---
+  request_new_component: z.object({
+    need: z
+      .string()
+      .min(1)
+      .describe("The view the user wants that no registry component provides, in their words, e.g. 'show the album as a burndown chart'"),
+    closest_component: z
+      .string()
+      .min(1)
+      .describe("The nearest existing registry component to substitute meanwhile, e.g. 'timeline'"),
+    sketch: z.string().optional().describe("Any specifics the user gave about how it should look"),
+  }),
+  review_proposed_component: z.object({
+    name: z.string().min(1).describe("The proposal name, as listed in the wishlist/Settings"),
+    decision: z.enum(["approve", "reject"]),
+  }),
   set_layout_preference: z.object({
     kind: z.enum(["ban_component", "pin_section", "default_variant_for", "accent_policy"]),
     component: z
@@ -306,6 +322,10 @@ const toolDescriptions: Record<ToolName, string> = {
     "Paint the Canvas page: a free-form visual the user watches build live — posters, charts, big-number summaries, week views. Use for ANY 'show me / draw / visualize' ask ('paint my week'). Never say you can't draw — this is how you draw. The result appears on the Canvas tab; say so.",
   edit_canvas:
     "Targeted change to the current canvas ('make the album section bigger') without repainting the rest. Requires an existing canvas — otherwise use paint_canvas.",
+  request_new_component:
+    "The user wants a dashboard view that doesn't exist yet (outside the registry). Files a priority wishlist entry and starts a background build (a few minutes). ALSO call paint_canvas with the same ask so they see something NOW, and tell them honestly: 'Building that view — meanwhile, here's the nearest thing.' When the build lands, approval happens in chat via review_proposed_component.",
+  review_proposed_component:
+    "Approve or reject a built component proposal. Approve = it joins the dashboard registry immediately (no restart). Reject = the need is tombstoned and never re-proposed.",
   set_layout_preference:
     "Store a durable layout preference: ban_component ('stop showing me people' → component: people_index), pin_section (freeze a section), default_variant_for (a project always compact/full/nested), accent_policy: never ('I hate the glowing ring'). remove: true deletes it. Enforced on every future plan until removed in Settings.",
 };

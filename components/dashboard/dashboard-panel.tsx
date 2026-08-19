@@ -9,6 +9,8 @@ import { getDocumentsWithProject, getEventsWithProject, getTasksWithContext } fr
 import { getCurrentLayout, maybeRegenerateLayout } from "@/lib/layout/generator";
 import { computeCurrentPlan, persistPlan } from "@/lib/layout/plan-store";
 import type { PlanBundle } from "@/lib/layout/plan-store";
+import { listDynamicComponents, renderTemplate } from "@/lib/layout/slow-loop";
+import { sanitizeCanvasMarkup } from "@/lib/canvas/sanitize";
 import type { PlanProject } from "./plan-view";
 import type { DocRow } from "./shared";
 import { DashboardViews, type EventRow, type TaskRow } from "./dashboard-views";
@@ -44,6 +46,16 @@ export async function DashboardPanel({
           .where(eq(projectsTable.userId, userId))
       : Promise.resolve([] as PlanProject[]),
   ]);
+
+  // Approved dynamic components (SPEC v1.3): interpolate + sanitize on the
+  // server — the client receives inert, sanitized HTML strings, never code.
+  const dynamicHtml: Record<string, string> = {};
+  if (ADAPTIVE_V2 && planBundle) {
+    const dynamic = await listDynamicComponents(userId);
+    for (const d of dynamic) {
+      dynamicHtml[d.name] = sanitizeCanvasMarkup(renderTemplate(d.template, planBundle.signals));
+    }
+  }
 
   if (ADAPTIVE_V2 && planBundle) {
     // Persist plan history in the background; render never waits on writes.
@@ -124,6 +136,7 @@ export async function DashboardPanel({
       planVersion={planBundle?.version ?? 0}
       planPinned={planBundle?.pinned ?? []}
       planProjects={projectRows}
+      planDynamicHtml={dynamicHtml}
       compact={compact}
     />
   );

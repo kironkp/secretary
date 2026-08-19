@@ -266,6 +266,46 @@ export const layoutSpecs = pgTable("layout_specs", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// Slow-loop wishlist (SPEC §7, v1.3): the planner/user wants a component that
+// doesn't exist → a wish accumulates here instead of improvising. Dedupe by
+// normalized need; tombstoned wishes are never re-proposed.
+export const wishlist = pgTable("wishlist", {
+  id: text("id").primaryKey().$defaultFn(uuid),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  need: text("need").notNull(),
+  closestComponent: text("closest_component").notNull(),
+  signals: text("signals").notNull(),
+  count: integer("count").notNull().default(1),
+  priority: boolean("priority").notNull().default(false),
+  tombstoned: boolean("tombstoned").notNull().default(false),
+  status: text("status")
+    .$type<"open" | "building" | "proposed" | "approved" | "rejected">()
+    .notNull()
+    .default("open"),
+  proposalName: text("proposal_name"),
+  enqueuedAt: timestamp("enqueued_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Approved slow-loop components (SPEC v1.3): declarative templates rendered
+// through the canvas sanitizer with {{signals.*}} interpolation. Inserting a
+// row IS hot-registration — registryVersion is monotonic; the runtime never
+// imports generated code.
+export const dynamicComponents = pgTable("dynamic_components", {
+  id: text("id").primaryKey().$defaultFn(uuid),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  description: text("description").notNull(),
+  template: text("template").notNull(),
+  registryVersion: integer("registry_version").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // Canvas snapshots (SPEC §7.6): every paint is saved — markup + brief +
 // timestamp. Provenance applies to pictures too; "show me Tuesday's version"
 // must work. Markup is ALWAYS sanitized before it lands here.

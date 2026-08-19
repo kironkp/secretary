@@ -202,6 +202,7 @@ export function PlanView({
   crossing,
   onDone,
   fresh,
+  dynamicHtml = {},
 }: {
   plan: LayoutPlan;
   version: number;
@@ -215,6 +216,8 @@ export function PlanView({
   crossing: Set<string>;
   onDone: (id: string) => void;
   fresh?: Set<string>;
+  /** Approved dynamic components, pre-interpolated + sanitized on the server. */
+  dynamicHtml?: Record<string, string>;
 }) {
   const router = useRouter();
   const [pinned, setPinned] = useState<Set<string>>(new Set(initialPinned));
@@ -308,6 +311,18 @@ export function PlanView({
         return <ProcrastinationZone tasks={tasks} />;
       case "suggested_zone":
         return <SuggestedZone suggestions={suggestions} />;
+      default: {
+        // Approved dynamic component (SPEC v1.3): server-sanitized inert HTML —
+        // interpolated from signals, no scripts/loads possible by construction.
+        const html = dynamicHtml[section.component];
+        if (!html) return null;
+        return (
+          <div
+            className="rounded-2xl border border-edge bg-surface p-4"
+            dangerouslySetInnerHTML={{ __html: html }}
+          />
+        );
+      }
     }
   };
 
