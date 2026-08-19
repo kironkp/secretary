@@ -1,7 +1,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { getLatestConversation, getTodayStrip } from "@/lib/db/queries";
+import { getTodayStrip } from "@/lib/db/queries";
 import { FloatingChat } from "@/components/chat/floating-chat";
 import { DetailDialog } from "@/components/shell/detail-dialog";
 import { EventChipButton } from "@/components/shell/event-chip";
@@ -18,10 +18,7 @@ export default async function AppLayout({
   if (!session) redirect("/sign-in");
 
   const timezone = (session.user as { timezone?: string }).timezone ?? "UTC";
-  const [strip, latestThread] = await Promise.all([
-    getTodayStrip(session.user.id, timezone),
-    getLatestConversation(session.user.id),
-  ]);
+  const strip = await getTodayStrip(session.user.id, timezone);
 
   const nextEventLabel = strip.nextEvent
     ? `${strip.nextEvent.title} · ${new Intl.DateTimeFormat("en-US", {
@@ -64,14 +61,7 @@ export default async function AppLayout({
         <div className="mx-auto h-full w-full max-w-7xl px-4">{children}</div>
       </main>
       <DetailDialog />
-      <FloatingChat
-        initialConversationId={latestThread?.conversation.id ?? null}
-        initialMessages={(latestThread?.messages ?? []).slice(-20).map((m) => ({
-          id: m.id,
-          role: m.role,
-          content: m.content,
-        }))}
-      />
+      <FloatingChat />
     </div>
   );
 }
