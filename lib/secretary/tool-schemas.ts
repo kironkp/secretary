@@ -227,6 +227,21 @@ export const toolSchemas = {
       )
       .min(1),
   }),
+  // --- Canvas tools (SPEC §7.6): the model-painted visual surface ---
+  paint_canvas: z.object({
+    brief: z
+      .string()
+      .min(1)
+      .describe(
+        "What to paint, in the user's words plus any specifics they gave, e.g. 'my week as a timeline with the album work highlighted'"
+      ),
+  }),
+  edit_canvas: z.object({
+    patch: z
+      .string()
+      .min(1)
+      .describe("The targeted change, e.g. 'make the album section bigger' — the rest stays"),
+  }),
   set_layout_preference: z.object({
     kind: z.enum(["ban_component", "pin_section", "default_variant_for", "accent_policy"]),
     component: z
@@ -287,6 +302,10 @@ const toolDescriptions: Record<ToolName, string> = {
     "The dashboard's current layout plan: sections in order (with keys), the component registry, and the user's stored layout preferences. Call before editing the layout.",
   edit_layout_plan:
     "Rearrange the user's dashboard NOW: move/remove/add sections or change their props (variant, expanded, accent). User-initiated changes apply immediately. For 'never show X again' use set_layout_preference instead.",
+  paint_canvas:
+    "Paint the Canvas page: a free-form visual the user watches build live — posters, charts, big-number summaries, week views. Use for ANY 'show me / draw / visualize' ask ('paint my week'). Never say you can't draw — this is how you draw. The result appears on the Canvas tab; say so.",
+  edit_canvas:
+    "Targeted change to the current canvas ('make the album section bigger') without repainting the rest. Requires an existing canvas — otherwise use paint_canvas.",
   set_layout_preference:
     "Store a durable layout preference: ban_component ('stop showing me people' → component: people_index), pin_section (freeze a section), default_variant_for (a project always compact/full/nested), accent_policy: never ('I hate the glowing ring'). remove: true deletes it. Enforced on every future plan until removed in Settings.",
 };

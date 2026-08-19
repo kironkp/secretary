@@ -1,0 +1,141 @@
+// Canvas painter (SPEC §7.6): brief + Signals → sanitized HTML fragment,
+// STREAMED into the snapshot row so the canvas page shows paint progress —
+// first chunks land in ~1–2s, well under the 3s first-paint budget, while the
+// full render completes in the background.
+//
+// The canvas never mutates app state: the only table this file writes is
+// canvas_snapshots. The model call is injectable for tests.
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { desc, eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { canvasSnapshots } from "@/lib/db/schema";
+import { openai, PLANNER_MODEL } from "@/lib/openai";
+import { computeSignals } from "@/lib/layout/signals";
+import { sanitizeCanvasMarkup } from "./sanitize";
+
+let promptCache: string | null = null;
+export function painterPrompt(): string {
+  promptCache ??= readFileSync(
+    join(process.cwd(), "docs/adaptive-ui/canvas-painter-prompt.md"),
+    "utf8"
+  );
+  return promptCache;
+}
+
+/** Streaming generator: yields accumulated raw markup as chunks arrive. */
+export type PainterStream = (
+  systemPrompt: string,
+  input: string
+) => AsyncIterable<string>;
+
+export const livePainterStream: PainterStream = async function* (systemPrompt, input) {
+  const stream = await openai.responses.create({
+    model: PLANNER_MODEL,
+    instructions: systemPrompt,
+    input,
+    stream: true,
+  });
+  let acc = "";
+  for await (const event of stream) {
+    if (event.type === "response.output_text.delta") {
+      acc += event.delta;
+      yield acc;
+    }
+  }
+  yield acc;
+};
+
+const FLUSH_EVERY_MS = 600;
+
+/**
+ * Paint (or repaint) the canvas. Creates the snapshot row immediately with
+ * painting=true, streams sanitized chunks into it, and finalizes. Returns the
+ * snapshot id. Every paint is a NEW snapshot — history is the feature.
+ */
+export async function paintCanvas(
+  userId: string,
+  brief: string,
+  opts: { baseMarkup?: string; stream?: PainterStream } = {}
+): Promise<{ snapshotId: string; markup: string }> {
+  const signals = await computeSignals(userId);
+  const input = [
+    opts.baseMarkup
+      ? `CURRENT CANVAS (patch it per the brief, keep everything else):\n${opts.baseMarkup}\n`
+      : "",
+    `SIGNALS:\n${JSON.stringify(signals)}`,
+    `BRIEF:\n${brief}`,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const [row] = await db
+    .insert(canvasSnapshots)
+    .values({ userId, brief, markup: "", painting: true })
+    .returning();
+
+  const stream = opts.stream ?? livePainterStream;
+  let lastFlush = 0;
+  let finalRaw = "";
+  try {
+    for await (const raw of stream(painterPrompt(), input)) {
+      finalRaw = raw;
+      const now = Date.now();
+      if (now - lastFlush >= FLUSH_EVERY_MS) {
+        lastFlush = now;
+        await db
+          .update(canvasSnapshots)
+          .set({ markup: sanitizeCanvasMarkup(raw) })
+          .where(eq(canvasSnapshots.id, row.id));
+      }
+    }
+  } finally {
+    const markup = sanitizeCanvasMarkup(finalRaw);
+    await db
+      .update(canvasSnapshots)
+      .set({ markup, painting: false })
+      .where(eq(canvasSnapshots.id, row.id));
+  }
+  return { snapshotId: row.id, markup: sanitizeCanvasMarkup(finalRaw) };
+}
+
+export async function latestSnapshot(userId: string) {
+  const [row] = await db
+    .select()
+    .from(canvasSnapshots)
+    .where(eq(canvasSnapshots.userId, userId))
+    .orderBy(desc(canvasSnapshots.createdAt))
+    .limit(1);
+  return row ?? null;
+}
+
+export async function listSnapshots(userId: string, limit = 20) {
+  return db
+    .select({
+      id: canvasSnapshots.id,
+      brief: canvasSnapshots.brief,
+      painting: canvasSnapshots.painting,
+      createdAt: canvasSnapshots.createdAt,
+    })
+    .from(canvasSnapshots)
+    .where(eq(canvasSnapshots.userId, userId))
+    .orderBy(desc(canvasSnapshots.createdAt))
+    .limit(limit);
+}
+
+/** One-tap restore: the chosen snapshot becomes the newest (a copy). */
+export async function restoreSnapshot(userId: string, snapshotId: string): Promise<boolean> {
+  const [row] = await db
+    .select()
+    .from(canvasSnapshots)
+    .where(eq(canvasSnapshots.id, snapshotId))
+    .limit(1);
+  if (!row || row.userId !== userId) return false;
+  await db.insert(canvasSnapshots).values({
+    userId,
+    brief: `restored: ${row.brief}`,
+    markup: row.markup,
+    painting: false,
+  });
+  return true;
+}

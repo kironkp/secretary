@@ -266,6 +266,21 @@ export const layoutSpecs = pgTable("layout_specs", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// Canvas snapshots (SPEC §7.6): every paint is saved — markup + brief +
+// timestamp. Provenance applies to pictures too; "show me Tuesday's version"
+// must work. Markup is ALWAYS sanitized before it lands here.
+export const canvasSnapshots = pgTable("canvas_snapshots", {
+  id: text("id").primaryKey().$defaultFn(uuid),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  brief: text("brief").notNull(),
+  markup: text("markup").notNull(),
+  // streaming flag: true while the painter is still appending chunks
+  painting: boolean("painting").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // Durable layout constraints from chat/Settings (SPEC §7.5 tier 1): one row
 // per preference, e.g. {kind:"ban_component", component:"people_index"}.
 // Injected into every planner call and enforced by the validator; listed and

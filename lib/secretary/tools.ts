@@ -15,6 +15,7 @@ import {
   type DocSection,
 } from "@/lib/db/schema";
 import { layoutPreferences } from "@/lib/db/schema";
+import { latestSnapshot, paintCanvas } from "@/lib/canvas/painter";
 import { dayRangeInTz } from "@/lib/time";
 import { defaultPlan, sectionKey, type LayoutPlan, type PlanSection } from "@/lib/layout/plan";
 import { getPlanHead, getPreferences, savePlanAsHead } from "@/lib/layout/plan-store";
@@ -1228,6 +1229,43 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     return {
       result: { applied: true, version, sections: v.plan.sections.map((s) => sectionKey(s)) },
       toast: { icon: "layout", text: "Dashboard rearranged" },
+    };
+  },
+
+  // --- Canvas tools (SPEC §7.6). The canvas never mutates app state; these
+  // only write canvas_snapshots. Painting streams into the row, so the tool
+  // returns immediately and the Canvas page shows the paint landing live. ---
+
+  async paint_canvas(ctx, args) {
+    const a = toolSchemas.paint_canvas.parse(args);
+    // Fire-and-stream: don't hold the chat turn hostage to the full render.
+    const done = paintCanvas(ctx.userId, a.brief).catch((e) =>
+      console.error("paint_canvas failed", e)
+    );
+    // Give the stream a beat so the snapshot row exists before we answer.
+    await Promise.race([done, new Promise((r) => setTimeout(r, 1200))]);
+    return {
+      result: {
+        painting: true,
+        note: "Canvas is painting now — it streams in on the Canvas tab. Tell the user to look there (say 'on your screen' in voice).",
+      },
+      toast: { icon: "🎨", text: "Painting the canvas…" },
+    };
+  },
+
+  async edit_canvas(ctx, args) {
+    const a = toolSchemas.edit_canvas.parse(args);
+    const current = await latestSnapshot(ctx.userId);
+    if (!current || !current.markup) {
+      return { result: { error: "No canvas yet — use paint_canvas first." } };
+    }
+    const done = paintCanvas(ctx.userId, a.patch, { baseMarkup: current.markup }).catch((e) =>
+      console.error("edit_canvas failed", e)
+    );
+    await Promise.race([done, new Promise((r) => setTimeout(r, 1200))]);
+    return {
+      result: { painting: true, note: "Patch is landing on the Canvas tab now." },
+      toast: { icon: "🎨", text: "Updating the canvas…" },
     };
   },
 
