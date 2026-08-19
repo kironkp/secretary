@@ -5,6 +5,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { openai, PLANNER_MODEL } from "@/lib/openai";
+import { anthropic } from "@/lib/anthropic";
 import { REGISTRY_VERSION } from "./registry";
 import { defaultPlan, type LayoutPlan } from "./plan";
 import { planFromRules } from "./plan-from-rules";
@@ -23,8 +24,9 @@ export function plannerPrompt(): string {
 }
 
 // The LLM runs in the background (persistPlan), never on the render path —
-// measured nano latency ~5s. This is the background budget, not a render stall.
-const LLM_TIMEOUT_MS = 15000;
+// measured nano latency ~5s; Claude at low effort can take longer. This is the
+// background budget, not a render stall.
+const LLM_TIMEOUT_MS = 60000;
 
 export const livePlannerCall: PlannerCall = async (systemPrompt, signalsJson) => {
   const response = await openai.responses.create({
@@ -36,6 +38,34 @@ export const livePlannerCall: PlannerCall = async (systemPrompt, signalsJson) =>
   });
   return response.output_text ?? "";
 };
+
+/**
+ * Claude planner (CLAUDE_BRAIN): user-chosen model, effort clamped to low —
+ * background refinement doesn't need deep reasoning, the validator is the
+ * gatekeeper either way. Throws on refusal; planWithFallback's catch → rules.
+ */
+export function claudePlannerCall(model: string): PlannerCall {
+  return async (systemPrompt, signalsJson) => {
+    const response = await anthropic().messages.create({
+      model,
+      max_tokens: 16000,
+      system: systemPrompt,
+      messages: [
+        {
+          role: "user",
+          content: `Emit the LayoutPlan as a single JSON object for these SIGNALS. Respond with ONLY the JSON — no markdown fences, no prose.\n${signalsJson}`,
+        },
+      ],
+      output_config: { effort: "low" },
+    });
+    if (response.stop_reason === "refusal") throw new Error("claude refusal");
+    const text = response.content
+      .filter((b): b is Extract<(typeof response.content)[number], { type: "text" }> => b.type === "text")
+      .map((b) => b.text)
+      .join("");
+    return text.trim().replace(/^```(?:json)?\s*/, "").replace(/\s*```$/, "");
+  };
+}
 
 /** In-memory plan cache (SPEC §6): signals-hash + registry version. The
  *  durable layer is the decision log — plan-store also reuses the stored head

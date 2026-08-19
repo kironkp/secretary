@@ -16,6 +16,13 @@ import {
 } from "@/lib/db/schema";
 import { crossReferenceMentions } from "./entities";
 import { openai, TEXT_MODEL } from "@/lib/openai";
+import {
+  anthropic,
+  brainSettings,
+  claudeBrainEnabled,
+  type BrainSettings,
+} from "@/lib/anthropic";
+import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { findDuplicate, findDuplicateEvent, titleSimilarity } from "./dedupe";
 
 export const extractionSchema = z.object({
@@ -91,7 +98,36 @@ Anything already in KNOWN OPEN TASKS or KNOWN EVENTS must NOT reappear in tasks/
 
 const OPEN_STATUSES = ["inbox", "todo", "in_progress", "blocked"] as const;
 
-/** Model call: transcript → structured candidates. */
+/**
+ * Claude extraction (the "smartest model for parsing" path): same prompt, same
+ * schema, structured output enforced by the API. Throws on refusal/mismatch so
+ * the caller can fall back to OpenAI.
+ */
+async function claudeExtract(
+  context: string,
+  brain: BrainSettings
+): Promise<{ result: ExtractionResult; inputTokens: number; outputTokens: number; model: string }> {
+  const response = await anthropic().messages.parse({
+    model: brain.model,
+    max_tokens: 16000,
+    system: EXTRACTION_PROMPT,
+    messages: [{ role: "user", content: context }],
+    output_config: {
+      effort: brain.effort,
+      format: zodOutputFormat(extractionSchema),
+    },
+  });
+  if (response.stop_reason === "refusal") throw new Error("claude refusal");
+  if (!response.parsed_output) throw new Error("claude structured output missing");
+  return {
+    result: extractionSchema.parse(response.parsed_output),
+    inputTokens: response.usage.input_tokens,
+    outputTokens: response.usage.output_tokens,
+    model: brain.model,
+  };
+}
+
+/** Model call: transcript → structured candidates. Claude-first when enabled. */
 export async function extractFromTranscript(opts: {
   transcript: string;
   timezone: string;
@@ -99,7 +135,9 @@ export async function extractFromTranscript(opts: {
   knownTasks: { title: string; dueAt: Date | null }[];
   knownEvents: { title: string; startsAt: Date }[];
   projectNames: string[];
-}): Promise<{ result: ExtractionResult; inputTokens: number; outputTokens: number }> {
+  /** Per-user Claude settings; when set (and the flag is on) Claude parses. */
+  brain?: BrainSettings;
+}): Promise<{ result: ExtractionResult; inputTokens: number; outputTokens: number; model: string }> {
   const fmt = (d: Date) =>
     new Intl.DateTimeFormat("en-US", {
       timeZone: opts.timezone,
@@ -125,6 +163,18 @@ export async function extractFromTranscript(opts: {
     opts.transcript,
   ].join("\n");
 
+  if (opts.brain && claudeBrainEnabled()) {
+    try {
+      return await claudeExtract(context, opts.brain);
+    } catch (e) {
+      console.error(
+        "claude extraction failed, falling back to openai:",
+        e instanceof Error ? e.message : e
+      );
+      if (!process.env.OPENAI_API_KEY) throw e;
+    }
+  }
+
   const response = await openai.responses.create({
     model: TEXT_MODEL,
     instructions: EXTRACTION_PROMPT,
@@ -143,6 +193,7 @@ export async function extractFromTranscript(opts: {
     result: extractionSchema.parse(JSON.parse(response.output_text || "{}")),
     inputTokens: response.usage?.input_tokens ?? 0,
     outputTokens: response.usage?.output_tokens ?? 0,
+    model: TEXT_MODEL,
   };
 }
 
@@ -316,7 +367,7 @@ export async function runExtraction(
   timezone: string
 ): Promise<void> {
   try {
-    if (!process.env.OPENAI_API_KEY) return;
+    if (!process.env.OPENAI_API_KEY && !claudeBrainEnabled()) return;
     const [conv] = await db
       .select()
       .from(conversations)
@@ -359,13 +410,14 @@ export async function runExtraction(
       .where(and(eq(projectsTable.userId, userId), neOp(projectsTable.status, "archived")));
 
     const markerTime = rows[rows.length - 1].createdAt;
-    const { result, inputTokens, outputTokens } = await extractFromTranscript({
+    const { result, inputTokens, outputTokens, model } = await extractFromTranscript({
       transcript,
       timezone,
       projectNames: projectRows.map((p) => p.name),
       conversationDate: conv.startedAt,
       knownTasks,
       knownEvents,
+      brain: claudeBrainEnabled() ? await brainSettings(userId) : undefined,
     });
 
     await applyExtraction(userId, conversationId, result);
@@ -377,7 +429,7 @@ export async function runExtraction(
     await db.insert(usage).values({
       userId,
       kind: "extraction",
-      model: TEXT_MODEL,
+      model,
       inputTokens,
       outputTokens,
     });

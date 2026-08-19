@@ -9,6 +9,7 @@ import { user } from "@/lib/db/schema";
 import { isErrorResponse, parseBody, requireSession } from "@/lib/api";
 import { EL_MOUTH_VOICE } from "@/lib/elevenlabs";
 import { REALTIME_VOICES } from "@/lib/openai";
+import { BRAIN_EFFORTS, BRAIN_MODELS } from "@/lib/anthropic";
 
 const bodySchema = z.object({
   sass: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]).optional(),
@@ -16,6 +17,8 @@ const bodySchema = z.object({
   voice: z
     .enum([...REALTIME_VOICES, EL_MOUTH_VOICE] as [string, ...string[]])
     .optional(),
+  brainModel: z.enum(BRAIN_MODELS.map((m) => m.id) as [string, ...string[]]).optional(),
+  brainEffort: z.enum(BRAIN_EFFORTS).optional(),
 });
 
 export async function POST(req: Request) {
@@ -33,6 +36,8 @@ export async function POST(req: Request) {
     ...(parsed.sass !== undefined ? { sass: parsed.sass } : {}),
     ...(parsed.name !== undefined ? { name: parsed.name.trim() } : {}),
     ...(parsed.voice !== undefined ? { voice: parsed.voice } : {}),
+    ...(parsed.brainModel !== undefined ? { brainModel: parsed.brainModel } : {}),
+    ...(parsed.brainEffort !== undefined ? { brainEffort: parsed.brainEffort } : {}),
   };
   await db.update(user).set({ persona: next }).where(eq(user.id, session.id));
   return NextResponse.json({ ok: true, persona: next });

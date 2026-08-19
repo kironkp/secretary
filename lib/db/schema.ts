@@ -39,6 +39,9 @@ export const user = pgTable("user", {
     praise?: "effusive" | "brief" | "none";
     followup_aggressiveness?: "low" | "standard" | "high";
     quiet_hours?: { start: string; end: string } | null;
+    // Claude brain (Settings): model + effort for extraction/painter/planner
+    brainModel?: string;
+    brainEffort?: "low" | "medium" | "high" | "xhigh" | "max";
   } | null>(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

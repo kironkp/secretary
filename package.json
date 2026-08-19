@@ -27,8 +27,11 @@
     "slow-loop:nightly": "tsx --env-file=.env.local scripts/slow-loop.ts --nightly"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.119.0",
     "@better-auth/passkey": "^1.6.23",
     "better-auth": "^1.6.23",
+    "dotenv": "^17.4.2",
+    "drizzle-kit": "^0.31.10",
     "drizzle-orm": "^0.45.2",
     "lucide-react": "^1.30.0",
     "next": "16.2.11",
@@ -37,9 +40,7 @@
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "resend": "^6.18.0",
-    "zod": "^4.4.3",
-    "drizzle-kit": "^0.31.10",
-    "dotenv": "^17.4.2"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

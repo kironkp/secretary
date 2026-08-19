@@ -11,6 +11,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { canvasSnapshots, messages } from "@/lib/db/schema";
 import { openai, PLANNER_MODEL } from "@/lib/openai";
+import { anthropic, brainSettings, claudeBrainEnabled } from "@/lib/anthropic";
 import { computeSignals } from "@/lib/layout/signals";
 import { sanitizeCanvasMarkup } from "./sanitize";
 
@@ -45,6 +46,33 @@ export const livePainterStream: PainterStream = async function* (systemPrompt, i
   }
   yield acc;
 };
+
+/**
+ * Claude painter (CLAUDE_BRAIN): user-chosen model, effort clamped to low —
+ * the canvas is a streaming, latency-sensitive surface. Text deltas only;
+ * thinking blocks never reach the markup.
+ */
+export function claudePainterStream(model: string): PainterStream {
+  return async function* (systemPrompt, input) {
+    const stream = anthropic().messages.stream({
+      model,
+      max_tokens: 64000,
+      system: systemPrompt,
+      messages: [{ role: "user", content: input }],
+      output_config: { effort: "low" },
+    });
+    let acc = "";
+    for await (const event of stream) {
+      if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+        acc += event.delta.text;
+        yield acc;
+      }
+    }
+    const final = await stream.finalMessage();
+    if (final.stop_reason === "refusal") throw new Error("claude refusal");
+    yield acc;
+  };
+}
 
 const FLUSH_EVERY_MS = 600;
 
@@ -112,10 +140,13 @@ export async function paintCanvas(
     .values({ userId, brief, markup: "", painting: true })
     .returning();
 
-  const stream = opts.stream ?? livePainterStream;
-  let lastFlush = 0;
+  const useClaude = !opts.stream && claudeBrainEnabled();
+  const chosen =
+    opts.stream ??
+    (useClaude ? claudePainterStream((await brainSettings(userId)).model) : livePainterStream);
   let finalRaw = "";
-  try {
+  const run = async (stream: PainterStream) => {
+    let lastFlush = 0;
     for await (const raw of stream(painterPrompt(), input)) {
       finalRaw = raw;
       const now = Date.now();
@@ -126,6 +157,20 @@ export async function paintCanvas(
           .set({ markup: sanitizeCanvasMarkup(raw) })
           .where(eq(canvasSnapshots.id, row.id));
       }
+    }
+  };
+  try {
+    try {
+      await run(chosen);
+    } catch (e) {
+      // Claude path can never break the canvas: one retry on the OpenAI stream.
+      if (!useClaude || !process.env.OPENAI_API_KEY) throw e;
+      console.error(
+        "claude painter failed, falling back to openai:",
+        e instanceof Error ? e.message : e
+      );
+      finalRaw = "";
+      await run(livePainterStream);
     }
   } finally {
     const markup = sanitizeCanvasMarkup(finalRaw);

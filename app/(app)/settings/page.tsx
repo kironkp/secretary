@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { user } from "@/lib/db/schema";
+import { BrainSettings } from "@/components/settings/brain-settings";
 import { CalmModeToggle } from "@/components/settings/calm-mode-toggle";
 import { LayoutPreferences } from "@/components/settings/layout-preferences";
 import { ProposalReview } from "@/components/settings/proposal-review";
@@ -69,6 +70,19 @@ export default async function SettingsPage() {
           The voice on calls. Also switchable mid-call from the call controls.
         </p>
         <VoicePicker initial={userRow?.persona?.voice ?? "marin"} />
+      </section>
+
+      <section className="rounded-xl border border-edge bg-surface p-5">
+        <h2 className="mb-1 text-sm font-bold">Brain</h2>
+        <p className="mb-4 text-xs text-muted">
+          The Claude model that parses your conversations into tasks, paints the
+          canvas, and plans the dashboard — and how hard it thinks. The call
+          voice itself is unaffected.
+        </p>
+        <BrainSettings
+          initialModel={userRow?.persona?.brainModel ?? "claude-opus-5"}
+          initialEffort={userRow?.persona?.brainEffort ?? "high"}
+        />
       </section>
 
       <section className="rounded-xl border border-edge bg-surface p-5">

@@ -135,19 +135,23 @@ export async function persistPlan(userId: string, bundle: PlanBundle): Promise<v
     }
 
     // LLM refinement (SPEC §6) — tests never call a live model (VITEST guard).
+    const { claudeBrainEnabled, brainSettings } = await import("@/lib/anthropic");
+    const useClaude = claudeBrainEnabled();
     if (
       !bundle.wantsLlmRefinement ||
-      !process.env.OPENAI_API_KEY ||
+      (!process.env.OPENAI_API_KEY && !useClaude) ||
       process.env.VITEST ||
       bundle.signals.context.calm_mode
     )
       return;
     const preferences = await getPreferences(userId);
+    const { claudePlannerCall } = await import("./plan-from-llm");
     const refined = await planWithFallback(bundle.signals, {
       previousPlan: bundle.plan,
       preferences,
       pinnedSections: bundle.pinned,
       llmEnabled: true,
+      call: useClaude ? claudePlannerCall((await brainSettings(userId)).model) : undefined,
       dynamicComponents: await listDynamicComponents(userId),
     });
     if (refined.source !== "llm" && refined.source !== "llm-cache") return;
