@@ -7,10 +7,15 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { user } from "@/lib/db/schema";
 import { isErrorResponse, parseBody, requireSession } from "@/lib/api";
+import { EL_MOUTH_VOICE } from "@/lib/elevenlabs";
+import { REALTIME_VOICES } from "@/lib/openai";
 
 const bodySchema = z.object({
   sass: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]).optional(),
   name: z.string().max(60).optional(),
+  voice: z
+    .enum([...REALTIME_VOICES, EL_MOUTH_VOICE] as [string, ...string[]])
+    .optional(),
 });
 
 export async function POST(req: Request) {
@@ -27,6 +32,7 @@ export async function POST(req: Request) {
     ...(row?.persona ?? {}),
     ...(parsed.sass !== undefined ? { sass: parsed.sass } : {}),
     ...(parsed.name !== undefined ? { name: parsed.name.trim() } : {}),
+    ...(parsed.voice !== undefined ? { voice: parsed.voice } : {}),
   };
   await db.update(user).set({ persona: next }).where(eq(user.id, session.id));
   return NextResponse.json({ ok: true, persona: next });

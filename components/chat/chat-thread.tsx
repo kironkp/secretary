@@ -67,6 +67,7 @@ export function ChatThread({
   briefing,
   anchorMessageId,
   secretaryName = "Secretary",
+  defaultVoice = "marin",
 }: {
   initialConversationId: string | null;
   initialMessages: Message[];
@@ -74,6 +75,8 @@ export function ChatThread({
   anchorMessageId?: string;
   /** The name the user gave their secretary — labels the transcript. */
   secretaryName?: string;
+  /** Persona-preferred call voice; switchable mid-call. */
+  defaultVoice?: string;
 }) {
   const router = useRouter();
   const { dockVoice } = useSplit();
@@ -279,7 +282,12 @@ export function ChatThread({
           {error && <p className="mb-2 text-xs text-danger">{error}</p>}
 
           {mode === "voice" ? (
-            <VoiceMode docked={dockVoice} onClose={closeVoice} onTranscript={setLiveLines} />
+            <VoiceMode
+              docked={dockVoice}
+              onClose={closeVoice}
+              onTranscript={setLiveLines}
+              defaultVoice={defaultVoice}
+            />
           ) : mode === "dictation" ? (
             <DictationBar
               onCancel={() => setMode("idle")}

@@ -30,6 +30,8 @@ export const user = pgTable("user", {
   // conversation. Null = defaults (see lib/secretary/persona.ts).
   persona: jsonb("persona").$type<{
     name?: string;
+    // preferred realtime voice ("marin", …) or "elevenlabs" for the EL mouth
+    voice?: string;
     // 1 robotic · 2 dry professional · 3 deadpan · 4 sardonic · 5 full sass
     sass?: 1 | 2 | 3 | 4 | 5;
     strictness?: "gentle" | "standard" | "stern";

@@ -8,6 +8,7 @@ import { CalmModeToggle } from "@/components/settings/calm-mode-toggle";
 import { LayoutPreferences } from "@/components/settings/layout-preferences";
 import { ProposalReview } from "@/components/settings/proposal-review";
 import { SassSlider } from "@/components/settings/sass-slider";
+import { VoicePicker } from "@/components/settings/voice-picker";
 import { layoutPreferences } from "@/lib/db/schema";
 import { PasskeySection } from "@/components/settings/passkey-section";
 import { TimezoneForm } from "@/components/settings/timezone-form";
@@ -60,7 +61,14 @@ export default async function SettingsPage() {
           How much attitude your secretary has — in writing and out loud. You can
           also just tell it: &ldquo;be more sassy&rdquo;, &ldquo;tone it down&rdquo;.
         </p>
-        <SassSlider initial={userRow?.persona?.sass ?? 2} />
+        <SassSlider initial={userRow?.persona?.sass ?? 4} />
+        <h3 className="mb-1 mt-4 text-xs font-bold uppercase tracking-wide text-muted">
+          Voice
+        </h3>
+        <p className="mb-2 text-xs text-muted">
+          The voice on calls. Also switchable mid-call from the call controls.
+        </p>
+        <VoicePicker initial={userRow?.persona?.voice ?? "marin"} />
       </section>
 
       <section className="rounded-xl border border-edge bg-surface p-5">

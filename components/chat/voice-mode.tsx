@@ -76,12 +76,15 @@ const MODELS = [
 export function VoiceMode({
   onClose,
   docked = false,
+  defaultVoice = "marin",
   onTranscript,
 }: {
   onClose: (conversationId: string | null) => void;
   /** Split-workspace mode: compact dock inside the chat pane instead of the
    *  full-screen overlay. Same session, same unlock, same plumbing. */
   docked?: boolean;
+  /** Persona-preferred voice (server-persisted); in-call picks update it. */
+  defaultVoice?: string;
   /** Live transcript stream — lets the chat thread render voice lines as
    *  messages while the call is running (one conversation, not two worlds). */
   onTranscript?: (lines: TranscriptLine[]) => void;
@@ -96,9 +99,7 @@ export function VoiceMode({
   const [model, setModel] = useState(
     () => (typeof window !== "undefined" && localStorage.getItem("voice-model")) || MODELS[0].id
   );
-  const [voice, setVoice] = useState(
-    () => (typeof window !== "undefined" && localStorage.getItem("voice-timbre")) || VOICES[0]
-  );
+  const [voice, setVoice] = useState(defaultVoice);
   const [elAvailable, setElAvailable] = useState(false);
 
   // The ElevenLabs mouth option appears only when the server has keys.
@@ -244,7 +245,12 @@ export function VoiceMode({
 
   const pickVoice = async (v: string) => {
     setVoice(v);
-    localStorage.setItem("voice-timbre", v);
+    // server-persisted: the same voice everywhere — every window, every device
+    void fetch("/api/persona", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ voice: v }),
+    }).catch(() => {});
     if (connected) {
       setSwitching(true);
       await session.switchVoice(v);
@@ -349,6 +355,20 @@ export function VoiceMode({
                   </p>
                 )}
               </div>
+              <select
+                value={voice}
+                onChange={(e) => pickVoice(e.target.value)}
+                title="Voice"
+                aria-label="Voice"
+                className="w-20 flex-none rounded-full border border-edge bg-card px-2 py-1.5 text-xs text-muted outline-none focus:border-accent"
+              >
+                {VOICES.map((v) => (
+                  <option key={v} value={v}>
+                    {v}
+                  </option>
+                ))}
+                {elAvailable && <option value="elevenlabs">sassy (EL)</option>}
+              </select>
               <button
                 onClick={session.toggleMute}
                 title={session.muted ? "Unmute" : "Mute"}

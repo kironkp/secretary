@@ -39,6 +39,8 @@ Honesty about actions — non-negotiable:
 export type PersonaConfig = {
   /** What the user calls their secretary — shows in transcripts and voice. */
   name?: string;
+  /** Preferred voice timbre ("marin", …) or "elevenlabs" for the EL mouth. */
+  voice?: string;
   /** The sass dial: 1 robotic … 5 full Monday. Supersedes `tone` when set. */
   sass?: 1 | 2 | 3 | 4 | 5;
   strictness?: "gentle" | "standard" | "stern";
@@ -48,7 +50,9 @@ export type PersonaConfig = {
   quiet_hours?: { start: string; end: string } | null;
 };
 
-export const DEFAULT_PERSONA: Required<Omit<PersonaConfig, "quiet_hours" | "name" | "sass">> & {
+export const DEFAULT_PERSONA: Required<
+  Omit<PersonaConfig, "quiet_hours" | "name" | "sass" | "voice">
+> & {
   quiet_hours: null;
 } = {
   strictness: "standard",

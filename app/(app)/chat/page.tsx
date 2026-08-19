@@ -27,6 +27,7 @@ export default async function ChatPage({
     db.select({ persona: user.persona }).from(user).where(eq(user.id, userId)),
   ]);
   const secretaryName = userRow?.persona?.name ?? "Secretary";
+  const defaultVoice = userRow?.persona?.voice ?? "marin";
 
   return (
     <ChatWorkspace
@@ -42,6 +43,7 @@ export default async function ChatPage({
           briefing={briefing.card}
           anchorMessageId={m}
           secretaryName={secretaryName}
+          defaultVoice={defaultVoice}
         />
       }
       dashboard={<DashboardPanel userId={userId} timezone={timezone} compact />}
