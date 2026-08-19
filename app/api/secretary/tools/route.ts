@@ -6,6 +6,7 @@ import { z } from "zod";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { conversations, messages } from "@/lib/db/schema";
+import { nextClarification } from "@/lib/secretary/entities";
 import { isErrorResponse, parseBody, requireSession } from "@/lib/api";
 import { executeTool } from "@/lib/secretary/tools";
 
@@ -56,6 +57,17 @@ export async function POST(req: Request) {
     parsed.name,
     parsed.args
   );
+
+  // SPEC §11: the async extractor queues clarifications while the call runs;
+  // tool results are the injection channel back into the realtime session.
+  // At most one rides along, marked asked — the model raises it at the next
+  // natural pause, never mid-flow.
+  if (parsed.name !== "queue_clarification" && parsed.name !== "resolve_clarification") {
+    const clarification = await nextClarification(user.id);
+    if (clarification && outcome.result && typeof outcome.result === "object") {
+      (outcome.result as Record<string, unknown>).ask_at_next_pause = clarification.question;
+    }
+  }
 
   return NextResponse.json(outcome);
 }

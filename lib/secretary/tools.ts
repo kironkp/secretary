@@ -1189,6 +1189,41 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     };
   },
 
+  // --- Thin voice tools (SPEC §11 fast/slow split): delegate to the fat
+  // handlers so voice and text write the SAME store the same way. ---
+
+  async log_status(ctx, args) {
+    const a = toolSchemas.log_status.parse(args);
+    if (a.signal === "done") return handlers.complete_task(ctx, { task: a.task });
+    return handlers.update_task(ctx, {
+      task: a.task,
+      ...(a.signal === "started" ? { status: "in_progress" } : {}),
+      ...(a.signal === "blocked" ? { status: "blocked" } : {}),
+      ...(a.signal === "postponed" && a.new_due_at ? { due_at: a.new_due_at } : {}),
+      ...(a.note ? { notes: a.note } : {}),
+    });
+  },
+
+  async create_commitment(ctx, args) {
+    const a = toolSchemas.create_commitment.parse(args);
+    return handlers.create_task(ctx, {
+      title: a.title,
+      due_at: a.due_at,
+      project: a.project,
+      stakes: a.stakes,
+    });
+  },
+
+  async schedule_checkin(ctx, args) {
+    const a = toolSchemas.schedule_checkin.parse(args);
+    return handlers.create_expectation(ctx, {
+      commitment: a.commitment,
+      expected_update_by: a.expected_update_by,
+      task: a.task,
+      on_miss: "nag",
+    });
+  },
+
   // --- Agent layer (SPEC §11): persona + pipeline templates ---
 
   async update_persona(ctx, args) {

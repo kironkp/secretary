@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+import { after } from "next/server";
 import { z } from "zod";
+import { runExtraction } from "@/lib/secretary/extraction";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { conversations, messages } from "@/lib/db/schema";
@@ -45,5 +47,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     .insert(messages)
     .values({ userId: user.id, conversationId: id, ...parsed })
     .returning();
+
+  // SPEC §11 fast/slow split: the extractor (brain) runs asynchronously a few
+  // seconds behind each finalized USER utterance and writes the store — a
+  // dead voice session loses nothing that was said. The extractedAt
+  // high-water mark keeps repeated runs cheap.
+  if (parsed.role === "user" && parsed.mode === "voice") {
+    after(() => runExtraction(user.id, id, user.timezone));
+  }
   return NextResponse.json({ id: message.id });
 }

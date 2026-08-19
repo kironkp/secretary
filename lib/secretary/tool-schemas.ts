@@ -205,6 +205,26 @@ export const toolSchemas = {
   search_history: z.object({
     query: z.string().min(1).describe("Text to search past conversations for"),
   }),
+  // --- Thin voice tools (SPEC §11 fast/slow split): the realtime model is
+  // mouth and ears ONLY. These four verbs + the clarification pair are all it
+  // carries; everything heavier belongs to the async extractor and text chat. ---
+  log_status: z.object({
+    task: z.string().min(1).describe("Task id or a distinctive title fragment"),
+    signal: z.enum(["done", "started", "postponed", "blocked", "progress"]),
+    new_due_at: z.string().optional().describe("If postponed: the new date, ISO 8601"),
+    note: z.string().optional().describe("What the user said, briefly"),
+  }),
+  create_commitment: z.object({
+    title: z.string().min(1).describe("Short imperative title"),
+    due_at: z.string().optional().describe("ISO 8601 if a deadline was stated"),
+    project: z.string().optional().describe("Project name if it belongs to one"),
+    stakes: z.string().optional().describe("Named consequence of missing it, if the user stated one"),
+  }),
+  schedule_checkin: z.object({
+    commitment: z.string().min(1).describe("What the user should report back on"),
+    expected_update_by: z.string().describe("ISO 8601 — when you'll ask"),
+    task: z.string().optional().describe("Related task title fragment"),
+  }),
   // --- Agent layer (SPEC §11): persona + pipeline templates ---
   update_persona: z.object({
     strictness: z.enum(["gentle", "standard", "stern"]).optional(),
@@ -399,6 +419,12 @@ const toolDescriptions: Record<ToolName, string> = {
     "The dashboard's current layout plan: sections in order (with keys), the component registry, and the user's stored layout preferences. Call before editing the layout.",
   edit_layout_plan:
     "Rearrange the user's dashboard NOW: move/remove/add sections or change their props (variant, expanded, accent). User-initiated changes apply immediately. For 'never show X again' use set_layout_preference instead.",
+  log_status:
+    "Voice: the user reported where something stands ('updated it this morning', 'pushing that to Friday'). One call per report — done/started/postponed/blocked/progress. The store is the only truth; log it the moment you hear it.",
+  create_commitment:
+    "Voice: the user took something on. Log it immediately with any stated deadline and stakes ('so I don't get a strike'). Never wait to be asked.",
+  schedule_checkin:
+    "Voice: you promised to follow up ('I'll be asking either way') — schedule it in the SAME breath. A user report clears it silently; a miss opens the next session.",
   update_persona:
     "The user asked you to BE different — sterner, gentler, brisker, more/less follow-up, quiet hours ('I need a nagging secretary', 'stop being so peppy'). Store it ONCE here; it applies to every future conversation and the nag engine. Never re-ask how they want you to behave.",
   queue_clarification:
@@ -426,6 +452,28 @@ const toolDescriptions: Record<ToolName, string> = {
 /** OpenAI tool definitions (same flat shape works for Realtime and Responses). */
 export function openAIToolDefs() {
   return (Object.keys(toolSchemas) as ToolName[]).map((name) => ({
+    type: "function" as const,
+    name,
+    description: toolDescriptions[name],
+    parameters: z.toJSONSchema(toolSchemas[name]),
+  }));
+}
+
+/** SPEC §11 fast/slow split: the ONLY tools the realtime voice session
+ *  carries. The mouth logs, commits, schedules, paints, and asks — the async
+ *  extractor (brain) and text chat own everything else. */
+export const VOICE_TOOL_NAMES = [
+  "log_status",
+  "create_commitment",
+  "schedule_checkin",
+  "paint_canvas",
+  "get_current_datetime",
+  "queue_clarification",
+  "resolve_clarification",
+] as const satisfies readonly ToolName[];
+
+export function openAIVoiceToolDefs() {
+  return VOICE_TOOL_NAMES.map((name) => ({
     type: "function" as const,
     name,
     description: toolDescriptions[name],

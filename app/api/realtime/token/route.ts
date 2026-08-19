@@ -10,8 +10,8 @@ import { isErrorResponse, parseBody, requireSession } from "@/lib/api";
 import { checkVoiceQuota } from "@/lib/rate-limit";
 import { buildBriefing } from "@/lib/secretary/briefing";
 import { buildLexicon, lexiconPrompt } from "@/lib/secretary/lexicon";
-import { buildInstructions } from "@/lib/secretary/persona";
-import { openAIToolDefs } from "@/lib/secretary/tool-schemas";
+import { buildInstructions, VOICE_MODALITY_RULES } from "@/lib/secretary/persona";
+import { openAIVoiceToolDefs } from "@/lib/secretary/tool-schemas";
 import {
   REALTIME_MODEL_DEFAULT,
   REALTIME_MODEL_MINI,
@@ -76,10 +76,14 @@ export async function POST(req: Request) {
     db.select({ persona: userTable.persona }).from(userTable).where(eq(userTable.id, user.id)),
     buildLexicon(user.id),
   ]);
-  const instructions = buildInstructions(briefing.text, {
-    reconnect: parsed.reconnect,
-    persona: userRow?.persona,
-  });
+  const instructions = [
+    buildInstructions(briefing.text, {
+      reconnect: parsed.reconnect,
+      persona: userRow?.persona,
+    }),
+    "",
+    VOICE_MODALITY_RULES,
+  ].join("\n");
   const transcriptionPrompt = lexiconPrompt(lexicon);
 
   const res = await fetch("https://api.openai.com/v1/realtime/client_secrets", {
@@ -94,7 +98,8 @@ export async function POST(req: Request) {
         model,
         instructions,
         output_modalities: ["audio"],
-        tools: openAIToolDefs(),
+        // SPEC §11 fast/slow split: the mouth carries ONLY the thin tools.
+        tools: openAIVoiceToolDefs(),
         tool_choice: "auto",
         audio: {
           input: {

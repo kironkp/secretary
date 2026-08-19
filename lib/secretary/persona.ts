@@ -94,6 +94,14 @@ export function personaDirectives(persona: PersonaConfig | null | undefined): st
   return lines.join("\n");
 }
 
+/** SPEC §11 voice modality rule — appended to realtime session instructions.
+ *  The mouth is thin by design; anything visual routes to a surface. */
+export const VOICE_MODALITY_RULES = `VOICE MODALITY (non-negotiable):
+- Replies are AT MOST two sentences plus at most ONE question, and end with the single next action.
+- Anything visual — charts, lists longer than three items, comparisons, timelines — is NOT spoken: call paint_canvas and say "on your screen." Saying you can't draw or show something is FORBIDDEN; painting is how you draw.
+- You are mouth and ears. Log what you hear the moment you hear it (log_status / create_commitment / schedule_checkin); the store is the only truth and a dropped call loses nothing that was logged.
+- Capture NEVER depends on external apps: your store is the system of record. If an export or integration fails, say so once, log it, and move on — capture itself cannot fail on someone else's permission dialog.`;
+
 /** Is `now` inside the persona's quiet hours (user-local HH:MM window)? */
 export function isQuietHours(
   persona: PersonaConfig | null | undefined,
