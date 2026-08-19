@@ -28,7 +28,31 @@ export type ValidationContext = {
   /** Section keys pinned by the user (kept position + variant). */
   pinnedSections: string[];
   defaultPlan: LayoutPlan;
+  /** User-initiated changes are exempt from movement rationing (invariant 3). */
+  userInitiated?: boolean;
 };
+
+/** Longest common subsequence of two key arrays — sections outside it "moved". */
+function lcs(a: string[], b: string[]): Set<string> {
+  const dp: number[][] = Array.from({ length: a.length + 1 }, () =>
+    new Array<number>(b.length + 1).fill(0)
+  );
+  for (let i = 1; i <= a.length; i++)
+    for (let j = 1; j <= b.length; j++)
+      dp[i][j] = a[i - 1] === b[j - 1] ? dp[i - 1][j - 1] + 1 : Math.max(dp[i - 1][j], dp[i][j - 1]);
+  const keep = new Set<string>();
+  let i = a.length,
+    j = b.length;
+  while (i > 0 && j > 0) {
+    if (a[i - 1] === b[j - 1]) {
+      keep.add(a[i - 1]);
+      i--;
+      j--;
+    } else if (dp[i - 1][j] >= dp[i][j - 1]) i--;
+    else j--;
+  }
+  return keep;
+}
 
 export type ValidationResult =
   | { ok: true; plan: LayoutPlan; warnings: string[] }
@@ -153,6 +177,30 @@ export function validatePlan(input: unknown, ctx: ValidationContext): Validation
       );
       if (idx === -1 || idx >= ABOVE_THE_FOLD) {
         reasons.push(`urgent project "${p.name}" (${p.days_left}d) not above the fold`);
+      }
+    }
+  }
+
+  // Invariant 3 — movement is rationed for SYSTEM-initiated plans: reordering
+  // needs days_since_layout_change >= 1 AND a why on every moved section.
+  // (User-initiated changes are exempt — nothing the user asked for is a surprise.)
+  if (!ctx.userInitiated && ctx.previousPlan) {
+    const prevKeys = ctx.previousPlan.sections.map(sectionKey);
+    const newKeys = plan.sections.map(sectionKey);
+    const common = new Set(prevKeys.filter((k) => newKeys.includes(k)));
+    const prevSeq = prevKeys.filter((k) => common.has(k));
+    const newSeq = newKeys.filter((k) => common.has(k));
+    if (prevSeq.join("|") !== newSeq.join("|")) {
+      if (ctx.signals.context.days_since_layout_change < 1) {
+        reasons.push("reordering is rationed: layout already changed today");
+      } else {
+        const kept = lcs(prevSeq, newSeq);
+        for (const s of plan.sections) {
+          const key = sectionKey(s);
+          if (common.has(key) && !kept.has(key) && !s.why) {
+            reasons.push(`moved section "${key}" has no why`);
+          }
+        }
       }
     }
   }

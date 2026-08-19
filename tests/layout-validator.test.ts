@@ -93,6 +93,44 @@ describe("F5 validator-rejects", () => {
   });
 });
 
+describe("invariant 3: movement rationing (system-initiated)", () => {
+  it("rejects a system reorder when the layout already changed today", () => {
+    const signals = baseSignals();
+    signals.context.days_since_layout_change = 0;
+    const previous = planFromRules(signals);
+    const moved = structuredClone(previous);
+    const [first] = moved.sections.splice(0, 1);
+    moved.sections.push(first);
+    const res = validatePlan(moved, ctx({ signals, previousPlan: previous }));
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reasons.join(" ")).toContain("rationed");
+  });
+
+  it("rejects a permitted reorder whose moved section has no why", () => {
+    const signals = baseSignals(); // days_since_layout_change: 2 — reorder allowed
+    const previous = planFromRules(signals);
+    const moved = structuredClone(previous);
+    const idx = moved.sections.findIndex((s) => s.component === "date_chase");
+    const [s] = moved.sections.splice(idx, 1);
+    delete s.why;
+    moved.sections.unshift(s);
+    const res = validatePlan(moved, ctx({ signals, previousPlan: previous }));
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reasons.join(" ")).toContain("no why");
+  });
+
+  it("lets the same reorder through when user-initiated", () => {
+    const signals = baseSignals();
+    signals.context.days_since_layout_change = 0;
+    const previous = planFromRules(signals);
+    const moved = structuredClone(previous);
+    const [first] = moved.sections.splice(0, 1);
+    moved.sections.push(first);
+    const res = validatePlan(moved, ctx({ signals, previousPlan: previous, userInitiated: true }));
+    expect(res.ok).toBe(true);
+  });
+});
+
 describe("F7 (validator half): ban_component preference", () => {
   it("rejects any plan containing a banned component, and the fallback omits it too", () => {
     const signals = baseSignals();

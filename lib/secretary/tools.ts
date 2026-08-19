@@ -14,7 +14,13 @@ import {
   tasks,
   type DocSection,
 } from "@/lib/db/schema";
+import { layoutPreferences } from "@/lib/db/schema";
 import { dayRangeInTz } from "@/lib/time";
+import { defaultPlan, sectionKey, type LayoutPlan, type PlanSection } from "@/lib/layout/plan";
+import { getPlanHead, getPreferences, savePlanAsHead } from "@/lib/layout/plan-store";
+import { REGISTRY_COMPONENTS, REGISTRY_VERSION } from "@/lib/layout/registry";
+import { computeSignals } from "@/lib/layout/signals";
+import { applyBans, validatePlan } from "@/lib/layout/validator";
 import { findDuplicate, findDuplicateEvent } from "./dedupe";
 import { spawnNextOccurrence } from "./recurrence";
 import { toolSchemas, type ToolName } from "./tool-schemas";
@@ -1144,6 +1150,138 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         snippet: m.content.slice(0, 200),
         conversation_id: m.conversationId,
       })),
+    };
+  },
+
+  // --- Layout tools (SPEC §7.5 tier 1). All edits pass the SAME validator as
+  // planner output; user-initiated changes apply immediately (invariant 3). ---
+
+  async get_current_plan(ctx) {
+    const [head, prefs, signals] = await Promise.all([
+      getPlanHead(ctx.userId),
+      getPreferences(ctx.userId),
+      computeSignals(ctx.userId),
+    ]);
+    const plan = head ? (head.spec as LayoutPlan) : defaultPlan(signals);
+    return {
+      result: {
+        registry_version: REGISTRY_VERSION,
+        components: REGISTRY_COMPONENTS,
+        sections: plan.sections.map((s, i) => ({ position: i, key: sectionKey(s), ...s })),
+        reason_summary: plan.reason_summary ?? null,
+        pinned: head?.pinned ?? [],
+        preferences: prefs,
+      },
+    };
+  },
+
+  async edit_layout_plan(ctx, args) {
+    const a = toolSchemas.edit_layout_plan.parse(args);
+    const [head, prefs, signals] = await Promise.all([
+      getPlanHead(ctx.userId),
+      getPreferences(ctx.userId),
+      computeSignals(ctx.userId),
+    ]);
+    const current = head ? (head.spec as LayoutPlan) : defaultPlan(signals);
+    const sections: PlanSection[] = structuredClone(current.sections);
+
+    for (const op of a.operations) {
+      if (op.op === "add") {
+        const section = { component: op.component, props: op.props } as PlanSection;
+        sections.splice(op.at ?? sections.length, 0, section);
+        continue;
+      }
+      const idx = sections.findIndex((s) => sectionKey(s) === op.section);
+      if (idx === -1) return { result: { error: `No section "${op.section}" in the current plan` } };
+      if (op.op === "remove") sections.splice(idx, 1);
+      else if (op.op === "move") {
+        const [s] = sections.splice(idx, 1);
+        sections.splice(Math.min(op.to, sections.length), 0, s);
+      } else if (op.op === "set_props") {
+        sections[idx] = { ...sections[idx], props: { ...sections[idx].props, ...op.props } };
+      }
+    }
+
+    const candidate: LayoutPlan = {
+      plan_id: `chat-${Date.now().toString(36)}`,
+      reason_summary: current.reason_summary ?? null,
+      sections,
+    };
+    // User-initiated: pins and movement rationing don't constrain the user's
+    // own request (invariant 3), but structural rules and preferences still do.
+    const v = validatePlan(candidate, {
+      signals,
+      previousPlan: current,
+      preferences: prefs,
+      pinnedSections: [],
+      defaultPlan: defaultPlan(signals),
+      userInitiated: true,
+    });
+    if (!v.ok) {
+      return {
+        result: {
+          error: `That change breaks a layout rule: ${v.reasons.join("; ")}. Nothing was changed.`,
+        },
+      };
+    }
+    const version = await savePlanAsHead(ctx.userId, v.plan);
+    return {
+      result: { applied: true, version, sections: v.plan.sections.map((s) => sectionKey(s)) },
+      toast: { icon: "layout", text: "Dashboard rearranged" },
+    };
+  },
+
+  async set_layout_preference(ctx, args) {
+    const a = toolSchemas.set_layout_preference.parse(args);
+    const value: Record<string, string> =
+      a.kind === "ban_component"
+        ? { component: a.component ?? "" }
+        : a.kind === "pin_section"
+          ? { section: a.section ?? "" }
+          : a.kind === "default_variant_for"
+            ? { project: a.project ?? "", variant: a.variant ?? "full" }
+            : { policy: a.policy ?? "auto" };
+    if (Object.values(value).some((v) => !v)) {
+      return { result: { error: `Missing fields for ${a.kind}` } };
+    }
+    if (a.kind === "ban_component" && !REGISTRY_COMPONENTS.includes(value.component as never)) {
+      return { result: { error: `Unknown component "${value.component}"` } };
+    }
+
+    const existing = await db
+      .select()
+      .from(layoutPreferences)
+      .where(and(eq(layoutPreferences.userId, ctx.userId), eq(layoutPreferences.kind, a.kind)));
+    const match = existing.find(
+      (row) => JSON.stringify(row.value) === JSON.stringify(value)
+    );
+
+    if (a.remove) {
+      if (!match) return { result: { error: "No such preference stored" } };
+      await db.delete(layoutPreferences).where(eq(layoutPreferences.id, match.id));
+      return {
+        result: { removed: true, kind: a.kind, value },
+        toast: { icon: "layout", text: "Preference removed" },
+      };
+    }
+
+    if (!match) {
+      await db.insert(layoutPreferences).values({ userId: ctx.userId, kind: a.kind, value });
+    }
+
+    // F7: the live plan re-renders without a banned component immediately.
+    const head = await getPlanHead(ctx.userId);
+    if (head) {
+      const current = head.spec as LayoutPlan;
+      const prefs = await getPreferences(ctx.userId);
+      const cleaned = applyBans(current, prefs);
+      if (JSON.stringify(cleaned.sections) !== JSON.stringify(current.sections)) {
+        await savePlanAsHead(ctx.userId, cleaned);
+      }
+    }
+    return {
+      result: { stored: true, kind: a.kind, value, note: "Enforced on every future plan; removable in Settings." },
+      toast: { icon: "layout", text: "Layout preference saved" },
     };
   },
 };

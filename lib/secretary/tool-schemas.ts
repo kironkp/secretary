@@ -195,6 +195,50 @@ export const toolSchemas = {
   search_history: z.object({
     query: z.string().min(1).describe("Text to search past conversations for"),
   }),
+  // --- Layout tools (SPEC §7.5 tier 1): the dashboard's arrangement is data ---
+  get_current_plan: z.object({}),
+  edit_layout_plan: z.object({
+    operations: z
+      .array(
+        z.discriminatedUnion("op", [
+          z.object({
+            op: z.literal("remove"),
+            section: z.string().describe("Section key, e.g. 'timeline' or 'project_card:<project_id>'"),
+          }),
+          z.object({
+            op: z.literal("move"),
+            section: z.string().describe("Section key to move"),
+            to: z.number().int().min(0).describe("New position, 0 = top"),
+          }),
+          z.object({
+            op: z.literal("set_props"),
+            section: z.string().describe("Section key to change"),
+            props: z
+              .record(z.string(), z.unknown())
+              .describe("New props merged over current, e.g. {\"variant\":\"compact\"} or {\"expanded\":true}"),
+          }),
+          z.object({
+            op: z.literal("add"),
+            component: z.string().describe("Registry component to add"),
+            props: z.record(z.string(), z.unknown()).optional(),
+            at: z.number().int().min(0).optional().describe("Position; omit = end"),
+          }),
+        ])
+      )
+      .min(1),
+  }),
+  set_layout_preference: z.object({
+    kind: z.enum(["ban_component", "pin_section", "default_variant_for", "accent_policy"]),
+    component: z
+      .string()
+      .optional()
+      .describe("ban_component: the registry component to never show, e.g. 'people_index'"),
+    section: z.string().optional().describe("pin_section: section key to freeze in place"),
+    project: z.string().optional().describe("default_variant_for: project name or id"),
+    variant: z.enum(["full", "compact", "nested"]).optional().describe("default_variant_for: the variant"),
+    policy: z.enum(["never", "auto"]).optional().describe("accent_policy: 'never' kills the glow ring"),
+    remove: z.boolean().optional().describe("true = delete this preference instead of adding it"),
+  }),
 } as const;
 
 export type ToolName = keyof typeof toolSchemas;
@@ -239,6 +283,12 @@ const toolDescriptions: Record<ToolName, string> = {
   get_current_datetime:
     "The current date and time in the user's timezone. Use this instead of guessing — never assume the date.",
   search_history: "Search past conversation transcripts.",
+  get_current_plan:
+    "The dashboard's current layout plan: sections in order (with keys), the component registry, and the user's stored layout preferences. Call before editing the layout.",
+  edit_layout_plan:
+    "Rearrange the user's dashboard NOW: move/remove/add sections or change their props (variant, expanded, accent). User-initiated changes apply immediately. For 'never show X again' use set_layout_preference instead.",
+  set_layout_preference:
+    "Store a durable layout preference: ban_component ('stop showing me people' → component: people_index), pin_section (freeze a section), default_variant_for (a project always compact/full/nested), accent_policy: never ('I hate the glowing ring'). remove: true deletes it. Enforced on every future plan until removed in Settings.",
 };
 
 /** OpenAI tool definitions (same flat shape works for Realtime and Responses). */

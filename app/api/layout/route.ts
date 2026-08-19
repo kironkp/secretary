@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { layoutSpecs, user as userTable } from "@/lib/db/schema";
+import { layoutPreferences, layoutSpecs, user as userTable } from "@/lib/db/schema";
 import { isErrorResponse, parseBody, requireSession } from "@/lib/api";
 import { getLayoutHead } from "@/lib/layout/generator";
 import { getPlanHead, revertPlan, setPinned } from "@/lib/layout/plan-store";
@@ -22,6 +22,7 @@ const bodySchema = z.discriminatedUnion("action", [
     pinned: z.boolean(),
   }),
   z.object({ action: z.literal("calm_mode"), enabled: z.boolean() }),
+  z.object({ action: z.literal("remove_preference"), id: z.string().min(1) }),
 ]);
 
 export async function POST(req: Request) {
@@ -37,6 +38,13 @@ export async function POST(req: Request) {
       .set({ calmMode: parsed.enabled })
       .where(eq(userTable.id, user.id));
     return NextResponse.json({ ok: true, calm_mode: parsed.enabled });
+  }
+
+  if (parsed.action === "remove_preference") {
+    await db
+      .delete(layoutPreferences)
+      .where(and(eq(layoutPreferences.userId, user.id), eq(layoutPreferences.id, parsed.id)));
+    return NextResponse.json({ ok: true });
   }
 
   if (PLAN_MODE) {

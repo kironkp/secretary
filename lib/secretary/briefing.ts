@@ -5,6 +5,7 @@ import { and, count, desc, eq, gte, inArray, isNotNull, lt, ne, or } from "drizz
 import { db } from "@/lib/db";
 import { documents, events, memories, projects, tasks } from "@/lib/db/schema";
 import { dayRangeInTz } from "@/lib/time";
+import { getPlanHead } from "@/lib/layout/plan-store";
 import { refreshProcrastinationScores } from "./procrastination";
 import { getPendingSuggestions } from "./suggestions";
 
@@ -402,6 +403,16 @@ export async function buildBriefing(
   if (memoryRows.length) {
     lines.push("", "Things you know about the user:");
     for (const m of memoryRows) lines.push(`- ${m.fact}`);
+  }
+  // Morning layout note (SPEC §9 Phase 2): if the dashboard was rearranged,
+  // the secretary knows why and can say so — or change it on request.
+  const planHead = await getPlanHead(userId);
+  const planReason = planHead?.reasonSummary;
+  if (planReason) {
+    lines.push(
+      "",
+      `DASHBOARD: currently arranged for the situation — "${planReason}". If the user asks about the layout or wants it changed, use get_current_plan / edit_layout_plan / set_layout_preference.`
+    );
   }
   lines.push(
     "",

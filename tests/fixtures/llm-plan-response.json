@@ -1,0 +1,20 @@
+{
+  "plan_id": "llm-recorded-1",
+  "reason_summary": "Patent is due in 3 days and dominated today's talk",
+  "sections": [
+    { "component": "hero_next_up" },
+    {
+      "component": "project_card",
+      "props": { "project_id": "patent", "variant": "full", "accent": true, "inline_loops": true },
+      "why": "Due in 3 days — 14 mentions today vs 2 typical"
+    },
+    { "component": "stat_row" },
+    { "component": "project_card", "props": { "project_id": "album", "variant": "compact" } },
+    { "component": "project_card", "props": { "project_id": "findit", "variant": "compact" } },
+    { "component": "project_card", "props": { "project_id": "caltrans", "variant": "compact" } },
+    { "component": "timeline", "props": { "span_days": 14, "expanded": true }, "why": "Lots of date questions today" },
+    { "component": "open_loops", "props": { "group_by": "project", "include_done": true } },
+    { "component": "date_chase" },
+    { "component": "people_index" }
+  ]
+}

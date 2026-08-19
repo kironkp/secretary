@@ -5,6 +5,8 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { user } from "@/lib/db/schema";
 import { CalmModeToggle } from "@/components/settings/calm-mode-toggle";
+import { LayoutPreferences } from "@/components/settings/layout-preferences";
+import { layoutPreferences } from "@/lib/db/schema";
 import { PasskeySection } from "@/components/settings/passkey-section";
 import { TimezoneForm } from "@/components/settings/timezone-form";
 import { SignOutButton } from "@/components/settings/sign-out-button";
@@ -15,10 +17,13 @@ export default async function SettingsPage() {
   if (!session) redirect("/sign-in");
 
   const timezone = (session.user as { timezone?: string }).timezone ?? "UTC";
-  const [userRow] = await db
-    .select({ calmMode: user.calmMode })
-    .from(user)
-    .where(eq(user.id, session.user.id));
+  const [[userRow], prefRows] = await Promise.all([
+    db.select({ calmMode: user.calmMode }).from(user).where(eq(user.id, session.user.id)),
+    db
+      .select({ id: layoutPreferences.id, kind: layoutPreferences.kind, value: layoutPreferences.value })
+      .from(layoutPreferences)
+      .where(eq(layoutPreferences.userId, session.user.id)),
+  ]);
 
   return (
     <div className="mx-auto max-w-xl space-y-6 py-6">
@@ -51,6 +56,10 @@ export default async function SettingsPage() {
           secretary stops rearranging until you switch it back.
         </p>
         <CalmModeToggle initial={userRow?.calmMode ?? false} />
+        <h3 className="mb-1 mt-4 text-xs font-bold uppercase tracking-wide text-muted">
+          Layout preferences
+        </h3>
+        <LayoutPreferences initial={prefRows} />
       </section>
 
       <section className="rounded-xl border border-edge bg-surface p-5">
