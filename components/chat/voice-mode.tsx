@@ -55,6 +55,19 @@ function ToastIcon({ glyph }: { glyph: string }) {
   }
 }
 
+const VOICES = [
+  "marin",
+  "cedar",
+  "alloy",
+  "ash",
+  "ballad",
+  "coral",
+  "echo",
+  "sage",
+  "shimmer",
+  "verse",
+];
+
 const MODELS = [
   { id: "gpt-realtime-2.1", label: "GPT Realtime (best)" },
   { id: "gpt-realtime-2.1-mini", label: "GPT Realtime Mini (faster/cheaper)" },
@@ -83,6 +96,23 @@ export function VoiceMode({
   const [model, setModel] = useState(
     () => (typeof window !== "undefined" && localStorage.getItem("voice-model")) || MODELS[0].id
   );
+  const [voice, setVoice] = useState(
+    () => (typeof window !== "undefined" && localStorage.getItem("voice-timbre")) || VOICES[0]
+  );
+  const [elAvailable, setElAvailable] = useState(false);
+
+  // The ElevenLabs mouth option appears only when the server has keys.
+  useEffect(() => {
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch("/api/elevenlabs/tts");
+        if (res.ok) setElAvailable(Boolean(((await res.json()) as { configured: boolean }).configured));
+      } catch {
+        /* option stays hidden */
+      }
+    }, 0);
+    return () => clearTimeout(t);
+  }, []);
   const [switching, setSwitching] = useState(false);
   const startedRef = useRef(false);
 
@@ -155,7 +185,7 @@ export function VoiceMode({
   useEffect(() => {
     if (!startedRef.current) {
       startedRef.current = true;
-      session.start(model);
+      session.start(model, voice);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -212,6 +242,16 @@ export function VoiceMode({
     }
   };
 
+  const pickVoice = async (v: string) => {
+    setVoice(v);
+    localStorage.setItem("voice-timbre", v);
+    if (connected) {
+      setSwitching(true);
+      await session.switchVoice(v);
+      setSwitching(false);
+    }
+  };
+
   const endCall = async () => {
     const conversationId = await session.end();
     onClose(conversationId);
@@ -257,7 +297,7 @@ export function VoiceMode({
                 <button
                   onClick={() => {
                     unlockRemoteAudio();
-                    session.start(model);
+                    session.start(model, voice);
                   }}
                   className="rounded-full bg-accent px-3 py-1.5 text-xs font-bold text-bg"
                 >
@@ -344,17 +384,32 @@ export function VoiceMode({
     <div className="fixed inset-0 z-50 flex flex-col bg-bg">
       <div className="flex items-center justify-between p-4">
         <span className="text-sm font-bold text-accent">Secretary</span>
-        <select
-          value={model}
-          onChange={(e) => pickModel(e.target.value)}
-          className="rounded-full border border-edge bg-card px-3 py-1.5 text-xs text-muted outline-none focus:border-accent"
-        >
-          {MODELS.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.label}
-            </option>
-          ))}
-        </select>
+        <div className="flex items-center gap-2">
+          <select
+            value={voice}
+            onChange={(e) => pickVoice(e.target.value)}
+            title="Voice"
+            className="rounded-full border border-edge bg-card px-3 py-1.5 text-xs text-muted outline-none focus:border-accent"
+          >
+            {VOICES.map((v) => (
+              <option key={v} value={v}>
+                {v}
+              </option>
+            ))}
+            {elAvailable && <option value="elevenlabs">sassy (ElevenLabs beta)</option>}
+          </select>
+          <select
+            value={model}
+            onChange={(e) => pickModel(e.target.value)}
+            className="rounded-full border border-edge bg-card px-3 py-1.5 text-xs text-muted outline-none focus:border-accent"
+          >
+            {MODELS.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {/* Error states (W7) */}
@@ -386,7 +441,7 @@ export function VoiceMode({
               <Button
                 onClick={() => {
                   unlockRemoteAudio();
-                  session.start(model);
+                  session.start(model, voice);
                 }}
               >
                 Try again

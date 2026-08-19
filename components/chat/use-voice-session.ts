@@ -45,7 +45,7 @@ export function useVoiceSession() {
   );
 
   const start = useCallback(
-    async (chosenModel: string) => {
+    async (chosenModel: string, chosenVoice?: string) => {
       const provider = new OpenAIRealtimeVoice();
       providerRef.current = provider;
       setTranscript([]);
@@ -68,7 +68,7 @@ export function useVoiceSession() {
         setTimeout(() => setToasts((prev) => prev.filter((t) => t.key !== key)), 6000);
       });
       try {
-        await provider.connect({ model: chosenModel });
+        await provider.connect({ model: chosenModel, voice: chosenVoice });
       } catch {
         /* status/error events already emitted */
       }
@@ -85,6 +85,10 @@ export function useVoiceSession() {
 
   const switchModel = useCallback(async (m: string) => {
     await providerRef.current?.switchModel(m);
+  }, []);
+
+  const switchVoice = useCallback(async (v: string) => {
+    await providerRef.current?.switchVoice(v);
   }, []);
 
   const toggleMute = useCallback(() => {
@@ -111,6 +115,7 @@ export function useVoiceSession() {
     start,
     end,
     switchModel,
+    switchVoice,
     toggleMute,
     getMicStream: () => providerRef.current?.micStream ?? null,
     getRemoteStream: () => providerRef.current?.remoteStream ?? null,

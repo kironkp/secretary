@@ -7,6 +7,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { conversations, usage, user as userTable } from "@/lib/db/schema";
 import { isErrorResponse, parseBody, requireSession } from "@/lib/api";
+import { EL_MOUTH_VOICE, elevenLabsConfigured } from "@/lib/elevenlabs";
 import { checkVoiceQuota } from "@/lib/rate-limit";
 import { buildBriefing } from "@/lib/secretary/briefing";
 import { buildLexicon, lexiconPrompt } from "@/lib/secretary/lexicon";
@@ -17,16 +18,19 @@ import {
   REALTIME_MODEL_MINI,
   REALTIME_TRANSCRIBE_MODEL,
   REALTIME_VOICE,
+  REALTIME_VOICES,
   TRANSCRIBE_LANGUAGE,
 } from "@/lib/openai";
 
 const bodySchema = z.object({
   model: z.string().optional(),
+  voice: z.string().optional(),
   conversationId: z.string().nullish(),
   reconnect: z.boolean().optional(),
 });
 
 const ALLOWED_MODELS = new Set([REALTIME_MODEL_DEFAULT, REALTIME_MODEL_MINI]);
+const ALLOWED_VOICES = new Set<string>(REALTIME_VOICES);
 
 export async function POST(req: Request) {
   const user = await requireSession();
@@ -38,6 +42,11 @@ export async function POST(req: Request) {
   const model = parsed.model ?? REALTIME_MODEL_DEFAULT;
   if (!ALLOWED_MODELS.has(model)) {
     return NextResponse.json({ error: "Unknown model" }, { status: 400 });
+  }
+  const voice = parsed.voice ?? REALTIME_VOICE;
+  const elMouth = voice === EL_MOUTH_VOICE && elevenLabsConfigured();
+  if (!ALLOWED_VOICES.has(voice) && !elMouth) {
+    return NextResponse.json({ error: "Unknown voice" }, { status: 400 });
   }
 
   const quota = await checkVoiceQuota(user.id);
@@ -84,6 +93,15 @@ export async function POST(req: Request) {
     }),
     "",
     VOICE_MODALITY_RULES,
+    ...(elMouth
+      ? [
+          "",
+          "TTS OUTPUT MODE: your text output is SPOKEN verbatim by a TTS voice — write exactly what should be said, phone-call register, nothing that only works on a screen." +
+            ((userRow?.persona?.sass ?? 4) >= 4
+              ? ' You may use ElevenLabs audio tags VERY sparingly for delivery: [sighs], [pause] — at most one per reply, only when earned.'
+              : ""),
+        ]
+      : []),
   ].join("\n");
   const transcriptionPrompt = lexiconPrompt(lexicon);
 
@@ -98,7 +116,9 @@ export async function POST(req: Request) {
         type: "realtime",
         model,
         instructions,
-        output_modalities: ["audio"],
+        // EL mouth (experimental): the session emits text; the browser speaks
+        // it through the ElevenLabs voice. Otherwise: native audio out.
+        output_modalities: elMouth ? ["text"] : ["audio"],
         // SPEC §11 fast/slow split: the mouth carries ONLY the thin tools.
         tools: openAIVoiceToolDefs(),
         tool_choice: "auto",
@@ -116,7 +136,7 @@ export async function POST(req: Request) {
             // silence must not trigger a reply.
             turn_detection: { type: "semantic_vad", eagerness: "low" },
           },
-          output: { voice: REALTIME_VOICE },
+          ...(elMouth ? {} : { output: { voice } }),
         },
       },
     }),

@@ -231,6 +231,15 @@ export const toolSchemas = {
       .string()
       .optional()
       .describe("The name the user gave you ('I'll call you Dot') — shows in transcripts"),
+    sass: z
+      .number()
+      .int()
+      .min(1)
+      .max(5)
+      .optional()
+      .describe(
+        "Sass dial: 1 robotic · 2 dry professional · 3 deadpan · 4 sardonic · 5 full sass ('be more sassy' → +1, 'full Monday' → 5, 'tone it down' → -1)"
+      ),
     strictness: z.enum(["gentle", "standard", "stern"]).optional(),
     tone: z.enum(["warm", "professional", "brisk"]).optional(),
     praise: z.enum(["effusive", "brief", "none"]).optional(),

@@ -21,3 +21,17 @@ export const REALTIME_MODEL_DEFAULT =
 export const REALTIME_MODEL_MINI =
   process.env.REALTIME_MODEL_MINI ?? "gpt-realtime-2.1-mini";
 export const REALTIME_VOICE = "marin";
+// Every stock realtime voice (all mint-verified 2026-08-19). marin/cedar are
+// the expressive flagship pair; the rest are the classic set.
+export const REALTIME_VOICES = [
+  "marin",
+  "cedar",
+  "alloy",
+  "ash",
+  "ballad",
+  "coral",
+  "echo",
+  "sage",
+  "shimmer",
+  "verse",
+] as const;

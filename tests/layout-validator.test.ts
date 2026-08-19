@@ -142,6 +142,24 @@ describe("invariant 3: movement rationing (system-initiated)", () => {
   });
 });
 
+describe("why hygiene: whys only on deviations", () => {
+  it("strips model self-talk whys from unchanged sections, keeps deviation whys", () => {
+    const signals = baseSignals();
+    const plan = defaultPlan(signals);
+    plan.sections[0].why = "No next hard commitment in SIGNALS."; // unchanged hero — meta note
+    const timeline = plan.sections.find((s) => s.component === "timeline")!;
+    timeline.props = { span_days: 14, expanded: true }; // real deviation
+    timeline.why = "You've been asking about dates all day";
+    const res = validatePlan(plan, ctx({ signals }));
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.plan.sections[0].why).toBeUndefined();
+      expect(res.plan.sections.find((s) => s.component === "timeline")?.why).toContain("dates");
+      expect(res.warnings.join(" ")).toContain("stripped why");
+    }
+  });
+});
+
 describe("F7 (validator half): ban_component preference", () => {
   it("rejects any plan containing a banned component, and the fallback omits it too", () => {
     const signals = baseSignals();

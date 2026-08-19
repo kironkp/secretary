@@ -1236,6 +1236,7 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     const next = {
       ...current,
       ...(a.name && { name: a.name.trim() }),
+      ...(a.sass && { sass: a.sass as 1 | 2 | 3 | 4 | 5 }),
       ...(a.strictness && { strictness: a.strictness }),
       ...(a.tone && { tone: a.tone }),
       ...(a.praise && { praise: a.praise }),

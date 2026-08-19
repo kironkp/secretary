@@ -7,6 +7,7 @@ import { user } from "@/lib/db/schema";
 import { CalmModeToggle } from "@/components/settings/calm-mode-toggle";
 import { LayoutPreferences } from "@/components/settings/layout-preferences";
 import { ProposalReview } from "@/components/settings/proposal-review";
+import { SassSlider } from "@/components/settings/sass-slider";
 import { layoutPreferences } from "@/lib/db/schema";
 import { PasskeySection } from "@/components/settings/passkey-section";
 import { TimezoneForm } from "@/components/settings/timezone-form";
@@ -19,7 +20,10 @@ export default async function SettingsPage() {
 
   const timezone = (session.user as { timezone?: string }).timezone ?? "UTC";
   const [[userRow], prefRows] = await Promise.all([
-    db.select({ calmMode: user.calmMode }).from(user).where(eq(user.id, session.user.id)),
+    db
+      .select({ calmMode: user.calmMode, persona: user.persona })
+      .from(user)
+      .where(eq(user.id, session.user.id)),
     db
       .select({ id: layoutPreferences.id, kind: layoutPreferences.kind, value: layoutPreferences.value })
       .from(layoutPreferences)
@@ -48,6 +52,15 @@ export default async function SettingsPage() {
           It was captured from your browser at signup.
         </p>
         <TimezoneForm current={timezone} />
+      </section>
+
+      <section className="rounded-xl border border-edge bg-surface p-5">
+        <h2 className="mb-1 text-sm font-bold">Personality</h2>
+        <p className="mb-4 text-xs text-muted">
+          How much attitude your secretary has — in writing and out loud. You can
+          also just tell it: &ldquo;be more sassy&rdquo;, &ldquo;tone it down&rdquo;.
+        </p>
+        <SassSlider initial={userRow?.persona?.sass ?? 2} />
       </section>
 
       <section className="rounded-xl border border-edge bg-surface p-5">

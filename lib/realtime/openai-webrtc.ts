@@ -2,6 +2,8 @@
 // Flow: POST /api/realtime/token (auth-gated, rate-limited, briefing baked into
 // the session server-side) → ephemeral client secret → SDP exchange with
 // api.openai.com → audio tracks + "oai-events" data channel.
+import { ElevenLabsMouth } from "./el-mouth";
+import { EL_MOUTH_VOICE } from "@/lib/elevenlabs";
 import { playRemoteStream, remoteAudioState } from "./remote-audio";
 import type {
   ToolToast,
@@ -32,6 +34,15 @@ type TokenResponse = {
 export class OpenAIRealtimeVoice implements VoiceProvider {
   status: VoiceStatus = "idle";
   model: string | null = null;
+  /** Chosen output voice; undefined = server default (REALTIME_VOICE).
+   *  The sentinel "elevenlabs" switches the session to text output spoken by
+   *  the ElevenLabs mouth. */
+  voice: string | undefined;
+  private mouth: ElevenLabsMouth | null = null;
+
+  private get elMouthMode(): boolean {
+    return this.voice === EL_MOUTH_VOICE;
+  }
   conversationId: string | null = null;
   micStream: MediaStream | null = null;
   remoteStream: MediaStream | null = null;
@@ -123,9 +134,17 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
     this.emit("status", status, detail);
   }
 
-  async connect({ model }: { model: string }): Promise<void> {
+  async connect({ model, voice }: { model: string; voice?: string }): Promise<void> {
     this.intentionalClose = false;
     this.model = model;
+    if (voice) this.voice = voice;
+    if (this.elMouthMode && !this.mouth) {
+      this.mouth = new ElevenLabsMouth();
+      this.mouth.onSpeakingChange = (speaking) => this.emit("assistantSpeaking", speaking);
+    } else if (!this.elMouthMode && this.mouth) {
+      this.mouth.dispose();
+      this.mouth = null;
+    }
 
     if (!this.micStream) {
       this.setStatus("requesting-mic");
@@ -147,6 +166,7 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model,
+        voice: this.voice,
         conversationId: this.conversationId,
         reconnect: this.reconnects > 0 || Boolean(this.conversationId),
       }),
@@ -254,6 +274,7 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
     remoteBytesReceived: number;
   }> {
     const out = { mic: null as number | null, remote: null as number | null, micBytesSent: 0, remoteBytesReceived: 0 };
+    if (this.mouth) out.remote = this.mouth.level();
     if (!this.pc) return out;
     const stats = await this.pc.getStats().catch(() => null);
     if (!stats) return out;
@@ -267,7 +288,7 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
       }
       if (r.type === "inbound-rtp" && r.kind === "audio") {
         if (typeof r.bytesReceived === "number") out.remoteBytesReceived = r.bytesReceived;
-        if (typeof r.audioLevel === "number") out.remote = r.audioLevel;
+        if (typeof r.audioLevel === "number" && !this.mouth) out.remote = r.audioLevel;
       }
     });
     return out;
@@ -361,7 +382,7 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
     this.teardownPeer();
     await new Promise((r) => setTimeout(r, Math.min(1000 * 2 ** this.reconnects, 8000)));
     try {
-      await this.connect({ model: this.model! });
+      await this.connect({ model: this.model!, voice: this.voice });
     } catch {
       if (!this.intentionalClose) this.tryReconnect();
     }
@@ -369,10 +390,20 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
 
   async switchModel(model: string): Promise<void> {
     if (model === this.model) return;
+    await this.reconnectWith({ model });
+  }
+
+  async switchVoice(voice: string): Promise<void> {
+    if (voice === this.voice) return;
+    await this.reconnectWith({ voice });
+  }
+
+  /** Re-mint the session with changed options; the call resumes, no greeting. */
+  private async reconnectWith(opts: { model?: string; voice?: string }): Promise<void> {
     this.setStatus("reconnecting");
     this.teardownPeer();
     this.reconnects = 1; // marks the next connect as a resume, not a fresh greeting
-    await this.connect({ model });
+    await this.connect({ model: opts.model ?? this.model!, voice: opts.voice ?? this.voice });
   }
 
   setMuted(muted: boolean) {
@@ -382,6 +413,8 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
 
   async disconnect(): Promise<void> {
     this.intentionalClose = true;
+    this.mouth?.dispose();
+    this.mouth = null;
     window.removeEventListener("pagehide", this.pagehide);
     this.teardownPeer();
     this.micStream?.getTracks().forEach((t) => t.stop());
@@ -470,7 +503,8 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
     if (t === "input_audio_buffer.speech_started") {
       // Barge-in: semantic_vad interrupts the response server-side
       // (interrupt_response defaults true) — a manual response.cancel here
-      // races with it. Just update the UI.
+      // races with it. Just update the UI (and silence the EL mouth).
+      this.mouth?.interrupt();
       this.emit("assistantSpeaking", false);
       return;
     }
@@ -530,6 +564,22 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
       const text = String(event.transcript ?? "");
       this.emit("assistantTranscript", id, text, true);
       // GA + beta names can BOTH fire for the same item — persist exactly once.
+      this.persistOnce(`assistant:${id}`, "assistant", text);
+      return;
+    }
+    // EL mouth mode: the session emits TEXT; the mouth speaks it.
+    if (t === "response.output_text.delta" && this.mouth) {
+      const id = String(event.item_id ?? event.response_id ?? "assistant-live");
+      const delta = String(event.delta ?? "");
+      this.mouth.pushDelta(delta);
+      this.emit("assistantTranscript", id, delta, false);
+      return;
+    }
+    if (t === "response.output_text.done" && this.mouth) {
+      const id = String(event.item_id ?? event.response_id ?? "assistant-live");
+      const text = String(event.text ?? "");
+      this.mouth.flushFinal();
+      this.emit("assistantTranscript", id, text, true);
       this.persistOnce(`assistant:${id}`, "assistant", text);
       return;
     }

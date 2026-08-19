@@ -36,10 +36,29 @@ describe("persona_config (transcript: 'stern secretary… keep nagging me')", ()
     expect(instructions).toContain("proactively ask for status");
   });
 
-  it("defaults are sane when nothing is stored — professional, not chummy", () => {
-    expect(personaDirectives(null)).toContain("standard");
-    expect(personaDirectives(null)).not.toContain("STERN");
-    expect(personaDirectives(null)).toContain("professional");
+  it("default character is the NY secretary at intensity 'as written' — never eager-intern", () => {
+    const d = personaDirectives(null);
+    expect(d).toContain("New York office secretary");
+    expect(d).toContain("Not an eager intern");
+    expect(d).toContain("as written");
+    expect(d).not.toContain("STERN");
+  });
+
+  it("the sass dial modulates the character: 1 strips it, 3 dials it low, 5 maxes it", () => {
+    expect(personaDirectives({ sass: 1 })).toContain("ROBOTIC");
+    expect(personaDirectives({ sass: 1 })).not.toContain("New York office secretary");
+    expect(personaDirectives({ sass: 3 })).toContain("New York office secretary");
+    expect(personaDirectives({ sass: 3 })).toContain("dialed LOW");
+    expect(personaDirectives({ sass: 5 })).toContain("MAX");
+    expect(personaDirectives({ sass: 5 })).toContain("never mean");
+  });
+
+  it("the character keeps the honesty guardrails at every level", () => {
+    for (const sass of [3, 4, 5] as const) {
+      const d = personaDirectives({ sass });
+      expect(d).toContain("on the user's side");
+      expect(d).toMatch(/never (actual )?mean/);
+    }
   });
 
   it("a given name is stored and lands in the directives + transcript labels", async () => {

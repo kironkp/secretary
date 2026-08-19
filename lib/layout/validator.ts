@@ -142,6 +142,19 @@ export function validatePlan(input: unknown, ctx: ValidationContext): Validation
   // Pass 3 — semantics.
   const reasons: string[] = [];
 
+  // A why belongs ONLY on a deviation. LLM planners like to annotate
+  // unchanged sections with introspection ("No engagement stats provided…")
+  // — that's model self-talk, not a user-facing reason. Strip why from any
+  // section whose props match its DEFAULT_PLAN counterpart.
+  for (const s of plan.sections) {
+    if (!s.why) continue;
+    const base = ctx.defaultPlan.sections.find((d) => sectionKey(d) === sectionKey(s));
+    if (base && JSON.stringify(s.props ?? {}) === JSON.stringify(base.props ?? {})) {
+      delete s.why;
+      warnings.push(`stripped why on unchanged section "${sectionKey(s)}"`);
+    }
+  }
+
   // Preferences: banned component present → plan rejected (F7).
   const banned = bannedComponents(ctx.preferences);
   for (const s of plan.sections) {
