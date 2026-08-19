@@ -214,6 +214,21 @@ export const toolSchemas = {
     quiet_hours_start: z.string().optional().describe("HH:MM, e.g. 22:00"),
     quiet_hours_end: z.string().optional().describe("HH:MM, e.g. 07:30"),
   }),
+  queue_clarification: z.object({
+    kind: z.enum(["referent", "asr_span", "new_name", "entity_conflict"]),
+    question: z.string().min(1).describe("Ready-to-ask question, e.g. 'Which CPO did you mean by \"this one\"?'"),
+    context: z.string().optional().describe("The verbatim phrase/span it's about"),
+  }),
+  resolve_clarification: z.object({
+    question: z.string().min(1).describe("The clarification being answered (fragment ok)"),
+    answer: z.string().min(1).describe("What the user said"),
+    action: z
+      .enum(["same_entity", "different_person", "spelling_confirmed", "spelling_corrected", "note"])
+      .describe(
+        "same_entity = the heard name IS the linked entity (stored as alias) · different_person = create a separate entity · spelling_confirmed / spelling_corrected (give corrected_name) · note = free-text resolution only"
+      ),
+    corrected_name: z.string().optional().describe("For spelling_corrected: the right spelling"),
+  }),
   create_expectation: z.object({
     commitment: z
       .string()
@@ -386,6 +401,10 @@ const toolDescriptions: Record<ToolName, string> = {
     "Rearrange the user's dashboard NOW: move/remove/add sections or change their props (variant, expanded, accent). User-initiated changes apply immediately. For 'never show X again' use set_layout_preference instead.",
   update_persona:
     "The user asked you to BE different — sterner, gentler, brisker, more/less follow-up, quiet hours ('I need a nagging secretary', 'stop being so peppy'). Store it ONCE here; it applies to every future conversation and the nag engine. Never re-ask how they want you to behave.",
+  queue_clarification:
+    "Something in the conversation is ambiguous and you can NOT resolve it — an unclear referent ('this one is finished' about a screen you can't see), a garbled name, a possible person mix-up. NEVER guess and never interrogate mid-flow: queue it here; your briefing surfaces ONE at a natural pause.",
+  resolve_clarification:
+    "The user just answered a queued clarification — record the resolution. For entity questions the action fixes the store: same_entity adds an alias, different_person creates the new person, spelling_confirmed/corrected fix the name.",
   create_expectation:
     "NEVER make a rhetorical promise: the moment you say \"I'll be asking\" / \"check back in with me\" / \"I'll follow up\", call this in the SAME turn. The user reporting progress clears it silently; a miss makes you open the next session with it (per on_miss). This is what makes your follow-through real.",
   save_pipeline_template:

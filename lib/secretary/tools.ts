@@ -5,8 +5,10 @@ import { and, count, desc, eq, gte, ilike, inArray, isNotNull, lt, ne, or } from
 import { db } from "@/lib/db";
 import {
   checkins,
+  clarifications,
   documents,
   documentVersions,
+  entities,
   events,
   expectations,
   memories,
@@ -1215,6 +1217,72 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
       },
       toast: { icon: "✓", text: "Persona updated" },
     };
+  },
+
+  async queue_clarification(ctx, args) {
+    const a = toolSchemas.queue_clarification.parse(args);
+    const [row] = await db
+      .insert(clarifications)
+      .values({ userId: ctx.userId, kind: a.kind, question: a.question, context: a.context })
+      .returning();
+    return {
+      result: {
+        queued: true,
+        clarification_id: row.id,
+        note: "Held for a natural pause — do not ask now unless one just arrived.",
+      },
+    };
+  },
+
+  async resolve_clarification(ctx, args) {
+    const a = toolSchemas.resolve_clarification.parse(args);
+    const rows = await db
+      .select()
+      .from(clarifications)
+      .where(
+        and(eq(clarifications.userId, ctx.userId), inArray(clarifications.status, ["open", "asked"]))
+      );
+    const needle = a.question.toLowerCase();
+    const target =
+      rows.find((c) => c.question.toLowerCase().includes(needle)) ??
+      rows.find((c) => needle.includes(c.question.toLowerCase().slice(0, 40)));
+    if (!target) return { result: { error: `No open clarification matching "${a.question}"` } };
+
+    if (target.entityId) {
+      if (a.action === "same_entity" && target.subject) {
+        const [ent] = await db.select().from(entities).where(eq(entities.id, target.entityId));
+        if (ent) {
+          await db
+            .update(entities)
+            .set({
+              aliases: [...new Set([...ent.aliases, target.subject])],
+              confirmed: true,
+              lastMentionedAt: new Date(),
+            })
+            .where(eq(entities.id, ent.id));
+        }
+      } else if (a.action === "different_person" && target.subject) {
+        await db.insert(entities).values({
+          userId: ctx.userId,
+          name: a.corrected_name ?? target.subject,
+          kind: "person",
+          confirmed: true,
+          notes: a.answer,
+        });
+      } else if (a.action === "spelling_confirmed") {
+        await db.update(entities).set({ confirmed: true }).where(eq(entities.id, target.entityId));
+      } else if (a.action === "spelling_corrected" && a.corrected_name) {
+        await db
+          .update(entities)
+          .set({ name: a.corrected_name, confirmed: true })
+          .where(eq(entities.id, target.entityId));
+      }
+    }
+    await db
+      .update(clarifications)
+      .set({ status: "resolved", resolution: `${a.action}: ${a.answer}` })
+      .where(eq(clarifications.id, target.id));
+    return { result: { resolved: true, action: a.action } };
   },
 
   async create_expectation(ctx, args) {

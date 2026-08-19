@@ -7,12 +7,14 @@ import { and, asc, desc, eq, gt, gte, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   checkins,
+  clarifications,
   conversations,
   events,
   memories,
   tasks,
   usage,
 } from "@/lib/db/schema";
+import { crossReferenceMentions } from "./entities";
 import { openai, TEXT_MODEL } from "@/lib/openai";
 import { findDuplicate, findDuplicateEvent, titleSimilarity } from "./dedupe";
 
@@ -49,6 +51,28 @@ export const extractionSchema = z.object({
     })
   ),
   facts: z.array(z.string().describe("A durable fact about the user worth remembering")),
+  // SPEC §11: every person/org/term mention, for entity cross-reference —
+  // never dropped, never silently merged.
+  mentions: z.array(
+    z.object({
+      name: z.string(),
+      kind: z.enum(["person", "org", "term", "acronym"]),
+      context: z.string().nullable().describe("The verbatim phrase it appeared in"),
+      confidence: z
+        .enum(["high", "low"])
+        .describe("Confidence in the SPELLING — voice transcripts garble names"),
+    })
+  ),
+  // SPEC §11: ambiguities the transcript itself can't resolve. NEVER guess —
+  // queue them. kinds: referent ("this one is finished" about an unseen
+  // screen), asr_span (garbled audio, keep the span verbatim).
+  ambiguities: z.array(
+    z.object({
+      kind: z.enum(["referent", "asr_span"]),
+      question: z.string().describe("The question to ask the user, ready to say aloud"),
+      context: z.string().describe("Verbatim transcript span this is about"),
+    })
+  ),
 });
 
 export type ExtractionResult = z.infer<typeof extractionSchema>;
@@ -60,6 +84,8 @@ Return:
 - events: meetings/appointments/plans with a concrete date or time.
 - status_updates: signals about EXISTING tasks — "yeah I sent it" (done), "I'll do it Friday" (postponed + new_due_at), "started on it" (started), "forget that" (dropped). Refer to the task by its title from the KNOWN OPEN TASKS list when possible.
 - facts: durable personal facts (names, preferences, constraints) — not one-off logistics.
+- mentions: EVERY person, organization, project term, and acronym mentioned, with the verbatim phrase and your confidence in the SPELLING (voice transcripts garble names — "calc card" for CalCard, "pay I test" for unknown terms → confidence low).
+- ambiguities: things the transcript cannot resolve — do NOT guess. Unresolved referents ("this one is finished" while reading a screen you can't see → which one?); garbled ASR spans (keep the span verbatim, kind asr_span). If a name could be either a separate person or a self-correction ("signed by Marissa, Teresa Mahers, my boss"), that is a referent ambiguity — never silently pick one.
 
 Anything already in KNOWN OPEN TASKS or KNOWN EVENTS must NOT reappear in tasks/events (report status changes about them via status_updates instead). Every task/event that belongs to an ongoing workstream carries that project's EXACT name from the PROJECTS list; null only for standalone life admin. Dates: resolve relative expressions against the conversation date given. If no timezone-certain time, use 17:00 local. Empty arrays are fine — most conversations produce nothing.`;
 
@@ -248,6 +274,32 @@ export async function applyExtraction(
     if (dup) continue;
     await db.insert(memories).values({ userId, fact, tags: ["inferred"] });
     savedFacts++;
+  }
+
+  // SPEC §11: cross-reference every mention (never dropped, never silently
+  // merged) and queue the transcript's own ambiguities — one-at-a-time
+  // delivery happens at the briefing.
+  await crossReferenceMentions(
+    userId,
+    (result.mentions ?? []).map((m) => ({
+      name: m.name,
+      kind: m.kind,
+      context: m.context ?? undefined,
+      confidence: m.confidence,
+    }))
+  );
+  for (const amb of result.ambiguities ?? []) {
+    const open = await db
+      .select()
+      .from(clarifications)
+      .where(and(eq(clarifications.userId, userId), inArray(clarifications.status, ["open", "asked"])));
+    if (open.some((c) => titleSimilarity(c.question, amb.question) >= 0.7)) continue;
+    await db.insert(clarifications).values({
+      userId,
+      kind: amb.kind,
+      question: amb.question,
+      context: amb.context,
+    });
   }
 
   return { createdTasks, createdEvents, updatedTasks, savedFacts };

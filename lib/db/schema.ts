@@ -284,6 +284,48 @@ export const layoutSpecs = pgTable("layout_specs", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// Entity store (SPEC §11): people, orgs, project terms, acronyms. Every
+// mention cross-references here BEFORE write; a mention matching an existing
+// entity can never be silently dropped or merged. Also feeds the ASR lexicon.
+export const entities = pgTable("entities", {
+  id: text("id").primaryKey().$defaultFn(uuid),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  kind: text("kind").$type<"person" | "org" | "term" | "acronym">().notNull(),
+  aliases: jsonb("aliases").$type<string[]>().notNull().default([]),
+  // false = heard once with low confidence; spelling unconfirmed — do not use
+  // in documents until the user confirms (clarification queue does that).
+  confirmed: boolean("confirmed").notNull().default(true),
+  notes: text("notes"),
+  lastMentionedAt: timestamp("last_mentioned_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Clarification queue (SPEC §11): extraction ambiguities accumulate here and
+// are asked ONE at a time at natural pauses — never mid-flow, never a barrage,
+// never silently guessed.
+export const clarifications = pgTable("clarifications", {
+  id: text("id").primaryKey().$defaultFn(uuid),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  kind: text("kind")
+    .$type<"referent" | "asr_span" | "new_name" | "entity_conflict">()
+    .notNull(),
+  // the heard name / span the question is about (resolution mechanics use it)
+  subject: text("subject"),
+  question: text("question").notNull(),
+  // the verbatim source snippet (for asr_span: kept with audio offsets)
+  context: text("context"),
+  entityId: text("entity_id").references(() => entities.id, { onDelete: "set null" }),
+  status: text("status").$type<"open" | "asked" | "resolved" | "dismissed">().notNull().default("open"),
+  resolution: text("resolution"),
+  askedAt: timestamp("asked_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // Expectations / nag engine (SPEC §11): every promised follow-up ("I'll be
 // asking either way") becomes a ROW, never a rhetorical promise. A user report
 // clears it silently; a miss fires at the next session per escalation policy —

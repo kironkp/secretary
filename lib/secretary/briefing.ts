@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { documents, events, expectations, memories, projects, tasks, user } from "@/lib/db/schema";
 import { dayRangeInTz } from "@/lib/time";
 import { getPlanHead } from "@/lib/layout/plan-store";
+import { nextClarification, openClarificationCount } from "./entities";
 import { isQuietHours } from "./persona";
 import { refreshProcrastinationScores } from "./procrastination";
 import { getPendingSuggestions } from "./suggestions";
@@ -465,6 +466,21 @@ export async function buildBriefing(
     }
     lines.push(
       "Escalation: mention = one soft line · nag = direct opener question · escalate = lead with it, cite the stakes, and get a NEW commitment (create_expectation again)."
+    );
+  }
+
+  // Clarification queue (SPEC §11): ONE question per session, at a natural
+  // pause — never mid-flow, never a barrage. Surfacing marks it asked.
+  const clarification = await nextClarification(userId);
+  if (clarification) {
+    const remaining = await openClarificationCount(userId);
+    lines.push(
+      "",
+      `CLARIFICATION QUEUE — exactly ONE this session, asked at a natural pause (never mid-flow, never as an interrogation)${
+        remaining > 0 ? ` (${remaining} more queued for later sessions)` : ""
+      }:`,
+      `- ${clarification.question}${clarification.context ? ` (about: "${clarification.context}")` : ""}`,
+      "When answered, call resolve_clarification."
     );
   }
 

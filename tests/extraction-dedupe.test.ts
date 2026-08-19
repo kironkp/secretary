@@ -147,6 +147,8 @@ describe("applyExtraction (real database)", () => {
         { task: "insurance form", signal: "done", new_due_at: null, reason: null },
       ],
       facts: ["User's dentist is Dr. Patel"],
+    mentions: [],
+    ambiguities: [],
     };
 
     const summary = await applyExtraction(U.id, convId, result);
@@ -189,6 +191,8 @@ describe("applyExtraction (real database)", () => {
       ],
       status_updates: [],
       facts: ["The user's dentist is Dr. Patel"],
+    mentions: [],
+    ambiguities: [],
     });
     expect(again).toEqual({ createdTasks: 0, createdEvents: 0, updatedTasks: 0, savedFacts: 0 });
   });
@@ -204,6 +208,8 @@ describe("applyExtraction (real database)", () => {
       events: [],
       status_updates: [],
       facts: [],
+    mentions: [],
+    ambiguities: [],
     });
     expect(summary.createdTasks).toBe(2);
     const rows = await db.select().from(tasks).where(eq(tasks.userId, U.id));
@@ -226,6 +232,8 @@ describe("applyExtraction (real database)", () => {
         },
       ],
       facts: [],
+    mentions: [],
+    ambiguities: [],
     });
     expect(summary.updatedTasks).toBe(1);
     const [passport] = await db
