@@ -284,6 +284,24 @@ export const layoutSpecs = pgTable("layout_specs", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// Expectations / nag engine (SPEC §11): every promised follow-up ("I'll be
+// asking either way") becomes a ROW, never a rhetorical promise. A user report
+// clears it silently; a miss fires at the next session per escalation policy —
+// batched into one ping, quiet-hours-aware, citing stakes when recorded.
+export const expectations = pgTable("expectations", {
+  id: text("id").primaryKey().$defaultFn(uuid),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  taskId: text("task_id").references(() => tasks.id, { onDelete: "cascade" }),
+  commitment: text("commitment").notNull(),
+  expectedUpdateBy: timestamp("expected_update_by", { withTimezone: true }).notNull(),
+  onMiss: text("on_miss").$type<"mention" | "nag" | "escalate">().notNull().default("nag"),
+  status: text("status").$type<"open" | "cleared" | "missed">().notNull().default("open"),
+  clearedAt: timestamp("cleared_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // Pipeline templates (SPEC §11): reusable ordered step lists with blocked_by
 // dependencies, instantiable per task (e.g. CPO: update → sign → pay →
 // reconcile+submit). offset_days positions each step's due date relative to

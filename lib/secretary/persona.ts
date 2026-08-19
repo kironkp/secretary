@@ -94,6 +94,25 @@ export function personaDirectives(persona: PersonaConfig | null | undefined): st
   return lines.join("\n");
 }
 
+/** Is `now` inside the persona's quiet hours (user-local HH:MM window)? */
+export function isQuietHours(
+  persona: PersonaConfig | null | undefined,
+  now: Date,
+  timezone: string
+): boolean {
+  const window = persona?.quiet_hours;
+  if (!window) return false;
+  const hhmm = new Intl.DateTimeFormat("en-GB", {
+    timeZone: timezone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(now);
+  const { start, end } = window;
+  // window may wrap midnight (22:00–07:30)
+  return start <= end ? hhmm >= start && hhmm < end : hhmm >= start || hhmm < end;
+}
+
 export function buildInstructions(
   briefingText: string,
   opts: { reconnect?: boolean; persona?: PersonaConfig | null } = {}

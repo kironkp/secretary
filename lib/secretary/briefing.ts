@@ -3,9 +3,10 @@
 // turns "hello" into "did you send the insurance form?".
 import { and, count, desc, eq, gte, inArray, isNotNull, lt, ne, or } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { documents, events, memories, projects, tasks } from "@/lib/db/schema";
+import { documents, events, expectations, memories, projects, tasks, user } from "@/lib/db/schema";
 import { dayRangeInTz } from "@/lib/time";
 import { getPlanHead } from "@/lib/layout/plan-store";
+import { isQuietHours } from "./persona";
 import { refreshProcrastinationScores } from "./procrastination";
 import { getPendingSuggestions } from "./suggestions";
 
@@ -407,6 +408,66 @@ export async function buildBriefing(
     lines.push("", "Things you know about the user:");
     for (const m of memoryRows) lines.push(`- ${m.fact}`);
   }
+  // Expectations / nag engine (SPEC §11): session start is the trigger. Open
+  // expectations past their update-by time become MISSED and fire here —
+  // batched into ONE opening ping, quiet-hours-aware, escalating per policy,
+  // citing task stakes when recorded. A cleared expectation never appears.
+  const [personaRow] = await db
+    .select({ persona: user.persona })
+    .from(user)
+    .where(eq(user.id, userId));
+  const dueExpectations = await db
+    .select()
+    .from(expectations)
+    .where(
+      and(
+        eq(expectations.userId, userId),
+        eq(expectations.status, "open"),
+        lt(expectations.expectedUpdateBy, now)
+      )
+    )
+    .orderBy(expectations.expectedUpdateBy);
+  if (dueExpectations.length) {
+    await db
+      .update(expectations)
+      .set({ status: "missed" })
+      .where(
+        inArray(
+          expectations.id,
+          dueExpectations.map((e) => e.id)
+        )
+      );
+    const quiet = isQuietHours(personaRow?.persona, now, timezone);
+    if (quiet) {
+      lines.push(
+        "",
+        "EXPECTATIONS MISSED (quiet hours — do NOT open with these; hold them until the user engages first):"
+      );
+    } else {
+      lines.push(
+        "",
+        "EXPECTATIONS MISSED — you said you'd ask. Open the session with ONE combined question covering all of these (never a barrage):"
+      );
+    }
+    const stakesById = new Map<string, string>();
+    const linkedIds = dueExpectations.flatMap((e) => (e.taskId ? [e.taskId] : []));
+    if (linkedIds.length) {
+      const linked = await db.select().from(tasks).where(inArray(tasks.id, linkedIds));
+      for (const t of linked) if (t.stakes) stakesById.set(t.id, t.stakes);
+    }
+    for (const e of dueExpectations) {
+      const stakes = e.taskId ? stakesById.get(e.taskId) : null;
+      lines.push(
+        `- "${e.commitment}" (update was due ${fmt(e.expectedUpdateBy, timezone)}) · on_miss: ${e.onMiss}${
+          stakes ? ` · STAKES: ${stakes}` : ""
+        }`
+      );
+    }
+    lines.push(
+      "Escalation: mention = one soft line · nag = direct opener question · escalate = lead with it, cite the stakes, and get a NEW commitment (create_expectation again)."
+    );
+  }
+
   // Morning layout note (SPEC §9 Phase 2): if the dashboard was rearranged,
   // the secretary knows why and can say so — or change it on request.
   const planHead = await getPlanHead(userId);

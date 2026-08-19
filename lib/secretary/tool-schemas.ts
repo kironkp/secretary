@@ -214,6 +214,21 @@ export const toolSchemas = {
     quiet_hours_start: z.string().optional().describe("HH:MM, e.g. 22:00"),
     quiet_hours_end: z.string().optional().describe("HH:MM, e.g. 07:30"),
   }),
+  create_expectation: z.object({
+    commitment: z
+      .string()
+      .min(1)
+      .describe("What the user is expected to report, e.g. 'CPO 2073 updated and shown to Teresa'"),
+    expected_update_by: z.string().describe("ISO 8601 — when an update is due from the user"),
+    task: z
+      .string()
+      .optional()
+      .describe("Related task id or title fragment (links stakes + auto-clearing)"),
+    on_miss: z
+      .enum(["mention", "nag", "escalate"])
+      .optional()
+      .describe("mention = one soft line · nag = direct opener question · escalate = open with it, cite stakes, ask for a new commitment"),
+  }),
   save_pipeline_template: z.object({
     name: z.string().min(1).describe("Template name, e.g. 'CPO procurement'"),
     steps: z
@@ -371,6 +386,8 @@ const toolDescriptions: Record<ToolName, string> = {
     "Rearrange the user's dashboard NOW: move/remove/add sections or change their props (variant, expanded, accent). User-initiated changes apply immediately. For 'never show X again' use set_layout_preference instead.",
   update_persona:
     "The user asked you to BE different — sterner, gentler, brisker, more/less follow-up, quiet hours ('I need a nagging secretary', 'stop being so peppy'). Store it ONCE here; it applies to every future conversation and the nag engine. Never re-ask how they want you to behave.",
+  create_expectation:
+    "NEVER make a rhetorical promise: the moment you say \"I'll be asking\" / \"check back in with me\" / \"I'll follow up\", call this in the SAME turn. The user reporting progress clears it silently; a miss makes you open the next session with it (per on_miss). This is what makes your follow-through real.",
   save_pipeline_template:
     "Save a reusable ordered checklist with dependencies (blocked_by) and per-step date offsets — e.g. CPO: update → sign (blocked by update) → pay (blocked by sign) → reconcile+submit. Use when the user describes an order of operations that will repeat.",
   apply_pipeline:

@@ -8,6 +8,7 @@ import {
   documents,
   documentVersions,
   events,
+  expectations,
   memories,
   messages,
   pipelineTemplates,
@@ -39,6 +40,20 @@ import { toolSchemas, type ToolName } from "./tool-schemas";
  *  the realtime model sometimes re-issues a create after a barge-in, and that
  *  must be idempotent, but "Email Ash" vs "Call Ash" must both go through. */
 const CREATE_GUARD_SIMILARITY = 0.85;
+
+/** SPEC §11: a user report clears open expectations for the task — silently. */
+async function clearExpectationsFor(userId: string, taskId: string): Promise<void> {
+  await db
+    .update(expectations)
+    .set({ status: "cleared", clearedAt: new Date() })
+    .where(
+      and(
+        eq(expectations.userId, userId),
+        eq(expectations.taskId, taskId),
+        eq(expectations.status, "open")
+      )
+    );
+}
 
 export type ToolContext = {
   userId: string;
@@ -440,6 +455,12 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
       if (next) spawnedNext = fmtDate(next.dueAt, ctx.timezone, false) ?? "soon";
     }
 
+    // A user report on this task clears its open expectations SILENTLY
+    // (SPEC §11) — status changes, postpones, and stage advances all count.
+    if (postponed || a.status || stageAdvanced) {
+      await clearExpectationsFor(ctx.userId, task.id);
+    }
+
     if (postponed || a.status) {
       await db.insert(checkins).values({
         userId: ctx.userId,
@@ -504,6 +525,7 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
       type: "user_update",
       note: "Marked done",
     });
+    await clearExpectationsFor(ctx.userId, task.id);
     const next = task.status !== "done" ? await spawnNextOccurrence(updated) : null;
     const nextDue = next ? fmtDate(next.dueAt, ctx.timezone, false) : null;
     return {
@@ -1192,6 +1214,29 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         note: "Applied from now on, in every conversation and to the nag engine — the user never needs to re-state this.",
       },
       toast: { icon: "✓", text: "Persona updated" },
+    };
+  },
+
+  async create_expectation(ctx, args) {
+    const a = toolSchemas.create_expectation.parse(args);
+    const when = parseWhen(a.expected_update_by);
+    if (!when) return { result: { error: `Bad expected_update_by "${a.expected_update_by}"` } };
+    const task = a.task ? await findTask(ctx.userId, a.task) : null;
+    const [row] = await db
+      .insert(expectations)
+      .values({
+        userId: ctx.userId,
+        taskId: task?.id ?? null,
+        commitment: a.commitment,
+        expectedUpdateBy: when,
+        onMiss: a.on_miss ?? "nag",
+      })
+      .returning();
+    return {
+      result: {
+        expectation_id: row.id,
+        note: "Held. A user report clears it silently; a miss opens the next session.",
+      },
     };
   },
 
