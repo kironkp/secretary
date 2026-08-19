@@ -1511,9 +1511,9 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
   async paint_canvas(ctx, args) {
     const a = toolSchemas.paint_canvas.parse(args);
     // Fire-and-stream: don't hold the chat turn hostage to the full render.
-    const done = paintCanvas(ctx.userId, a.brief).catch((e) =>
-      console.error("paint_canvas failed", e)
-    );
+    const done = paintCanvas(ctx.userId, a.brief, {
+      conversationId: ctx.conversationId,
+    }).catch((e) => console.error("paint_canvas failed", e));
     // Give the stream a beat so the snapshot row exists before we answer.
     await Promise.race([done, new Promise((r) => setTimeout(r, 1200))]);
     return {
@@ -1531,9 +1531,10 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     if (!current || !current.markup) {
       return { result: { error: "No canvas yet — use paint_canvas first." } };
     }
-    const done = paintCanvas(ctx.userId, a.patch, { baseMarkup: current.markup }).catch((e) =>
-      console.error("edit_canvas failed", e)
-    );
+    const done = paintCanvas(ctx.userId, a.patch, {
+      baseMarkup: current.markup,
+      conversationId: ctx.conversationId,
+    }).catch((e) => console.error("edit_canvas failed", e));
     await Promise.race([done, new Promise((r) => setTimeout(r, 1200))]);
     return {
       result: { painting: true, note: "Patch is landing on the Canvas tab now." },

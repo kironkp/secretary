@@ -17,8 +17,11 @@ lanes, grids, annotated SVG charts — and zero interactivity.
    var(--ok) var(--warn) var(--danger). Cards: background var(--card), 1px
    solid var(--edge), border-radius 12–16px, padding 14–18px.
 4. DATA HONESTY: every number, date, and name on the canvas must come from
-   SIGNALS or the BRIEF verbatim. Never invent values. If a value is missing,
-   show "—" and say what's missing in small muted text.
+   SIGNALS, the CONVERSATION excerpt, or the BRIEF verbatim. Details the user
+   just said in the CONVERSATION are first-class facts — "lay out what we
+   discussed" means render THOSE. Never invent values. If a value appears in
+   none of the three, show "—" and say what's missing in small muted text.
+   Write LITERAL values — never {{braces}} or any template/placeholder syntax.
 5. Interactivity belongs to the shell, expressed as attributes only:
    - `data-expand` on any element that should click-to-expand.
    - `data-link="<project_id or event_id from SIGNALS>"` on anything that

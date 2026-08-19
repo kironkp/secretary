@@ -7,9 +7,9 @@
 // canvas_snapshots. The model call is injectable for tests.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { canvasSnapshots } from "@/lib/db/schema";
+import { canvasSnapshots, messages } from "@/lib/db/schema";
 import { openai, PLANNER_MODEL } from "@/lib/openai";
 import { computeSignals } from "@/lib/layout/signals";
 import { sanitizeCanvasMarkup } from "./sanitize";
@@ -48,6 +48,47 @@ export const livePainterStream: PainterStream = async function* (systemPrompt, i
 
 const FLUSH_EVERY_MS = 600;
 
+/** Pure input assembly (unit-tested): the painter's whole world. */
+export function buildPainterInput(
+  brief: string,
+  signalsJson: string,
+  opts: { baseMarkup?: string; conversationExcerpt?: string } = {}
+): string {
+  return [
+    opts.baseMarkup
+      ? `CURRENT CANVAS (patch it per the brief, keep everything else):\n${opts.baseMarkup}\n`
+      : "",
+    `SIGNALS:\n${signalsJson}`,
+    opts.conversationExcerpt
+      ? `CONVERSATION (most recent excerpt — what the user just said; verbatim source of truth, same standing as SIGNALS):\n${opts.conversationExcerpt}`
+      : "",
+    `BRIEF:\n${brief}`,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+const CONVERSATION_EXCERPT_MESSAGES = 30;
+
+/** "Paint what I just said" needs the saying — the excerpt the painter reads. */
+async function conversationExcerpt(
+  userId: string,
+  conversationId: string
+): Promise<string | undefined> {
+  const rows = await db
+    .select({ role: messages.role, content: messages.content })
+    .from(messages)
+    .where(and(eq(messages.userId, userId), eq(messages.conversationId, conversationId)))
+    .orderBy(desc(messages.createdAt))
+    .limit(CONVERSATION_EXCERPT_MESSAGES);
+  if (!rows.length) return undefined;
+  return rows
+    .reverse()
+    .filter((m) => m.role !== "tool")
+    .map((m) => `${m.role === "user" ? "USER" : "SECRETARY"}: ${m.content}`)
+    .join("\n");
+}
+
 /**
  * Paint (or repaint) the canvas. Creates the snapshot row immediately with
  * painting=true, streams sanitized chunks into it, and finalizes. Returns the
@@ -56,18 +97,15 @@ const FLUSH_EVERY_MS = 600;
 export async function paintCanvas(
   userId: string,
   brief: string,
-  opts: { baseMarkup?: string; stream?: PainterStream } = {}
+  opts: { baseMarkup?: string; conversationId?: string; stream?: PainterStream } = {}
 ): Promise<{ snapshotId: string; markup: string }> {
   const signals = await computeSignals(userId);
-  const input = [
-    opts.baseMarkup
-      ? `CURRENT CANVAS (patch it per the brief, keep everything else):\n${opts.baseMarkup}\n`
-      : "",
-    `SIGNALS:\n${JSON.stringify(signals)}`,
-    `BRIEF:\n${brief}`,
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  const input = buildPainterInput(brief, JSON.stringify(signals), {
+    baseMarkup: opts.baseMarkup,
+    conversationExcerpt: opts.conversationId
+      ? await conversationExcerpt(userId, opts.conversationId)
+      : undefined,
+  });
 
   const [row] = await db
     .insert(canvasSnapshots)

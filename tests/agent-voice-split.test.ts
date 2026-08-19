@@ -92,6 +92,15 @@ describe("voice modality rule", () => {
     expect(VOICE_MODALITY_RULES).toContain("queued a clarification");
   });
 
+  it("outlaws the CPO-call failures: rhetorical screen promises and 'processing' vagueness", () => {
+    expect(VOICE_MODALITY_RULES).toContain("SCREEN PROMISES ARE TOOL CALLS");
+    expect(VOICE_MODALITY_RULES).toContain("SAME turn");
+    expect(VOICE_MODALITY_RULES).toContain("painter reads the recent conversation");
+    expect(VOICE_MODALITY_RULES).toContain('"processing"');
+    expect(VOICE_MODALITY_RULES).toContain("N tool calls");
+    expect(VOICE_MODALITY_RULES).toContain("letter-by-letter");
+  });
+
   it("keeps capture independent of external apps", () => {
     expect(VOICE_MODALITY_RULES).toContain("system of record");
     expect(VOICE_MODALITY_RULES).toContain("cannot fail on someone else's permission");

@@ -433,9 +433,9 @@ const toolDescriptions: Record<ToolName, string> = {
   edit_layout_plan:
     "Rearrange the user's dashboard NOW: move/remove/add sections or change their props (variant, expanded, accent). User-initiated changes apply immediately. For 'never show X again' use set_layout_preference instead.",
   log_status:
-    "Voice: the user reported where something stands ('updated it this morning', 'pushing that to Friday'). One call per report — done/started/postponed/blocked/progress. The store is the only truth; log it the moment you hear it.",
+    "Voice: the user reported where something stands ('updated it this morning', 'pushing that to Friday'). One call PER ITEM — a list spoken in one breath is several calls in the same turn, blocked items included (put the blocker in the note). The store is the only truth; log it the moment you hear it.",
   create_commitment:
-    "Voice: the user took something on. Log it immediately with any stated deadline and stakes ('so I don't get a strike'). Never wait to be asked.",
+    "Voice: the user took something on. Log it immediately with any stated deadline and stakes ('so I don't get a strike'). Several items mentioned together = several calls in the same turn. Never wait to be asked.",
   schedule_checkin:
     "Voice: you promised to follow up ('I'll be asking either way') — schedule it in the SAME breath. A user report clears it silently; a miss opens the next session.",
   update_persona:
@@ -451,7 +451,7 @@ const toolDescriptions: Record<ToolName, string> = {
   apply_pipeline:
     "Instantiate a saved pipeline template onto a task: sets its stages with computed per-step dates. 'Where am I on X' is then answered from the task's stage state — never from memory.",
   paint_canvas:
-    "Paint the Canvas page: a free-form visual the user watches build live — posters, charts, big-number summaries, week views. Use for ANY 'show me / draw / visualize' ask ('paint my week'). Never say you can't draw — this is how you draw. The result appears on the Canvas tab; say so.",
+    "Paint the Canvas page: a free-form visual the user watches build live — posters, charts, big-number summaries, week views. Use for ANY 'show me / draw / visualize / put it on the canvas' ask. The painter READS THE RECENT CONVERSATION, so 'lay out the CPO statuses we just discussed' is a complete brief — everything the user just said will render. Never say you can't draw, and never promise a screen update without calling this. The result appears on the Canvas tab; say so.",
   edit_canvas:
     "Targeted change to the current canvas ('make the album section bigger') without repainting the rest. Requires an existing canvas — otherwise use paint_canvas.",
   request_new_component:
