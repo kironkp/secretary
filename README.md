@@ -25,6 +25,17 @@ All nine phases are in.
 | 8 | Procrastination scoring + suggested tasks | done |
 | 9 | Calendar + Timeline views; search | done |
 
+**Adaptive-UI track** (docs/adaptive-ui/SPEC.md, Aug 2026) — all phases in:
+
+| Phase | What | Status |
+|---|---|---|
+| 0 | Recon → INTEGRATION.md | done |
+| 1 | LayoutPlan v2: registry, validator, rules planner, signals, renderer | done |
+| 2 | LLM planner (background refinement) + chat layout tools (tier 1) | done |
+| 2.5 | The Canvas: model-painted, sanitized, sandboxed + floating chat | done |
+| 3 | Slow loop: wishlist → `claude -p` build → approval → hot-register | done |
+| §11 ×5 | Agent layer: persona/stakes/pipelines · nag engine · entities/clarifications · ASR lexicon · voice fast/slow split | done |
+
 Beyond the spec: a **Spreadsheet** page (`/spreadsheet`) shows everything the
 secretary has captured — every task/event/fact with its source (spoken, typed,
 inferred, suggested), the accountability log of check-ins, full conversation
