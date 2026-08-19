@@ -49,11 +49,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Unknown voice" }, { status: 400 });
   }
 
-  const quota = await checkVoiceQuota(user.id);
-  if (!quota.ok) {
-    return NextResponse.json({ error: quota.message }, { status: quota.status });
-  }
-
   // Reuse the conversation on reconnect/model-switch; otherwise start one.
   let conversationId = parsed.conversationId ?? null;
   if (conversationId) {
@@ -63,6 +58,25 @@ export async function POST(req: Request) {
       .where(and(eq(conversations.id, conversationId), eq(conversations.userId, user.id)))
       .limit(1);
     if (!owned) conversationId = null;
+  }
+
+  // Voice/model switch on a live call re-mints the token for the SAME session:
+  // reuse the open usage row instead of inserting a second one — otherwise the
+  // concurrency guard sees the old row and rejects its own reconnect
+  // ("a voice session is already running"), killing the call mid-switch.
+  let reuseUsageId: string | null = null;
+  if (parsed.reconnect && conversationId) {
+    const [open] = await db
+      .select({ id: usage.id })
+      .from(usage)
+      .where(and(eq(usage.userId, user.id), eq(usage.kind, "voice"), eq(usage.seconds, 0)))
+      .limit(1);
+    if (open) reuseUsageId = open.id;
+  }
+
+  const quota = await checkVoiceQuota(user.id, { handover: Boolean(reuseUsageId) });
+  if (!quota.ok) {
+    return NextResponse.json({ error: quota.message }, { status: quota.status });
   }
   if (!conversationId) {
     const [conv] = await db
@@ -152,15 +166,21 @@ export async function POST(req: Request) {
   }
   const secret = (await res.json()) as { value: string };
 
-  const [usageRow] = await db
-    .insert(usage)
-    .values({ userId: user.id, kind: "voice", model, seconds: 0 })
-    .returning();
+  let usageId = reuseUsageId;
+  if (usageId) {
+    await db.update(usage).set({ model }).where(eq(usage.id, usageId));
+  } else {
+    const [usageRow] = await db
+      .insert(usage)
+      .values({ userId: user.id, kind: "voice", model, seconds: 0 })
+      .returning();
+    usageId = usageRow.id;
+  }
 
   return NextResponse.json({
     clientSecret: secret.value,
     conversationId,
-    usageId: usageRow.id,
+    usageId,
     model,
   });
 }

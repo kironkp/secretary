@@ -10,9 +10,14 @@ function envInt(name: string, fallback: number) {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
-export async function checkVoiceQuota(userId: string): Promise<
-  { ok: true } | { ok: false; status: number; message: string }
-> {
+export async function checkVoiceQuota(
+  userId: string,
+  opts: {
+    /** Voice/model switch on a live call: the caller reuses its own open
+     *  usage row, so that row must not block as a "concurrent" session. */
+    handover?: boolean;
+  } = {}
+): Promise<{ ok: true } | { ok: false; status: number; message: string }> {
   if (process.env.VOICE_DISABLED === "true") {
     return {
       ok: false,
@@ -20,6 +25,11 @@ export async function checkVoiceQuota(userId: string): Promise<
       message: "Voice is briefly down for maintenance. Everything else works.",
     };
   }
+
+  // A handover never mints a new session slot — it re-uses the caller's open
+  // usage row — so neither the daily cap nor the concurrency cap applies.
+  // Blocking here would kill a live call mid-switch.
+  if (opts.handover) return { ok: true };
 
   const perDay = envInt("VOICE_SESSIONS_PER_DAY", 30);
   const maxConcurrent = envInt("VOICE_MAX_CONCURRENT", 1);

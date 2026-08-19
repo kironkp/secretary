@@ -18,11 +18,31 @@ type Snapshot = {
 };
 type HistoryRow = { id: string; brief: string; painting: boolean; createdAt: string };
 
-export function CanvasView() {
+export function CanvasView({
+  pollMs = 15000,
+}: {
+  /** Idle poll interval; tighter when embedded in a live call. */
+  pollMs?: number;
+} = {}) {
   const router = useRouter();
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [history, setHistory] = useState<HistoryRow[] | null>(null);
   const frameRef = useRef<HTMLIFrameElement>(null);
+  // The iframe grows to its content so the PAGE scrolls — an inner-scrolling
+  // fixed-height iframe is exactly what breaks on iOS.
+  const [frameH, setFrameH] = useState<number | null>(null);
+
+  const measure = useCallback(() => {
+    const doc = frameRef.current?.contentDocument;
+    if (!doc?.body) return;
+    const h = Math.max(doc.body.scrollHeight, doc.documentElement?.scrollHeight ?? 0);
+    if (h > 40) setFrameH(h + 24);
+  }, []);
+
+  useEffect(() => {
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [measure]);
 
   const load = useCallback(async () => {
     const dark = document.documentElement.classList.contains("dark") ? "1" : "0";
@@ -39,12 +59,12 @@ export function CanvasView() {
   // Initial load + poll: fast while painting (progressive render), slow otherwise.
   useEffect(() => {
     const timeout = setTimeout(() => void load(), 0);
-    const interval = setInterval(() => void load(), snapshot?.painting ? 1000 : 15000);
+    const interval = setInterval(() => void load(), snapshot?.painting ? 1000 : pollMs);
     return () => {
       clearTimeout(timeout);
       clearInterval(interval);
     };
-  }, [snapshot?.painting, load]);
+  }, [snapshot?.painting, load, pollMs]);
 
   // Shell interaction primitives: host-attached, never from model markup.
   const wireShellBehaviors = useCallback(() => {
@@ -135,8 +155,14 @@ export function CanvasView() {
         title="Canvas"
         sandbox={CANVAS_SANDBOX}
         srcDoc={snapshot.srcdoc}
-        onLoad={wireShellBehaviors}
-        className="h-[75vh] w-full rounded-2xl border border-edge bg-surface"
+        onLoad={() => {
+          wireShellBehaviors();
+          measure();
+          // re-measure after fonts/layout settle
+          setTimeout(measure, 350);
+        }}
+        style={frameH ? { height: `${frameH}px` } : undefined}
+        className="min-h-[45vh] w-full rounded-2xl border border-edge bg-surface"
       />
     </div>
   );

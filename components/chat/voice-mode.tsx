@@ -15,15 +15,19 @@ import {
   Bookmark,
   Calendar,
   Check,
+  ChevronDown,
   FolderPlus,
   Hourglass,
+  Maximize2,
   Mic,
   MicOff,
+  Paintbrush,
   Pencil,
   PhoneOff,
   TriangleAlert,
   Wrench,
 } from "lucide-react";
+import { CanvasView } from "@/components/canvas/canvas-view";
 import {
   playRemoteStream,
   stopRemoteAudio,
@@ -96,6 +100,11 @@ export function VoiceMode({
     onTranscript?.(session.transcript);
   }, [session.transcript, onTranscript]);
   const [showTranscript, setShowTranscript] = useState(false);
+  // Mobile lifelines: shrink the overlay to a floating pill (the page behind
+  // becomes usable), or swap the orb for the live canvas without leaving the
+  // call — navigating away would unmount the session.
+  const [minimized, setMinimized] = useState(false);
+  const [showCanvas, setShowCanvas] = useState(false);
   const [model, setModel] = useState(
     () => (typeof window !== "undefined" && localStorage.getItem("voice-model")) || MODELS[0].id
   );
@@ -281,10 +290,9 @@ export function VoiceMode({
               ? "Listening…"
               : "";
 
-  if (docked) {
-    const lastToast = session.toasts[session.toasts.length - 1];
-    return (
-      <div className="rounded-2xl border border-accent/40 bg-surface shadow-sm">
+  const lastToast = session.toasts[session.toasts.length - 1];
+  const dockBar = (
+    <div className="rounded-2xl border border-accent/40 bg-surface shadow-sm">
         {debugOn && (
           <pre
             onClick={() => void navigator.clipboard?.writeText(debugJson).catch(() => {})}
@@ -369,6 +377,16 @@ export function VoiceMode({
                 ))}
                 {elAvailable && <option value="elevenlabs">sassy (EL)</option>}
               </select>
+              {!docked && (
+                <button
+                  onClick={() => setMinimized(false)}
+                  title="Back to full screen"
+                  aria-label="Back to full screen"
+                  className="flex h-9 w-9 flex-none items-center justify-center rounded-full border border-edge bg-card text-ink hover:border-faint"
+                >
+                  <Maximize2 size={15} strokeWidth={1.75} />
+                </button>
+              )}
               <button
                 onClick={session.toggleMute}
                 title={session.muted ? "Unmute" : "Mute"}
@@ -397,19 +415,27 @@ export function VoiceMode({
           )}
         </div>
       </div>
-    );
-  }
+  );
+
+  if (docked) return dockBar;
+  // Minimized: floating pill above the page — the call keeps running while
+  // the user reads the thread underneath. (Leaving the page still ends it.)
+  if (minimized)
+    return <div className="fixed inset-x-2 bottom-3 z-50 mx-auto max-w-md">{dockBar}</div>;
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-bg">
-      <div className="flex items-center justify-between p-4">
-        <span className="text-sm font-bold text-accent">Secretary</span>
-        <div className="flex items-center gap-2">
+      {/* min-w-0 + shrinking selects: this row must NEVER exceed the viewport —
+          overflow here widens the mobile layout viewport and pushes the call
+          controls off-screen (the 3:24 iPhone screenshot). */}
+      <div className="flex items-center justify-between gap-2 p-4">
+        <span className="flex-none text-sm font-bold text-accent">Secretary</span>
+        <div className="flex min-w-0 items-center gap-2">
           <select
             value={voice}
             onChange={(e) => pickVoice(e.target.value)}
             title="Voice"
-            className="rounded-full border border-edge bg-card px-3 py-1.5 text-xs text-muted outline-none focus:border-accent"
+            className="min-w-0 max-w-[6.5rem] shrink rounded-full border border-edge bg-card px-3 py-1.5 text-xs text-muted outline-none focus:border-accent"
           >
             {VOICES.map((v) => (
               <option key={v} value={v}>
@@ -421,7 +447,7 @@ export function VoiceMode({
           <select
             value={model}
             onChange={(e) => pickModel(e.target.value)}
-            className="rounded-full border border-edge bg-card px-3 py-1.5 text-xs text-muted outline-none focus:border-accent"
+            className="min-w-0 max-w-[9rem] shrink rounded-full border border-edge bg-card px-3 py-1.5 text-xs text-muted outline-none focus:border-accent"
           >
             {MODELS.map((m) => (
               <option key={m.id} value={m.id}>
@@ -429,6 +455,14 @@ export function VoiceMode({
               </option>
             ))}
           </select>
+          <button
+            onClick={() => setMinimized(true)}
+            title="Minimize call"
+            aria-label="Minimize call"
+            className="flex h-8 w-8 flex-none items-center justify-center rounded-full border border-edge bg-card text-muted transition-colors hover:text-ink"
+          >
+            <ChevronDown size={16} strokeWidth={2} />
+          </button>
         </div>
       </div>
 
@@ -470,6 +504,27 @@ export function VoiceMode({
             <Button variant="secondary" onClick={() => onClose(null)}>
               Continue in text
             </Button>
+          </div>
+        </div>
+      ) : showCanvas ? (
+        /* In-call canvas: watch paints land live without leaving the call.
+           Scrolls as a page — the iframe auto-grows to its content. */
+        <div className="relative flex min-h-0 flex-1 flex-col">
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-2 [-webkit-overflow-scrolling:touch]">
+            <CanvasView pollMs={3000} />
+          </div>
+          <div className="pointer-events-none absolute right-4 top-2 flex w-64 max-w-[70vw] flex-col gap-2">
+            {session.toasts.map((t) => (
+              <div
+                key={t.key}
+                className="animate-toast-in flex items-start gap-1.5 rounded-lg border border-edge bg-card px-3 py-2 text-xs shadow-lg"
+              >
+                <span className="translate-y-[1px] flex-none">
+                  <ToastIcon glyph={t.icon} />
+                </span>
+                {t.text}
+              </div>
+            ))}
           </div>
         </div>
       ) : (
@@ -567,6 +622,18 @@ export function VoiceMode({
           }`}
         >
           <AlignLeft size={18} strokeWidth={1.75} />
+        </button>
+        <button
+          onClick={() => setShowCanvas((s) => !s)}
+          title={showCanvas ? "Back to the orb" : "Show canvas"}
+          aria-label={showCanvas ? "Back to the orb" : "Show canvas"}
+          className={`flex h-12 w-12 items-center justify-center rounded-full border transition-colors ${
+            showCanvas
+              ? "border-accent bg-accent/20 text-accent"
+              : "border-edge bg-card text-ink hover:border-faint"
+          }`}
+        >
+          <Paintbrush size={18} strokeWidth={1.75} />
         </button>
         <button
           onClick={endCall}
