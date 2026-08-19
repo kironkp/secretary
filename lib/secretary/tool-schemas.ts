@@ -227,6 +227,10 @@ export const toolSchemas = {
   }),
   // --- Agent layer (SPEC §11): persona + pipeline templates ---
   update_persona: z.object({
+    name: z
+      .string()
+      .optional()
+      .describe("The name the user gave you ('I'll call you Dot') — shows in transcripts"),
     strictness: z.enum(["gentle", "standard", "stern"]).optional(),
     tone: z.enum(["warm", "professional", "brisk"]).optional(),
     praise: z.enum(["effusive", "brief", "none"]).optional(),
@@ -426,7 +430,7 @@ const toolDescriptions: Record<ToolName, string> = {
   schedule_checkin:
     "Voice: you promised to follow up ('I'll be asking either way') — schedule it in the SAME breath. A user report clears it silently; a miss opens the next session.",
   update_persona:
-    "The user asked you to BE different — sterner, gentler, brisker, more/less follow-up, quiet hours ('I need a nagging secretary', 'stop being so peppy'). Store it ONCE here; it applies to every future conversation and the nag engine. Never re-ask how they want you to behave.",
+    "The user asked you to BE different — sterner, gentler, brisker, more/less follow-up, quiet hours ('I need a nagging secretary', 'stop being so peppy') — or gave you a NAME ('I'll call you Dot'). Store it ONCE here; it applies to every future conversation, the transcript labels, and the nag engine. Never re-ask.",
   queue_clarification:
     "Something in the conversation is ambiguous and you can NOT resolve it — an unclear referent ('this one is finished' about a screen you can't see), a garbled name, a possible person mix-up. NEVER guess and never interrogate mid-flow: queue it here; your briefing surfaces ONE at a natural pause.",
   resolve_clarification:

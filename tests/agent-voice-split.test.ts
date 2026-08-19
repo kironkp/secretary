@@ -82,6 +82,16 @@ describe("voice modality rule", () => {
     expect(VOICE_MODALITY_RULES).toContain("FORBIDDEN");
   });
 
+  it("speaks in phone-call register: minimal acks, waits through pauses, no fluff", () => {
+    expect(VOICE_MODALITY_RULES).toContain("one word or a short phrase");
+    expect(VOICE_MODALITY_RULES).toContain("take your time");
+    expect(VOICE_MODALITY_RULES).toContain("do not fill the silence");
+    expect(VOICE_MODALITY_RULES).toContain("Not every utterance needs an answer");
+    // the exact failure modes from the 2026-08-19 session are named as forbidden
+    expect(VOICE_MODALITY_RULES).toContain("It's okay not to know yet");
+    expect(VOICE_MODALITY_RULES).toContain("queued a clarification");
+  });
+
   it("keeps capture independent of external apps", () => {
     expect(VOICE_MODALITY_RULES).toContain("system of record");
     expect(VOICE_MODALITY_RULES).toContain("cannot fail on someone else's permission");

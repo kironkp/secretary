@@ -109,7 +109,9 @@ export async function POST(req: Request) {
               model: TRANSCRIBE_MODEL,
               ...(transcriptionPrompt ? { prompt: transcriptionPrompt } : {}),
             },
-            turn_detection: { type: "semantic_vad" },
+            // Low eagerness: tolerate pauses — "one sec" and mid-thought
+            // silence must not trigger a reply.
+            turn_detection: { type: "semantic_vad", eagerness: "low" },
           },
           output: { voice: REALTIME_VOICE },
         },

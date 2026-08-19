@@ -1,6 +1,9 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
+import { db } from "@/lib/db";
+import { user } from "@/lib/db/schema";
 import { getConversationWithMessages, getLatestConversation } from "@/lib/db/queries";
 import { buildBriefing } from "@/lib/secretary/briefing";
 import { ChatThread } from "@/components/chat/chat-thread";
@@ -18,10 +21,12 @@ export default async function ChatPage({
   const timezone = (session.user as { timezone?: string }).timezone ?? "UTC";
 
   const { c, m } = await searchParams;
-  const thread = c
-    ? await getConversationWithMessages(userId, c)
-    : await getLatestConversation(userId);
-  const briefing = await buildBriefing(userId, timezone);
+  const [thread, briefing, [userRow]] = await Promise.all([
+    c ? getConversationWithMessages(userId, c) : getLatestConversation(userId),
+    buildBriefing(userId, timezone),
+    db.select({ persona: user.persona }).from(user).where(eq(user.id, userId)),
+  ]);
+  const secretaryName = userRow?.persona?.name ?? "Secretary";
 
   return (
     <ChatWorkspace
@@ -36,6 +41,7 @@ export default async function ChatPage({
           }))}
           briefing={briefing.card}
           anchorMessageId={m}
+          secretaryName={secretaryName}
         />
       }
       dashboard={<DashboardPanel userId={userId} timezone={timezone} compact />}

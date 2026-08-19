@@ -1235,6 +1235,7 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     const current = row?.persona ?? {};
     const next = {
       ...current,
+      ...(a.name && { name: a.name.trim() }),
       ...(a.strictness && { strictness: a.strictness }),
       ...(a.tone && { tone: a.tone }),
       ...(a.praise && { praise: a.praise }),

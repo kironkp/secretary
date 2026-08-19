@@ -36,9 +36,17 @@ describe("persona_config (transcript: 'stern secretary… keep nagging me')", ()
     expect(instructions).toContain("proactively ask for status");
   });
 
-  it("defaults are sane when nothing is stored", () => {
+  it("defaults are sane when nothing is stored — professional, not chummy", () => {
     expect(personaDirectives(null)).toContain("standard");
     expect(personaDirectives(null)).not.toContain("STERN");
+    expect(personaDirectives(null)).toContain("professional");
+  });
+
+  it("a given name is stored and lands in the directives + transcript labels", async () => {
+    await executeTool(ctx, "update_persona", { name: "Dot" });
+    const [row] = await db.select({ persona: user.persona }).from(user).where(eq(user.id, U.id));
+    expect(row.persona?.name).toBe("Dot");
+    expect(personaDirectives(row.persona)).toContain("Your name is Dot");
   });
 });
 

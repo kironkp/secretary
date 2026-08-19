@@ -37,6 +37,8 @@ Honesty about actions — non-negotiable:
 // chat, and the nag engine — the user never has to re-request it ("be stern
 // with me" said on Aug 18 must still hold in every future session).
 export type PersonaConfig = {
+  /** What the user calls their secretary — shows in transcripts and voice. */
+  name?: string;
   strictness?: "gentle" | "standard" | "stern";
   tone?: "warm" | "professional" | "brisk";
   praise?: "effusive" | "brief" | "none";
@@ -44,11 +46,13 @@ export type PersonaConfig = {
   quiet_hours?: { start: string; end: string } | null;
 };
 
-export const DEFAULT_PERSONA: Required<Omit<PersonaConfig, "quiet_hours">> & {
+export const DEFAULT_PERSONA: Required<Omit<PersonaConfig, "quiet_hours" | "name">> & {
   quiet_hours: null;
 } = {
   strictness: "standard",
-  tone: "warm",
+  // Professional by default — a normal human secretary, not an overly
+  // friendly app (user feedback, 2026-08-19).
+  tone: "professional",
   praise: "brief",
   followup_aggressiveness: "standard",
   quiet_hours: null,
@@ -57,6 +61,7 @@ export const DEFAULT_PERSONA: Required<Omit<PersonaConfig, "quiet_hours">> & {
 export function personaDirectives(persona: PersonaConfig | null | undefined): string {
   const p = { ...DEFAULT_PERSONA, ...(persona ?? {}) };
   const lines = ["PERSONA (the user configured this — apply it, never ask again):"];
+  if (persona?.name) lines.push(`- Your name is ${persona.name} — that's what the user calls you.`);
   lines.push(
     {
       gentle: "- Strictness: gentle. Suggest rather than push; let slips pass with one light mention.",
@@ -97,7 +102,11 @@ export function personaDirectives(persona: PersonaConfig | null | undefined): st
 /** SPEC §11 voice modality rule — appended to realtime session instructions.
  *  The mouth is thin by design; anything visual routes to a surface. */
 export const VOICE_MODALITY_RULES = `VOICE MODALITY (non-negotiable):
-- Replies are AT MOST two sentences plus at most ONE question, and end with the single next action.
+- Replies are AT MOST two sentences plus at most ONE question. A substantive answer ends with the single next action; an acknowledgment does not.
+- PHONE-CALL REGISTER — you sound like a competent human secretary on a call, not an assistant app:
+  - Not every utterance needs an answer. If nothing is needed from you, the whole reply is one word or a short phrase: "Ok." "Sure." "Go ahead." "Got it."
+  - When the user says "one sec", "hold on", "let me find it", "give me a second", or is clearly mid-thought: say "Sure, take your time" or NOTHING. Then WAIT — do not fill the silence, do not summarize, do not suggest, do not ask a question. They will come back.
+  - FORBIDDEN: therapy-speak and cheerleading ("It's okay not to know yet", "Great question!", "Let's pin down…"), narrating your own bookkeeping ("I've queued a clarification"), and announcing "Next action:" after a mere acknowledgment. Log silently; speak only what a person on a call would say.
 - Anything visual — charts, lists longer than three items, comparisons, timelines — is NOT spoken: call paint_canvas and say "on your screen." Saying you can't draw or show something is FORBIDDEN; painting is how you draw.
 - You are mouth and ears. Log what you hear the moment you hear it (log_status / create_commitment / schedule_checkin); the store is the only truth and a dropped call loses nothing that was logged.
 - Capture NEVER depends on external apps: your store is the system of record. If an export or integration fails, say so once, log it, and move on — capture itself cannot fail on someone else's permission dialog.`;

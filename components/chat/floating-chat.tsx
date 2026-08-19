@@ -16,6 +16,7 @@ type Bootstrap = {
   conversationId: string | null;
   messages: { id: string; role: "user" | "assistant" | "tool"; content: string; mode: "voice" | "text" }[];
   briefing: BriefingCard;
+  secretaryName: string;
 };
 
 export function FloatingChat() {
@@ -60,7 +61,7 @@ export function FloatingChat() {
         }`}
       >
         <div className="flex flex-none items-center justify-between border-b border-edge bg-card px-4 py-2.5">
-          <span className="text-sm font-bold">Secretary</span>
+          <span className="text-sm font-bold">{bootstrap?.secretaryName ?? "Secretary"}</span>
           <button
             onClick={() => setOpen(false)}
             title="Minimize"
@@ -77,6 +78,7 @@ export function FloatingChat() {
                 initialConversationId={bootstrap.conversationId}
                 initialMessages={bootstrap.messages}
                 briefing={bootstrap.briefing}
+                secretaryName={bootstrap.secretaryName}
               />
             </SplitContext.Provider>
           ) : (

@@ -29,6 +29,7 @@ export const user = pgTable("user", {
   // to voice, chat, UI copy, and the nag engine — never re-requested per
   // conversation. Null = defaults (see lib/secretary/persona.ts).
   persona: jsonb("persona").$type<{
+    name?: string;
     strictness?: "gentle" | "standard" | "stern";
     tone?: "warm" | "professional" | "brisk";
     praise?: "effusive" | "brief" | "none";

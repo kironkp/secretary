@@ -66,11 +66,14 @@ export function ChatThread({
   initialMessages,
   briefing,
   anchorMessageId,
+  secretaryName = "Secretary",
 }: {
   initialConversationId: string | null;
   initialMessages: Message[];
   briefing: BriefingCard;
   anchorMessageId?: string;
+  /** The name the user gave their secretary — labels the transcript. */
+  secretaryName?: string;
 }) {
   const router = useRouter();
   const { dockVoice } = useSplit();
@@ -234,7 +237,7 @@ export function ChatThread({
               >
                 {m.mode === "voice" && (
                   <span className="mb-1 flex items-center gap-1 text-[10px] uppercase tracking-wide text-faint">
-                    <Mic size={10} strokeWidth={2} /> voice
+                    <Mic size={10} strokeWidth={2} /> {m.role === "user" ? "you" : secretaryName}
                   </span>
                 )}
                 <span className="whitespace-pre-wrap">{m.content}</span>
@@ -254,7 +257,7 @@ export function ChatThread({
                 >
                   <span className="mb-1 flex items-center gap-1 text-[10px] uppercase tracking-wide text-faint">
                     <Mic size={10} strokeWidth={2} className={l.final ? "" : "animate-pulse"} />
-                    voice
+                    {l.role === "user" ? "you" : secretaryName}
                   </span>
                   <span className="whitespace-pre-wrap">
                     {l.text}
