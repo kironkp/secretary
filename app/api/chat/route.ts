@@ -5,7 +5,7 @@ import { after } from "next/server";
 import { z } from "zod";
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { conversations, messages, usage } from "@/lib/db/schema";
+import { conversations, messages, usage, user as userTable } from "@/lib/db/schema";
 import { isErrorResponse, parseBody, requireSession } from "@/lib/api";
 import { buildBriefing } from "@/lib/secretary/briefing";
 import { buildInstructions } from "@/lib/secretary/persona";
@@ -68,7 +68,11 @@ export async function POST(req: Request) {
     .limit(HISTORY_LIMIT);
 
   const briefing = await buildBriefing(user.id, user.timezone, { consumeNudges: true });
-  const instructions = buildInstructions(briefing.text);
+  const [userRow] = await db
+    .select({ persona: userTable.persona })
+    .from(userTable)
+    .where(eq(userTable.id, user.id));
+  const instructions = buildInstructions(briefing.text, { persona: userRow?.persona });
 
   type InputItem = Record<string, unknown>;
   // Reasoning models pair function_call items with reasoning items, so turns

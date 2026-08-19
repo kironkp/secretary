@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { conversations, usage } from "@/lib/db/schema";
+import { conversations, usage, user as userTable } from "@/lib/db/schema";
 import { isErrorResponse, parseBody, requireSession } from "@/lib/api";
 import { checkVoiceQuota } from "@/lib/rate-limit";
 import { buildBriefing } from "@/lib/secretary/briefing";
@@ -71,7 +71,14 @@ export async function POST(req: Request) {
   const briefing = await buildBriefing(user.id, user.timezone, {
     consumeNudges: !parsed.reconnect,
   });
-  const instructions = buildInstructions(briefing.text, { reconnect: parsed.reconnect });
+  const [userRow] = await db
+    .select({ persona: userTable.persona })
+    .from(userTable)
+    .where(eq(userTable.id, user.id));
+  const instructions = buildInstructions(briefing.text, {
+    reconnect: parsed.reconnect,
+    persona: userRow?.persona,
+  });
 
   const res = await fetch("https://api.openai.com/v1/realtime/client_secrets", {
     method: "POST",

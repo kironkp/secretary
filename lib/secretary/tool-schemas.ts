@@ -26,6 +26,12 @@ export const toolSchemas = {
       .enum(["daily", "weekly", "monthly", "yearly"])
       .optional()
       .describe("Recurring task: completing it spawns the next occurrence from its due date"),
+    stakes: z
+      .string()
+      .optional()
+      .describe(
+        "The consequence the user named for missing this, verbatim-ish: 'miss reconcile → strike from HQ'. Capture whenever a consequence is stated."
+      ),
   }),
   update_task: z.object({
     task: z.string().min(1).describe("Task id, or a distinctive fragment of its title"),
@@ -58,6 +64,10 @@ export const toolSchemas = {
       .enum(["daily", "weekly", "monthly", "yearly", "none"])
       .optional()
       .describe('Make the task recurring, or "none" to stop it recurring'),
+    stakes: z
+      .string()
+      .optional()
+      .describe("Set/replace the named consequence of missing this task; \"\" clears it"),
     postpone_reason: z
       .string()
       .optional()
@@ -195,6 +205,47 @@ export const toolSchemas = {
   search_history: z.object({
     query: z.string().min(1).describe("Text to search past conversations for"),
   }),
+  // --- Agent layer (SPEC §11): persona + pipeline templates ---
+  update_persona: z.object({
+    strictness: z.enum(["gentle", "standard", "stern"]).optional(),
+    tone: z.enum(["warm", "professional", "brisk"]).optional(),
+    praise: z.enum(["effusive", "brief", "none"]).optional(),
+    followup_aggressiveness: z.enum(["low", "standard", "high"]).optional(),
+    quiet_hours_start: z.string().optional().describe("HH:MM, e.g. 22:00"),
+    quiet_hours_end: z.string().optional().describe("HH:MM, e.g. 07:30"),
+  }),
+  save_pipeline_template: z.object({
+    name: z.string().min(1).describe("Template name, e.g. 'CPO procurement'"),
+    steps: z
+      .array(
+        z.object({
+          name: z.string().min(1),
+          blocked_by: z
+            .number()
+            .int()
+            .min(0)
+            .nullable()
+            .optional()
+            .describe("Index of the step that must finish first; omit/null if independent"),
+          offset_days: z
+            .number()
+            .int()
+            .nullable()
+            .optional()
+            .describe("Step due date = anchor date + this many days; omit if undated"),
+        })
+      )
+      .min(2),
+    recurrence: z.enum(["daily", "weekly", "monthly", "yearly"]).optional(),
+  }),
+  apply_pipeline: z.object({
+    task: z.string().min(1).describe("Task id, or a distinctive fragment of its title"),
+    template: z.string().min(1).describe("Pipeline template name (fuzzy-matched)"),
+    anchor_date: z
+      .string()
+      .optional()
+      .describe("ISO date the step offsets count from; defaults to today"),
+  }),
   // --- Layout tools (SPEC §7.5 tier 1): the dashboard's arrangement is data ---
   get_current_plan: z.object({}),
   edit_layout_plan: z.object({
@@ -318,6 +369,12 @@ const toolDescriptions: Record<ToolName, string> = {
     "The dashboard's current layout plan: sections in order (with keys), the component registry, and the user's stored layout preferences. Call before editing the layout.",
   edit_layout_plan:
     "Rearrange the user's dashboard NOW: move/remove/add sections or change their props (variant, expanded, accent). User-initiated changes apply immediately. For 'never show X again' use set_layout_preference instead.",
+  update_persona:
+    "The user asked you to BE different — sterner, gentler, brisker, more/less follow-up, quiet hours ('I need a nagging secretary', 'stop being so peppy'). Store it ONCE here; it applies to every future conversation and the nag engine. Never re-ask how they want you to behave.",
+  save_pipeline_template:
+    "Save a reusable ordered checklist with dependencies (blocked_by) and per-step date offsets — e.g. CPO: update → sign (blocked by update) → pay (blocked by sign) → reconcile+submit. Use when the user describes an order of operations that will repeat.",
+  apply_pipeline:
+    "Instantiate a saved pipeline template onto a task: sets its stages with computed per-step dates. 'Where am I on X' is then answered from the task's stage state — never from memory.",
   paint_canvas:
     "Paint the Canvas page: a free-form visual the user watches build live — posters, charts, big-number summaries, week views. Use for ANY 'show me / draw / visualize' ask ('paint my week'). Never say you can't draw — this is how you draw. The result appears on the Canvas tab; say so.",
   edit_canvas:

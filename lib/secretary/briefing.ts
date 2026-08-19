@@ -313,6 +313,9 @@ export async function buildBriefing(
     for (const t of overdueRows)
       lines.push(
         `- "${t.title}" — due ${fmt(t.dueAt!, timezone)} (${daysLate(t)}d late, postponed ${t.postponedCount}×)${
+          // SPEC §11: nags cite recorded stakes — sternness stays honest.
+          t.stakes ? ` [STAKES the user named — cite when nudging: ${t.stakes}]` : ""
+        }${
           toNudge.some((n) => n.id === t.id) ? "" : " [already nudged today — do not nag again unless asked]"
         }`
       );

@@ -10,8 +10,10 @@ import {
   events,
   memories,
   messages,
+  pipelineTemplates,
   projects,
   tasks,
+  user as userTable,
   type DocSection,
 } from "@/lib/db/schema";
 import { layoutPreferences } from "@/lib/db/schema";
@@ -328,6 +330,7 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         reminders,
         stages: (a.stages ?? []).map((name) => ({ name, done: false })),
         recurrence: a.recurrence,
+        stakes: a.stakes,
         status: "todo",
         source: ctx.conversationId ? "spoken" : "typed",
         createdFromConversationId: ctx.conversationId,
@@ -393,6 +396,7 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     if (a.recurrence !== undefined) {
       updates.recurrence = a.recurrence === "none" ? null : a.recurrence;
     }
+    if (a.stakes !== undefined) updates.stakes = a.stakes === "" ? null : a.stakes;
     if (a.stages !== undefined) {
       // replace the stage list, preserving done-ness of stages that survive
       updates.stages = a.stages.map((name) => ({
@@ -1158,6 +1162,112 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         snippet: m.content.slice(0, 200),
         conversation_id: m.conversationId,
       })),
+    };
+  },
+
+  // --- Agent layer (SPEC §11): persona + pipeline templates ---
+
+  async update_persona(ctx, args) {
+    const a = toolSchemas.update_persona.parse(args);
+    const [row] = await db
+      .select({ persona: userTable.persona })
+      .from(userTable)
+      .where(eq(userTable.id, ctx.userId));
+    const current = row?.persona ?? {};
+    const next = {
+      ...current,
+      ...(a.strictness && { strictness: a.strictness }),
+      ...(a.tone && { tone: a.tone }),
+      ...(a.praise && { praise: a.praise }),
+      ...(a.followup_aggressiveness && { followup_aggressiveness: a.followup_aggressiveness }),
+      ...(a.quiet_hours_start && a.quiet_hours_end
+        ? { quiet_hours: { start: a.quiet_hours_start, end: a.quiet_hours_end } }
+        : {}),
+    };
+    await db.update(userTable).set({ persona: next }).where(eq(userTable.id, ctx.userId));
+    return {
+      result: {
+        stored: true,
+        persona: next,
+        note: "Applied from now on, in every conversation and to the nag engine — the user never needs to re-state this.",
+      },
+      toast: { icon: "✓", text: "Persona updated" },
+    };
+  },
+
+  async save_pipeline_template(ctx, args) {
+    const a = toolSchemas.save_pipeline_template.parse(args);
+    for (const [i, step] of a.steps.entries()) {
+      if (step.blocked_by != null && step.blocked_by >= i) {
+        return { result: { error: `Step ${i} ("${step.name}") can only be blocked by an EARLIER step` } };
+      }
+    }
+    const existing = await db
+      .select()
+      .from(pipelineTemplates)
+      .where(and(eq(pipelineTemplates.userId, ctx.userId), ilike(pipelineTemplates.name, a.name)));
+    if (existing.length) {
+      await db
+        .update(pipelineTemplates)
+        .set({ steps: a.steps, recurrence: a.recurrence ?? null })
+        .where(eq(pipelineTemplates.id, existing[0].id));
+    } else {
+      await db.insert(pipelineTemplates).values({
+        userId: ctx.userId,
+        name: a.name,
+        steps: a.steps,
+        recurrence: a.recurrence ?? null,
+      });
+    }
+    return {
+      result: { saved: true, name: a.name, steps: a.steps.length },
+      toast: { icon: "✓", text: `Pipeline "${a.name}" saved` },
+    };
+  },
+
+  async apply_pipeline(ctx, args) {
+    const a = toolSchemas.apply_pipeline.parse(args);
+    const task = await findTask(ctx.userId, a.task);
+    if (!task) return { result: { error: `No task matching "${a.task}"` } };
+    const templates = await db
+      .select()
+      .from(pipelineTemplates)
+      .where(eq(pipelineTemplates.userId, ctx.userId));
+    const needle = a.template.toLowerCase();
+    const template =
+      templates.find((t) => t.name.toLowerCase() === needle) ??
+      templates.find(
+        (t) => t.name.toLowerCase().includes(needle) || needle.includes(t.name.toLowerCase())
+      );
+    if (!template) return { result: { error: `No pipeline template matching "${a.template}"` } };
+    const anchor = a.anchor_date ? new Date(a.anchor_date) : new Date();
+    if (Number.isNaN(anchor.getTime()))
+      return { result: { error: `Bad anchor_date "${a.anchor_date}"` } };
+    const stages = template.steps.map((s) => ({
+      name: s.name,
+      done: false,
+      due_at:
+        s.offset_days != null
+          ? new Date(anchor.getTime() + s.offset_days * 86400000).toISOString().slice(0, 10)
+          : null,
+      blocked_by: s.blocked_by ?? null,
+    }));
+    await db
+      .update(tasks)
+      .set({
+        stages,
+        ...(template.recurrence ? { recurrence: template.recurrence } : {}),
+        updatedAt: new Date(),
+      })
+      .where(eq(tasks.id, task.id));
+    return {
+      result: {
+        applied: true,
+        task_id: task.id,
+        stages,
+        note: "Stage state is now the source of truth for 'where am I' on this task.",
+      },
+      toast: { icon: "✓", text: `Pipeline applied to "${task.title}"` },
     };
   },
 

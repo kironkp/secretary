@@ -33,9 +33,75 @@ Honesty about actions — non-negotiable:
 - If you lack a tool for what the user asked, or a tool returns an error, say so plainly ("I can't do that yet" / "that failed because…"). Never improvise a workaround like "noting it", and never imply success.
 - When the user reports a filing mistake, fix it with tools immediately — update_task with the correct project, update_project with merge_into for duplicates — then confirm using what the tool actually returned. File tasks into the EXACT project names listed in your briefing; check list_projects when unsure.`;
 
-export function buildInstructions(briefingText: string, opts: { reconnect?: boolean } = {}) {
+// Persona config (SPEC §11): stored once on the user row, applied to voice,
+// chat, and the nag engine — the user never has to re-request it ("be stern
+// with me" said on Aug 18 must still hold in every future session).
+export type PersonaConfig = {
+  strictness?: "gentle" | "standard" | "stern";
+  tone?: "warm" | "professional" | "brisk";
+  praise?: "effusive" | "brief" | "none";
+  followup_aggressiveness?: "low" | "standard" | "high";
+  quiet_hours?: { start: string; end: string } | null;
+};
+
+export const DEFAULT_PERSONA: Required<Omit<PersonaConfig, "quiet_hours">> & {
+  quiet_hours: null;
+} = {
+  strictness: "standard",
+  tone: "warm",
+  praise: "brief",
+  followup_aggressiveness: "standard",
+  quiet_hours: null,
+};
+
+export function personaDirectives(persona: PersonaConfig | null | undefined): string {
+  const p = { ...DEFAULT_PERSONA, ...(persona ?? {}) };
+  const lines = ["PERSONA (the user configured this — apply it, never ask again):"];
+  lines.push(
+    {
+      gentle: "- Strictness: gentle. Suggest rather than push; let slips pass with one light mention.",
+      standard: "- Strictness: standard. Follow up on misses plainly, once.",
+      stern:
+        "- Strictness: STERN — the user hired you to be on their ass. Open with the most overdue commitment, ask direct yes/no status questions, and don't let vague answers slide. Professional, never theatrical: when stakes are recorded, cite them; when none are, don't invent drama.",
+    }[p.strictness]
+  );
+  lines.push(
+    {
+      warm: "- Tone: warm and personable.",
+      professional: "- Tone: professional and composed — the best-hired-secretary register.",
+      brisk: "- Tone: brisk. Short sentences, no filler.",
+    }[p.tone]
+  );
+  lines.push(
+    {
+      effusive: "- Praise: celebrate completions enthusiastically.",
+      brief: "- Praise: brief — 'Done, nice.' and move on.",
+      none: "- Praise: none. Acknowledge and continue.",
+    }[p.praise]
+  );
+  lines.push(
+    {
+      low: "- Follow-ups: only when asked or clearly overdue.",
+      standard: "- Follow-ups: respect the nudge budget in the briefing.",
+      high: "- Follow-ups: proactively ask for status on anything the user said they'd do, every session.",
+    }[p.followup_aggressiveness]
+  );
+  if (p.quiet_hours) {
+    lines.push(
+      `- Quiet hours ${p.quiet_hours.start}–${p.quiet_hours.end}: no nags or proactive pings in that window.`
+    );
+  }
+  return lines.join("\n");
+}
+
+export function buildInstructions(
+  briefingText: string,
+  opts: { reconnect?: boolean; persona?: PersonaConfig | null } = {}
+) {
   return [
     SECRETARY_PERSONA,
+    "",
+    personaDirectives(opts.persona),
     "",
     briefingText,
     ...(opts.reconnect

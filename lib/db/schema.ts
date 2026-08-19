@@ -25,6 +25,16 @@ export const user = pgTable("user", {
   // SPEC §1 invariant 7: calm mode renders DEFAULT_PLAN unconditionally and
   // the planner is never called. Toggled in Settings.
   calmMode: boolean("calm_mode").notNull().default(false),
+  // Persona config (SPEC §11, from the Aug 18 transcript): stored ONCE, applied
+  // to voice, chat, UI copy, and the nag engine — never re-requested per
+  // conversation. Null = defaults (see lib/secretary/persona.ts).
+  persona: jsonb("persona").$type<{
+    strictness?: "gentle" | "standard" | "stern";
+    tone?: "warm" | "professional" | "brisk";
+    praise?: "effusive" | "brief" | "none";
+    followup_aggressiveness?: "low" | "standard" | "high";
+    quiet_hours?: { start: string; end: string } | null;
+  } | null>(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -189,8 +199,16 @@ export const tasks = pgTable("tasks", {
   // briefing and the dashboard (supersedes the never-used remindAt column).
   reminders: jsonb("reminders").$type<string[]>().notNull().default([]),
   // Multi-step work shows its stages: ordered checklist, e.g. outline →
-  // draft → review → submit. Empty = plain single-step task.
-  stages: jsonb("stages").$type<{ name: string; done: boolean }[]>().notNull().default([]),
+  // draft → review → submit. Empty = plain single-step task. SPEC §11 pipeline
+  // steps add optional per-step dates and blocked_by (index of the blocking
+  // stage) — "where am I" reads THIS, never summary memory.
+  stages: jsonb("stages")
+    .$type<{ name: string; done: boolean; due_at?: string | null; blocked_by?: number | null }[]>()
+    .notNull()
+    .default([]),
+  // SPEC §11: the consequence the user named ("miss reconcile → strike from
+  // HQ"). Nags MUST cite stakes when present — sternness stays honest.
+  stakes: text("stakes"),
   // 'daily' | 'weekly' | 'monthly' | 'yearly' — completing the task spawns
   // the next occurrence (lib/secretary/recurrence.ts). Null = one-shot.
   recurrence: text("recurrence"),
@@ -263,6 +281,23 @@ export const layoutSpecs = pgTable("layout_specs", {
   signalsHash: text("signals_hash"),
   reasonSummary: text("reason_summary"),
   outcome: text("outcome").$type<"accepted" | "reverted" | "pinned_over" | null>(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Pipeline templates (SPEC §11): reusable ordered step lists with blocked_by
+// dependencies, instantiable per task (e.g. CPO: update → sign → pay →
+// reconcile+submit). offset_days positions each step's due date relative to
+// the task's anchor date at apply time.
+export const pipelineTemplates = pgTable("pipeline_templates", {
+  id: text("id").primaryKey().$defaultFn(uuid),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  steps: jsonb("steps")
+    .$type<{ name: string; blocked_by?: number | null; offset_days?: number | null }[]>()
+    .notNull(),
+  recurrence: text("recurrence"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
