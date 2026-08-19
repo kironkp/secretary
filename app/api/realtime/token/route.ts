@@ -15,8 +15,9 @@ import { openAIVoiceToolDefs } from "@/lib/secretary/tool-schemas";
 import {
   REALTIME_MODEL_DEFAULT,
   REALTIME_MODEL_MINI,
+  REALTIME_TRANSCRIBE_MODEL,
   REALTIME_VOICE,
-  TRANSCRIBE_MODEL,
+  TRANSCRIBE_LANGUAGE,
 } from "@/lib/openai";
 
 const bodySchema = z.object({
@@ -106,9 +107,11 @@ export async function POST(req: Request) {
             // SPEC §11 ASR lexicon: bias transcription toward the entity
             // store's exact spellings (CPO not CPU, CalCard not calc card).
             transcription: {
-              model: TRANSCRIBE_MODEL,
+              model: REALTIME_TRANSCRIBE_MODEL,
+              language: TRANSCRIBE_LANGUAGE,
               ...(transcriptionPrompt ? { prompt: transcriptionPrompt } : {}),
             },
+            noise_reduction: { type: "near_field" },
             // Low eagerness: tolerate pauses — "one sec" and mid-thought
             // silence must not trigger a reply.
             turn_detection: { type: "semantic_vad", eagerness: "low" },

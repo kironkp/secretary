@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 import { usage } from "@/lib/db/schema";
 import { isErrorResponse, requireSession } from "@/lib/api";
 import { checkTranscribeQuota } from "@/lib/rate-limit";
-import { openai, TRANSCRIBE_MODEL } from "@/lib/openai";
+import { openai, TRANSCRIBE_LANGUAGE, TRANSCRIBE_MODEL } from "@/lib/openai";
 
 const MAX_BYTES = 25 * 1024 * 1024;
 
@@ -31,6 +31,7 @@ export async function POST(req: Request) {
     const result = await openai.audio.transcriptions.create({
       file,
       model: TRANSCRIBE_MODEL,
+      language: TRANSCRIBE_LANGUAGE,
     });
     await db.insert(usage).values({
       userId: user.id,
