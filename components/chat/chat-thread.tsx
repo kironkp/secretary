@@ -246,9 +246,9 @@ export function ChatThread({
           {mode === "voice" &&
             liveLines
               .filter((l) => l.text.trim())
-              .map((l, i) => (
+              .map((l) => (
                 <div
-                  key={`live-${i}`}
+                  key={l.id}
                   className={`max-w-[85%] rounded-[14px] px-4 py-2.5 text-[15px] leading-relaxed ${
                     l.role === "user"
                       ? "ml-auto bg-bubble text-ink"

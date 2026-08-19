@@ -416,8 +416,12 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
     if (this.dc?.readyState === "open") this.dc.send(JSON.stringify(event));
   }
 
-  private persistMessage(role: "user" | "assistant", content: string) {
+  private persistedIds = new Set<string>();
+
+  private persistOnce(key: string, role: "user" | "assistant", content: string) {
     if (!this.conversationId || !content.trim()) return;
+    if (this.persistedIds.has(key)) return; // duplicate event name for the same item
+    this.persistedIds.add(key);
     fetch(`/api/conversations/${this.conversationId}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -502,26 +506,31 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
       }
       return;
     }
-    // User speech transcription (GA + beta event names)
+    // User speech transcription (GA + beta event names). Lines are keyed by
+    // the server's item id so interleaved streams (barge-in) can't fragment.
     if (t === "conversation.item.input_audio_transcription.delta") {
-      this.emit("userTranscript", String(event.delta ?? ""), false);
+      this.emit("userTranscript", String(event.item_id ?? "user-live"), String(event.delta ?? ""), false);
       return;
     }
     if (t === "conversation.item.input_audio_transcription.completed") {
+      const id = String(event.item_id ?? "user-live");
       const text = String(event.transcript ?? "");
-      this.emit("userTranscript", text, true);
-      this.persistMessage("user", text);
+      this.emit("userTranscript", id, text, true);
+      this.persistOnce(`user:${id}`, "user", text);
       return;
     }
     // Assistant audio transcript (GA name response.output_audio_transcript.*, beta response.audio_transcript.*)
     if (t.endsWith("audio_transcript.delta")) {
-      this.emit("assistantTranscript", String(event.delta ?? ""), false);
+      const id = String(event.item_id ?? event.response_id ?? "assistant-live");
+      this.emit("assistantTranscript", id, String(event.delta ?? ""), false);
       return;
     }
     if (t.endsWith("audio_transcript.done")) {
+      const id = String(event.item_id ?? event.response_id ?? "assistant-live");
       const text = String(event.transcript ?? "");
-      this.emit("assistantTranscript", text, true);
-      this.persistMessage("assistant", text);
+      this.emit("assistantTranscript", id, text, true);
+      // GA + beta names can BOTH fire for the same item — persist exactly once.
+      this.persistOnce(`assistant:${id}`, "assistant", text);
       return;
     }
     if (t === "response.function_call_arguments.done") {

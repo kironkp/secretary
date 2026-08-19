@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { OpenAIRealtimeVoice } from "@/lib/realtime/openai-webrtc";
 import type { ToolToast, VoiceErrorKind, VoiceStatus } from "@/lib/realtime/types";
 
-export type TranscriptLine = { role: "user" | "assistant"; text: string; final: boolean };
+export type TranscriptLine = { id: string; role: "user" | "assistant"; text: string; final: boolean };
 export type ActiveToast = ToolToast & { key: number };
 
 export function useVoiceSession() {
@@ -19,16 +19,26 @@ export function useVoiceSession() {
   const [model, setModel] = useState<string>("");
   const toastKey = useRef(0);
 
+  // Lines are keyed by the server's item id: barge-in interleaves user and
+  // assistant streams, and "append to the last line of my role" fragments
+  // under that. A final event REPLACES its line's text (the authoritative
+  // transcript), deltas append to it — same id, same line, always.
   const appendTranscript = useCallback(
-    (role: "user" | "assistant") => (text: string, final: boolean) => {
+    (role: "user" | "assistant") => (id: string, text: string, final: boolean) => {
+      const key = `${role}:${id}`;
       setTranscript((prev) => {
-        const last = prev[prev.length - 1];
-        if (last && last.role === role && !last.final) {
-          const merged = final ? { role, text, final: true } : { role, text: last.text + text, final: false };
-          return [...prev.slice(0, -1), merged];
+        const idx = prev.findIndex((l) => l.id === key);
+        if (idx === -1) {
+          if (!text.trim() && !final) return prev;
+          return [...prev, { id: key, role, text, final }];
         }
-        if (!text.trim() && !final) return prev;
-        return [...prev, { role, text, final }];
+        const line = prev[idx];
+        if (line.final) return prev; // duplicate final (GA + beta event names)
+        const next = [...prev];
+        next[idx] = final
+          ? { ...line, text, final: true }
+          : { ...line, text: line.text + text };
+        return next;
       });
     },
     []

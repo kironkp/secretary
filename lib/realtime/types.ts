@@ -22,8 +22,10 @@ export type ToolToast = { icon: string; text: string };
 
 export type VoiceEvents = {
   status: (status: VoiceStatus, detail?: { kind?: VoiceErrorKind; message?: string }) => void;
-  userTranscript: (text: string, final: boolean) => void;
-  assistantTranscript: (text: string, final: boolean) => void;
+  // id = the server's item/response id: transcript lines are keyed by it so
+  // interleaved streams (barge-in) can never fragment or double.
+  userTranscript: (id: string, text: string, final: boolean) => void;
+  assistantTranscript: (id: string, text: string, final: boolean) => void;
   assistantSpeaking: (speaking: boolean) => void;
   toolResult: (name: string, toast?: ToolToast) => void;
   modelChanged: (model: string) => void;
