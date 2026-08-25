@@ -33,6 +33,9 @@ type Message = {
   content: string;
   mode: "voice" | "text";
   attachments?: Attachment[] | null;
+  /** Client-only: delivery failed; the reason shows under the bubble with a
+   *  tap-to-retry (payload kept — nothing to retype, iMessage-style). */
+  failed?: string;
 };
 
 type PendingAttachment = {
@@ -208,6 +211,50 @@ export function ChatThread({
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [msgs.length, liveLines.length]);
 
+  // Payloads for undelivered messages, keyed by their local id — a failed
+  // bubble can be re-sent verbatim (text + already-uploaded attachment ids).
+  const retryPayloads = useRef(new Map<string, { text: string; attachmentIds: string[] }>());
+
+  const deliver = async (tempId: string) => {
+    const payload = retryPayloads.current.get(tempId);
+    if (!payload || sending) return;
+    setSending(true);
+    setMsgs((m) => m.map((msg) => (msg.id === tempId ? { ...msg, failed: undefined } : msg)));
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: payload.text,
+          conversationId,
+          attachmentIds: payload.attachmentIds,
+        }),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        setMsgs((m) =>
+          m.map((msg) =>
+            msg.id === tempId ? { ...msg, failed: body.error ?? "Message failed" } : msg
+          )
+        );
+        return;
+      }
+      retryPayloads.current.delete(tempId);
+      setConversationId(body.conversationId);
+      setMsgs((m) => [
+        ...m.map((msg) => (msg.id === tempId ? { ...msg, id: body.userMessageId } : msg)),
+        { ...body.assistantMessage, mode: "text" as const },
+      ]);
+      router.refresh(); // today strip + dashboard counts
+    } catch {
+      setMsgs((m) =>
+        m.map((msg) => (msg.id === tempId ? { ...msg, failed: "Not delivered" } : msg))
+      );
+    } finally {
+      setSending(false);
+    }
+  };
+
   const send = async () => {
     const text = input.trim();
     const ready = pending.filter((a) => a.id);
@@ -216,8 +263,6 @@ export function ChatThread({
     setInput("");
     if (inputRef.current) inputRef.current.style.height = "auto";
     setError("");
-    setSending(true);
-    const attachmentIds = ready.map((a) => a.id!);
     const sentAttachments: Attachment[] = ready.map((a) => ({
       id: a.id!,
       mime: a.mime,
@@ -227,6 +272,7 @@ export function ChatThread({
     pending.forEach((a) => a.previewUrl && URL.revokeObjectURL(a.previewUrl));
     setPending([]);
     const tempId = `local-${++localKey.current}`;
+    retryPayloads.current.set(tempId, { text, attachmentIds: sentAttachments.map((a) => a.id) });
     setMsgs((m) => [
       ...m,
       {
@@ -237,28 +283,7 @@ export function ChatThread({
         attachments: sentAttachments.length ? sentAttachments : null,
       },
     ]);
-    try {
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, conversationId, attachmentIds }),
-      });
-      const body = await res.json();
-      if (!res.ok) {
-        setError(body.error ?? "Message failed — try again.");
-        return;
-      }
-      setConversationId(body.conversationId);
-      setMsgs((m) => [
-        ...m.map((msg) => (msg.id === tempId ? { ...msg, id: body.userMessageId } : msg)),
-        { ...body.assistantMessage, mode: "text" as const },
-      ]);
-      router.refresh(); // today strip + dashboard counts
-    } catch {
-      setError("Message failed — check your connection.");
-    } finally {
-      setSending(false);
-    }
+    await deliver(tempId);
   };
 
   const closeVoice = useCallback(
@@ -348,12 +373,12 @@ export function ChatThread({
           {msgs
             .filter((m) => m.role !== "tool")
             .map((m) => (
+              <div key={m.id}>
               <div
-                key={m.id}
                 id={`m-${m.id}`}
                 className={`max-w-[85%] rounded-[14px] px-4 py-2.5 text-[15px] leading-relaxed transition-shadow ${
                   m.role === "user"
-                    ? "ml-auto bg-bubble text-ink"
+                    ? `ml-auto bg-bubble text-ink ${m.failed ? "opacity-70" : ""}`
                     : "border border-edge bg-surface"
                 }`}
               >
@@ -389,6 +414,17 @@ export function ChatThread({
                   </span>
                 )}
                 <span className="whitespace-pre-wrap">{m.content}</span>
+              </div>
+              {m.failed && (
+                <button
+                  onClick={() => void deliver(m.id)}
+                  disabled={sending}
+                  className="ml-auto mt-1 flex items-center gap-1 text-xs font-semibold text-danger disabled:opacity-50"
+                >
+                  <TriangleAlert size={11} strokeWidth={2.25} className="flex-none" />
+                  {m.failed} — tap to retry
+                </button>
+              )}
               </div>
             ))}
           {mode === "voice" &&
