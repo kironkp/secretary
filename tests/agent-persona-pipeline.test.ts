@@ -69,6 +69,32 @@ describe("persona_config (transcript: 'stern secretary… keep nagging me')", ()
   });
 });
 
+describe("dispatcher rules (Aug 25 mobile session: 'can't make the call rn' → dead end)", () => {
+  const instructions = buildInstructions("BRIEFING", { persona: null });
+
+  it("a stated blocker demands a redirect in the same breath, not just a parked task", () => {
+    expect(instructions).toContain("never leave them empty-handed");
+    expect(instructions).toContain("TWO requests");
+    expect(instructions).toContain("offer what they CAN do instead");
+  });
+
+  it("constraints stick: no re-offering phone calls after 'no calls'", () => {
+    expect(instructions).toContain("stick for the whole conversation");
+    expect(instructions).toContain("weren't listening");
+  });
+
+  it("'what can I do now' filters by current context instead of dumping everything", () => {
+    expect(instructions).toContain("CURRENT context");
+    expect(instructions).toContain("Filter by every constraint");
+    expect(instructions).toContain("why the rest is parked");
+  });
+
+  it("chat output is plain text — the bubbles render no markdown", () => {
+    expect(instructions).toContain("no markdown");
+    expect(instructions).toContain("**bold**");
+  });
+});
+
 describe("stakes (transcript: reconcile by Sep 8 'so I don't get a strike')", () => {
   it("captures stakes on create and cites them in the overdue briefing", async () => {
     await executeTool(ctx, "create_task", {
