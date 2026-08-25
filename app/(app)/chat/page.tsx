@@ -39,6 +39,7 @@ export default async function ChatPage({
             role: msg.role,
             content: msg.content,
             mode: msg.mode,
+            attachments: msg.attachments,
           }))}
           briefing={briefing.card}
           anchorMessageId={m}

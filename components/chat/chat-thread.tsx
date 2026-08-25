@@ -9,11 +9,14 @@ import {
   ArrowUp,
   Calendar,
   Clock,
+  FileText,
   Flame,
   Mic,
+  Paperclip,
   Sparkles,
   Sun,
   TriangleAlert,
+  X,
 } from "lucide-react";
 import type { BriefingCard } from "@/lib/secretary/briefing";
 import { unlockRemoteAudio } from "@/lib/realtime/remote-audio";
@@ -22,12 +25,53 @@ import { useSplit } from "./split-context";
 import type { TranscriptLine } from "./use-voice-session";
 import { VoiceMode } from "./voice-mode";
 
+type Attachment = { id: string; mime: string; name: string };
+
 type Message = {
   id: string;
   role: "user" | "assistant" | "tool";
   content: string;
   mode: "voice" | "text";
+  attachments?: Attachment[] | null;
 };
+
+type PendingAttachment = {
+  key: number;
+  name: string;
+  mime: string;
+  previewUrl: string | null; // object URL for images
+  id: string | null; // server id once uploaded
+  error: string | null;
+};
+
+const MAX_ATTACHMENTS = 4;
+const IMAGE_MAX_EDGE = 1600;
+
+/** Downscale + JPEG-encode a picked image (handles HEIC on iOS — Safari
+ *  decodes it natively, and the canvas re-encodes to a mime the model takes). */
+async function normalizeImage(file: File): Promise<Blob> {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error("decode failed"));
+      el.src = url;
+    });
+    const scale = Math.min(1, IMAGE_MAX_EDGE / Math.max(img.naturalWidth, img.naturalHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(img.naturalWidth * scale);
+    canvas.height = Math.round(img.naturalHeight * scale);
+    canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, "image/jpeg", 0.85)
+    );
+    if (!blob) throw new Error("encode failed");
+    return blob;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
 
 /** The Talk button's waveform mark (kept from the old design — it works). */
 function WaveformGlyph({ size = 14 }: { size?: number }) {
@@ -91,7 +135,62 @@ export function ChatThread({
   const [error, setError] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const localKey = useRef(0);
+  const [pending, setPending] = useState<PendingAttachment[]>([]);
+
+  // Pick → normalize (images to ≤1600px JPEG) → upload right away; the send
+  // only passes ids. Failed uploads show inline and never block the text.
+  const addFiles = async (files: FileList | null) => {
+    if (!files) return;
+    for (const file of Array.from(files).slice(0, MAX_ATTACHMENTS - pending.length)) {
+      const key = ++localKey.current;
+      const isPdf = file.type === "application/pdf";
+      const entry: PendingAttachment = {
+        key,
+        name: file.name || "photo",
+        mime: isPdf ? "application/pdf" : "image/jpeg",
+        previewUrl: null,
+        id: null,
+        error: null,
+      };
+      setPending((p) => [...p, entry]);
+      try {
+        const blob = isPdf ? file : await normalizeImage(file);
+        if (!isPdf) {
+          const previewUrl = URL.createObjectURL(blob);
+          setPending((p) => p.map((a) => (a.key === key ? { ...a, previewUrl } : a)));
+        }
+        const form = new FormData();
+        form.append(
+          "file",
+          new File([blob], isPdf ? entry.name : entry.name.replace(/\.\w+$/, "") + ".jpg", {
+            type: entry.mime,
+          })
+        );
+        const res = await fetch("/api/attachments", { method: "POST", body: form });
+        const body = await res.json();
+        if (!res.ok) throw new Error(body.error ?? "upload failed");
+        setPending((p) => p.map((a) => (a.key === key ? { ...a, id: body.id } : a)));
+      } catch (e) {
+        setPending((p) =>
+          p.map((a) =>
+            a.key === key
+              ? { ...a, error: e instanceof Error ? e.message : "upload failed" }
+              : a
+          )
+        );
+      }
+    }
+  };
+
+  const removePending = (key: number) => {
+    setPending((p) => {
+      const gone = p.find((a) => a.key === key);
+      if (gone?.previewUrl) URL.revokeObjectURL(gone.previewUrl);
+      return p.filter((a) => a.key !== key);
+    });
+  };
 
   useEffect(() => {
     if (anchorMessageId) {
@@ -111,18 +210,38 @@ export function ChatThread({
 
   const send = async () => {
     const text = input.trim();
-    if (!text || sending) return;
+    const ready = pending.filter((a) => a.id);
+    if ((!text && ready.length === 0) || sending) return;
+    if (pending.some((a) => !a.id && !a.error)) return; // uploads still in flight
     setInput("");
     if (inputRef.current) inputRef.current.style.height = "auto";
     setError("");
     setSending(true);
+    const attachmentIds = ready.map((a) => a.id!);
+    const sentAttachments: Attachment[] = ready.map((a) => ({
+      id: a.id!,
+      mime: a.mime,
+      name: a.name,
+    }));
+    // thumbnails render from the server from here on
+    pending.forEach((a) => a.previewUrl && URL.revokeObjectURL(a.previewUrl));
+    setPending([]);
     const tempId = `local-${++localKey.current}`;
-    setMsgs((m) => [...m, { id: tempId, role: "user", content: text, mode: "text" }]);
+    setMsgs((m) => [
+      ...m,
+      {
+        id: tempId,
+        role: "user",
+        content: text || (ready.length === 1 ? `(sent ${ready[0].name})` : `(sent ${ready.length} files)`),
+        mode: "text",
+        attachments: sentAttachments.length ? sentAttachments : null,
+      },
+    ]);
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, conversationId }),
+        body: JSON.stringify({ message: text, conversationId, attachmentIds }),
       });
       const body = await res.json();
       if (!res.ok) {
@@ -243,6 +362,32 @@ export function ChatThread({
                     <Mic size={10} strokeWidth={2} /> {m.role === "user" ? "you" : secretaryName}
                   </span>
                 )}
+                {m.attachments && m.attachments.length > 0 && (
+                  <span className="mb-1.5 flex flex-wrap gap-1.5">
+                    {m.attachments.map((a) =>
+                      a.mime === "application/pdf" ? (
+                        <a
+                          key={a.id}
+                          href={`/api/attachments/${a.id}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center gap-1.5 rounded-lg border border-edge bg-card px-2.5 py-1.5 text-xs text-muted hover:text-ink"
+                        >
+                          <FileText size={13} strokeWidth={1.75} className="flex-none" />
+                          <span className="max-w-[10rem] truncate">{a.name}</span>
+                        </a>
+                      ) : (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          key={a.id}
+                          src={`/api/attachments/${a.id}`}
+                          alt={a.name}
+                          className="max-h-48 max-w-full rounded-lg border border-edge object-cover"
+                        />
+                      )
+                    )}
+                  </span>
+                )}
                 <span className="whitespace-pre-wrap">{m.content}</span>
               </div>
             ))}
@@ -301,7 +446,64 @@ export function ChatThread({
               }}
             />
           ) : (
-            <div className="flex items-end gap-1.5 rounded-2xl border border-edge bg-surface px-2.5 py-2 shadow-sm transition-shadow focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/20">
+            <div className="rounded-2xl border border-edge bg-surface px-2.5 py-2 shadow-sm transition-shadow focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/20">
+              {pending.length > 0 && (
+                <div className="flex flex-wrap gap-2 px-1.5 pb-2 pt-1">
+                  {pending.map((a) => (
+                    <div
+                      key={a.key}
+                      className={`relative flex items-center gap-1.5 rounded-lg border px-1.5 py-1.5 text-xs ${
+                        a.error ? "border-danger/50 bg-danger/10 text-danger" : "border-edge bg-card"
+                      }`}
+                    >
+                      {a.previewUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={a.previewUrl}
+                          alt={a.name}
+                          className="h-12 w-12 rounded object-cover"
+                        />
+                      ) : (
+                        <FileText size={16} strokeWidth={1.75} className="mx-1 text-muted" />
+                      )}
+                      <span className="max-w-[8rem] truncate">
+                        {a.error ?? a.name}
+                        {!a.id && !a.error && <span className="animate-pulse"> ↑</span>}
+                      </span>
+                      <button
+                        onClick={() => removePending(a.key)}
+                        title="Remove"
+                        aria-label={`Remove ${a.name}`}
+                        className="flex h-5 w-5 flex-none items-center justify-center rounded-full text-muted hover:text-ink"
+                      >
+                        <X size={12} strokeWidth={2.5} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="flex items-end gap-1.5">
+              <input
+                ref={fileRef}
+                type="file"
+                // image/* makes iOS offer Take Photo / Photo Library natively
+                accept="image/*,application/pdf"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  void addFiles(e.target.files);
+                  e.target.value = "";
+                }}
+              />
+              <button
+                onClick={() => fileRef.current?.click()}
+                disabled={pending.length >= MAX_ATTACHMENTS}
+                title="Attach a photo or file"
+                aria-label="Attach a photo or file"
+                className="flex h-9 w-9 flex-none items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-2 hover:text-ink disabled:opacity-40"
+              >
+                <Paperclip size={18} strokeWidth={1.75} />
+              </button>
               <textarea
                 ref={inputRef}
                 value={input}
@@ -320,10 +522,10 @@ export function ChatThread({
                 placeholder="Message your secretary…"
                 className="max-h-[140px] min-w-0 flex-1 resize-none bg-transparent px-1.5 py-1.5 text-[15px] leading-relaxed text-ink outline-none placeholder:text-faint"
               />
-              {input.trim() ? (
+              {input.trim() || pending.some((a) => a.id) ? (
                 <button
                   onClick={send}
-                  disabled={sending}
+                  disabled={sending || pending.some((a) => !a.id && !a.error)}
                   title="Send"
                   aria-label="Send message"
                   className="flex h-9 w-9 flex-none items-center justify-center rounded-full bg-accent text-bg transition-opacity hover:opacity-90 disabled:opacity-50"
@@ -356,6 +558,7 @@ export function ChatThread({
                   </button>
                 </>
               )}
+              </div>
             </div>
           )}
         </div>

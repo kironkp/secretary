@@ -25,6 +25,7 @@ export async function GET() {
       role: m.role,
       content: m.content,
       mode: m.mode,
+      attachments: m.attachments,
     })),
     briefing: briefing.card,
     secretaryName: userRow?.persona?.name ?? "Secretary",

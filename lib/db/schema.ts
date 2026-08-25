@@ -1,5 +1,6 @@
 import {
   boolean,
+  customType,
   integer,
   jsonb,
   pgEnum,
@@ -8,6 +9,11 @@ import {
   text,
   timestamp,
 } from "drizzle-orm/pg-core";
+
+// Binary column for attachment payloads (drizzle has no built-in bytea).
+const bytea = customType<{ data: Buffer }>({
+  dataType: () => "bytea",
+});
 
 // ---------------------------------------------------------------------------
 // Better Auth tables (names/fields must match what the drizzle adapter expects)
@@ -160,6 +166,24 @@ export const messages = pgTable("messages", {
   role: messageRole("role").notNull(),
   content: text("content").notNull(),
   mode: conversationMode("mode").notNull(),
+  // Photo/file intake: meta for rendering thumbnails; payloads live in the
+  // attachments table (DB-stored — Heroku's filesystem is ephemeral).
+  attachments: jsonb("attachments").$type<{ id: string; mime: string; name: string }[] | null>(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Uploaded photos/files (chat intake). Rows are created on upload with a null
+// messageId, then bound to the user message on send; unbound rows older than a
+// day are garbage (abandoned composer) and safe to sweep.
+export const attachments = pgTable("attachments", {
+  id: text("id").primaryKey().$defaultFn(uuid),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  messageId: text("message_id").references(() => messages.id, { onDelete: "cascade" }),
+  mime: text("mime").notNull(),
+  name: text("name").notNull(),
+  data: bytea("data").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

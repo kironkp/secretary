@@ -14,7 +14,13 @@ import { SplitContext } from "./split-context";
 
 type Bootstrap = {
   conversationId: string | null;
-  messages: { id: string; role: "user" | "assistant" | "tool"; content: string; mode: "voice" | "text" }[];
+  messages: {
+    id: string;
+    role: "user" | "assistant" | "tool";
+    content: string;
+    mode: "voice" | "text";
+    attachments?: { id: string; mime: string; name: string }[] | null;
+  }[];
   briefing: BriefingCard;
   secretaryName: string;
   defaultVoice: string;
