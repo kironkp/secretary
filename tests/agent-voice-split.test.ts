@@ -35,6 +35,7 @@ describe("fast/slow split: the mouth is thin", () => {
       expect(names).not.toContain(heavy);
     }
     expect(names).toContain("paint_canvas"); // the voice's hands for anything visual
+    expect(names).toContain("consult_brain"); // …and its phone-a-friend for hard questions
   });
 
   it("create_commitment writes the same store as text (with stakes)", async () => {

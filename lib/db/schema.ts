@@ -48,6 +48,11 @@ export const user = pgTable("user", {
     // Claude brain (Settings): model + effort for extraction/painter/planner
     brainModel?: string;
     brainEffort?: "low" | "medium" | "high" | "xhigh" | "max";
+    // Composer chip: the text secretary's model + effort (either provider)
+    chatModel?: string;
+    chatEffort?: string;
+    // In-call thinking depth for the realtime voice ("auto" = API default)
+    voiceEffort?: string;
   } | null>(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -132,6 +137,8 @@ export const usageKind = pgEnum("usage_kind", [
   "extraction",
   "layout",
   "chat",
+  // consult_brain: the voice/chat asking the Claude brain a hard question
+  "consult",
 ]);
 
 const uuid = () => crypto.randomUUID();

@@ -24,6 +24,9 @@ type Bootstrap = {
   briefing: BriefingCard;
   secretaryName: string;
   defaultVoice: string;
+  voiceEffort: string;
+  chatModel: string;
+  chatEffort: string;
 };
 
 export function FloatingChat() {
@@ -87,6 +90,9 @@ export function FloatingChat() {
                 briefing={bootstrap.briefing}
                 secretaryName={bootstrap.secretaryName}
                 defaultVoice={bootstrap.defaultVoice}
+                defaultVoiceEffort={bootstrap.voiceEffort}
+                initialChatModel={bootstrap.chatModel}
+                initialChatEffort={bootstrap.chatEffort}
               />
             </SplitContext.Provider>
           ) : (

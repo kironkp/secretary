@@ -258,9 +258,13 @@ export async function buildBriefing(
     Math.max(1, Math.floor((now.getTime() - (t.dueAt?.getTime() ?? 0)) / 86400000));
 
   const card: BriefingCard = {
+    // Year included ON PURPOSE: models compute relative dates ("this Friday")
+    // from this line, and a yearless date sent Claude to its training-prior
+    // year (filed a task 360 days late). Never make the model guess the year.
     dateLabel: new Intl.DateTimeFormat("en-US", {
       timeZone: timezone,
       weekday: "long",
+      year: "numeric",
       month: "short",
       day: "numeric",
       hour: "numeric",

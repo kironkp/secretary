@@ -14,6 +14,8 @@ import { openAIToolDefs } from "@/lib/secretary/tool-schemas";
 import { executeTool, type ToolOutcome } from "@/lib/secretary/tools";
 import { runExtraction } from "@/lib/secretary/extraction";
 import { openai, TEXT_MODEL } from "@/lib/openai";
+import { chatProvider, chatSettings, claudeBrainEnabled } from "@/lib/anthropic";
+import { runClaudeChat } from "@/lib/secretary/chat-claude";
 
 const bodySchema = z.object({
   // Empty text is fine when attachments carry the message ("here's the flyer").
@@ -102,6 +104,13 @@ export async function POST(req: Request) {
     .where(eq(userTable.id, user.id));
   const instructions = buildInstructions(briefing.text, { persona: userRow?.persona });
 
+  // Composer chip: which model answers, at what effort. Claude models need
+  // the brain enabled (key + flag); otherwise quietly run the OpenAI default.
+  const chip = await chatSettings(user.id);
+  const useClaude = chatProvider(chip.model) === "anthropic" && claudeBrainEnabled();
+  const openAIModel = chatProvider(chip.model) === "openai" ? chip.model : TEXT_MODEL;
+  const openAIEffort = chatProvider(chip.model) === "openai" ? chip.effort : undefined;
+
   type InputItem = Record<string, unknown>;
   // The current turn: text plus any attached photos/PDFs as vision input.
   // History replay stays text-only — the analysis lives in the assistant's
@@ -143,15 +152,58 @@ export async function POST(req: Request) {
   let assistantText = "";
   let totalIn = 0;
   let totalOut = 0;
+  let servedBy = openAIModel;
+  let claudeServed = false;
+
+  if (useClaude) {
+    try {
+      const result = await runClaudeChat({
+        model: chip.model,
+        effort: chip.effort,
+        instructions,
+        history: prior
+          .filter((m): m is typeof m & { role: "user" | "assistant" } => m.role !== "tool")
+          .map((m) => ({ role: m.role, content: m.content })),
+        message: parsed.message,
+        attachments: attachRows,
+        toolCtx: {
+          userId: user.id,
+          timezone: user.timezone,
+          conversationId,
+          anchorMessageId: userMessage.id,
+        },
+        executeTool,
+      });
+      assistantText = result.text;
+      toasts.push(...result.toasts);
+      totalIn = result.inputTokens;
+      totalOut = result.outputTokens;
+      servedBy = chip.model;
+      claudeServed = true;
+      // Claude turns aren't in OpenAI's server-side chain — force the next
+      // OpenAI turn to replay history instead of resuming a stale id.
+      await db
+        .update(conversations)
+        .set({ lastResponseId: null })
+        .where(and(eq(conversations.id, conversationId), eq(conversations.userId, user.id)));
+      previousResponseId = undefined;
+    } catch (e) {
+      console.error(
+        "claude chat failed, falling back to openai:",
+        e instanceof Error ? e.message : e
+      );
+    }
+  }
 
   try {
-    for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    for (let round = 0; !claudeServed && round < MAX_TOOL_ROUNDS; round++) {
       const response = await openai.responses.create({
-        model: TEXT_MODEL,
+        model: openAIModel,
         instructions,
         input: input as never,
         tools: openAIToolDefs() as never,
         previous_response_id: previousResponseId,
+        ...(openAIEffort ? { reasoning: { effort: openAIEffort as never } } : {}),
       });
       previousResponseId = response.id;
       totalIn += response.usage?.input_tokens ?? 0;
@@ -193,7 +245,7 @@ export async function POST(req: Request) {
 
   if (!assistantText) assistantText = "(done)";
 
-  if (previousResponseId) {
+  if (!claudeServed && previousResponseId) {
     await db
       .update(conversations)
       .set({ lastResponseId: previousResponseId })
@@ -214,7 +266,7 @@ export async function POST(req: Request) {
   await db.insert(usage).values({
     userId: user.id,
     kind: "chat",
-    model: TEXT_MODEL,
+    model: servedBy,
     inputTokens: totalIn,
     outputTokens: totalOut,
   });

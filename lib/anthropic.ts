@@ -18,6 +18,63 @@ export type BrainModel = (typeof BRAIN_MODELS)[number]["id"];
 export const BRAIN_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 export type BrainEffort = (typeof BRAIN_EFFORTS)[number];
 
+// ---------------------------------------------------------------------------
+// Chat model registry: the composer chip's vocabulary. Two providers — the
+// voice loop stays OpenAI Realtime, but the TEXT secretary can run on either.
+// Effort ladders differ per provider (probed live 2026-08-25):
+//   anthropic: low / medium / high / xhigh / max
+//   openai   : none / low / medium / high / xhigh   ("minimal" 400s on gpt-5.5)
+// ---------------------------------------------------------------------------
+export type ChatProvider = "anthropic" | "openai";
+
+export const CHAT_MODELS = [
+  { id: "claude-fable-5", label: "Fable 5", provider: "anthropic", hint: "toughest problems" },
+  { id: "claude-opus-5", label: "Opus 5", provider: "anthropic", hint: "complex work" },
+  { id: "claude-sonnet-5", label: "Sonnet 5", provider: "anthropic", hint: "fast + efficient" },
+  { id: "gpt-5.5", label: "GPT-5.5", provider: "openai", hint: "default" },
+  { id: "gpt-5.4-mini", label: "GPT-5.4 mini", provider: "openai", hint: "quick answers" },
+] as const;
+export type ChatModel = (typeof CHAT_MODELS)[number]["id"];
+
+export const CHAT_EFFORTS: Record<ChatProvider, readonly string[]> = {
+  anthropic: BRAIN_EFFORTS,
+  openai: ["none", "low", "medium", "high", "xhigh"],
+};
+
+export const DEFAULT_CHAT_MODEL: ChatModel = "gpt-5.5";
+export const DEFAULT_CHAT_EFFORT = "medium";
+
+export function chatProvider(model: string): ChatProvider {
+  return CHAT_MODELS.find((m) => m.id === model)?.provider ?? "openai";
+}
+
+/** Keep a stored effort meaningful when the model (and its ladder) changes. */
+export function clampEffort(provider: ChatProvider, effort: string | undefined): string {
+  const ladder = CHAT_EFFORTS[provider];
+  if (effort && ladder.includes(effort)) return effort;
+  if (effort === "max") return "xhigh"; // anthropic-only top → openai top
+  if (effort === "none") return "low"; // openai-only floor → anthropic floor
+  return DEFAULT_CHAT_EFFORT;
+}
+
+export type ChatSettings = { model: ChatModel; effort: string };
+
+/** Per-user chat model + effort from the composer chip (persona jsonb). */
+export async function chatSettings(userId: string): Promise<ChatSettings> {
+  const { db } = await import("@/lib/db");
+  const { user } = await import("@/lib/db/schema");
+  const [row] = await db
+    .select({ persona: user.persona })
+    .from(user)
+    .where(eq(user.id, userId))
+    .limit(1);
+  const p = row?.persona;
+  const model = CHAT_MODELS.some((m) => m.id === p?.chatModel)
+    ? (p!.chatModel as ChatModel)
+    : DEFAULT_CHAT_MODEL;
+  return { model, effort: clampEffort(chatProvider(model), p?.chatEffort) };
+}
+
 export const DEFAULT_BRAIN_MODEL: BrainModel = "claude-opus-5";
 export const DEFAULT_BRAIN_EFFORT: BrainEffort = "high";
 

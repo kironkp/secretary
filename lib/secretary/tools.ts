@@ -16,6 +16,7 @@ import {
   pipelineTemplates,
   projects,
   tasks,
+  usage,
   user as userTable,
   type DocSection,
 } from "@/lib/db/schema";
@@ -1159,6 +1160,57 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         timezone: ctx.timezone,
       },
     };
+  },
+
+  // The Siri-asks-ChatGPT move: the realtime mouth (or chat) phones the
+  // Claude brain for questions that need genuine analysis. Effort capped at
+  // medium — a caller is waiting on the line.
+  async consult_brain(ctx, args) {
+    const a = toolSchemas.consult_brain.parse(args);
+    const { anthropic, brainSettings, claudeBrainEnabled } = await import("@/lib/anthropic");
+    if (!claudeBrainEnabled()) {
+      return {
+        result: { unavailable: true, note: "The deep-reasoning brain isn't configured." },
+      };
+    }
+    const { model } = await brainSettings(ctx.userId);
+    const { buildBriefing } = await import("./briefing");
+    const briefing = await buildBriefing(ctx.userId, ctx.timezone);
+    const response = await anthropic().messages.create({
+      model,
+      max_tokens: 2000,
+      output_config: { effort: "medium" },
+      system:
+        "You are the deep-reasoning brain behind a voice secretary. The secretary relays your answer ALOUD on a phone call: answer the question directly and completely in plain prose — no markdown, no headers — in under 150 words. Lead with the answer, then the one or two reasons that matter.",
+      messages: [
+        {
+          role: "user",
+          content: [
+            `USER'S CURRENT SITUATION (briefing):\n${briefing.text}`,
+            a.context ? `CONVERSATION CONTEXT:\n${a.context}` : "",
+            `QUESTION:\n${a.question}`,
+          ]
+            .filter(Boolean)
+            .join("\n\n"),
+        },
+      ],
+    });
+    if (response.stop_reason === "refusal") {
+      return { result: { unavailable: true, note: "The brain declined that one." } };
+    }
+    const answer = response.content
+      .filter((b): b is Extract<(typeof response.content)[number], { type: "text" }> => b.type === "text")
+      .map((b) => b.text)
+      .join("")
+      .slice(0, 1600);
+    await db.insert(usage).values({
+      userId: ctx.userId,
+      kind: "consult",
+      model,
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+    });
+    return { result: { answer }, toast: { icon: "◆", text: "Consulted the brain" } };
   },
 
   async search_history(ctx, args) {

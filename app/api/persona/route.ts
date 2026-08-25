@@ -9,7 +9,7 @@ import { user } from "@/lib/db/schema";
 import { isErrorResponse, parseBody, requireSession } from "@/lib/api";
 import { EL_MOUTH_VOICE } from "@/lib/elevenlabs";
 import { REALTIME_VOICES } from "@/lib/openai";
-import { BRAIN_EFFORTS, BRAIN_MODELS } from "@/lib/anthropic";
+import { BRAIN_EFFORTS, BRAIN_MODELS, CHAT_MODELS, chatProvider, CHAT_EFFORTS } from "@/lib/anthropic";
 
 const bodySchema = z.object({
   sass: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]).optional(),
@@ -19,6 +19,9 @@ const bodySchema = z.object({
     .optional(),
   brainModel: z.enum(BRAIN_MODELS.map((m) => m.id) as [string, ...string[]]).optional(),
   brainEffort: z.enum(BRAIN_EFFORTS).optional(),
+  chatModel: z.enum(CHAT_MODELS.map((m) => m.id) as [string, ...string[]]).optional(),
+  chatEffort: z.string().optional(),
+  voiceEffort: z.enum(["auto", "low", "medium", "high"]).optional(),
 });
 
 export async function POST(req: Request) {
@@ -38,7 +41,17 @@ export async function POST(req: Request) {
     ...(parsed.voice !== undefined ? { voice: parsed.voice } : {}),
     ...(parsed.brainModel !== undefined ? { brainModel: parsed.brainModel } : {}),
     ...(parsed.brainEffort !== undefined ? { brainEffort: parsed.brainEffort } : {}),
+    ...(parsed.chatModel !== undefined ? { chatModel: parsed.chatModel } : {}),
+    ...(parsed.voiceEffort !== undefined ? { voiceEffort: parsed.voiceEffort } : {}),
   };
+  // Effort is validated against the (possibly just-changed) model's ladder.
+  if (parsed.chatEffort !== undefined) {
+    const provider = chatProvider(next.chatModel ?? "");
+    if (!CHAT_EFFORTS[provider].includes(parsed.chatEffort)) {
+      return NextResponse.json({ error: "Invalid effort for model" }, { status: 400 });
+    }
+    next.chatEffort = parsed.chatEffort;
+  }
   await db.update(user).set({ persona: next }).where(eq(user.id, session.id));
   return NextResponse.json({ ok: true, persona: next });
 }

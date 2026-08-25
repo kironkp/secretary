@@ -38,6 +38,8 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
    *  The sentinel "elevenlabs" switches the session to text output spoken by
    *  the ElevenLabs mouth. */
   voice: string | undefined;
+  /** Realtime thinking depth ("auto" = API default). Higher = slower to speak. */
+  effort: string | undefined;
   private mouth: ElevenLabsMouth | null = null;
 
   private get elMouthMode(): boolean {
@@ -134,10 +136,11 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
     this.emit("status", status, detail);
   }
 
-  async connect({ model, voice }: { model: string; voice?: string }): Promise<void> {
+  async connect({ model, voice, effort }: { model: string; voice?: string; effort?: string }): Promise<void> {
     this.intentionalClose = false;
     this.model = model;
     if (voice) this.voice = voice;
+    if (effort) this.effort = effort;
     if (this.elMouthMode && !this.mouth) {
       this.mouth = new ElevenLabsMouth();
       this.mouth.onSpeakingChange = (speaking) => this.emit("assistantSpeaking", speaking);
@@ -167,6 +170,7 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
       body: JSON.stringify({
         model,
         voice: this.voice,
+        effort: this.effort,
         conversationId: this.conversationId,
         reconnect: this.reconnects > 0 || Boolean(this.conversationId),
       }),
@@ -396,6 +400,12 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
   async switchVoice(voice: string): Promise<void> {
     if (voice === this.voice) return;
     await this.reconnectWith({ voice });
+  }
+
+  async switchEffort(effort: string): Promise<void> {
+    if (effort === this.effort) return;
+    this.effort = effort;
+    await this.reconnectWith({});
   }
 
   /** Re-mint the session with changed options; the call resumes, no greeting. */

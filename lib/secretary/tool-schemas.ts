@@ -384,6 +384,13 @@ export const toolSchemas = {
     policy: z.enum(["never", "auto"]).optional().describe("accent_policy: 'never' kills the glow ring"),
     remove: z.boolean().optional().describe("true = delete this preference instead of adding it"),
   }),
+  consult_brain: z.object({
+    question: z.string().min(1).describe("The hard question, fully self-contained"),
+    context: z
+      .string()
+      .optional()
+      .describe("Anything from this conversation the brain needs to answer well"),
+  }),
 } as const;
 
 export type ToolName = keyof typeof toolSchemas;
@@ -460,6 +467,8 @@ const toolDescriptions: Record<ToolName, string> = {
     "Approve or reject a built component proposal. Approve = it joins the dashboard registry immediately (no restart). Reject = the need is tombstoned and never re-proposed.",
   set_layout_preference:
     "Store a durable layout preference: ban_component ('stop showing me people' → component: people_index), pin_section (freeze a section), default_variant_for (a project always compact/full/nested), accent_policy: never ('I hate the glowing ring'). remove: true deletes it. Enforced on every future plan until removed in Settings.",
+  consult_brain:
+    "Ask the deep-reasoning brain (Claude) a question that needs genuine analysis — tricky planning, weighing tradeoffs, drafting something hard, math beyond arithmetic. NOT for quick recall or anything your other tools already answer. On a call: say a brief 'give me a second' first, then relay the answer in your own words and register. Takes a few seconds.",
 };
 
 /** OpenAI tool definitions (same flat shape works for Realtime and Responses). */
@@ -469,6 +478,15 @@ export function openAIToolDefs() {
     name,
     description: toolDescriptions[name],
     parameters: z.toJSONSchema(toolSchemas[name]),
+  }));
+}
+
+/** Anthropic tool definitions — same source of truth, Messages-API shape. */
+export function anthropicToolDefs() {
+  return (Object.keys(toolSchemas) as ToolName[]).map((name) => ({
+    name,
+    description: toolDescriptions[name],
+    input_schema: z.toJSONSchema(toolSchemas[name]) as Record<string, unknown>,
   }));
 }
 
@@ -483,6 +501,8 @@ export const VOICE_TOOL_NAMES = [
   "get_current_datetime",
   "queue_clarification",
   "resolve_clarification",
+  // the Siri-asks-ChatGPT move: the mouth phones the Claude brain on demand
+  "consult_brain",
 ] as const satisfies readonly ToolName[];
 
 export function openAIVoiceToolDefs() {

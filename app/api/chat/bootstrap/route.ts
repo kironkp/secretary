@@ -30,5 +30,8 @@ export async function GET() {
     briefing: briefing.card,
     secretaryName: userRow?.persona?.name ?? "Secretary",
     defaultVoice: userRow?.persona?.voice ?? "marin",
+    voiceEffort: userRow?.persona?.voiceEffort ?? "auto",
+    chatModel: userRow?.persona?.chatModel ?? "gpt-5.5",
+    chatEffort: userRow?.persona?.chatEffort ?? "medium",
   });
 }

@@ -77,10 +77,18 @@ const MODELS = [
   { id: "gpt-realtime-2.1-mini", label: "GPT Realtime Mini (faster/cheaper)" },
 ];
 
+const VOICE_EFFORTS = [
+  { id: "auto", label: "auto" },
+  { id: "low", label: "quick" },
+  { id: "medium", label: "thoughtful" },
+  { id: "high", label: "deep (slower)" },
+];
+
 export function VoiceMode({
   onClose,
   docked = false,
   defaultVoice = "marin",
+  defaultEffort = "auto",
   onTranscript,
 }: {
   onClose: (conversationId: string | null) => void;
@@ -89,6 +97,8 @@ export function VoiceMode({
   docked?: boolean;
   /** Persona-preferred voice (server-persisted); in-call picks update it. */
   defaultVoice?: string;
+  /** Realtime thinking depth ("auto" = API default); in-call picks persist. */
+  defaultEffort?: string;
   /** Live transcript stream — lets the chat thread render voice lines as
    *  messages while the call is running (one conversation, not two worlds). */
   onTranscript?: (lines: TranscriptLine[]) => void;
@@ -109,6 +119,7 @@ export function VoiceMode({
     () => (typeof window !== "undefined" && localStorage.getItem("voice-model")) || MODELS[0].id
   );
   const [voice, setVoice] = useState(defaultVoice);
+  const [effort, setEffort] = useState(defaultEffort);
   const [elAvailable, setElAvailable] = useState(false);
 
   // The ElevenLabs mouth option appears only when the server has keys.
@@ -195,7 +206,7 @@ export function VoiceMode({
   useEffect(() => {
     if (!startedRef.current) {
       startedRef.current = true;
-      session.start(model, voice);
+      session.start(model, voice, effort);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -263,6 +274,20 @@ export function VoiceMode({
     if (connected) {
       setSwitching(true);
       await session.switchVoice(v);
+      setSwitching(false);
+    }
+  };
+
+  const pickEffort = async (e: string) => {
+    setEffort(e);
+    void fetch("/api/persona", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ voiceEffort: e }),
+    }).catch(() => {});
+    if (connected) {
+      setSwitching(true);
+      await session.switchEffort(e);
       setSwitching(false);
     }
   };
@@ -443,6 +468,19 @@ export function VoiceMode({
               </option>
             ))}
             {elAvailable && <option value="elevenlabs">sassy (ElevenLabs beta)</option>}
+          </select>
+          <select
+            value={effort}
+            onChange={(e) => pickEffort(e.target.value)}
+            title="Thinking depth — deeper pauses longer before speaking"
+            aria-label="Thinking depth"
+            className="min-w-0 max-w-[7rem] shrink rounded-full border border-edge bg-card px-3 py-1.5 text-xs text-muted outline-none focus:border-accent"
+          >
+            {VOICE_EFFORTS.map((ef) => (
+              <option key={ef.id} value={ef.id}>
+                {ef.label}
+              </option>
+            ))}
           </select>
           <select
             value={model}

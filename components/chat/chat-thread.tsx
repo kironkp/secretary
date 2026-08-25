@@ -21,6 +21,7 @@ import {
 import type { BriefingCard } from "@/lib/secretary/briefing";
 import { unlockRemoteAudio } from "@/lib/realtime/remote-audio";
 import { DictationBar } from "./dictation-bar";
+import { ModelChip } from "./model-chip";
 import { useSplit } from "./split-context";
 import type { TranscriptLine } from "./use-voice-session";
 import { VoiceMode } from "./voice-mode";
@@ -115,6 +116,9 @@ export function ChatThread({
   anchorMessageId,
   secretaryName = "Secretary",
   defaultVoice = "marin",
+  defaultVoiceEffort = "auto",
+  initialChatModel = "gpt-5.5",
+  initialChatEffort = "medium",
 }: {
   initialConversationId: string | null;
   initialMessages: Message[];
@@ -124,6 +128,11 @@ export function ChatThread({
   secretaryName?: string;
   /** Persona-preferred call voice; switchable mid-call. */
   defaultVoice?: string;
+  /** Persona-preferred realtime thinking depth ("auto" = API default). */
+  defaultVoiceEffort?: string;
+  /** Composer chip: persisted chat model + effort. */
+  initialChatModel?: string;
+  initialChatEffort?: string;
 }) {
   const router = useRouter();
   const { dockVoice } = useSplit();
@@ -468,6 +477,7 @@ export function ChatThread({
               onClose={closeVoice}
               onTranscript={setLiveLines}
               defaultVoice={defaultVoice}
+              defaultEffort={defaultVoiceEffort}
             />
           ) : mode === "dictation" ? (
             <DictationBar
@@ -518,7 +528,27 @@ export function ChatThread({
                   ))}
                 </div>
               )}
-              <div className="flex items-end gap-1.5">
+              <textarea
+                ref={inputRef}
+                value={input}
+                rows={1}
+                onChange={(e) => {
+                  setInput(e.target.value);
+                  e.target.style.height = "auto";
+                  e.target.style.height = Math.min(e.target.scrollHeight, 140) + "px";
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    send();
+                  }
+                }}
+                placeholder="Message your secretary…"
+                className="max-h-[140px] w-full resize-none bg-transparent px-1.5 py-1.5 text-[15px] leading-relaxed text-ink outline-none placeholder:text-faint"
+              />
+              {/* Controls row (Claude-app style): attach + model chip left,
+                  voice/send right — the chip never fights the textarea for width. */}
+              <div className="flex items-center gap-1.5 pt-1">
               <input
                 ref={fileRef}
                 type="file"
@@ -540,24 +570,8 @@ export function ChatThread({
               >
                 <Paperclip size={18} strokeWidth={1.75} />
               </button>
-              <textarea
-                ref={inputRef}
-                value={input}
-                rows={1}
-                onChange={(e) => {
-                  setInput(e.target.value);
-                  e.target.style.height = "auto";
-                  e.target.style.height = Math.min(e.target.scrollHeight, 140) + "px";
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    send();
-                  }
-                }}
-                placeholder="Message your secretary…"
-                className="max-h-[140px] min-w-0 flex-1 resize-none bg-transparent px-1.5 py-1.5 text-[15px] leading-relaxed text-ink outline-none placeholder:text-faint"
-              />
+              <ModelChip initialModel={initialChatModel} initialEffort={initialChatEffort} />
+              <div className="min-w-0 flex-1" />
               {input.trim() || pending.some((a) => a.id) ? (
                 <button
                   onClick={send}

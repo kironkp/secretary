@@ -27,6 +27,10 @@ const bodySchema = z.object({
   voice: z.string().optional(),
   conversationId: z.string().nullish(),
   reconnect: z.boolean().optional(),
+  // Realtime thinking depth (probed 2026-08-25: session config accepts
+  // reasoning.effort). "auto" = omit and let the API default. Higher = the
+  // voice pauses longer before speaking.
+  effort: z.enum(["auto", "low", "medium", "high"]).optional(),
 });
 
 const ALLOWED_MODELS = new Set([REALTIME_MODEL_DEFAULT, REALTIME_MODEL_MINI]);
@@ -130,6 +134,9 @@ export async function POST(req: Request) {
         type: "realtime",
         model,
         instructions,
+        ...(parsed.effort && parsed.effort !== "auto"
+          ? { reasoning: { effort: parsed.effort } }
+          : {}),
         // EL mouth (experimental): the session emits text; the browser speaks
         // it through the ElevenLabs voice. Otherwise: native audio out.
         output_modalities: elMouth ? ["text"] : ["audio"],

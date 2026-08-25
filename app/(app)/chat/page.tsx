@@ -45,6 +45,9 @@ export default async function ChatPage({
           anchorMessageId={m}
           secretaryName={secretaryName}
           defaultVoice={defaultVoice}
+          defaultVoiceEffort={userRow?.persona?.voiceEffort ?? "auto"}
+          initialChatModel={userRow?.persona?.chatModel ?? "gpt-5.5"}
+          initialChatEffort={userRow?.persona?.chatEffort ?? "medium"}
         />
       }
       dashboard={<DashboardPanel userId={userId} timezone={timezone} compact />}
