@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { getTodayStrip } from "@/lib/db/queries";
 import { FloatingChat } from "@/components/chat/floating-chat";
+import { VoiceCallProvider } from "@/components/chat/voice-call-provider";
 import { DetailDialog } from "@/components/shell/detail-dialog";
 import { EventChipButton } from "@/components/shell/event-chip";
 import { NavTabs } from "@/components/shell/nav-tabs";
@@ -29,6 +30,9 @@ export default async function AppLayout({
     : null;
 
   return (
+    // VoiceCallProvider wraps the whole shell: a live call is owned HERE, so
+    // switching tabs (or opening the floating chat) never hangs it up.
+    <VoiceCallProvider>
     <div className="flex h-dvh flex-col">
       <header className="z-10 flex-none border-b border-edge bg-surface/90 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center gap-4 px-4 py-3">
@@ -63,5 +67,6 @@ export default async function AppLayout({
       <DetailDialog />
       <FloatingChat />
     </div>
+    </VoiceCallProvider>
   );
 }

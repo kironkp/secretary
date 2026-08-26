@@ -3,7 +3,7 @@
 // The chat home (W1): briefing card, message thread, input bar with dictation
 // mic + Talk button. One thread, both modes. Centered reading column; only the
 // thread scrolls, the input stays pinned to the bottom.
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowUp,
@@ -23,8 +23,7 @@ import { unlockRemoteAudio } from "@/lib/realtime/remote-audio";
 import { DictationBar } from "./dictation-bar";
 import { ModelChip } from "./model-chip";
 import { useSplit } from "./split-context";
-import type { TranscriptLine } from "./use-voice-session";
-import { VoiceMode } from "./voice-mode";
+import { useVoiceCall } from "./voice-call-provider";
 
 type Attachment = { id: string; mime: string; name: string };
 
@@ -139,10 +138,11 @@ export function ChatThread({
   const [conversationId, setConversationId] = useState(initialConversationId);
   const [msgs, setMsgs] = useState<Message[]>(initialMessages);
   const [input, setInput] = useState("");
-  const [mode, setMode] = useState<"idle" | "dictation" | "voice">("idle");
-  // Live voice transcript, streamed into the thread as it happens — the call
-  // and the chat are one conversation, not two worlds.
-  const [liveLines, setLiveLines] = useState<TranscriptLine[]>([]);
+  const [mode, setMode] = useState<"idle" | "dictation">("idle");
+  // The call is GLOBAL (VoiceCallProvider in the app shell) — this thread just
+  // reads its live transcript so voice lines render as messages while talking.
+  const call = useVoiceCall();
+  const liveLines = call.active ? call.session.transcript : [];
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -295,22 +295,21 @@ export function ChatThread({
     await deliver(tempId);
   };
 
-  const closeVoice = useCallback(
-    async (voiceConversationId: string | null) => {
-      setMode("idle");
-      setLiveLines([]); // persisted voice messages replace the live stream
-      if (voiceConversationId) {
-        setConversationId(voiceConversationId);
-        const res = await fetch(`/api/conversations/${voiceConversationId}/messages`);
-        if (res.ok) {
-          const body = await res.json();
-          setMsgs(body.messages);
-        }
-        router.refresh();
-      }
-    },
-    [router]
-  );
+  // When a call ends (wherever the user was), swap the live stream for the
+  // persisted voice messages.
+  const endedSeq = useRef(0);
+  useEffect(() => {
+    if (!call.ended || call.ended.seq === endedSeq.current) return;
+    endedSeq.current = call.ended.seq;
+    const voiceConversationId = call.ended.conversationId;
+    if (!voiceConversationId) return;
+    setConversationId(voiceConversationId);
+    void (async () => {
+      const res = await fetch(`/api/conversations/${voiceConversationId}/messages`);
+      if (res.ok) setMsgs(((await res.json()) as { messages: Message[] }).messages);
+      router.refresh();
+    })();
+  }, [call.ended, router]);
 
   const hasBriefing = briefing.hasContent;
 
@@ -436,7 +435,7 @@ export function ChatThread({
               )}
               </div>
             ))}
-          {mode === "voice" &&
+          {call.active &&
             liveLines
               .filter((l) => l.text.trim())
               .map((l) => (
@@ -471,15 +470,7 @@ export function ChatThread({
         <div className="mx-auto max-w-2xl px-1">
           {error && <p className="mb-2 text-xs text-danger">{error}</p>}
 
-          {mode === "voice" ? (
-            <VoiceMode
-              docked={dockVoice}
-              onClose={closeVoice}
-              onTranscript={setLiveLines}
-              defaultVoice={defaultVoice}
-              defaultEffort={defaultVoiceEffort}
-            />
-          ) : mode === "dictation" ? (
+          {mode === "dictation" ? (
             <DictationBar
               onCancel={() => setMode("idle")}
               onText={(text) => {
@@ -597,11 +588,18 @@ export function ChatThread({
                       // must run synchronously inside the tap: iOS only allows
                       // audio playback that a user gesture unlocked
                       unlockRemoteAudio();
-                      setMode("voice");
+                      // global call: survives tab switches; docks to the pill
+                      // immediately in split/floating contexts
+                      call.begin({
+                        voice: defaultVoice,
+                        effort: defaultVoiceEffort,
+                        minimized: dockVoice,
+                      });
                     }}
+                    disabled={call.active}
                     title="Start a live voice conversation"
                     aria-label="Start a live voice conversation"
-                    className="flex h-9 flex-none items-center gap-1.5 rounded-full bg-accent px-3.5 text-sm font-bold text-bg transition-opacity hover:opacity-90"
+                    className="flex h-9 flex-none items-center gap-1.5 rounded-full bg-accent px-3.5 text-sm font-bold text-bg transition-opacity hover:opacity-90 disabled:opacity-50"
                   >
                     <WaveformGlyph />
                     Talk

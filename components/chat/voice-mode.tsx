@@ -85,25 +85,28 @@ const VOICE_EFFORTS = [
 ];
 
 export function VoiceMode({
+  session,
   onClose,
-  docked = false,
   defaultVoice = "marin",
   defaultEffort = "auto",
+  startMinimized = false,
   onTranscript,
 }: {
+  /** The globally-owned session (VoiceCallProvider) — the call survives
+   *  navigation because nothing on a page owns it. */
+  session: ReturnType<typeof useVoiceSession>;
   onClose: (conversationId: string | null) => void;
-  /** Split-workspace mode: compact dock inside the chat pane instead of the
-   *  full-screen overlay. Same session, same unlock, same plumbing. */
-  docked?: boolean;
   /** Persona-preferred voice (server-persisted); in-call picks update it. */
   defaultVoice?: string;
   /** Realtime thinking depth ("auto" = API default); in-call picks persist. */
   defaultEffort?: string;
+  /** Start as the floating pill (split workspace / floating chat) instead of
+   *  taking the whole screen. */
+  startMinimized?: boolean;
   /** Live transcript stream — lets the chat thread render voice lines as
    *  messages while the call is running (one conversation, not two worlds). */
   onTranscript?: (lines: TranscriptLine[]) => void;
 }) {
-  const session = useVoiceSession();
   const router = useRouter();
 
   useEffect(() => {
@@ -122,7 +125,7 @@ export function VoiceMode({
   // Mobile lifelines: shrink the overlay to a floating pill (the page behind
   // becomes usable), or swap the orb for the live canvas without leaving the
   // call — navigating away would unmount the session.
-  const [minimized, setMinimized] = useState(false);
+  const [minimized, setMinimized] = useState(startMinimized);
   const [showCanvas, setShowCanvas] = useState(false);
   const [model, setModel] = useState(
     () => (typeof window !== "undefined" && localStorage.getItem("voice-model")) || MODELS[0].id
@@ -411,16 +414,14 @@ export function VoiceMode({
                 ))}
                 {elAvailable && <option value="elevenlabs">sassy (EL)</option>}
               </select>
-              {!docked && (
-                <button
-                  onClick={() => setMinimized(false)}
-                  title="Back to full screen"
-                  aria-label="Back to full screen"
-                  className="flex h-9 w-9 flex-none items-center justify-center rounded-full border border-edge bg-card text-ink hover:border-faint"
-                >
-                  <Maximize2 size={15} strokeWidth={1.75} />
-                </button>
-              )}
+              <button
+                onClick={() => setMinimized(false)}
+                title="Back to full screen"
+                aria-label="Back to full screen"
+                className="flex h-9 w-9 flex-none items-center justify-center rounded-full border border-edge bg-card text-ink hover:border-faint"
+              >
+                <Maximize2 size={15} strokeWidth={1.75} />
+              </button>
               <button
                 onClick={session.toggleMute}
                 title={session.muted ? "Unmute" : "Mute"}
@@ -451,9 +452,8 @@ export function VoiceMode({
       </div>
   );
 
-  if (docked) return dockBar;
-  // Minimized: floating pill above the page — the call keeps running while
-  // the user reads the thread underneath. (Leaving the page still ends it.)
+  // Minimized: floating pill above EVERY page — the session lives in the app
+  // shell (VoiceCallProvider), so browsing tabs never hangs up.
   if (minimized)
     return <div className="fixed inset-x-2 bottom-3 z-50 mx-auto max-w-md">{dockBar}</div>;
 

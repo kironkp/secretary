@@ -942,6 +942,8 @@ export function ProjectGrid({
   onDone: (id: string) => void;
 }) {
   const projects = useMemo(() => buildProjects(tasks, events), [tasks, events]);
+  // "+ N more" is a real control: tap to unfold the full task list in place.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   if (projects.length === 0) return null;
 
   return (
@@ -967,6 +969,10 @@ export function ProjectGrid({
             <div className="flex items-start gap-2.5">
               <div className="min-w-0 flex-1">
                 {p.id ? (
+                  // The chevron is ALWAYS visible on touch devices (no hover
+                  // there — an invisible affordance is a dead end), and the
+                  // link carries no hover-gated content: iOS Safari spends the
+                  // first tap on hover when it does, eating the navigation.
                   <Link
                     href={`/projects/${p.id}`}
                     className="group/title flex items-center gap-2 text-[17px] font-semibold tracking-tight hover:text-accent"
@@ -979,7 +985,7 @@ export function ProjectGrid({
                     <ChevronRight
                       size={14}
                       strokeWidth={2}
-                      className="opacity-0 transition-opacity group-hover/title:opacity-70"
+                      className="opacity-60 transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/title:opacity-70"
                     />
                   </Link>
                 ) : (
@@ -1043,7 +1049,7 @@ export function ProjectGrid({
                   <span className="text-faint line-through">{t.title}</span>
                 </li>
               ))}
-              {sorted.slice(0, 3).map((t) => (
+              {(expanded.has(p.name) ? sorted : sorted.slice(0, 3)).map((t) => (
                 <li
                   key={t.id}
                   onClick={() => openDetail("task", t.id)}
@@ -1083,7 +1089,26 @@ export function ProjectGrid({
                 </li>
               ))}
               {sorted.length > 3 && (
-                <li className="text-xs text-faint">+ {sorted.length - 3} more</li>
+                <li>
+                  <button
+                    onClick={() =>
+                      setExpanded((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(p.name)) next.delete(p.name);
+                        else next.add(p.name);
+                        return next;
+                      })
+                    }
+                    className="flex items-center gap-1 rounded-md px-1 py-0.5 text-xs font-semibold text-muted transition-colors hover:text-ink"
+                  >
+                    <ChevronRight
+                      size={12}
+                      strokeWidth={2.5}
+                      className={`transition-transform ${expanded.has(p.name) ? "rotate-90" : ""}`}
+                    />
+                    {expanded.has(p.name) ? "Show fewer" : `Show all ${sorted.length}`}
+                  </button>
+                </li>
               )}
             </ul>
 
