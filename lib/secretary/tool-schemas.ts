@@ -509,8 +509,8 @@ export function anthropicToolDefs() {
 }
 
 /** SPEC §11 fast/slow split: the ONLY tools the realtime voice session
- *  carries. The mouth logs, commits, schedules, paints, and asks — the async
- *  extractor (brain) and text chat own everything else. */
+ *  carries. The mouth logs, commits, schedules, paints, remembers, and asks —
+ *  the async extractor (brain) and text chat own everything else. */
 export const VOICE_TOOL_NAMES = [
   "log_status",
   "create_commitment",
@@ -519,6 +519,9 @@ export const VOICE_TOOL_NAMES = [
   "get_current_datetime",
   "queue_clarification",
   "resolve_clarification",
+  // stated facts are fast-path capture (one insert, no entity resolution);
+  // the extractor stays the safety net for inferred ones
+  "remember_fact",
   // the Siri-asks-ChatGPT move: the mouth phones the Claude brain on demand
   "consult_brain",
   // the upward cycle: "I can't do that" files a shop request instead of dying

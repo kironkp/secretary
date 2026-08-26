@@ -5,7 +5,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { expectations, tasks, user } from "@/lib/db/schema";
+import { conversations, expectations, memories, tasks, user } from "@/lib/db/schema";
+import { applyExtraction } from "@/lib/secretary/extraction";
 import { VOICE_MODALITY_RULES } from "@/lib/secretary/persona";
 import { openAIVoiceToolDefs, VOICE_TOOL_NAMES } from "@/lib/secretary/tool-schemas";
 import { executeTool } from "@/lib/secretary/tools";
@@ -70,6 +71,48 @@ describe("fast/slow split: the mouth is thin", () => {
     await executeTool(ctx, "log_status", { task: "CPO 2073", signal: "done" });
     const [t] = await db.select().from(tasks).where(eq(tasks.userId, U.id));
     expect(t.status).toBe("done");
+  });
+
+  // Stated facts are fast-path capture (SPEC §11): the mouth saves them live
+  // instead of dead-ending with "I can't store that"; the extractor remains
+  // the safety net for inferred facts only.
+  it("remember_fact rides the voice session with its schema intact", () => {
+    expect(VOICE_TOOL_NAMES).toContain("remember_fact");
+    const def = openAIVoiceToolDefs().find((t) => t.name === "remember_fact");
+    expect(def).toBeTruthy();
+    expect(def?.description).toContain("durable fact");
+    expect((def?.parameters as { properties?: Record<string, unknown> }).properties).toHaveProperty("fact");
+  });
+
+  it("remember_fact inserts a memory and returns the Noted toast", async () => {
+    const { result, toast } = await executeTool(ctx, "remember_fact", {
+      fact: "My reports go out on Fridays",
+      tags: ["work"],
+    });
+    expect((result as { memory_id?: string }).memory_id).toBeTruthy();
+    expect(toast).toEqual({ icon: "◆", text: "Noted: My reports go out on Fridays" });
+    const rows = await db.select().from(memories).where(eq(memories.userId, U.id));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].fact).toBe("My reports go out on Fridays");
+    expect(rows[0].tags).toEqual(["work"]);
+  });
+
+  it("post-call extraction doesn't duplicate a fact already saved live", async () => {
+    const [conv] = await db
+      .insert(conversations)
+      .values({ userId: U.id, mode: "voice" })
+      .returning();
+    const summary = await applyExtraction(U.id, conv.id, {
+      tasks: [],
+      events: [],
+      status_updates: [],
+      facts: ["The user's reports go out on Fridays"],
+      mentions: [],
+      ambiguities: [],
+    });
+    expect(summary.savedFacts).toBe(0);
+    const rows = await db.select().from(memories).where(eq(memories.userId, U.id));
+    expect(rows).toHaveLength(1); // still just the live-captured row
   });
 });
 
