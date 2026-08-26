@@ -1241,7 +1241,9 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
 
   async review_capability(ctx, args) {
     const a = toolSchemas.review_capability.parse(args);
-    const { approveRequest, findRequest, rejectRequest } = await import("@/lib/shop/shop");
+    const { approveRequest, findRequest, rejectRequest, reviseRequest } = await import(
+      "@/lib/shop/shop"
+    );
     const req = await findRequest(ctx.userId, a.request);
     if (!req) return { result: { error: `No shop request matching "${a.request}"` } };
     if (a.decision === "reject") {
@@ -1251,13 +1253,30 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         toast: { icon: "✓", text: "Shop request closed" },
       };
     }
+    if (a.decision === "revise") {
+      if (!a.feedback?.trim()) {
+        return { result: { error: "revise needs feedback — what should change in the plan?" } };
+      }
+      const res = await reviseRequest(ctx.userId, req.id, a.feedback.trim());
+      if (!res.ok) return { result: { error: res.error } };
+      return {
+        result: {
+          revising: true,
+          need: req.need,
+          note: "The shop is redrafting the plan with that feedback — the user gets a push when the new plan is ready.",
+        },
+        toast: { icon: "✎", text: `Revising plan: ${req.need.slice(0, 50)}` },
+      };
+    }
     const res = await approveRequest(ctx.userId, req.id);
     if (!res.ok) return { result: { error: res.error } };
     return {
       result: {
         approved: true,
         need: req.need,
-        note: "Build started — it lands automatically once the test suite passes (typically 15-40 minutes).",
+        note: res.queued
+          ? "Approved and queued — the build starts the moment the current shop job finishes, and lands once tests pass."
+          : "Build started — it lands automatically once the test suite passes (typically 15-40 minutes).",
       },
       toast: { icon: "▣", text: `Building: ${req.need.slice(0, 60)}` },
     };

@@ -14,7 +14,7 @@ import { promisify } from "node:util";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { capabilityRequests } from "@/lib/db/schema";
-import { buildPrompt, planPrompt, shopSlug } from "@/lib/shop/shop";
+import { buildPrompt, kickQueue, planPrompt, shopSlug } from "@/lib/shop/shop";
 
 const exec = promisify(execFile);
 const CLAUDE_BIN = process.env.CLAUDE_BIN ?? "claude";
@@ -80,13 +80,8 @@ async function runPlan(id: string): Promise<void> {
     });
     console.error(`shop: plan phase failed for ${id}`);
   }
-  // Lane cleared — pull the next filed request into planning.
-  const [next] = await db
-    .select()
-    .from(capabilityRequests)
-    .where(eq(capabilityRequests.status, "filed"))
-    .limit(1);
-  if (next) await runPlan(next.id);
+  // Lane cleared — the sweeper claims the next job (approved builds first).
+  await kickQueue();
 }
 
 async function sh(cmd: string, args: string[], cwd: string, timeout = VERIFY_TIMEOUT_MS) {
@@ -188,6 +183,8 @@ async function runBuild(id: string): Promise<void> {
       url: "/settings",
     }).catch(() => 0);
   }
+  // Either way the lane is clear — pick up whatever queued while we built.
+  await kickQueue();
 }
 
 async function main() {

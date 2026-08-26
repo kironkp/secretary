@@ -11,6 +11,7 @@ type ShopRequest = {
   need: string;
   status: string;
   plan: string | null;
+  feedback: string | null;
   branch: string | null;
   buildLog: string | null;
   updatedAt: string;
@@ -31,6 +32,11 @@ export function ShopRequests() {
   const [rows, setRows] = useState<ShopRequest[] | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // NEVER swallow a failed action — the 10:17 bug: approve bounced off the
+  // busy lane and the button just did visibly nothing.
+  const [notice, setNotice] = useState<{ id: string; text: string; tone: "ok" | "err" } | null>(null);
+  const [feedbackFor, setFeedbackFor] = useState<string | null>(null);
+  const [feedbackText, setFeedbackText] = useState("");
 
   const load = async () => {
     const res = await fetch("/api/shop");
@@ -46,15 +52,34 @@ export function ShopRequests() {
     };
   }, []);
 
-  const act = async (id: string, action: "approve" | "reject") => {
+  const act = async (id: string, action: "approve" | "reject" | "feedback", feedback?: string) => {
     setBusy(true);
+    setNotice(null);
     const res = await fetch("/api/shop", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, action }),
+      body: JSON.stringify({ id, action, feedback }),
     });
+    const body = (await res.json().catch(() => ({}))) as { error?: string; queued?: boolean };
     setBusy(false);
-    if (res.ok) void load();
+    if (!res.ok) {
+      setNotice({ id, text: body.error ?? "That didn't go through — try again.", tone: "err" });
+      return;
+    }
+    if (action === "approve") {
+      setNotice({
+        id,
+        text: body.queued
+          ? "Approved — queued behind the current shop job; the build starts the moment it finishes."
+          : "Approved — building now. You'll get a push when it ships.",
+        tone: "ok",
+      });
+    } else if (action === "feedback") {
+      setNotice({ id, text: "Sent — the shop is revising the plan.", tone: "ok" });
+      setFeedbackFor(null);
+      setFeedbackText("");
+    }
+    void load();
   };
 
   if (!rows) return <p className="text-xs text-faint">Loading…</p>;
@@ -106,13 +131,23 @@ export function ShopRequests() {
                 <p className="text-[10px] text-faint">Branch kept for autopsy: {r.branch}</p>
               )}
               {r.status === "planned" && (
-                <div className="flex gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <button
                     onClick={() => void act(r.id, "approve")}
                     disabled={busy}
                     className="rounded-full bg-accent px-4 py-1.5 text-xs font-bold text-bg disabled:opacity-50"
                   >
                     Approve &amp; build
+                  </button>
+                  <button
+                    onClick={() => {
+                      setFeedbackFor(feedbackFor === r.id ? null : r.id);
+                      setNotice(null);
+                    }}
+                    disabled={busy}
+                    className="rounded-full border border-edge px-4 py-1.5 text-xs text-muted hover:text-ink disabled:opacity-50"
+                  >
+                    Give feedback
                   </button>
                   <button
                     onClick={() => void act(r.id, "reject")}
@@ -122,6 +157,29 @@ export function ShopRequests() {
                     Reject
                   </button>
                 </div>
+              )}
+              {feedbackFor === r.id && r.status === "planned" && (
+                <div className="flex flex-col gap-2">
+                  <textarea
+                    value={feedbackText}
+                    onChange={(e) => setFeedbackText(e.target.value)}
+                    rows={3}
+                    placeholder="What should change? e.g. 'Also cover voice calls' or 'Skip the schema change, keep it simpler'"
+                    className="w-full resize-none rounded-lg border border-edge bg-surface px-2.5 py-2 text-xs outline-none focus:border-accent"
+                  />
+                  <button
+                    onClick={() => void act(r.id, "feedback", feedbackText)}
+                    disabled={busy || !feedbackText.trim()}
+                    className="self-start rounded-full bg-accent px-4 py-1.5 text-xs font-bold text-bg disabled:opacity-50"
+                  >
+                    Send — revise the plan
+                  </button>
+                </div>
+              )}
+              {notice?.id === r.id && (
+                <p className={`text-xs ${notice.tone === "ok" ? "text-ok" : "text-danger"}`}>
+                  {notice.text}
+                </p>
               )}
             </div>
           )}

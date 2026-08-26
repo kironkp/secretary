@@ -484,6 +484,10 @@ export const capabilityRequests = pgTable("capability_requests", {
     .notNull()
     .default("filed"),
   plan: text("plan"),
+  // Revision loop: the user's feedback on a drafted plan (accumulates across
+  // rounds); a request with feedback re-enters planning with the old plan +
+  // feedback in the prompt.
+  feedback: text("feedback"),
   branch: text("branch"),
   buildLog: text("build_log"),
   conversationId: text("conversation_id"),

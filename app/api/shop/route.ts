@@ -3,7 +3,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { isErrorResponse, parseBody, requireSession } from "@/lib/api";
-import { approveRequest, listRequests, rejectRequest } from "@/lib/shop/shop";
+import { approveRequest, listRequests, rejectRequest, reviseRequest } from "@/lib/shop/shop";
 
 export async function GET() {
   const user = await requireSession();
@@ -15,6 +15,7 @@ export async function GET() {
       need: r.need,
       status: r.status,
       plan: r.plan,
+      feedback: r.feedback,
       branch: r.branch,
       buildLog: r.status === "failed" ? r.buildLog : null,
       createdAt: r.createdAt,
@@ -25,7 +26,8 @@ export async function GET() {
 
 const bodySchema = z.object({
   id: z.string().min(1),
-  action: z.enum(["approve", "reject"]),
+  action: z.enum(["approve", "reject", "feedback"]),
+  feedback: z.string().max(4000).optional(),
 });
 
 export async function POST(req: Request) {
@@ -40,8 +42,17 @@ export async function POST(req: Request) {
       ? NextResponse.json({ ok: true })
       : NextResponse.json({ error: "Not found" }, { status: 404 });
   }
+  if (parsed.action === "feedback") {
+    if (!parsed.feedback?.trim()) {
+      return NextResponse.json({ error: "Say what should change." }, { status: 400 });
+    }
+    const res = await reviseRequest(user.id, parsed.id, parsed.feedback.trim());
+    return res.ok
+      ? NextResponse.json({ ok: true })
+      : NextResponse.json({ error: res.error }, { status: 400 });
+  }
   const res = await approveRequest(user.id, parsed.id);
   return res.ok
-    ? NextResponse.json({ ok: true })
+    ? NextResponse.json({ ok: true, queued: res.queued })
     : NextResponse.json({ error: res.error }, { status: 400 });
 }

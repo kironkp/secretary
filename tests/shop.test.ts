@@ -10,8 +10,10 @@ import {
   buildPrompt,
   fileRequest,
   findRequest,
+  kickQueue,
   planPrompt,
   rejectRequest,
+  reviseRequest,
   shopSlug,
 } from "@/lib/shop/shop";
 import { anthropicToolDefs, openAIToolDefs, VOICE_TOOL_NAMES } from "@/lib/secretary/tool-schemas";
@@ -52,20 +54,51 @@ describe("filing and the single-flight lane", () => {
 });
 
 describe("the approval gate", () => {
-  it("only a planned request can be approved; the lane must be clear", async () => {
+  it("only a planned request can be approved; a busy lane QUEUES instead of bouncing", async () => {
     const req = await findRequest(U.id, "reporting preferences");
     // still "planning" — not approvable
     const early = await approveRequest(U.id, req!.id);
     expect(early.ok).toBe(false);
 
+    // Second request occupies the lane (planning) → approve queues, never errors.
     await db
       .update(capabilityRequests)
       .set({ status: "planned", plan: "1. Do the thing." })
       .where(eq(capabilityRequests.id, req!.id));
     const res = await approveRequest(U.id, req!.id);
     expect(res.ok).toBe(true);
+    if (res.ok) expect(typeof res.queued).toBe("boolean");
     const after = await findRequest(U.id, "reporting preferences");
     expect(after!.status).toBe("approved");
+  });
+
+  it("kickQueue claims an approved build first when the lane is clear", async () => {
+    // clear the lane (no planning/building anywhere for this run)
+    await db
+      .update(capabilityRequests)
+      .set({ status: "planned" })
+      .where(eq(capabilityRequests.status, "planning"));
+    await kickQueue();
+    const req = await findRequest(U.id, "reporting preferences");
+    expect(req!.status).toBe("building"); // claimed (spawn suppressed under VITEST)
+  });
+
+  it("feedback re-enters planning with the old plan + notes in the prompt", async () => {
+    const req = await findRequest(U.id, "reporting preferences");
+    await db
+      .update(capabilityRequests)
+      .set({ status: "planned", plan: "old plan v1" })
+      .where(eq(capabilityRequests.id, req!.id));
+    const res = await reviseRequest(U.id, req!.id, "also cover voice calls");
+    expect(res.ok).toBe(true);
+    const after = await findRequest(U.id, "reporting preferences");
+    expect(["filed", "planning"]).toContain(after!.status); // kickQueue may claim it
+    expect(after!.feedback).toContain("also cover voice calls");
+
+    const prompt = planPrompt(after!);
+    expect(prompt).toContain("old plan v1");
+    expect(prompt).toContain("also cover voice calls");
+    expect(prompt).toContain("REVISE");
   });
 
   it("fuzzy find matches by need fragment", async () => {

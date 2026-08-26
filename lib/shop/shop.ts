@@ -77,11 +77,15 @@ export async function fileRequest(
   return { id: row.id, status: "filed", deduped: false, queued: true };
 }
 
-/** Approve a planned request → the build phase starts (the last human step). */
+/**
+ * Approve a planned request (the last human step). Never bounces on a busy
+ * lane: the request becomes `approved` and BUILDS AS SOON AS THE LANE CLEARS
+ * (runner chain + the minute sweeper below). Immediate spawn when free.
+ */
 export async function approveRequest(
   userId: string,
   id: string
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<{ ok: true; queued: boolean } | { ok: false; error: string }> {
   const [row] = await db
     .select()
     .from(capabilityRequests)
@@ -91,22 +95,98 @@ export async function approveRequest(
   if (row.status !== "planned") {
     return { ok: false, error: `Request is ${row.status} — only a planned request can be approved` };
   }
-  const [inFlight] = await db
-    .select({ id: capabilityRequests.id })
-    .from(capabilityRequests)
-    .where(
-      and(
-        eq(capabilityRequests.userId, userId),
-        inArray(capabilityRequests.status, [...IN_FLIGHT])
-      )
-    )
-    .limit(1);
-  if (inFlight) return { ok: false, error: "The shop is mid-job — approve again when it finishes" };
   await db
     .update(capabilityRequests)
     .set({ status: "approved", updatedAt: new Date() })
     .where(eq(capabilityRequests.id, id));
+  const [inFlight] = await db
+    .select({ id: capabilityRequests.id })
+    .from(capabilityRequests)
+    .where(inArray(capabilityRequests.status, [...IN_FLIGHT]))
+    .limit(1);
+  if (inFlight) return { ok: true, queued: true };
   spawnRunner(["--build", id]);
+  return { ok: true, queued: false };
+}
+
+/**
+ * Queue sweeper (runs every minute from instrumentation.ts, and callable
+ * anywhere): when the lane is clear, atomically claim the next job —
+ * approved builds first, then filed plans. The atomic UPDATE...WHERE status
+ * claim means the runner's own chain and this sweeper can never double-run
+ * one request. Self-heals stranded queues (crashed runner, server restart).
+ */
+export async function kickQueue(): Promise<void> {
+  const [inFlight] = await db
+    .select({ id: capabilityRequests.id })
+    .from(capabilityRequests)
+    .where(inArray(capabilityRequests.status, [...IN_FLIGHT]))
+    .limit(1);
+  if (inFlight) return;
+
+  const [build] = await db
+    .update(capabilityRequests)
+    .set({ status: "building", updatedAt: new Date() })
+    .where(
+      eq(
+        capabilityRequests.id,
+        db
+          .select({ id: capabilityRequests.id })
+          .from(capabilityRequests)
+          .where(eq(capabilityRequests.status, "approved"))
+          .limit(1)
+      )
+    )
+    .returning({ id: capabilityRequests.id });
+  if (build) {
+    spawnRunner(["--build", build.id]);
+    return;
+  }
+  const [plan] = await db
+    .update(capabilityRequests)
+    .set({ status: "planning", updatedAt: new Date() })
+    .where(
+      eq(
+        capabilityRequests.id,
+        db
+          .select({ id: capabilityRequests.id })
+          .from(capabilityRequests)
+          .where(eq(capabilityRequests.status, "filed"))
+          .limit(1)
+      )
+    )
+    .returning({ id: capabilityRequests.id });
+  if (plan) spawnRunner(["--plan", plan.id]);
+}
+
+/**
+ * Feedback on a drafted plan (the third button): the request re-enters
+ * planning carrying the old plan + the user's notes. Feedback accumulates
+ * across rounds so a second revision still sees the first.
+ */
+export async function reviseRequest(
+  userId: string,
+  id: string,
+  feedback: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const [row] = await db
+    .select()
+    .from(capabilityRequests)
+    .where(and(eq(capabilityRequests.id, id), eq(capabilityRequests.userId, userId)))
+    .limit(1);
+  if (!row) return { ok: false, error: "No such request" };
+  if (row.status !== "planned" && row.status !== "failed") {
+    return { ok: false, error: `Request is ${row.status} — feedback applies to a drafted plan` };
+  }
+  await db
+    .update(capabilityRequests)
+    .set({
+      status: "filed",
+      feedback: row.feedback ? `${row.feedback}\n---\n${feedback}` : feedback,
+      updatedAt: new Date(),
+    })
+    .where(eq(capabilityRequests.id, id));
+  await kickQueue();
   return { ok: true };
 }
 
@@ -142,7 +222,12 @@ export async function findRequest(userId: string, fragment: string) {
 // Prompts for the headless Claude Code runs (scripts/shop.ts)
 // ---------------------------------------------------------------------------
 
-export function planPrompt(req: { need: string; context: string | null }): string {
+export function planPrompt(req: {
+  need: string;
+  context: string | null;
+  plan?: string | null;
+  feedback?: string | null;
+}): string {
   return [
     "You are planning a feature for the personal-assistant app you are running inside (the secretary).",
     "CLAUDE.md and docs/adaptive-ui/SPEC.md are law. Explore the code as needed.",
@@ -150,6 +235,16 @@ export function planPrompt(req: { need: string; context: string | null }): strin
     "## The need (verbatim, from the user's secretary)",
     req.need,
     ...(req.context ? ["", "## Conversation context", req.context] : []),
+    ...(req.feedback && req.plan
+      ? [
+          "",
+          "## Your previous plan (the user reviewed it)",
+          req.plan,
+          "",
+          "## The user's feedback — REVISE the plan to address every point",
+          req.feedback,
+        ]
+      : []),
     "",
     "## Produce",
     "A concise implementation plan in markdown — the user reads and approves this on a phone:",

@@ -403,7 +403,11 @@ export const toolSchemas = {
   }),
   review_capability: z.object({
     request: z.string().min(1).describe("The request's need (or a distinctive fragment of it)"),
-    decision: z.enum(["approve", "reject"]),
+    decision: z.enum(["approve", "reject", "revise"]),
+    feedback: z
+      .string()
+      .optional()
+      .describe("decision=revise: the user's notes on the plan — what to change, add, or drop"),
   }),
 } as const;
 
@@ -486,7 +490,7 @@ const toolDescriptions: Record<ToolName, string> = {
   request_capability:
     "You lack a tool or ability the user needs ('I can't store that', 'no tool for X', 'I can't do that here'): NEVER dead-end — file this in the SAME turn. The shop (Claude Code on the user's machine) drafts an implementation plan for the user to approve; approved builds land in the app automatically, fully tested. Say: 'I can't do that yet — sent it to the shop; you'll get a plan to approve.' NOT for things your existing tools already handle.",
   review_capability:
-    "The user decided on a shop request ('yes build it', 'approve the reporting one', 'no, skip that'). approve = the build starts now, lands automatically once tests pass. reject = closed, never re-proposed. Your briefing lists requests awaiting decision.",
+    "The user decided on a shop request. approve = build it ('yes build it') — starts immediately, or queues behind the current shop job and starts automatically. reject = closed for good. revise (with feedback) = the user wants the plan CHANGED ('have it also handle X', 'too complicated, simpler') — the shop redrafts and they get a fresh plan to review. Your briefing lists requests awaiting decision.",
 };
 
 /** OpenAI tool definitions (same flat shape works for Realtime and Responses). */
