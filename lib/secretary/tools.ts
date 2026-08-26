@@ -503,13 +503,15 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
           }
         : spawnedNext
           ? { icon: "✓", text: `Done: ${updated.title} — next one due ${spawnedNext}` }
-          : movedTo !== undefined
-            ? { icon: "→", text: `Moved: ${updated.title} → ${movedTo ?? "no project"}` }
-            : postponed
-              ? { icon: "→", text: `Pushed: ${updated.title} — now ${due}` }
-              : newReminders !== undefined
-                ? { icon: "✓", text: `Reminders set: ${updated.title}` }
-                : { icon: "✎", text: `Updated: ${updated.title}` },
+          : a.status === "dropped"
+            ? { icon: "✕", text: `Dropped: ${updated.title}` }
+            : movedTo !== undefined
+              ? { icon: "→", text: `Moved: ${updated.title} → ${movedTo ?? "no project"}` }
+              : postponed
+                ? { icon: "→", text: `Pushed: ${updated.title} — now ${due}` }
+                : newReminders !== undefined
+                  ? { icon: "✓", text: `Reminders set: ${updated.title}` }
+                  : { icon: "✎", text: `Updated: ${updated.title}` },
     };
   },
 
@@ -1301,6 +1303,7 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
       task: a.task,
       ...(a.signal === "started" ? { status: "in_progress" } : {}),
       ...(a.signal === "blocked" ? { status: "blocked" } : {}),
+      ...(a.signal === "dropped" ? { status: "dropped" } : {}),
       ...(a.signal === "postponed" && a.new_due_at ? { due_at: a.new_due_at } : {}),
       ...(a.note ? { notes: a.note } : {}),
     });
