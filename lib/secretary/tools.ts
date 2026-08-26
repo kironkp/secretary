@@ -324,13 +324,33 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
       CREATE_GUARD_SIMILARITY
     );
     if (twin) {
+      // A re-issued create that names a project must not silently drop it:
+      // fill a BLANK project on the existing task. Fill-only — a project
+      // already set is never overwritten by a guard match.
+      let filedUnder: string | null = null;
+      if (a.project && !twin.projectId) {
+        const { project } = await resolveProject(ctx.userId, a.project);
+        if (project) {
+          await db
+            .update(tasks)
+            .set({ projectId: project.id, updatedAt: new Date() })
+            .where(and(eq(tasks.userId, ctx.userId), eq(tasks.id, twin.id)));
+          filedUnder = project.name;
+        }
+      }
       return {
         result: {
           task_id: twin.id,
           title: twin.title,
           already_existed: true,
-          note: "An open task with this title already exists — nothing was created. Use update_task to change it.",
+          ...(filedUnder ? { project: filedUnder } : {}),
+          note: filedUnder
+            ? `An open task with this title already existed — nothing was created; it's now filed under "${filedUnder}". Use update_task for other changes.`
+            : "An open task with this title already exists — nothing was created. Use update_task to change it.",
         },
+        ...(filedUnder
+          ? { toast: { icon: "→", text: `Moved: ${twin.title} → ${filedUnder}` } }
+          : {}),
       };
     }
     const { project, matched } = await resolveProject(ctx.userId, a.project);
@@ -382,15 +402,12 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     let projectMatch: ProjectResolution["matched"] = null;
 
     if (a.project !== undefined) {
-      if (a.project.trim().toLowerCase() === "none") {
-        updates.projectId = null;
-        movedTo = null;
-      } else {
-        const res = await resolveProject(ctx.userId, a.project);
-        updates.projectId = res.project!.id;
-        movedTo = res.project!.name;
-        projectMatch = res.matched;
-      }
+      // resolveProject maps the "no project" sentinels (none/null/unfiled/…)
+      // to null — that means unfile here, never a null-deref crash.
+      const res = await resolveProject(ctx.userId, a.project);
+      updates.projectId = res.project?.id ?? null;
+      movedTo = res.project?.name ?? null;
+      projectMatch = res.matched;
     }
 
     if (a.due_at) {
@@ -733,15 +750,11 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     let movedTo: string | null | undefined;
     let projectMatch: ProjectResolution["matched"] = null;
     if (a.project !== undefined) {
-      if (a.project.trim().toLowerCase() === "none") {
-        updates.projectId = null;
-        movedTo = null;
-      } else {
-        const res = await resolveProject(ctx.userId, a.project);
-        updates.projectId = res.project!.id;
-        movedTo = res.project!.name;
-        projectMatch = res.matched;
-      }
+      // same sentinel handling as update_task: null resolution = unfile
+      const res = await resolveProject(ctx.userId, a.project);
+      updates.projectId = res.project?.id ?? null;
+      movedTo = res.project?.name ?? null;
+      projectMatch = res.matched;
     }
     const newReminders = parseReminders(a.reminders);
     if (newReminders !== undefined) updates.reminders = newReminders;
@@ -995,14 +1008,10 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     let movedTo: string | null | undefined;
     if (a.title) updates.title = a.title;
     if (a.project !== undefined) {
-      if (a.project.trim().toLowerCase() === "none") {
-        updates.projectId = null;
-        movedTo = null;
-      } else {
-        const res = await resolveProject(ctx.userId, a.project);
-        updates.projectId = res.project!.id;
-        movedTo = res.project!.name;
-      }
+      // same sentinel handling as update_task: null resolution = unfile
+      const res = await resolveProject(ctx.userId, a.project);
+      updates.projectId = res.project?.id ?? null;
+      movedTo = res.project?.name ?? null;
     }
     const [updated] = await db
       .update(documents)
@@ -1335,6 +1344,16 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
       due_at: a.due_at,
       project: a.project,
       stakes: a.stakes,
+    });
+  },
+
+  async amend_task(ctx, args) {
+    const a = toolSchemas.amend_task.parse(args);
+    return handlers.update_task(ctx, {
+      task: a.task,
+      ...(a.project !== undefined ? { project: a.project } : {}),
+      ...(a.title ? { title: a.title } : {}),
+      ...(a.note ? { notes: a.note } : {}),
     });
   },
 

@@ -8,7 +8,12 @@ import { db } from "@/lib/db";
 import { checkins, conversations, expectations, memories, tasks, user } from "@/lib/db/schema";
 import { applyExtraction } from "@/lib/secretary/extraction";
 import { VOICE_MODALITY_RULES } from "@/lib/secretary/persona";
-import { openAIVoiceToolDefs, VOICE_TOOL_NAMES } from "@/lib/secretary/tool-schemas";
+import {
+  anthropicToolDefs,
+  openAIToolDefs,
+  openAIVoiceToolDefs,
+  VOICE_TOOL_NAMES,
+} from "@/lib/secretary/tool-schemas";
 import { executeTool } from "@/lib/secretary/tools";
 
 const U = { id: `test-voice-${crypto.randomUUID()}`, email: `voice-${Date.now()}@p10.test` };
@@ -37,6 +42,22 @@ describe("fast/slow split: the mouth is thin", () => {
     }
     expect(names).toContain("paint_canvas"); // the voice's hands for anything visual
     expect(names).toContain("consult_brain"); // …and its phone-a-friend for hard questions
+  });
+
+  // A change to an existing task ("file that under X") is an amendment, never
+  // a second commitment — the thin delegate rides the voice session and both
+  // tool-def builders (SPEC §11).
+  it("amend_task rides the voice session and both tool-def builders", () => {
+    expect(VOICE_TOOL_NAMES).toContain("amend_task");
+    const def = openAIVoiceToolDefs().find((t) => t.name === "amend_task");
+    expect(def).toBeTruthy();
+    expect(def?.description).toContain("EXISTING");
+    const params = def?.parameters as { properties?: Record<string, unknown> };
+    expect(params.properties).toHaveProperty("task");
+    expect(params.properties).toHaveProperty("project");
+    expect(openAIToolDefs().some((t) => t.name === "amend_task")).toBe(true);
+    expect(anthropicToolDefs().some((t) => t.name === "amend_task")).toBe(true);
+    expect(VOICE_MODALITY_RULES).toContain("amend_task");
   });
 
   it("create_commitment writes the same store as text (with stakes)", async () => {

@@ -225,6 +225,17 @@ export const toolSchemas = {
     expected_update_by: z.string().describe("ISO 8601 — when you'll ask"),
     task: z.string().optional().describe("Related task title fragment"),
   }),
+  amend_task: z.object({
+    task: z.string().min(1).describe("The EXISTING task — id or a distinctive title fragment"),
+    project: z
+      .string()
+      .optional()
+      .describe(
+        'File it under this project (fuzzy-matched against existing names, created if new). The literal value "none" removes it from its project.'
+      ),
+    title: z.string().optional().describe("New title, if the user renamed it"),
+    note: z.string().optional().describe("Detail worth keeping on the task, briefly"),
+  }),
   // --- Agent layer (SPEC §11): persona + pipeline templates ---
   update_persona: z.object({
     name: z
@@ -463,6 +474,8 @@ const toolDescriptions: Record<ToolName, string> = {
     "Voice: the user took something on. Log it immediately with any stated deadline and stakes ('so I don't get a strike'). Several items mentioned together = several calls in the same turn. Never wait to be asked.",
   schedule_checkin:
     "Voice: you promised to follow up ('I'll be asking either way') — schedule it in the SAME breath. A user report clears it silently; a miss opens the next session.",
+  amend_task:
+    "Voice: the user is changing something about a task that ALREADY exists — 'file that under Caltrans', 'move it to the trip project', 'rename it', 'add a note that the gate code is 4411'. Amends the EXISTING task in place: project (\"none\" unfiles it), title, note. NEVER creates a task — create_commitment is only for a genuinely new to-do.",
   update_persona:
     "The user asked you to BE different — sterner, gentler, brisker, more/less follow-up, quiet hours ('I need a nagging secretary', 'stop being so peppy') — or gave you a NAME ('I'll call you Dot'). Store it ONCE here; it applies to every future conversation, the transcript labels, and the nag engine. Never re-ask.",
   queue_clarification:
@@ -518,6 +531,9 @@ export function anthropicToolDefs() {
 export const VOICE_TOOL_NAMES = [
   "log_status",
   "create_commitment",
+  // a change to something already logged ("file that under X", "rename it")
+  // is an amendment of the existing row, never a second commitment
+  "amend_task",
   "schedule_checkin",
   "paint_canvas",
   "get_current_datetime",

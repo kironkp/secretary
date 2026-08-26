@@ -475,7 +475,7 @@ claude.ai session used as a fixture (docs/adaptive-ui/transcript-2026-08-18).
   "I can't draw a chart out loud" is a forbidden answer.
 - **fast/slow split**: the realtime voice model (mouth/ears) carries only
   persona + today's brief + lexicon + thin tools (`log_status`,
-  `create_commitment`, `schedule_checkin`, `paint_canvas`,
+  `create_commitment`, `amend_task`, `schedule_checkin`, `paint_canvas`,
   `get_current_datetime`, `queue_clarification`, `resolve_clarification`,
   `consult_brain`, `request_capability`, `review_capability`, and
   `remember_fact` — an explicitly *stated* fact is fast-path capture: one
@@ -488,6 +488,13 @@ claude.ai session used as a fixture (docs/adaptive-ui/transcript-2026-08-18).
   task"), the mouth pairs it with `remember_fact` in the SAME turn — the
   same idiom as stated-fact capture; the extractor's own `dropped` signal
   stays the safety net, and its dedupe never resurrects a dropped task.
+  A change to something ALREADY logged ("file that under Caltrans",
+  "rename it", "add a note to it") is `amend_task` — a thin delegate to
+  `update_task` that files (or unfiles: "none"), retitles, or annotates
+  the EXISTING row, never a second commitment. The create-guard backs it
+  up: a re-issued create that names a project fills a BLANK project on
+  the existing twin instead of silently dropping it — fill-only, always
+  toasted; a project already set is never overwritten.
   The extractor (brain) runs async 2–5s behind each
   utterance, writes the store, and injects clarifications back for the next
   pause. The store is the only truth; a dead voice session loses nothing.
