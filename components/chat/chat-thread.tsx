@@ -22,7 +22,6 @@ import type { BriefingCard } from "@/lib/secretary/briefing";
 import { unlockRemoteAudio } from "@/lib/realtime/remote-audio";
 import { DictationBar } from "./dictation-bar";
 import { ModelChip } from "./model-chip";
-import { useSplit } from "./split-context";
 import { useVoiceCall } from "./voice-call-provider";
 
 type Attachment = { id: string; mime: string; name: string };
@@ -134,7 +133,6 @@ export function ChatThread({
   initialChatEffort?: string;
 }) {
   const router = useRouter();
-  const { dockVoice } = useSplit();
   const [conversationId, setConversationId] = useState(initialConversationId);
   const [msgs, setMsgs] = useState<Message[]>(initialMessages);
   const [input, setInput] = useState("");
@@ -588,12 +586,13 @@ export function ChatThread({
                       // must run synchronously inside the tap: iOS only allows
                       // audio playback that a user gesture unlocked
                       unlockRemoteAudio();
-                      // global call: survives tab switches; docks to the pill
-                      // immediately in split/floating contexts
+                      // global call, PILL-FIRST (user ask, Aug 26): Talk drops
+                      // into the minimal bar so the screen stays usable — the
+                      // full call view is opt-in via the expand button.
                       call.begin({
                         voice: defaultVoice,
                         effort: defaultVoiceEffort,
-                        minimized: dockVoice,
+                        minimized: true,
                       });
                     }}
                     disabled={call.active}
