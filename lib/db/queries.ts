@@ -139,6 +139,21 @@ export function getTasksWithContext(userId: string) {
     .orderBy(asc(tasks.dueAt), desc(tasks.createdAt));
 }
 
+/**
+ * The NEWEST `limit` messages of a conversation, returned oldest-first. This
+ * is the model's context window: a long thread must keep what was just said,
+ * never its opening turns (SPEC §11 cross-session recall).
+ */
+export async function loadHistoryWindow(userId: string, conversationId: string, limit = 40) {
+  const rows = await db
+    .select()
+    .from(messages)
+    .where(and(eq(messages.userId, userId), eq(messages.conversationId, conversationId)))
+    .orderBy(desc(messages.createdAt))
+    .limit(limit);
+  return rows.reverse();
+}
+
 /** Most recent conversation (with messages) to restore the chat thread. */
 export async function getLatestConversation(userId: string) {
   const [conv] = await db
@@ -149,6 +164,76 @@ export async function getLatestConversation(userId: string) {
     .limit(1);
   if (!conv) return null;
   return { conversation: conv, messages: await getMessages(userId, conv.id) };
+}
+
+// A text thread left idle this long is over: the next open starts fresh and
+// the old thread becomes a "prior session" the briefing can quote.
+export const CONVERSATION_IDLE_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * Latest conversation for restoring the chat thread — unless it's been idle
+ * past CONVERSATION_IDLE_MS, in which case it's stamped endedAt (once, at its
+ * last activity) and the chat opens fresh. Rollover keys on idle time, NOT on
+ * endedAt: a voice call that just hung up (endedAt set) still restores.
+ */
+export async function getActiveConversation(userId: string) {
+  const latest = await getLatestConversation(userId);
+  if (!latest) return null;
+  const last = latest.messages[latest.messages.length - 1];
+  const lastActivity = last?.createdAt ?? latest.conversation.startedAt;
+  if (Date.now() - lastActivity.getTime() < CONVERSATION_IDLE_MS) return latest;
+  if (!latest.conversation.endedAt) {
+    await db
+      .update(conversations)
+      .set({ endedAt: lastActivity })
+      .where(and(eq(conversations.id, latest.conversation.id), eq(conversations.userId, userId)));
+  }
+  return null;
+}
+
+/**
+ * Verbatim tails of the most recent prior conversations (voice and text), for
+ * the briefing's PRIOR SESSIONS block. Newest conversation first; messages
+ * oldest-first within each. Conversations with no messages (e.g. a voice
+ * token minted but never spoken into) are skipped.
+ */
+export async function getRecentConversationTails(
+  userId: string,
+  opts: {
+    excludeConversationId?: string | null;
+    conversationLimit?: number;
+    messagesPerConversation?: number;
+  } = {}
+) {
+  const wanted = opts.conversationLimit ?? 3;
+  const perConversation = opts.messagesPerConversation ?? 10;
+  const convs = await db
+    .select()
+    .from(conversations)
+    .where(
+      opts.excludeConversationId
+        ? and(eq(conversations.userId, userId), ne(conversations.id, opts.excludeConversationId))
+        : eq(conversations.userId, userId)
+    )
+    .orderBy(desc(conversations.startedAt))
+    // over-fetch: empty conversations don't count against the wanted tally
+    .limit(wanted * 3);
+  const tails: {
+    conversation: (typeof convs)[number];
+    messages: (typeof messages.$inferSelect)[];
+  }[] = [];
+  for (const conv of convs) {
+    if (tails.length >= wanted) break;
+    const tail = await db
+      .select()
+      .from(messages)
+      .where(and(eq(messages.userId, userId), eq(messages.conversationId, conv.id)))
+      .orderBy(desc(messages.createdAt))
+      .limit(perConversation);
+    if (tail.length === 0) continue;
+    tails.push({ conversation: conv, messages: tail.reverse() });
+  }
+  return tails;
 }
 
 export async function getConversationWithMessages(userId: string, id: string) {

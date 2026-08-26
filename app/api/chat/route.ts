@@ -3,11 +3,12 @@
 import { NextResponse } from "next/server";
 import { after } from "next/server";
 import { z } from "zod";
-import { and, asc, eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { attachments, conversations, messages, usage, user as userTable } from "@/lib/db/schema";
 import { inArray } from "drizzle-orm";
 import { isErrorResponse, parseBody, requireSession } from "@/lib/api";
+import { loadHistoryWindow } from "@/lib/db/queries";
 import { buildBriefing } from "@/lib/secretary/briefing";
 import { buildInstructions } from "@/lib/secretary/persona";
 import { openAIToolDefs } from "@/lib/secretary/tool-schemas";
@@ -90,14 +91,15 @@ export async function POST(req: Request) {
       .where(inArray(attachments.id, attachRows.map((a) => a.id)));
   }
 
-  const history = await db
-    .select()
-    .from(messages)
-    .where(and(eq(messages.conversationId, conversationId), eq(messages.userId, user.id)))
-    .orderBy(asc(messages.createdAt))
-    .limit(HISTORY_LIMIT);
+  // Newest-first window: a long thread must keep what was just said — loading
+  // the oldest 40 silently dropped recent turns (SPEC §11 cross-session recall).
+  const history = await loadHistoryWindow(user.id, conversationId, HISTORY_LIMIT);
 
-  const briefing = await buildBriefing(user.id, user.timezone, { consumeNudges: true });
+  const briefing = await buildBriefing(user.id, user.timezone, {
+    consumeNudges: true,
+    // this thread is already the model's input — prior sessions only
+    excludeConversationId: conversationId,
+  });
   const [userRow] = await db
     .select({ persona: userTable.persona })
     .from(userTable)

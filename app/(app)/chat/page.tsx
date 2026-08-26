@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { user } from "@/lib/db/schema";
-import { getConversationWithMessages, getLatestConversation } from "@/lib/db/queries";
+import { getActiveConversation, getConversationWithMessages } from "@/lib/db/queries";
 import { buildBriefing } from "@/lib/secretary/briefing";
 import { ChatThread } from "@/components/chat/chat-thread";
 import { ChatWorkspace } from "@/components/chat/chat-workspace";
@@ -21,8 +21,10 @@ export default async function ChatPage({
   const timezone = (session.user as { timezone?: string }).timezone ?? "UTC";
 
   const { c, m } = await searchParams;
+  // No explicit ?c: restore the ACTIVE thread — one idle >6h rolls over
+  // (stamped endedAt) and the page opens fresh. Deep links still land anywhere.
   const [thread, briefing, [userRow]] = await Promise.all([
-    c ? getConversationWithMessages(userId, c) : getLatestConversation(userId),
+    c ? getConversationWithMessages(userId, c) : getActiveConversation(userId),
     buildBriefing(userId, timezone),
     db.select({ persona: user.persona }).from(user).where(eq(user.id, userId)),
   ]);

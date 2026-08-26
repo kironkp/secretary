@@ -73,7 +73,9 @@ describe("the approval gate", () => {
   });
 
   it("kickQueue claims an approved build first when the lane is clear", async () => {
-    // clear the lane (no planning/building anywhere for this run)
+    // Clear OUR lane only. laneScope (the HEAD fix) makes this suite fully
+    // isolated — it supersedes the branch's foreign-row workaround for the
+    // same bug (the shop's own build holding the global lane mid-suite).
     await db
       .update(capabilityRequests)
       .set({ status: "planned" })

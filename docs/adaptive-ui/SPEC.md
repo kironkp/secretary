@@ -473,11 +473,23 @@ claude.ai session used as a fixture (docs/adaptive-ui/transcript-2026-08-18).
   ending with the single next action. Anything visual routes to a surface
   (Canvas paint or Dashboard plan edit) and the voice says "on your screen."
   "I can't draw a chart out loud" is a forbidden answer.
+- **cross-session recall**: every session (voice and text) opens with real
+  prior-conversation context: the current thread's NEWEST turns (a window that
+  keeps what was just said, never the opening turns of a long thread) plus a
+  small verbatim tail excerpt of the last few prior sessions — both modes,
+  labeled with mode and timestamps. Excerpts are verbatim lines, never
+  summaries. Anything older is on-demand via `search_history` (substring
+  match over all transcripts, optional after/before time filters, results
+  labeled with mode) — which is why the voice session carries it too.
+  Text threads roll over after 6h idle (stamped `ended_at` on next open), so
+  "last session" is a real boundary the excerpts can quote.
 - **fast/slow split**: the realtime voice model (mouth/ears) carries only
   persona + today's brief + lexicon + thin tools (`log_status`,
   `create_commitment`, `schedule_checkin`, `paint_canvas`,
   `get_current_datetime`, `queue_clarification`, `resolve_clarification`,
-  `consult_brain`, `request_capability`, `review_capability`, and
+  `consult_brain`, `request_capability`, `review_capability`,
+  `search_history` — cross-session recall on demand ("what did I say about X
+  last week?") — and
   `remember_fact` — an explicitly *stated* fact is fast-path capture: one
   insert, no entity resolution; the extractor stays the safety net for
   *inferred* facts). `log_status` carries a `dropped` signal: "that
