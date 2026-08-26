@@ -80,20 +80,54 @@ export const DEFAULT_BRAIN_EFFORT: BrainEffort = "high";
 
 export type BrainSettings = { model: BrainModel; effort: BrainEffort };
 
-/** Flag + key + never under vitest — CI must not touch a live model. */
+/** Flag + never under vitest — CI must not touch a live model. Whether a KEY
+ *  exists is per-user now (connected account or house key): callers resolve
+ *  a client with anthropicFor(userId) and skip the Claude path on null. */
 export function claudeBrainEnabled(): boolean {
-  return (
-    process.env.CLAUDE_BRAIN === "true" &&
-    !!process.env.ANTHROPIC_API_KEY &&
-    !process.env.VITEST
-  );
+  return process.env.CLAUDE_BRAIN === "true" && !process.env.VITEST;
 }
 
 let client: Anthropic | null = null;
-/** Lazy so importing this module never throws when the key is absent. */
+/** House-key client (owner's .env). Lazy so import never throws keyless. */
 export function anthropic(): Anthropic {
   client ??= new Anthropic();
   return client;
+}
+
+const userClients = new Map<string, Anthropic>();
+
+/**
+ * The multi-user resolution: the user's connected Claude account first, then
+ * the house key, else null (caller falls back to its OpenAI path). Site login
+ * and Claude connection are separate layers — see connectedAccounts schema.
+ */
+export async function anthropicFor(userId: string): Promise<Anthropic | null> {
+  const { db } = await import("@/lib/db");
+  const { connectedAccounts } = await import("@/lib/db/schema");
+  const { and, eq } = await import("drizzle-orm");
+  const [row] = await db
+    .select()
+    .from(connectedAccounts)
+    .where(and(eq(connectedAccounts.userId, userId), eq(connectedAccounts.provider, "anthropic")))
+    .limit(1);
+  if (row) {
+    const cached = userClients.get(row.id);
+    if (cached) return cached;
+    const { decryptSecret } = await import("@/lib/crypto");
+    try {
+      const c = new Anthropic({ apiKey: decryptSecret(row.encryptedKey) });
+      userClients.set(row.id, c);
+      return c;
+    } catch {
+      // corrupt/undecryptable row — fall through to the house key
+    }
+  }
+  return process.env.ANTHROPIC_API_KEY ? anthropic() : null;
+}
+
+/** Invalidate the per-user client cache after connect/disconnect. */
+export function forgetUserClient(rowId: string): void {
+  userClients.delete(rowId);
 }
 
 /** Per-user model + effort from Settings (persona jsonb); Opus 5 @ high default. */

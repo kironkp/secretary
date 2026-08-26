@@ -6,6 +6,8 @@ import { db } from "@/lib/db";
 import { user } from "@/lib/db/schema";
 import { BrainSettings } from "@/components/settings/brain-settings";
 import { CalmModeToggle } from "@/components/settings/calm-mode-toggle";
+import { ConnectedAccounts } from "@/components/settings/connected-accounts";
+import { NotificationsSection } from "@/components/settings/notifications";
 import { LayoutPreferences } from "@/components/settings/layout-preferences";
 import { ProposalReview } from "@/components/settings/proposal-review";
 import { SassSlider } from "@/components/settings/sass-slider";
@@ -71,6 +73,26 @@ export default async function SettingsPage() {
           The voice on calls. Also switchable mid-call from the call controls.
         </p>
         <VoicePicker initial={userRow?.persona?.voice ?? "marin"} />
+      </section>
+
+      <section className="rounded-xl border border-edge bg-surface p-5">
+        <h2 className="mb-1 text-sm font-bold">Notifications</h2>
+        <p className="mb-4 text-xs text-muted">
+          Reminders you set with the secretary ring this device at the exact time, and
+          the shop pings you when a plan is ready or a build ships. Add the app to your
+          Home Screen first on iPhone.
+        </p>
+        <NotificationsSection />
+      </section>
+
+      <section className="rounded-xl border border-edge bg-surface p-5">
+        <h2 className="mb-1 text-sm font-bold">Connected accounts</h2>
+        <p className="mb-4 text-xs text-muted">
+          Your login here is your account. Connecting your own Claude API key makes the
+          brain features — conversation parsing, canvas, Claude chat — run and bill on
+          your Anthropic account.
+        </p>
+        <ConnectedAccounts />
       </section>
 
       <section className="rounded-xl border border-edge bg-surface p-5">

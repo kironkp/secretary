@@ -5,7 +5,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { openai, PLANNER_MODEL } from "@/lib/openai";
-import { anthropic } from "@/lib/anthropic";
+import type Anthropic from "@anthropic-ai/sdk";
 import { REGISTRY_VERSION } from "./registry";
 import { defaultPlan, type LayoutPlan } from "./plan";
 import { planFromRules } from "./plan-from-rules";
@@ -44,9 +44,9 @@ export const livePlannerCall: PlannerCall = async (systemPrompt, signalsJson) =>
  * background refinement doesn't need deep reasoning, the validator is the
  * gatekeeper either way. Throws on refusal; planWithFallback's catch → rules.
  */
-export function claudePlannerCall(model: string): PlannerCall {
+export function claudePlannerCall(client: Anthropic, model: string): PlannerCall {
   return async (systemPrompt, signalsJson) => {
-    const response = await anthropic().messages.create({
+    const response = await client.messages.create({
       model,
       max_tokens: 16000,
       system: systemPrompt,

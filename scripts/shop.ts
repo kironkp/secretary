@@ -18,6 +18,15 @@ import { buildPrompt, planPrompt, shopSlug } from "@/lib/shop/shop";
 
 const exec = promisify(execFile);
 const CLAUDE_BIN = process.env.CLAUDE_BIN ?? "claude";
+// The runner inherits the dev server's env, which carries ANTHROPIC_API_KEY
+// (the app's brain key). Headless claude must NOT pick it up — it overrides
+// the user's claude.ai login and died mid-run on the first live build.
+const claudeEnv = (): NodeJS.ProcessEnv => {
+  const env = { ...process.env };
+  delete env.ANTHROPIC_API_KEY;
+  delete env.ANTHROPIC_AUTH_TOKEN;
+  return env;
+};
 const PLAN_TIMEOUT_MS = 15 * 60 * 1000;
 const BUILD_TIMEOUT_MS = 40 * 60 * 1000;
 const VERIFY_TIMEOUT_MS = 10 * 60 * 1000;
@@ -52,12 +61,18 @@ async function runPlan(id: string): Promise<void> {
     const { stdout } = await exec(
       CLAUDE_BIN,
       ["-p", planPrompt(req), "--output-format", "text", "--permission-mode", "plan"],
-      { cwd: REPO, timeout: PLAN_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 }
+      { cwd: REPO, timeout: PLAN_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024, env: claudeEnv() }
     );
     const plan = stdout.trim();
     if (!plan) throw new Error("empty plan output");
     await setStatus(id, { status: "planned", plan });
     console.log(`shop: plan ready for "${req.need}" — awaiting approval`);
+    const { sendPush } = await import("@/lib/push");
+    await sendPush(req.userId, {
+      title: "The shop drafted a plan",
+      body: `"${req.need}" — tap to review and approve.`,
+      url: "/settings",
+    }).catch(() => 0);
   } catch (e) {
     await setStatus(id, {
       status: "failed",
@@ -91,6 +106,11 @@ async function runBuild(id: string): Promise<void> {
   try {
     // 1. Isolated worktree; share node_modules, copy env (gitignored, needed
     //    by tests). The blast radius is this branch until verification passes.
+    //    Idempotent: a stale worktree/branch from a failed run is swept first.
+    if (existsSync(dir)) {
+      await sh("git", ["worktree", "remove", dir, "--force"], REPO).catch(() => {});
+    }
+    await sh("git", ["branch", "-D", branch], REPO).catch(() => {});
     await sh("git", ["worktree", "add", dir, "-b", branch], REPO);
     if (!existsSync(join(dir, "node_modules"))) {
       symlinkSync(join(REPO, "node_modules"), join(dir, "node_modules"), "dir");
@@ -100,14 +120,24 @@ async function runBuild(id: string): Promise<void> {
     }
 
     // 2. The build agent. Skip-permissions is safe HERE ONLY because the
-    //    worktree is disposable and step 3 is the actual gate.
+    //    worktree is disposable and step 3 is the actual gate. The agent's
+    //    EXIT CODE is advisory — a crashed session that left real work behind
+    //    still goes to verification; the gate judges the tree, not the agent.
     log.push("== build agent ==");
-    const { stdout } = await exec(
-      CLAUDE_BIN,
-      ["-p", buildPrompt(req), "--output-format", "text", "--dangerously-skip-permissions"],
-      { cwd: dir, timeout: BUILD_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 }
-    );
-    log.push(stdout.slice(-4000));
+    try {
+      const { stdout } = await exec(
+        CLAUDE_BIN,
+        ["-p", buildPrompt(req), "--output-format", "text", "--dangerously-skip-permissions"],
+        { cwd: dir, timeout: BUILD_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024, env: claudeEnv() }
+      );
+      log.push(stdout.slice(-4000));
+    } catch (e) {
+      log.push(
+        `agent process exited abnormally (continuing — verification decides): ${
+          e instanceof Error ? e.message.split("\n").slice(-3).join(" ").slice(0, 500) : String(e)
+        }`
+      );
+    }
 
     // Sweep any uncommitted work into the branch before judging it.
     const { stdout: dirty } = await sh("git", ["status", "--porcelain"], dir);
@@ -141,10 +171,22 @@ async function runBuild(id: string): Promise<void> {
     await sh("git", ["worktree", "remove", dir, "--force"], REPO);
     await setStatus(id, { status: "shipped", buildLog: log.join("\n") });
     console.log(`shop: SHIPPED "${req.need}" (${branch} merged)`);
+    const { sendPush } = await import("@/lib/push");
+    await sendPush(req.userId, {
+      title: "The shop shipped it",
+      body: `"${req.need}" is live — all tests passed.`,
+      url: "/settings",
+    }).catch(() => 0);
   } catch (e) {
     log.push(`== FAILED ==\n${e instanceof Error ? e.message : String(e)}`);
     await setStatus(id, { status: "failed", buildLog: log.join("\n").slice(-12000) });
     console.error(`shop: build failed for ${id} — branch ${branch} kept for autopsy`);
+    const { sendPush } = await import("@/lib/push");
+    await sendPush(req.userId, {
+      title: "Shop build failed",
+      body: `"${req.need}" didn't pass verification — details in Settings.`,
+      url: "/settings",
+    }).catch(() => 0);
   }
 }
 

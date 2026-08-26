@@ -17,11 +17,12 @@ import {
 import { crossReferenceMentions } from "./entities";
 import { openai, TEXT_MODEL } from "@/lib/openai";
 import {
-  anthropic,
+  anthropicFor,
   brainSettings,
   claudeBrainEnabled,
   type BrainSettings,
 } from "@/lib/anthropic";
+import type Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { findDuplicate, findDuplicateEvent, titleSimilarity } from "./dedupe";
 
@@ -104,10 +105,11 @@ const OPEN_STATUSES = ["inbox", "todo", "in_progress", "blocked"] as const;
  * the caller can fall back to OpenAI.
  */
 async function claudeExtract(
+  client: Anthropic,
   context: string,
   brain: BrainSettings
 ): Promise<{ result: ExtractionResult; inputTokens: number; outputTokens: number; model: string }> {
-  const response = await anthropic().messages.parse({
+  const response = await client.messages.parse({
     model: brain.model,
     max_tokens: 16000,
     system: EXTRACTION_PROMPT,
@@ -137,6 +139,8 @@ export async function extractFromTranscript(opts: {
   projectNames: string[];
   /** Per-user Claude settings; when set (and the flag is on) Claude parses. */
   brain?: BrainSettings;
+  /** Per-user client (connected account or house key) — null skips Claude. */
+  claude?: Anthropic | null;
 }): Promise<{ result: ExtractionResult; inputTokens: number; outputTokens: number; model: string }> {
   const fmt = (d: Date) =>
     new Intl.DateTimeFormat("en-US", {
@@ -163,9 +167,9 @@ export async function extractFromTranscript(opts: {
     opts.transcript,
   ].join("\n");
 
-  if (opts.brain && claudeBrainEnabled()) {
+  if (opts.brain && opts.claude && claudeBrainEnabled()) {
     try {
-      return await claudeExtract(context, opts.brain);
+      return await claudeExtract(opts.claude, context, opts.brain);
     } catch (e) {
       console.error(
         "claude extraction failed, falling back to openai:",
@@ -367,7 +371,8 @@ export async function runExtraction(
   timezone: string
 ): Promise<void> {
   try {
-    if (!process.env.OPENAI_API_KEY && !claudeBrainEnabled()) return;
+    const claude = claudeBrainEnabled() ? await anthropicFor(userId) : null;
+    if (!process.env.OPENAI_API_KEY && !claude) return;
     const [conv] = await db
       .select()
       .from(conversations)
@@ -417,7 +422,8 @@ export async function runExtraction(
       conversationDate: conv.startedAt,
       knownTasks,
       knownEvents,
-      brain: claudeBrainEnabled() ? await brainSettings(userId) : undefined,
+      brain: claude ? await brainSettings(userId) : undefined,
+      claude,
     });
 
     await applyExtraction(userId, conversationId, result);

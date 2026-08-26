@@ -16,6 +16,13 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Secretary",
   description: "A genius secretary you talk to.",
+  // Home-screen install (iOS): apple-touch-icon + standalone web-app meta.
+  icons: { apple: "/apple-touch-icon.png" },
+  appleWebApp: {
+    capable: true,
+    title: "Secretary",
+    statusBarStyle: "default",
+  },
 };
 
 export default async function RootLayout({

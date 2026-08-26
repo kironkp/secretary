@@ -14,7 +14,7 @@ import { openAIToolDefs } from "@/lib/secretary/tool-schemas";
 import { executeTool, type ToolOutcome } from "@/lib/secretary/tools";
 import { runExtraction } from "@/lib/secretary/extraction";
 import { openai, TEXT_MODEL } from "@/lib/openai";
-import { chatProvider, chatSettings, claudeBrainEnabled } from "@/lib/anthropic";
+import { anthropicFor, chatProvider, chatSettings, claudeBrainEnabled } from "@/lib/anthropic";
 import { runClaudeChat } from "@/lib/secretary/chat-claude";
 
 const bodySchema = z.object({
@@ -104,10 +104,15 @@ export async function POST(req: Request) {
     .where(eq(userTable.id, user.id));
   const instructions = buildInstructions(briefing.text, { persona: userRow?.persona });
 
-  // Composer chip: which model answers, at what effort. Claude models need
-  // the brain enabled (key + flag); otherwise quietly run the OpenAI default.
+  // Composer chip: which model answers, at what effort. Claude models need a
+  // key — the user's connected account first, then the house key; without
+  // either the turn quietly runs the OpenAI default.
   const chip = await chatSettings(user.id);
-  const useClaude = chatProvider(chip.model) === "anthropic" && claudeBrainEnabled();
+  const claudeClient =
+    chatProvider(chip.model) === "anthropic" && claudeBrainEnabled()
+      ? await anthropicFor(user.id)
+      : null;
+  const useClaude = Boolean(claudeClient);
   const openAIModel = chatProvider(chip.model) === "openai" ? chip.model : TEXT_MODEL;
   const openAIEffort = chatProvider(chip.model) === "openai" ? chip.effort : undefined;
 
@@ -155,9 +160,10 @@ export async function POST(req: Request) {
   let servedBy = openAIModel;
   let claudeServed = false;
 
-  if (useClaude) {
+  if (useClaude && claudeClient) {
     try {
       const result = await runClaudeChat({
+        client: claudeClient,
         model: chip.model,
         effort: chip.effort,
         instructions,

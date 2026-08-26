@@ -3,7 +3,6 @@
 // chip picks one. Mirrors the /api/chat OpenAI loop; the route falls back to
 // OpenAI if this throws (refusal included) — the chip can never brick chat.
 import type Anthropic from "@anthropic-ai/sdk";
-import { anthropic } from "@/lib/anthropic";
 import { anthropicToolDefs } from "./tool-schemas";
 import type { ToolContext, ToolOutcome } from "./tools";
 
@@ -17,6 +16,8 @@ export type ClaudeChatResult = {
 };
 
 export async function runClaudeChat(opts: {
+  /** Per-user client (connected account or house key). */
+  client: Anthropic;
   model: string;
   effort: string;
   instructions: string;
@@ -63,7 +64,7 @@ export async function runClaudeChat(opts: {
   let outputTokens = 0;
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-    const response = await anthropic().messages.create({
+    const response = await opts.client.messages.create({
       model: opts.model,
       max_tokens: 8000,
       system: opts.instructions,

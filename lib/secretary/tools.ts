@@ -1167,16 +1167,20 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
   // medium — a caller is waiting on the line.
   async consult_brain(ctx, args) {
     const a = toolSchemas.consult_brain.parse(args);
-    const { anthropic, brainSettings, claudeBrainEnabled } = await import("@/lib/anthropic");
-    if (!claudeBrainEnabled()) {
+    const { anthropicFor, brainSettings, claudeBrainEnabled } = await import("@/lib/anthropic");
+    const client = claudeBrainEnabled() ? await anthropicFor(ctx.userId) : null;
+    if (!client) {
       return {
-        result: { unavailable: true, note: "The deep-reasoning brain isn't configured." },
+        result: {
+          unavailable: true,
+          note: "The deep-reasoning brain isn't connected — the user can connect their Claude account in Settings.",
+        },
       };
     }
     const { model } = await brainSettings(ctx.userId);
     const { buildBriefing } = await import("./briefing");
     const briefing = await buildBriefing(ctx.userId, ctx.timezone);
-    const response = await anthropic().messages.create({
+    const response = await client.messages.create({
       model,
       max_tokens: 2000,
       output_config: { effort: "medium" },

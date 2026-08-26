@@ -11,7 +11,8 @@ import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { canvasSnapshots, messages } from "@/lib/db/schema";
 import { openai, PLANNER_MODEL } from "@/lib/openai";
-import { anthropic, brainSettings, claudeBrainEnabled } from "@/lib/anthropic";
+import { anthropicFor, brainSettings, claudeBrainEnabled } from "@/lib/anthropic";
+import type Anthropic from "@anthropic-ai/sdk";
 import { computeSignals } from "@/lib/layout/signals";
 import { sanitizeCanvasMarkup } from "./sanitize";
 
@@ -52,9 +53,9 @@ export const livePainterStream: PainterStream = async function* (systemPrompt, i
  * the canvas is a streaming, latency-sensitive surface. Text deltas only;
  * thinking blocks never reach the markup.
  */
-export function claudePainterStream(model: string): PainterStream {
+export function claudePainterStream(client: Anthropic, model: string): PainterStream {
   return async function* (systemPrompt, input) {
-    const stream = anthropic().messages.stream({
+    const stream = client.messages.stream({
       model,
       max_tokens: 64000,
       system: systemPrompt,
@@ -140,10 +141,11 @@ export async function paintCanvas(
     .values({ userId, brief, markup: "", painting: true })
     .returning();
 
-  const useClaude = !opts.stream && claudeBrainEnabled();
+  const claude = !opts.stream && claudeBrainEnabled() ? await anthropicFor(userId) : null;
+  const useClaude = Boolean(claude);
   const chosen =
     opts.stream ??
-    (useClaude ? claudePainterStream((await brainSettings(userId)).model) : livePainterStream);
+    (claude ? claudePainterStream(claude, (await brainSettings(userId)).model) : livePainterStream);
   let finalRaw = "";
   const run = async (stream: PainterStream) => {
     let lastFlush = 0;

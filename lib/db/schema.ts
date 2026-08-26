@@ -424,6 +424,48 @@ export const wishlist = pgTable("wishlist", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// Per-user model-provider connections: the SITE login is better-auth (above);
+// this is the "connect your Claude account once inside" layer. Keys are
+// AES-256-GCM encrypted at rest (lib/crypto.ts); only the tail is readable.
+// Brain features resolve the user's key first, then the house .env key.
+export const connectedAccounts = pgTable("connected_accounts", {
+  id: text("id").primaryKey().$defaultFn(uuid),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  provider: text("provider").$type<"anthropic" | "openai">().notNull(),
+  encryptedKey: text("encrypted_key").notNull(),
+  // last 4 chars, for "Connected ····x7Ab" display — never the key itself
+  keyTail: text("key_tail").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Web Push (installed PWA): one row per enabled device. Dead endpoints
+// (404/410 from the push service) are pruned on send — the table self-cleans.
+export const pushSubscriptions = pgTable("push_subscriptions", {
+  id: text("id").primaryKey().$defaultFn(uuid),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  endpoint: text("endpoint").notNull().unique(),
+  p256dh: text("p256dh").notNull(),
+  auth: text("auth").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Once-only guarantee for scheduled pushes: the scanner claims a key
+// (e.g. "task:<id>:<reminder-iso>") before sending; a unique violation means
+// another pass already took it.
+export const pushLog = pgTable("push_log", {
+  id: text("id").primaryKey().$defaultFn(uuid),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  key: text("key").notNull().unique(),
+  sentAt: timestamp("sent_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // The Shop (self-improvement loop): "I can't do that" files a request here;
 // headless Claude Code drafts a plan (plan-mode, read-only), the user approves
 // in chat/voice/Settings, and a worktree build lands ONLY after the runner
