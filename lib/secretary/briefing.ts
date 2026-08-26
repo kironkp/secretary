@@ -488,6 +488,40 @@ export async function buildBriefing(
     );
   }
 
+  // The Shop (self-improvement loop): plans awaiting the user's sign-off, and
+  // outcomes since roughly the last day — the "it shipped overnight" moment.
+  const { capabilityRequests } = await import("@/lib/db/schema");
+  const shopRows = await db
+    .select()
+    .from(capabilityRequests)
+    .where(eq(capabilityRequests.userId, userId));
+  const awaiting = shopRows.filter((r) => r.status === "planned");
+  const recent = shopRows.filter(
+    (r) =>
+      (r.status === "shipped" || r.status === "failed") &&
+      now.getTime() - r.updatedAt.getTime() < 36 * 60 * 60 * 1000
+  );
+  if (awaiting.length) {
+    lines.push(
+      "",
+      "SHOP — plans awaiting the user's decision (approve/reject via review_capability; the plan text is in Settings):"
+    );
+    for (const r of awaiting) lines.push(`- "${r.need}"`);
+    lines.push(
+      "Mention ONE at a natural pause: the shop drafted a plan for it — want it built? Approved builds land automatically once tests pass."
+    );
+  }
+  if (recent.length) {
+    lines.push("", "SHOP — recent outcomes (mention briefly if relevant):");
+    for (const r of recent) {
+      lines.push(
+        r.status === "shipped"
+          ? `- SHIPPED: "${r.need}" — the ability now exists; use it.`
+          : `- FAILED: "${r.need}" — the build didn't pass verification; the user can re-file or check Settings.`
+      );
+    }
+  }
+
   // Morning layout note (SPEC §9 Phase 2): if the dashboard was rearranged,
   // the secretary knows why and can say so — or change it on request.
   const planHead = await getPlanHead(userId);

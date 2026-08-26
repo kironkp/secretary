@@ -12,6 +12,7 @@ import { SassSlider } from "@/components/settings/sass-slider";
 import { VoicePicker } from "@/components/settings/voice-picker";
 import { layoutPreferences } from "@/lib/db/schema";
 import { PasskeySection } from "@/components/settings/passkey-section";
+import { ShopRequests } from "@/components/settings/shop-requests";
 import { TimezoneForm } from "@/components/settings/timezone-form";
 import { SignOutButton } from "@/components/settings/sign-out-button";
 import { AppearancePicker } from "@/components/shell/theme";
@@ -100,6 +101,16 @@ export default async function SettingsPage() {
           Proposed components
         </h3>
         <ProposalReview />
+      </section>
+
+      <section className="rounded-xl border border-edge bg-surface p-5">
+        <h2 className="mb-1 text-sm font-bold">The Shop</h2>
+        <p className="mb-4 text-xs text-muted">
+          When the secretary can&rsquo;t do something, it files the missing ability here.
+          Claude Code drafts a plan; you approve; the build lands automatically once the
+          full test suite passes. Every shipped change is one revert away.
+        </p>
+        <ShopRequests />
       </section>
 
       <section className="rounded-xl border border-edge bg-surface p-5">

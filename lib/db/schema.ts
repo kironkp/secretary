@@ -424,6 +424,31 @@ export const wishlist = pgTable("wishlist", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// The Shop (self-improvement loop): "I can't do that" files a request here;
+// headless Claude Code drafts a plan (plan-mode, read-only), the user approves
+// in chat/voice/Settings, and a worktree build lands ONLY after the runner
+// itself re-runs tsc + lint + tests. Approval is the single human step.
+export const capabilityRequests = pgTable("capability_requests", {
+  id: text("id").primaryKey().$defaultFn(uuid),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  need: text("need").notNull(),
+  context: text("context"),
+  status: text("status")
+    .$type<
+      "filed" | "planning" | "planned" | "approved" | "building" | "shipped" | "failed" | "rejected"
+    >()
+    .notNull()
+    .default("filed"),
+  plan: text("plan"),
+  branch: text("branch"),
+  buildLog: text("build_log"),
+  conversationId: text("conversation_id"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // Approved slow-loop components (SPEC v1.3): declarative templates rendered
 // through the canvas sanitizer with {{signals.*}} interpolation. Inserting a
 // row IS hot-registration — registryVersion is monotonic; the runtime never

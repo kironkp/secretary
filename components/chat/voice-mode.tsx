@@ -110,6 +110,15 @@ export function VoiceMode({
     onTranscript?.(session.transcript);
   }, [session.transcript, onTranscript]);
   const [showTranscript, setShowTranscript] = useState(false);
+  // Live transcript follows the conversation — but only when already pinned
+  // near the bottom, so scrolling up to reread isn't fought.
+  const transcriptRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = transcriptRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    if (nearBottom) el.scrollTop = el.scrollHeight;
+  }, [session.transcript]);
   // Mobile lifelines: shrink the overlay to a floating pill (the page behind
   // becomes usable), or swap the orb for the live canvas without leaving the
   // call — navigating away would unmount the session.
@@ -621,7 +630,10 @@ export function VoiceMode({
 
       {/* Transcript panel */}
       {showTranscript && (
-        <div className="max-h-56 overflow-y-auto border-t border-edge bg-surface px-4 py-3 text-sm">
+        <div
+          ref={transcriptRef}
+          className="max-h-56 overflow-y-auto border-t border-edge bg-surface px-4 py-3 text-sm"
+        >
           {session.transcript.length === 0 && (
             <p className="text-xs text-faint">Transcript will appear here.</p>
           )}

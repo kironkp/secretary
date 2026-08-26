@@ -391,6 +391,20 @@ export const toolSchemas = {
       .optional()
       .describe("Anything from this conversation the brain needs to answer well"),
   }),
+  request_capability: z.object({
+    need: z
+      .string()
+      .min(1)
+      .describe("What the app should be able to do, stated as the user's need — not a technical spec"),
+    context: z
+      .string()
+      .optional()
+      .describe("Verbatim-ish conversation context: what the user asked and why it matters"),
+  }),
+  review_capability: z.object({
+    request: z.string().min(1).describe("The request's need (or a distinctive fragment of it)"),
+    decision: z.enum(["approve", "reject"]),
+  }),
 } as const;
 
 export type ToolName = keyof typeof toolSchemas;
@@ -469,6 +483,10 @@ const toolDescriptions: Record<ToolName, string> = {
     "Store a durable layout preference: ban_component ('stop showing me people' → component: people_index), pin_section (freeze a section), default_variant_for (a project always compact/full/nested), accent_policy: never ('I hate the glowing ring'). remove: true deletes it. Enforced on every future plan until removed in Settings.",
   consult_brain:
     "Ask the deep-reasoning brain (Claude) a question that needs genuine analysis — tricky planning, weighing tradeoffs, drafting something hard, math beyond arithmetic. NOT for quick recall or anything your other tools already answer. On a call: say a brief 'give me a second' first, then relay the answer in your own words and register. Takes a few seconds.",
+  request_capability:
+    "You lack a tool or ability the user needs ('I can't store that', 'no tool for X', 'I can't do that here'): NEVER dead-end — file this in the SAME turn. The shop (Claude Code on the user's machine) drafts an implementation plan for the user to approve; approved builds land in the app automatically, fully tested. Say: 'I can't do that yet — sent it to the shop; you'll get a plan to approve.' NOT for things your existing tools already handle.",
+  review_capability:
+    "The user decided on a shop request ('yes build it', 'approve the reporting one', 'no, skip that'). approve = the build starts now, lands automatically once tests pass. reject = closed, never re-proposed. Your briefing lists requests awaiting decision.",
 };
 
 /** OpenAI tool definitions (same flat shape works for Realtime and Responses). */
@@ -503,6 +521,9 @@ export const VOICE_TOOL_NAMES = [
   "resolve_clarification",
   // the Siri-asks-ChatGPT move: the mouth phones the Claude brain on demand
   "consult_brain",
+  // the upward cycle: "I can't do that" files a shop request instead of dying
+  "request_capability",
+  "review_capability",
 ] as const satisfies readonly ToolName[];
 
 export function openAIVoiceToolDefs() {

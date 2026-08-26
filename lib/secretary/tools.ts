@@ -1213,6 +1213,52 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     return { result: { answer }, toast: { icon: "◆", text: "Consulted the brain" } };
   },
 
+  // The upward cycle: a missing ability becomes a shop request. Plan-mode
+  // Claude Code drafts, the user approves, a verified build lands. This tool
+  // is why "I can't do that" is never the end of the sentence.
+  async request_capability(ctx, args) {
+    const a = toolSchemas.request_capability.parse(args);
+    const { fileRequest } = await import("@/lib/shop/shop");
+    const res = await fileRequest(ctx.userId, a.need, a.context, ctx.conversationId);
+    return {
+      result: {
+        request_id: res.id,
+        status: res.status,
+        already_filed: res.deduped,
+        note: res.deduped
+          ? `Already in the shop (${res.status}).`
+          : res.queued
+            ? "Filed — the shop is mid-job; this one is next in line."
+            : "Filed — the shop is drafting a plan now. The user approves it in a later session or in Settings.",
+      },
+      toast: { icon: "▣", text: res.deduped ? "Already in the shop" : `Sent to the shop: ${a.need.slice(0, 60)}` },
+    };
+  },
+
+  async review_capability(ctx, args) {
+    const a = toolSchemas.review_capability.parse(args);
+    const { approveRequest, findRequest, rejectRequest } = await import("@/lib/shop/shop");
+    const req = await findRequest(ctx.userId, a.request);
+    if (!req) return { result: { error: `No shop request matching "${a.request}"` } };
+    if (a.decision === "reject") {
+      await rejectRequest(ctx.userId, req.id);
+      return {
+        result: { rejected: true, need: req.need },
+        toast: { icon: "✓", text: "Shop request closed" },
+      };
+    }
+    const res = await approveRequest(ctx.userId, req.id);
+    if (!res.ok) return { result: { error: res.error } };
+    return {
+      result: {
+        approved: true,
+        need: req.need,
+        note: "Build started — it lands automatically once the test suite passes (typically 15-40 minutes).",
+      },
+      toast: { icon: "▣", text: `Building: ${req.need.slice(0, 60)}` },
+    };
+  },
+
   async search_history(ctx, args) {
     const a = toolSchemas.search_history.parse(args);
     const rows = await db
