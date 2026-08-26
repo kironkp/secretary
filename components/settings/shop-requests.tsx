@@ -12,10 +12,15 @@ type ShopRequest = {
   status: string;
   plan: string | null;
   feedback: string | null;
+  buildModel: string | null;
+  buildEffort: string | null;
+  ultracode: boolean;
   branch: string | null;
   buildLog: string | null;
   updatedAt: string;
 };
+
+type Prefs = { model: string; effort: string; ultracode: boolean };
 
 const STATUS_TONE: Record<string, string> = {
   filed: "text-muted",
@@ -37,6 +42,19 @@ export function ShopRequests() {
   const [notice, setNotice] = useState<{ id: string; text: string; tone: "ok" | "err" } | null>(null);
   const [feedbackFor, setFeedbackFor] = useState<string | null>(null);
   const [feedbackText, setFeedbackText] = useState("");
+  // Approve-time build preferences, PER REQUEST (review finding: a single
+  // shared state bled one card's choices into the next approval). Seeded from
+  // the row's stored prefs so a revise round shows what it will actually run
+  // with — the same values the chat-door approve keeps.
+  const [prefsById, setPrefsById] = useState<Record<string, Prefs>>({});
+  const prefsFor = (r: ShopRequest): Prefs =>
+    prefsById[r.id] ?? {
+      model: r.buildModel ?? "",
+      effort: r.buildEffort ?? "",
+      ultracode: r.ultracode ?? true,
+    };
+  const setPref = (r: ShopRequest, patch: Partial<Prefs>) =>
+    setPrefsById((m) => ({ ...m, [r.id]: { ...prefsFor(r), ...patch } }));
 
   const load = async () => {
     const res = await fetch("/api/shop");
@@ -52,13 +70,26 @@ export function ShopRequests() {
     };
   }, []);
 
-  const act = async (id: string, action: "approve" | "reject" | "feedback", feedback?: string) => {
+  const act = async (
+    r: ShopRequest,
+    action: "approve" | "reject" | "feedback",
+    feedback?: string
+  ) => {
+    const id = r.id;
+    const p = prefsFor(r);
     setBusy(true);
     setNotice(null);
     const res = await fetch("/api/shop", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, action, feedback }),
+      body: JSON.stringify({
+        id,
+        action,
+        feedback,
+        ...(action === "approve"
+          ? { model: p.model, effort: p.effort, ultracode: p.ultracode }
+          : {}),
+      }),
     });
     const body = (await res.json().catch(() => ({}))) as { error?: string; queued?: boolean };
     setBusy(false);
@@ -138,8 +169,43 @@ export function ShopRequests() {
               )}
               {r.status === "planned" && (
                 <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    value={prefsFor(r).model}
+                    onChange={(e) => setPref(r, { model: e.target.value })}
+                    title="Build model"
+                    aria-label="Build model"
+                    className="rounded-full border border-edge bg-surface px-2.5 py-1.5 text-xs text-muted outline-none focus:border-accent"
+                  >
+                    <option value="">Machine default</option>
+                    <option value="fable">Fable 5</option>
+                    <option value="opus">Opus 5</option>
+                    <option value="sonnet">Sonnet 5</option>
+                  </select>
+                  <select
+                    value={prefsFor(r).effort}
+                    onChange={(e) => setPref(r, { effort: e.target.value })}
+                    title="Build effort"
+                    aria-label="Build effort"
+                    className="rounded-full border border-edge bg-surface px-2.5 py-1.5 text-xs text-muted outline-none focus:border-accent"
+                  >
+                    <option value="">Default effort</option>
+                    <option value="max">max</option>
+                    <option value="xhigh">xhigh</option>
+                    <option value="high">high</option>
+                    <option value="medium">medium</option>
+                    <option value="low">low</option>
+                  </select>
+                  <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted">
+                    <input
+                      type="checkbox"
+                      checked={prefsFor(r).ultracode}
+                      onChange={(e) => setPref(r, { ultracode: e.target.checked })}
+                      className="accent-accent"
+                    />
+                    ultracode
+                  </label>
                   <button
-                    onClick={() => void act(r.id, "approve")}
+                    onClick={() => void act(r, "approve")}
                     disabled={busy}
                     className="rounded-full bg-accent px-4 py-1.5 text-xs font-bold text-bg disabled:opacity-50"
                   >
@@ -156,7 +222,7 @@ export function ShopRequests() {
                     Give feedback
                   </button>
                   <button
-                    onClick={() => void act(r.id, "reject")}
+                    onClick={() => void act(r, "reject")}
                     disabled={busy}
                     className="rounded-full border border-edge px-4 py-1.5 text-xs text-muted hover:text-ink disabled:opacity-50"
                   >
@@ -174,7 +240,7 @@ export function ShopRequests() {
                     className="w-full resize-none rounded-lg border border-edge bg-surface px-2.5 py-2 text-xs outline-none focus:border-accent"
                   />
                   <button
-                    onClick={() => void act(r.id, "feedback", feedbackText)}
+                    onClick={() => void act(r, "feedback", feedbackText)}
                     disabled={busy || !feedbackText.trim()}
                     className="self-start rounded-full bg-accent px-4 py-1.5 text-xs font-bold text-bg disabled:opacity-50"
                   >

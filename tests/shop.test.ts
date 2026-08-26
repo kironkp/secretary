@@ -69,7 +69,8 @@ describe("the approval gate", () => {
     expect(res.ok).toBe(true);
     if (res.ok) expect(typeof res.queued).toBe("boolean");
     const after = await findRequest(U.id, "reporting preferences");
-    expect(after!.status).toBe("approved");
+    // free lane → atomically claimed to building; busy lane → parked approved
+    expect(["approved", "building"]).toContain(after!.status);
   });
 
   it("kickQueue claims an approved build first when the lane is clear", async () => {
@@ -122,8 +123,65 @@ describe("prompts carry the guardrails", () => {
     const p = buildPrompt({ need: "Do X", plan: "the plan" });
     expect(p).toContain("NEVER touch lib/auth.ts, .env.local");
     expect(p).toContain("npx tsc --noEmit && npm run lint && npm test");
+    expect(p).toContain("ADDITIVE ONLY");
     expect(p).toContain("Shop: ");
     expect(p).toContain("the plan");
+  });
+
+  it("ultracode leads the build prompt when chosen; absent otherwise", () => {
+    expect(buildPrompt({ need: "X", plan: "p", ultracode: true }).startsWith("ultracode\n")).toBe(true);
+    expect(buildPrompt({ need: "X", plan: "p" })).not.toContain("ultracode");
+  });
+
+  it("approve stores per-request build prefs; bogus values are refused", async () => {
+    const req = await findRequest(U.id, "reporting preferences");
+    await db
+      .update(capabilityRequests)
+      .set({ status: "planned" })
+      .where(eq(capabilityRequests.id, req!.id));
+    const bad = await approveRequest(U.id, req!.id, U.id, { model: "gpt-9" });
+    expect(bad.ok).toBe(false);
+    const res = await approveRequest(U.id, req!.id, U.id, {
+      model: "opus",
+      effort: "max",
+      ultracode: false,
+    });
+    expect(res.ok).toBe(true);
+    const after = await findRequest(U.id, "reporting preferences");
+    expect(after!.buildModel).toBe("opus");
+    expect(after!.buildEffort).toBe("max");
+    expect(after!.ultracode).toBe(false);
+  });
+
+  it("double approval loses: the status-guarded write refuses an already-handled request", async () => {
+    const req = await findRequest(U.id, "reporting preferences");
+    // previous test left it approved→building (free lane claims immediately)
+    const second = await approveRequest(U.id, req!.id, U.id, { model: "sonnet" });
+    expect(second.ok).toBe(false);
+    const after = await findRequest(U.id, "reporting preferences");
+    expect(after!.buildModel).toBe("opus"); // first approval's prefs untouched
+  });
+
+  it('""-means-default contract: empty prefs store NULL, and NULL emits no CLI flags', async () => {
+    const filed = await fileRequest(U.id, "Colorize the timeline", undefined, undefined, U.id);
+    await db
+      .update(capabilityRequests)
+      .set({ status: "planned" })
+      .where(eq(capabilityRequests.id, filed.id));
+    const res = await approveRequest(U.id, filed.id, U.id, { model: "", effort: "", ultracode: true });
+    expect(res.ok).toBe(true);
+    const [row] = await db
+      .select()
+      .from(capabilityRequests)
+      .where(eq(capabilityRequests.id, filed.id));
+    expect(row.buildModel).toBeNull();
+    expect(row.buildEffort).toBeNull();
+    // the runner's flag builder pattern: null → no flag entries
+    const flags = [
+      ...(row.buildModel ? ["--model", row.buildModel] : []),
+      ...(row.buildEffort ? ["--effort", row.buildEffort] : []),
+    ];
+    expect(flags).toEqual([]);
   });
 
   it("slug is filesystem/branch-safe", () => {

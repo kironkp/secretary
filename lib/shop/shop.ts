@@ -99,10 +99,23 @@ export async function fileRequest(
  * lane: the request becomes `approved` and BUILDS AS SOON AS THE LANE CLEARS
  * (runner chain + the minute sweeper below). Immediate spawn when free.
  */
+export const BUILD_MODELS = ["", "fable", "opus", "sonnet"] as const; // "" = machine default
+export const BUILD_EFFORTS = ["", "low", "medium", "high", "xhigh", "max"] as const;
+
+export type BuildPrefs = {
+  /** CLI model alias; "" / undefined = the machine's Claude Code default. */
+  model?: string;
+  /** CLI effort level; "" / undefined = default (xhigh). */
+  effort?: string;
+  /** Prepend the ultracode orchestration keyword to the build prompt. */
+  ultracode?: boolean;
+};
+
 export async function approveRequest(
   userId: string,
   id: string,
-  laneScope?: string
+  laneScope?: string,
+  prefs?: BuildPrefs
 ): Promise<{ ok: true; queued: boolean } | { ok: false; error: string }> {
   const [row] = await db
     .select()
@@ -113,13 +126,38 @@ export async function approveRequest(
   if (row.status !== "planned") {
     return { ok: false, error: `Request is ${row.status} — only a planned request can be approved` };
   }
-  await db
+  if (prefs?.model && !BUILD_MODELS.includes(prefs.model as (typeof BUILD_MODELS)[number])) {
+    return { ok: false, error: "Unknown build model" };
+  }
+  if (prefs?.effort && !BUILD_EFFORTS.includes(prefs.effort as (typeof BUILD_EFFORTS)[number])) {
+    return { ok: false, error: "Unknown build effort" };
+  }
+  // Status-guarded write: the earlier SELECT is a stale snapshot; guarding the
+  // UPDATE itself means two doors (Settings + chat) can't double-approve.
+  const [approved] = await db
     .update(capabilityRequests)
-    .set({ status: "approved", updatedAt: new Date() })
-    .where(eq(capabilityRequests.id, id));
+    .set({
+      status: "approved",
+      updatedAt: new Date(),
+      ...(prefs?.model !== undefined ? { buildModel: prefs.model || null } : {}),
+      ...(prefs?.effort !== undefined ? { buildEffort: prefs.effort || null } : {}),
+      ...(prefs?.ultracode !== undefined ? { ultracode: prefs.ultracode } : {}),
+    })
+    .where(and(eq(capabilityRequests.id, id), eq(capabilityRequests.status, "planned")))
+    .returning({ id: capabilityRequests.id });
+  if (!approved) return { ok: false, error: "Request was already handled" };
   if (await laneBusy(laneScope)) return { ok: true, queued: true };
-  spawnRunner(["--build", id]);
-  return { ok: true, queued: false };
+  // Atomic claim before spawning: without flipping to `building` here, the
+  // status sits at `approved` (not in-flight) during the runner's multi-second
+  // npx startup — long enough for the minute sweeper to claim it too and
+  // double-build. Whoever wins this UPDATE owns the spawn.
+  const [claimed] = await db
+    .update(capabilityRequests)
+    .set({ status: "building", updatedAt: new Date() })
+    .where(and(eq(capabilityRequests.id, id), eq(capabilityRequests.status, "approved")))
+    .returning({ id: capabilityRequests.id });
+  if (claimed) spawnRunner(["--build", id]);
+  return { ok: true, queued: !claimed };
 }
 
 /**
@@ -263,14 +301,22 @@ export function planPrompt(req: {
   ].join("\n");
 }
 
-export function buildPrompt(req: { need: string; plan: string | null }): string {
+export function buildPrompt(req: {
+  need: string;
+  plan: string | null;
+  ultracode?: boolean;
+}): string {
   return [
+    // The orchestration keyword must LEAD the prompt to opt the session in.
+    ...(req.ultracode ? ["ultracode", ""] : []),
     "Implement the following approved plan in this repo (the secretary app). You are in an isolated",
     "git worktree on your own branch — work freely, but these are HARD constraints:",
     "- NEVER touch lib/auth.ts, .env.local, or scripts/sync-to-heroku.mjs.",
     "- Follow CLAUDE.md and docs/adaptive-ui/SPEC.md. Reuse existing patterns; match the codebase's idiom.",
     "- Add or extend tests for what you build (tests/ uses the real local Postgres — follow existing suites).",
-    "- If the schema changes, run: npx drizzle-kit push",
+    "- If the schema changes, run: npx drizzle-kit push. Schema changes must be ADDITIVE ONLY —",
+    "  new tables/columns/indexes; never rename, drop, or retype anything existing. The push hits a",
+    "  shared dev database: if your build fails to merge, non-additive changes strand or destroy data.",
     "- Before finishing: npx tsc --noEmit && npm run lint && npm test — fix anything red.",
     "- Commit ALL your work with message starting `Shop: ` (the runner independently re-verifies; an",
     "  uncommitted or red-tested worktree is a failed build).",

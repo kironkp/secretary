@@ -498,6 +498,13 @@ export const capabilityRequests = pgTable("capability_requests", {
   // rounds); a request with feedback re-enters planning with the old plan +
   // feedback in the prompt.
   feedback: text("feedback"),
+  // Per-request build preferences (set at approve time; null = the machine's
+  // Claude Code defaults). buildModel is a CLI alias/name ("fable", "opus",
+  // "sonnet"); ultracode prepends the orchestration keyword to the build
+  // prompt — the user's usual mode, so it defaults on.
+  buildModel: text("build_model"),
+  buildEffort: text("build_effort"),
+  ultracode: boolean("ultracode").notNull().default(true),
   branch: text("branch"),
   buildLog: text("build_log"),
   conversationId: text("conversation_id"),

@@ -16,6 +16,9 @@ export async function GET() {
       status: r.status,
       plan: r.plan,
       feedback: r.feedback,
+      buildModel: r.buildModel,
+      buildEffort: r.buildEffort,
+      ultracode: r.ultracode,
       branch: r.branch,
       buildLog: r.status === "failed" ? r.buildLog : null,
       createdAt: r.createdAt,
@@ -28,6 +31,10 @@ const bodySchema = z.object({
   id: z.string().min(1),
   action: z.enum(["approve", "reject", "feedback"]),
   feedback: z.string().max(4000).optional(),
+  // Approve-time build preferences ("" = machine default)
+  model: z.enum(["", "fable", "opus", "sonnet"]).optional(),
+  effort: z.enum(["", "low", "medium", "high", "xhigh", "max"]).optional(),
+  ultracode: z.boolean().optional(),
 });
 
 export async function POST(req: Request) {
@@ -51,7 +58,11 @@ export async function POST(req: Request) {
       ? NextResponse.json({ ok: true })
       : NextResponse.json({ error: res.error }, { status: 400 });
   }
-  const res = await approveRequest(user.id, parsed.id);
+  const res = await approveRequest(user.id, parsed.id, undefined, {
+    model: parsed.model,
+    effort: parsed.effort,
+    ultracode: parsed.ultracode,
+  });
   return res.ok
     ? NextResponse.json({ ok: true, queued: res.queued })
     : NextResponse.json({ error: res.error }, { status: 400 });

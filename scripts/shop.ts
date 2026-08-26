@@ -60,7 +60,17 @@ async function runPlan(id: string): Promise<void> {
   try {
     const { stdout } = await exec(
       CLAUDE_BIN,
-      ["-p", planPrompt(req), "--output-format", "text", "--permission-mode", "plan"],
+      [
+        "-p",
+        planPrompt(req),
+        "--output-format",
+        "text",
+        "--permission-mode",
+        "plan",
+        // Replans after feedback honor the request's chosen model/effort.
+        ...(req.buildModel ? ["--model", req.buildModel] : []),
+        ...(req.buildEffort ? ["--effort", req.buildEffort] : []),
+      ],
       { cwd: REPO, timeout: PLAN_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024, env: claudeEnv() }
     );
     const plan = stdout.trim();
@@ -118,11 +128,26 @@ async function runBuild(id: string): Promise<void> {
     //    worktree is disposable and step 3 is the actual gate. The agent's
     //    EXIT CODE is advisory — a crashed session that left real work behind
     //    still goes to verification; the gate judges the tree, not the agent.
-    log.push("== build agent ==");
+    //    Per-request prefs: --model/--effort when chosen at approve time;
+    //    ultracode rides the prompt itself (buildPrompt).
+    const prefFlags = [
+      ...(req.buildModel ? ["--model", req.buildModel] : []),
+      ...(req.buildEffort ? ["--effort", req.buildEffort] : []),
+    ];
+    log.push(
+      `== build agent (${req.buildModel || "default model"} @ ${req.buildEffort || "default effort"}${req.ultracode ? " · ultracode" : ""}) ==`
+    );
     try {
       const { stdout } = await exec(
         CLAUDE_BIN,
-        ["-p", buildPrompt(req), "--output-format", "text", "--dangerously-skip-permissions"],
+        [
+          "-p",
+          buildPrompt(req),
+          "--output-format",
+          "text",
+          "--dangerously-skip-permissions",
+          ...prefFlags,
+        ],
         { cwd: dir, timeout: BUILD_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024, env: claudeEnv() }
       );
       log.push(stdout.slice(-4000));
@@ -158,6 +183,12 @@ async function runBuild(id: string): Promise<void> {
           `main moved during the build and conflicts with it — branch ${branch} kept, merge manually. ${e instanceof Error ? e.message.split("\n")[0] : ""}`
         );
       }
+      // Schema heal (review finding): the agent's own `drizzle-kit push` ran
+      // against ITS snapshot of schema.ts — reconciling the shared dev DB to a
+      // stale tree can drop columns main added meanwhile. Re-push the MERGED
+      // schema so the DB matches what actually lands.
+      log.push("== schema: push merged ==");
+      await sh("npx", ["drizzle-kit", "push"], dir);
       log.push("== verify: tsc ==");
       await sh("npx", ["tsc", "--noEmit"], dir);
       log.push("== verify: lint ==");
