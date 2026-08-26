@@ -480,7 +480,15 @@ claude.ai session used as a fixture (docs/adaptive-ui/transcript-2026-08-18).
   `consult_brain`, `request_capability`, `review_capability`, and
   `remember_fact` — an explicitly *stated* fact is fast-path capture: one
   insert, no entity resolution; the extractor stays the safety net for
-  *inferred* facts). The extractor (brain) runs async 2–5s behind each
+  *inferred* facts). `log_status` carries a `dropped` signal: "that
+  shouldn't be a task" / "forget that one" removes the item from the
+  checklist on the spot (status → dropped, audit check-in, "✕ Dropped:"
+  toast) and it can be reinstated just by asking (status back to todo).
+  When the drop states a durable rule ("never make Caltrans checks a
+  task"), the mouth pairs it with `remember_fact` in the SAME turn — the
+  same idiom as stated-fact capture; the extractor's own `dropped` signal
+  stays the safety net, and its dedupe never resurrects a dropped task.
+  The extractor (brain) runs async 2–5s behind each
   utterance, writes the store, and injects clarifications back for the next
   pause. The store is the only truth; a dead voice session loses nothing.
 - **capture never depends on external apps**: the store is the system of

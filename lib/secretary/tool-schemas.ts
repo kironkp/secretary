@@ -210,7 +210,7 @@ export const toolSchemas = {
   // carries; everything heavier belongs to the async extractor and text chat. ---
   log_status: z.object({
     task: z.string().min(1).describe("Task id or a distinctive title fragment"),
-    signal: z.enum(["done", "started", "postponed", "blocked", "progress"]),
+    signal: z.enum(["done", "started", "postponed", "blocked", "progress", "dropped"]),
     new_due_at: z.string().optional().describe("If postponed: the new date, ISO 8601"),
     note: z.string().optional().describe("What the user said, briefly"),
   }),
@@ -458,7 +458,7 @@ const toolDescriptions: Record<ToolName, string> = {
   edit_layout_plan:
     "Rearrange the user's dashboard NOW: move/remove/add sections or change their props (variant, expanded, accent). User-initiated changes apply immediately. For 'never show X again' use set_layout_preference instead.",
   log_status:
-    "Voice: the user reported where something stands ('updated it this morning', 'pushing that to Friday'). One call PER ITEM — a list spoken in one breath is several calls in the same turn, blocked items included (put the blocker in the note). The store is the only truth; log it the moment you hear it.",
+    "Voice: the user reported where something stands ('updated it this morning', 'pushing that to Friday'). One call PER ITEM — a list spoken in one breath is several calls in the same turn, blocked items included (put the blocker in the note). 'That shouldn't be a task' / 'forget that one' / 'take it off the list' → signal dropped: removes it from the checklist on the spot (reinstatable by asking). Drop ONLY the exact task the user named — when unsure which one they mean, ask first. If the drop states a standing rule ('never make Caltrans checks a task'), ALSO call remember_fact in the SAME turn. The store is the only truth; log it the moment you hear it.",
   create_commitment:
     "Voice: the user took something on. Log it immediately with any stated deadline and stakes ('so I don't get a strike'). Several items mentioned together = several calls in the same turn. Never wait to be asked.",
   schedule_checkin:
