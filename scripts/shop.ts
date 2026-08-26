@@ -143,25 +143,41 @@ async function runBuild(id: string): Promise<void> {
     const { stdout: commits } = await sh("git", ["rev-list", "--count", `main..${branch}`], dir);
     if (Number(commits.trim()) === 0) throw new Error("build produced no commits");
 
-    // 3. Runner-owned verification — the agent's claims count for nothing.
-    log.push("== verify: tsc ==");
-    await sh("npx", ["tsc", "--noEmit"], dir);
-    log.push("clean");
-    log.push("== verify: lint ==");
-    await sh("npm", ["run", "lint"], dir);
-    log.push("clean");
-    log.push("== verify: tests ==");
-    const { stdout: testOut } = await sh("npm", ["test"], dir, VERIFY_TIMEOUT_MS);
-    log.push(testOut.slice(-1500));
+    // 3+4. Sync → verify → land, with ONE retry if main moves mid-verify.
+    // Main is a live working repo (the owner develops in parallel) — the
+    // 10:39 failure was a green build that conflicted at landing time because
+    // main had advanced during the build. Syncing BEFORE verification means
+    // we verify the exact tree that will land.
+    for (let attempt = 1; ; attempt++) {
+      log.push(`== sync with main (attempt ${attempt}) ==`);
+      try {
+        await sh("git", ["merge", "main", "-m", `sync ${branch} with main`], dir);
+      } catch (e) {
+        await sh("git", ["merge", "--abort"], dir).catch(() => {});
+        throw new Error(
+          `main moved during the build and conflicts with it — branch ${branch} kept, merge manually. ${e instanceof Error ? e.message.split("\n")[0] : ""}`
+        );
+      }
+      log.push("== verify: tsc ==");
+      await sh("npx", ["tsc", "--noEmit"], dir);
+      log.push("== verify: lint ==");
+      await sh("npm", ["run", "lint"], dir);
+      log.push("== verify: tests ==");
+      const { stdout: testOut } = await sh("npm", ["test"], dir, VERIFY_TIMEOUT_MS);
+      log.push(testOut.slice(-1200));
 
-    // 4. Green — land it. A conflict keeps the branch and reports honestly.
-    try {
-      await sh("git", ["merge", "--no-ff", branch, "-m", `Shop: ${req.need}`], REPO);
-    } catch (e) {
-      await sh("git", ["merge", "--abort"], REPO).catch(() => {});
-      throw new Error(
-        `built GREEN but merge conflicted — branch ${branch} kept, merge manually. ${e instanceof Error ? e.message : ""}`
-      );
+      try {
+        await sh("git", ["merge", "--no-ff", branch, "-m", `Shop: ${req.need}`], REPO);
+        break; // landed
+      } catch (e) {
+        await sh("git", ["merge", "--abort"], REPO).catch(() => {});
+        if (attempt >= 2) {
+          throw new Error(
+            `built GREEN but landing conflicted twice — branch ${branch} kept, merge manually. ${e instanceof Error ? e.message.split("\n")[0] : ""}`
+          );
+        }
+        log.push("main moved during verification — resyncing once");
+      }
     }
     await sh("git", ["worktree", "remove", dir, "--force"], REPO);
     await setStatus(id, { status: "shipped", buildLog: log.join("\n") });
