@@ -37,6 +37,16 @@ describe("fast/slow split: the mouth is thin", () => {
     }
     expect(names).toContain("paint_canvas"); // the voice's hands for anything visual
     expect(names).toContain("consult_brain"); // …and its phone-a-friend for hard questions
+    expect(names).toContain("search_history"); // cross-session recall on demand (SPEC §11)
+  });
+
+  it("voice search_history carries the time filters for 'what did I say last week?'", () => {
+    const def = openAIVoiceToolDefs().find((t) => t.name === "search_history");
+    expect(def).toBeTruthy();
+    const props = (def?.parameters as { properties?: Record<string, unknown> }).properties ?? {};
+    expect(props).toHaveProperty("query");
+    expect(props).toHaveProperty("after");
+    expect(props).toHaveProperty("before");
   });
 
   it("create_commitment writes the same store as text (with stakes)", async () => {

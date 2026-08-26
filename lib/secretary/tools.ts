@@ -1,7 +1,7 @@
 // Tool executor — the secretary's hands. Every function is user-scoped; the
 // voice path reaches it via POST /api/secretary/tools, the text path calls
 // executeTool directly inside /api/chat.
-import { and, count, desc, eq, gte, ilike, inArray, isNotNull, lt, ne, or } from "drizzle-orm";
+import { and, count, desc, eq, gte, ilike, inArray, isNotNull, lt, ne } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   checkins,
@@ -1286,25 +1286,27 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
 
   async search_history(ctx, args) {
     const a = toolSchemas.search_history.parse(args);
+    const after = a.after ? new Date(a.after) : null;
+    const before = a.before ? new Date(a.before) : null;
+    const conds = [eq(messages.userId, ctx.userId), ilike(messages.content, `%${a.query}%`)];
+    if (after && !isNaN(after.getTime())) conds.push(gte(messages.createdAt, after));
+    if (before && !isNaN(before.getTime())) conds.push(lt(messages.createdAt, before));
     const rows = await db
       .select({
         content: messages.content,
         role: messages.role,
+        mode: messages.mode,
         conversationId: messages.conversationId,
         createdAt: messages.createdAt,
       })
       .from(messages)
-      .where(
-        and(
-          eq(messages.userId, ctx.userId),
-          or(ilike(messages.content, `%${a.query}%`))
-        )
-      )
+      .where(and(...conds))
       .orderBy(desc(messages.createdAt))
       .limit(10);
     return {
       result: rows.map((m) => ({
         when: fmtDate(m.createdAt, ctx.timezone),
+        mode: m.mode,
         role: m.role,
         snippet: m.content.slice(0, 200),
         conversation_id: m.conversationId,

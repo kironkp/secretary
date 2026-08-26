@@ -7,14 +7,16 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { user as userTable } from "@/lib/db/schema";
 import { isErrorResponse, requireSession } from "@/lib/api";
-import { getLatestConversation } from "@/lib/db/queries";
+import { getActiveConversation } from "@/lib/db/queries";
 import { buildBriefing } from "@/lib/secretary/briefing";
 
 export async function GET() {
   const user = await requireSession();
   if (isErrorResponse(user)) return user;
+  // getActiveConversation (not Latest): a thread idle >6h rolls over — the
+  // panel opens fresh and the old thread becomes a quotable prior session.
   const [thread, briefing, [userRow]] = await Promise.all([
-    getLatestConversation(user.id),
+    getActiveConversation(user.id),
     buildBriefing(user.id, user.timezone),
     db.select({ persona: userTable.persona }).from(userTable).where(eq(userTable.id, user.id)),
   ]);

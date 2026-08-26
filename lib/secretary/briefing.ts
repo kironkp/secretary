@@ -5,6 +5,7 @@ import { and, count, desc, eq, gte, inArray, isNotNull, lt, ne, or } from "drizz
 import { db } from "@/lib/db";
 import { documents, events, expectations, memories, projects, tasks, user } from "@/lib/db/schema";
 import { dayRangeInTz } from "@/lib/time";
+import { getRecentConversationTails } from "@/lib/db/queries";
 import { getPlanHead } from "@/lib/layout/plan-store";
 import { nextClarification, openClarificationCount } from "./entities";
 import { isQuietHours } from "./persona";
@@ -14,6 +15,12 @@ import { getPendingSuggestions } from "./suggestions";
 const OPEN_STATUSES = ["inbox", "todo", "in_progress", "blocked"] as const;
 const MAX_NUDGES = 3;
 const STALLED_DAYS = 3;
+// PRIOR SESSIONS block (SPEC §11 cross-session recall): verbatim excerpts,
+// never summaries — capped so the briefing doesn't balloon per request.
+const PRIOR_SESSION_COUNT = 3;
+const PRIOR_SESSION_TAIL = 10;
+const PRIOR_SESSIONS_CHAR_CAP = 3000;
+const PRIOR_LINE_CHAR_CAP = 200;
 
 // Pending suggestions live as source='suggested' + status='inbox' until the
 // user accepts them — they must not masquerade as real tasks anywhere.
@@ -53,7 +60,7 @@ function fmt(d: Date, tz: string, withTime = true) {
 export async function buildBriefing(
   userId: string,
   timezone: string,
-  opts: { consumeNudges?: boolean } = {}
+  opts: { consumeNudges?: boolean; excludeConversationId?: string | null } = {}
 ): Promise<Briefing> {
   const now = new Date();
   const today = dayRangeInTz(timezone, now);
@@ -412,6 +419,41 @@ export async function buildBriefing(
   if (memoryRows.length) {
     lines.push("", "Things you know about the user:");
     for (const m of memoryRows) lines.push(`- ${m.fact}`);
+  }
+  // Prior sessions (SPEC §11 cross-session recall): verbatim tail of the last
+  // few conversations, voice and text alike — this is what makes "like I said
+  // last time" land. Verbatim lines, never summaries; the deep past stays
+  // on-demand via search_history.
+  const priorTails = await getRecentConversationTails(userId, {
+    excludeConversationId: opts.excludeConversationId,
+    conversationLimit: PRIOR_SESSION_COUNT,
+    messagesPerConversation: PRIOR_SESSION_TAIL,
+  });
+  if (priorTails.length) {
+    lines.push(
+      "",
+      "=== PRIOR SESSIONS (verbatim excerpts, most recent first — what was said in recent conversations; for anything older or not shown, use search_history) ==="
+    );
+    let used = 0;
+    for (const { conversation: conv, messages: tail } of priorTails) {
+      const block = [
+        `[${conv.mode} session · ${fmt(conv.startedAt, timezone)}${
+          conv.endedAt ? ` – ${fmt(conv.endedAt, timezone)}` : ""
+        }]`,
+      ];
+      for (const m of tail) {
+        if (m.role === "tool") continue;
+        const text =
+          m.content.length > PRIOR_LINE_CHAR_CAP
+            ? `${m.content.slice(0, PRIOR_LINE_CHAR_CAP)}…`
+            : m.content;
+        block.push(`${m.role === "user" ? "USER" : "SECRETARY"}: ${text}`);
+      }
+      const size = block.join("\n").length;
+      if (used > 0 && used + size > PRIOR_SESSIONS_CHAR_CAP) break;
+      lines.push(...block);
+      used += size;
+    }
   }
   // Expectations / nag engine (SPEC §11): session start is the trigger. Open
   // expectations past their update-by time become MISSED and fire here —

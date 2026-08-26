@@ -78,9 +78,21 @@ describe("the approval gate", () => {
       .update(capabilityRequests)
       .set({ status: "planned" })
       .where(eq(capabilityRequests.status, "planning"));
+    // The shop runs this suite DURING builds: a real request may hold the lane
+    // as `building`, and it isn't ours to clear. Both branches prove the
+    // single-flight claim logic — busy lane never claims, clear lane does.
+    const [foreign] = await db
+      .select({ id: capabilityRequests.id })
+      .from(capabilityRequests)
+      .where(eq(capabilityRequests.status, "building"))
+      .limit(1);
     await kickQueue();
     const req = await findRequest(U.id, "reporting preferences");
-    expect(req!.status).toBe("building"); // claimed (spawn suppressed under VITEST)
+    if (foreign) {
+      expect(req!.status).toBe("approved"); // lane busy — stays queued, never double-runs
+    } else {
+      expect(req!.status).toBe("building"); // claimed (spawn suppressed under VITEST)
+    }
   });
 
   it("feedback re-enters planning with the old plan + notes in the prompt", async () => {

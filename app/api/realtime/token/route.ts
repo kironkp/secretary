@@ -99,6 +99,8 @@ export async function POST(req: Request) {
 
   const briefing = await buildBriefing(user.id, user.timezone, {
     consumeNudges: !parsed.reconnect,
+    // this call's own thread shouldn't echo back as a "prior session"
+    excludeConversationId: conversationId,
   });
   const [[userRow], lexicon] = await Promise.all([
     db.select({ persona: userTable.persona }).from(userTable).where(eq(userTable.id, user.id)),

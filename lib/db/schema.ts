@@ -1,6 +1,7 @@
 import {
   boolean,
   customType,
+  index,
   integer,
   jsonb,
   pgEnum,
@@ -162,22 +163,31 @@ export const conversations = pgTable("conversations", {
 
 // A message's id doubles as the provenance anchor: task/event provenance links
 // deep-link to the exact message ("from Tuesday's conversation").
-export const messages = pgTable("messages", {
-  id: text("id").primaryKey().$defaultFn(uuid),
-  userId: text("user_id")
-    .notNull()
-    .references(() => user.id, { onDelete: "cascade" }),
-  conversationId: text("conversation_id")
-    .notNull()
-    .references(() => conversations.id, { onDelete: "cascade" }),
-  role: messageRole("role").notNull(),
-  content: text("content").notNull(),
-  mode: conversationMode("mode").notNull(),
-  // Photo/file intake: meta for rendering thumbnails; payloads live in the
-  // attachments table (DB-stored — Heroku's filesystem is ephemeral).
-  attachments: jsonb("attachments").$type<{ id: string; mime: string; name: string }[] | null>(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const messages = pgTable(
+  "messages",
+  {
+    id: text("id").primaryKey().$defaultFn(uuid),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    role: messageRole("role").notNull(),
+    content: text("content").notNull(),
+    mode: conversationMode("mode").notNull(),
+    // Photo/file intake: meta for rendering thumbnails; payloads live in the
+    // attachments table (DB-stored — Heroku's filesystem is ephemeral).
+    attachments: jsonb("attachments").$type<{ id: string; mime: string; name: string }[] | null>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  // Recall paths (SPEC §11 cross-session recall): newest-first windows per
+  // conversation, and per-user recency scans for search_history / tails.
+  (t) => [
+    index("messages_user_conversation_created_idx").on(t.userId, t.conversationId, t.createdAt),
+    index("messages_user_created_idx").on(t.userId, t.createdAt),
+  ]
+);
 
 // Uploaded photos/files (chat intake). Rows are created on upload with a null
 // messageId, then bound to the user message on send; unbound rows older than a

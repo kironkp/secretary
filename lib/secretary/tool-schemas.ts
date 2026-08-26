@@ -204,6 +204,11 @@ export const toolSchemas = {
   get_current_datetime: z.object({}),
   search_history: z.object({
     query: z.string().min(1).describe("Text to search past conversations for"),
+    after: z
+      .string()
+      .optional()
+      .describe("Only messages at/after this instant — ISO 8601 ('last week' → 7 days ago)"),
+    before: z.string().optional().describe("Only messages before this instant — ISO 8601"),
   }),
   // --- Thin voice tools (SPEC §11 fast/slow split): the realtime model is
   // mouth and ears ONLY. These four verbs + the clarification pair are all it
@@ -452,7 +457,8 @@ const toolDescriptions: Record<ToolName, string> = {
   recall_facts: "Everything remembered about the user.",
   get_current_datetime:
     "The current date and time in the user's timezone. Use this instead of guessing — never assume the date.",
-  search_history: "Search past conversation transcripts.",
+  search_history:
+    "Search past conversation transcripts (voice and text) for what was actually said — 'what did I say about X last week?'. after/before narrow to a time window. Your briefing already carries the last few sessions verbatim; use this for anything older or not shown.",
   get_current_plan:
     "The dashboard's current layout plan: sections in order (with keys), the component registry, and the user's stored layout preferences. Call before editing the layout.",
   edit_layout_plan:
@@ -531,6 +537,10 @@ export const VOICE_TOOL_NAMES = [
   // the upward cycle: "I can't do that" files a shop request instead of dying
   "request_capability",
   "review_capability",
+  // cross-session recall on demand (SPEC §11): the briefing carries the last
+  // few sessions verbatim; this reaches everything older ("what did I say
+  // about X last week?")
+  "search_history",
 ] as const satisfies readonly ToolName[];
 
 export function openAIVoiceToolDefs() {
