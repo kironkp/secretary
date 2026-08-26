@@ -2,7 +2,7 @@
 // the approval gate, and the prompts that carry the guardrails. VITEST guards
 // mean nothing ever spawns here — status rows are the observable truth.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { capabilityRequests, user } from "@/lib/db/schema";
 import {
@@ -30,24 +30,24 @@ afterAll(async () => {
 
 describe("filing and the single-flight lane", () => {
   it("first request goes straight to planning (spawn suppressed under VITEST)", async () => {
-    const res = await fileRequest(U.id, "Remember reporting preferences per report", "ctx", undefined);
+    const res = await fileRequest(U.id, "Remember reporting preferences per report", "ctx", undefined, U.id);
     expect(res.deduped).toBe(false);
     expect(res.status).toBe("planning");
   });
 
   it("a second request queues as filed while the lane is busy", async () => {
-    const res = await fileRequest(U.id, "Export tasks to a CSV file");
+    const res = await fileRequest(U.id, "Export tasks to a CSV file", undefined, undefined, U.id);
     expect(res.status).toBe("filed");
     expect(res.queued).toBe(true);
   });
 
   it("dedupes by normalized need — no twin rows, no re-nag after reject", async () => {
-    const dup = await fileRequest(U.id, "  remember REPORTING preferences per report ");
+    const dup = await fileRequest(U.id, "  remember REPORTING preferences per report ", undefined, undefined, U.id);
     expect(dup.deduped).toBe(true);
 
     const csv = await findRequest(U.id, "csv");
     await rejectRequest(U.id, csv!.id);
-    const again = await fileRequest(U.id, "Export tasks to a CSV file");
+    const again = await fileRequest(U.id, "Export tasks to a CSV file", undefined, undefined, U.id);
     expect(again.deduped).toBe(true); // rejected twin returned, not re-filed
     expect(again.status).toBe("rejected");
   });
@@ -57,7 +57,7 @@ describe("the approval gate", () => {
   it("only a planned request can be approved; a busy lane QUEUES instead of bouncing", async () => {
     const req = await findRequest(U.id, "reporting preferences");
     // still "planning" — not approvable
-    const early = await approveRequest(U.id, req!.id);
+    const early = await approveRequest(U.id, req!.id, U.id);
     expect(early.ok).toBe(false);
 
     // Second request occupies the lane (planning) → approve queues, never errors.
@@ -65,7 +65,7 @@ describe("the approval gate", () => {
       .update(capabilityRequests)
       .set({ status: "planned", plan: "1. Do the thing." })
       .where(eq(capabilityRequests.id, req!.id));
-    const res = await approveRequest(U.id, req!.id);
+    const res = await approveRequest(U.id, req!.id, U.id);
     expect(res.ok).toBe(true);
     if (res.ok) expect(typeof res.queued).toBe("boolean");
     const after = await findRequest(U.id, "reporting preferences");
@@ -77,8 +77,8 @@ describe("the approval gate", () => {
     await db
       .update(capabilityRequests)
       .set({ status: "planned" })
-      .where(eq(capabilityRequests.status, "planning"));
-    await kickQueue();
+      .where(and(eq(capabilityRequests.userId, U.id), eq(capabilityRequests.status, "planning")));
+    await kickQueue(U.id);
     const req = await findRequest(U.id, "reporting preferences");
     expect(req!.status).toBe("building"); // claimed (spawn suppressed under VITEST)
   });
@@ -89,7 +89,7 @@ describe("the approval gate", () => {
       .update(capabilityRequests)
       .set({ status: "planned", plan: "old plan v1" })
       .where(eq(capabilityRequests.id, req!.id));
-    const res = await reviseRequest(U.id, req!.id, "also cover voice calls");
+    const res = await reviseRequest(U.id, req!.id, "also cover voice calls", U.id);
     expect(res.ok).toBe(true);
     const after = await findRequest(U.id, "reporting preferences");
     expect(["filed", "planning"]).toContain(after!.status); // kickQueue may claim it

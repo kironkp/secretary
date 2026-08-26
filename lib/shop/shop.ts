@@ -28,6 +28,22 @@ export const shopSlug = (need: string) =>
 
 const IN_FLIGHT = ["planning", "building"] as const;
 
+// The lane is GLOBAL by default — one machine, one repo, one claude at a time,
+// regardless of which user filed. `laneScope` narrows every lane check and
+// claim to one user's rows; ONLY tests use it, so suites sharing the dev
+// database can never stomp or claim real requests (the 10:26 incident: a test
+// flipped a real mid-planning row to planned).
+async function laneBusy(laneScope?: string): Promise<boolean> {
+  const conds = [inArray(capabilityRequests.status, [...IN_FLIGHT])];
+  if (laneScope) conds.push(eq(capabilityRequests.userId, laneScope));
+  const [row] = await db
+    .select({ id: capabilityRequests.id })
+    .from(capabilityRequests)
+    .where(and(...conds))
+    .limit(1);
+  return Boolean(row);
+}
+
 function spawnRunner(args: string[]): void {
   if (process.env.VITEST || process.env.SHOP_DISABLED === "true") return;
   const child = spawn("npx", ["tsx", "scripts/shop.ts", ...args], {
@@ -49,7 +65,8 @@ export async function fileRequest(
   userId: string,
   need: string,
   context?: string,
-  conversationId?: string
+  conversationId?: string,
+  laneScope?: string
 ): Promise<{ id: string; status: string; deduped: boolean; queued: boolean }> {
   const rows = await db
     .select()
@@ -65,7 +82,7 @@ export async function fileRequest(
     .values({ userId, need, context: context ?? null, conversationId: conversationId ?? null })
     .returning();
 
-  const busy = rows.some((r) => (IN_FLIGHT as readonly string[]).includes(r.status));
+  const busy = await laneBusy(laneScope);
   if (!busy) {
     await db
       .update(capabilityRequests)
@@ -84,7 +101,8 @@ export async function fileRequest(
  */
 export async function approveRequest(
   userId: string,
-  id: string
+  id: string,
+  laneScope?: string
 ): Promise<{ ok: true; queued: boolean } | { ok: false; error: string }> {
   const [row] = await db
     .select()
@@ -99,12 +117,7 @@ export async function approveRequest(
     .update(capabilityRequests)
     .set({ status: "approved", updatedAt: new Date() })
     .where(eq(capabilityRequests.id, id));
-  const [inFlight] = await db
-    .select({ id: capabilityRequests.id })
-    .from(capabilityRequests)
-    .where(inArray(capabilityRequests.status, [...IN_FLIGHT]))
-    .limit(1);
-  if (inFlight) return { ok: true, queued: true };
+  if (await laneBusy(laneScope)) return { ok: true, queued: true };
   spawnRunner(["--build", id]);
   return { ok: true, queued: false };
 }
@@ -116,47 +129,39 @@ export async function approveRequest(
  * claim means the runner's own chain and this sweeper can never double-run
  * one request. Self-heals stranded queues (crashed runner, server restart).
  */
-export async function kickQueue(): Promise<void> {
-  const [inFlight] = await db
-    .select({ id: capabilityRequests.id })
-    .from(capabilityRequests)
-    .where(inArray(capabilityRequests.status, [...IN_FLIGHT]))
-    .limit(1);
-  if (inFlight) return;
+export async function kickQueue(laneScope?: string): Promise<void> {
+  if (await laneBusy(laneScope)) return;
 
-  const [build] = await db
-    .update(capabilityRequests)
-    .set({ status: "building", updatedAt: new Date() })
-    .where(
-      eq(
-        capabilityRequests.id,
-        db
-          .select({ id: capabilityRequests.id })
-          .from(capabilityRequests)
-          .where(eq(capabilityRequests.status, "approved"))
-          .limit(1)
+  const claim = async (
+    from: "approved" | "filed",
+    to: "building" | "planning"
+  ): Promise<string | null> => {
+    const conds = [eq(capabilityRequests.status, from)];
+    if (laneScope) conds.push(eq(capabilityRequests.userId, laneScope));
+    const [row] = await db
+      .update(capabilityRequests)
+      .set({ status: to, updatedAt: new Date() })
+      .where(
+        eq(
+          capabilityRequests.id,
+          db
+            .select({ id: capabilityRequests.id })
+            .from(capabilityRequests)
+            .where(and(...conds))
+            .limit(1)
+        )
       )
-    )
-    .returning({ id: capabilityRequests.id });
+      .returning({ id: capabilityRequests.id });
+    return row?.id ?? null;
+  };
+
+  const build = await claim("approved", "building");
   if (build) {
-    spawnRunner(["--build", build.id]);
+    spawnRunner(["--build", build]);
     return;
   }
-  const [plan] = await db
-    .update(capabilityRequests)
-    .set({ status: "planning", updatedAt: new Date() })
-    .where(
-      eq(
-        capabilityRequests.id,
-        db
-          .select({ id: capabilityRequests.id })
-          .from(capabilityRequests)
-          .where(eq(capabilityRequests.status, "filed"))
-          .limit(1)
-      )
-    )
-    .returning({ id: capabilityRequests.id });
-  if (plan) spawnRunner(["--plan", plan.id]);
+  const plan = await claim("filed", "planning");
+  if (plan) spawnRunner(["--plan", plan]);
 }
 
 /**
@@ -167,7 +172,8 @@ export async function kickQueue(): Promise<void> {
 export async function reviseRequest(
   userId: string,
   id: string,
-  feedback: string
+  feedback: string,
+  laneScope?: string
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const [row] = await db
     .select()
@@ -186,7 +192,7 @@ export async function reviseRequest(
       updatedAt: new Date(),
     })
     .where(eq(capabilityRequests.id, id));
-  await kickQueue();
+  await kickQueue(laneScope);
   return { ok: true };
 }
 

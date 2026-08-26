@@ -117,10 +117,16 @@ export function ShopRequests() {
           </button>
           {openId === r.id && (
             <div className="mt-2 space-y-2 border-t border-edge/60 pt-2">
-              {r.plan && (
+              {r.plan ? (
                 <pre className="max-h-64 overflow-y-auto whitespace-pre-wrap rounded-lg bg-surface p-2.5 text-xs text-muted">
                   {r.plan}
                 </pre>
+              ) : (
+                r.status === "planned" && (
+                  <p className="animate-pulse text-xs text-faint">
+                    Plan text is still being written — it&rsquo;ll appear here shortly.
+                  </p>
+                )
               )}
               {r.buildLog && (
                 <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap rounded-lg bg-surface p-2.5 text-[10px] text-danger">
