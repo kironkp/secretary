@@ -7,6 +7,9 @@ import { events, layoutSpecs, messages, projects, tasks, user } from "@/lib/db/s
 
 const OPEN_STATUSES = ["inbox", "todo", "in_progress", "blocked"] as const;
 
+/** SPEC §4: SIGNALS.tasks cap — enough for any painted list, bounded prompt. */
+const TASKS_SIGNAL_CAP = 50;
+
 export type ProjectSignal = {
   id: string;
   name: string;
@@ -21,8 +24,19 @@ export type ProjectSignal = {
   people: string[];
 };
 
+/** SPEC §4: the id vocabulary for painted surfaces — every task id the Canvas
+ *  may act on (data-check, §7.6) must appear here. Open tasks only. */
+export type TaskSignal = {
+  id: string;
+  title: string;
+  project_id: string | null;
+  status: string;
+  due_at: string | null;
+};
+
 export type Signals = {
   projects: ProjectSignal[];
+  tasks: TaskSignal[];
   engagement: Record<
     string,
     { mentions_24h: number; baseline_mentions: number; last_touched: string }
@@ -82,6 +96,7 @@ export async function computeSignals(userId: string, now = new Date()): Promise<
         .select({
           id: tasks.id,
           projectId: tasks.projectId,
+          title: tasks.title,
           status: tasks.status,
           dueAt: tasks.dueAt,
           source: tasks.source,
@@ -237,6 +252,21 @@ export async function computeSignals(userId: string, now = new Date()): Promise<
           people: [], // until the entity store exists (SPEC §11) — see INTEGRATION
         };
       }),
+    tasks: taskRows
+      .filter((t) => (OPEN_STATUSES as readonly string[]).includes(t.status))
+      .toSorted(
+        (a, b) =>
+          (a.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER) -
+          (b.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER)
+      )
+      .slice(0, TASKS_SIGNAL_CAP)
+      .map((t) => ({
+        id: t.id,
+        title: t.title,
+        project_id: t.projectId,
+        status: t.status,
+        due_at: t.dueAt?.toISOString() ?? null,
+      })),
     engagement,
     conversation: {
       today_topics: todayTopics,

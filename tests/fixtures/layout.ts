@@ -63,6 +63,7 @@ export function baseSignals(): Signals {
         people: [],
       },
     ],
+    tasks: [],
     engagement: {
       patent: { mentions_24h: 2, baseline_mentions: 2, last_touched: "2026-08-07T08:00:00Z" },
       album: { mentions_24h: 2, baseline_mentions: 2, last_touched: "2026-08-07T08:00:00Z" },

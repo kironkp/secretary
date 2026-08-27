@@ -13,7 +13,8 @@
   apply immediately.
 - The Canvas is the only surface where the model writes markup: sanitized
   static HTML in a sandboxed iframe, no scripts/handlers/forms/external loads
-  ever. The shell owns all interactivity (data-expand, data-link). Everywhere
-  else, model output is data.
+  ever. The shell owns all interactivity (data-expand, data-link, data-check —
+  the last is the one sanctioned write: tap an open task to mark it done, ids
+  from SIGNALS.tasks only). Everywhere else, model output is data.
 - Full spec: docs/adaptive-ui/SPEC.md — source of truth. To change behavior,
   update the spec first, then the code.

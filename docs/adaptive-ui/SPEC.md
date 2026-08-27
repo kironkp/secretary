@@ -165,6 +165,11 @@ type Signals = {
     subprojects: { id: string; name: string; open_count: number; done_count: number }[];
     people: string[];
   }[];
+  tasks: {
+    id: string; title: string; project_id: string | null;
+    status: string;                             // open statuses only
+    due_at: string | null;                      // ISO timestamp
+  }[];
   engagement: Record<string, { mentions_24h: number; baseline_mentions: number; last_touched: string }>;
   conversation: { today_topics: string[]; schedule_word_share: number; questions_today: string[] };
   pending: { items_missing_dates: string[]; unanswered_asks: string[] };
@@ -178,6 +183,10 @@ type Signals = {
 ```
 
 Definitions:
+- `tasks`: the user's OPEN tasks (inbox/todo/in_progress/blocked), due-soonest
+  first with undated last, capped at 50. This is the id vocabulary for painted
+  surfaces: every task id the Canvas may act on (`data-check`, §7.6) must
+  appear here.
 - `mentions_24h`: count of chat messages in last 24h whose extraction linked to this
   project. `baseline_mentions`: trailing 14-day daily median (min 1).
 - `schedule_word_share`: fraction of today's user messages containing schedule
@@ -297,7 +306,17 @@ Rules:
 - **Interactivity ceiling:** none from the model, by design. The host shell
   provides generic primitives: any element with `data-expand` gets
   click-to-expand; `data-link="<entity_id>"` opens that entity on the Dashboard
-  or Spreadsheet. The model emits attributes; the shell owns all behavior.
+  or Spreadsheet; `data-check="<task_id>"` crosses that task off on tap and
+  marks it done through the same task API as the Dashboard checkbox (recurrence
+  rollover and check-in log included). The model emits attributes; the shell
+  owns all behavior. `data-check` is the one sanctioned write from a painted
+  surface — sanctioned because it is invariant 3's case: a USER-initiated
+  change, applied immediately. Guardrails: the painter may only use ids present
+  in `SIGNALS.tasks` (open tasks only, never invented); the sanitizer drops
+  values that aren't id-shaped; the shell ignores repeat taps and rolls the
+  cross-off back if the API refuses; the server enforces per-user ownership, so
+  a hallucinated id can at worst 404. Dashboard dynamic components share the
+  sanitizer but get no behavior wiring — there the attribute stays inert.
 - **Chat tools:** `paint_canvas(brief)` — full repaint, streamed so first paint
   lands fast; `edit_canvas(patch)` — targeted change ("make the album section
   bigger") without a full repaint.

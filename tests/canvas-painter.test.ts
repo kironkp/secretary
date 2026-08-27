@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { conversations, messages, user } from "@/lib/db/schema";
-import { buildPainterInput, paintCanvas } from "@/lib/canvas/painter";
+import { buildPainterInput, paintCanvas, painterPrompt } from "@/lib/canvas/painter";
 
 const U = { id: `test-painter-${crypto.randomUUID()}`, email: `paint-${Date.now()}@cv.test` };
 
@@ -26,6 +26,14 @@ describe("buildPainterInput", () => {
 
   it("omits the conversation section entirely when there is no excerpt", () => {
     expect(buildPainterInput("brief", "{}")).not.toContain("CONVERSATION (");
+  });
+});
+
+describe("painter prompt", () => {
+  it("teaches data-check bound to SIGNALS.tasks ids (SPEC §7.6 tap-to-complete)", () => {
+    const prompt = painterPrompt();
+    expect(prompt).toContain("data-check");
+    expect(prompt).toContain("SIGNALS.tasks");
   });
 });
 
