@@ -159,6 +159,10 @@ export const conversations = pgTable("conversations", {
   // created after this instant are re-scanned, so repeated runs stay cheap
   // and never double-extract.
   extractedAt: timestamp("extracted_at", { withTimezone: true }),
+  // Ingestion channel: null = the user's own chat/voice threads; "email" =
+  // mailbox intake. Email threads never hijack the active chat (review
+  // finding) — they're reachable via ?c= links and history search.
+  channel: text("channel"),
 });
 
 // A message's id doubles as the provenance anchor: task/event provenance links

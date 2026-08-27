@@ -76,6 +76,32 @@ export default async function SettingsPage() {
       </section>
 
       <section className="rounded-xl border border-edge bg-surface p-5">
+        <h2 className="mb-1 text-sm font-bold">Email intake</h2>
+        {process.env.INBOUND_EMAIL_HOST &&
+        process.env.INBOUND_EMAIL_USER &&
+        process.env.INBOUND_EMAIL_PASSWORD ? (
+          <>
+            <p className="mb-3 text-xs text-muted">
+              Forward anything here <span className="font-semibold">from your login email
+              address</span> ({session.user.email}) — bills, flyers, meeting threads, photos.
+              The secretary reads it within a minute, files what it finds, and pings your phone
+              with the receipt. Mail from unregistered senders is ignored.
+            </p>
+            <p className="select-all rounded-lg border border-edge bg-card px-3 py-2 font-mono text-sm">
+              {process.env.INBOUND_EMAIL_ADDRESS ?? process.env.INBOUND_EMAIL_USER}
+            </p>
+          </>
+        ) : (
+          <p className="text-xs text-muted">
+            Not set up yet. Create a dedicated mailbox (a fresh Gmail with an app password
+            works), put its IMAP credentials in <span className="font-mono">.env.local</span>{" "}
+            (INBOUND_EMAIL_HOST / USER / PASSWORD), and this becomes the address you forward
+            things to.
+          </p>
+        )}
+      </section>
+
+      <section className="rounded-xl border border-edge bg-surface p-5">
         <h2 className="mb-1 text-sm font-bold">Notifications</h2>
         <p className="mb-4 text-xs text-muted">
           Reminders you set with the secretary ring this device at the exact time, and

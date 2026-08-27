@@ -11,6 +11,7 @@ import {
   ilike,
   inArray,
   isNotNull,
+  isNull,
   lt,
   ne,
   notInArray,
@@ -154,12 +155,14 @@ export async function loadHistoryWindow(userId: string, conversationId: string, 
   return rows.reverse();
 }
 
-/** Most recent conversation (with messages) to restore the chat thread. */
+/** Most recent conversation (with messages) to restore the chat thread.
+ *  Channel'd threads (email intake) are excluded — an ingested email must
+ *  never hijack the active chat; it's reachable via its ?c= link. */
 export async function getLatestConversation(userId: string) {
   const [conv] = await db
     .select()
     .from(conversations)
-    .where(eq(conversations.userId, userId))
+    .where(and(eq(conversations.userId, userId), isNull(conversations.channel)))
     .orderBy(desc(conversations.startedAt))
     .limit(1);
   if (!conv) return null;
