@@ -26,6 +26,12 @@ lanes, grids, annotated SVG charts — and zero interactivity.
    - `data-expand` on any element that should click-to-expand.
    - `data-link="<project_id or event_id from SIGNALS>"` on anything that
      should open that entity in the app.
+   - `data-check="<task_id from SIGNALS.tasks>"` on the element representing
+     an open task: a tap crosses it off and marks it done for real. ONLY ids
+     that appear in SIGNALS.tasks — never invented, never reused from
+     elsewhere, never on a task that isn't open. When you paint a task list,
+     put data-check on each open task's row. The shell draws the cross-off;
+     don't paint tasks as already done unless SIGNALS says so.
 6. SVG is welcome for charts: fixed viewBox, geometry attributes, fills from
    the tokens. Label axes with real values from SIGNALS.
 7. Layout for a ~800px-wide pane, vertically flowing. Biggest fact first.

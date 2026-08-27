@@ -57,6 +57,9 @@ describe("F9 sanitizer", () => {
     expect(sanitizeCanvasMarkup(`<div data-expand data-link="proj-1">x</div>`)).toContain(
       'data-link="proj-1"'
     );
+    expect(
+      sanitizeCanvasMarkup(`<li data-check="4f9d2c10-93ab-4bfb-8c0e-1234567890ab">flyers</li>`)
+    ).toContain('data-check="4f9d2c10-93ab-4bfb-8c0e-1234567890ab"');
     // truncated mid-tag: incomplete token dropped, no throw
     expect(sanitizeCanvasMarkup(`<div class="a">ok</div><p cla`)).toBe(`<div class="a">ok</div>`);
     // unclosed <script (truncation) never leaks content
@@ -71,6 +74,24 @@ describe("F9 iframe document", () => {
     expect(doc).toContain(`script-src 'none'`);
     expect(doc).toContain(`form-action 'none'`);
     expect(CANVAS_SANDBOX).not.toContain("allow-scripts");
+  });
+});
+
+describe("data-check tap-to-complete (SPEC §7.6)", () => {
+  it("strips malformed data-check values — only id-shaped survives", () => {
+    // must never reach the shell's click handler → the task API
+    expect(sanitizeCanvasMarkup(`<li data-check="a b">x</li>`)).not.toContain("data-check");
+    expect(sanitizeCanvasMarkup(`<li data-check="x&quot;y">x</li>`)).not.toContain("data-check");
+    expect(sanitizeCanvasMarkup(`<li data-check="../etc">x</li>`)).not.toContain("data-check");
+    expect(sanitizeCanvasMarkup(`<li data-check>x</li>`)).not.toContain("data-check");
+    expect(sanitizeCanvasMarkup(`<li data-check="">x</li>`)).not.toContain("data-check");
+  });
+
+  it("iframe doc styles the tap affordance and the cross-off", () => {
+    const doc = buildCanvasSrcDoc("<p>hi</p>");
+    expect(doc).toContain("[data-check]{cursor:pointer}");
+    expect(doc).toContain(".cv-done{");
+    expect(doc).toContain("line-through");
   });
 });
 

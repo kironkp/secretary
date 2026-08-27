@@ -25,7 +25,7 @@ const VOID_TAGS = new Set(["br", "hr", "stop"]);
 const DROP_CONTENT_TAGS = new Set(["script", "style", "iframe", "object", "embed", "noscript"]);
 
 const ALLOWED_ATTRS = new Set([
-  "class", "style", "data-expand", "data-link", "colspan", "rowspan",
+  "class", "style", "data-expand", "data-link", "data-check", "colspan", "rowspan",
   // SVG geometry + paint
   "viewbox", "xmlns", "width", "height", "x", "y", "x1", "y1", "x2", "y2",
   "cx", "cy", "r", "rx", "ry", "d", "points", "fill", "stroke", "stroke-width",
@@ -58,7 +58,9 @@ function sanitizeAttrs(rawAttrs: string): string {
       if (safe === null) continue;
       value = safe;
     }
-    if (name === "id" && !/^[-a-zA-Z0-9_]+$/.test(value)) continue;
+    // id-shaped values only: data-check reaches the task API (SPEC §7.6), and
+    // a bare/garbage value must never survive to the shell's click handler.
+    if ((name === "id" || name === "data-check") && !/^[-a-zA-Z0-9_]+$/.test(value)) continue;
     out += ` ${name}="${value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;")}"`;
   }
   return out;
@@ -115,6 +117,8 @@ export function buildCanvasSrcDoc(sanitizedMarkup: string, opts: { dark?: boolea
     "html,body{margin:0;padding:16px;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,sans-serif;font-size:14px;line-height:1.5}",
     "[data-expand]{cursor:pointer}",
     "[data-link]{cursor:pointer;text-decoration:underline;text-decoration-color:var(--accent);text-underline-offset:2px}",
+    "[data-check]{cursor:pointer}",
+    ".cv-done{text-decoration:line-through;opacity:.55;transition:opacity .2s}",
     ".cv-expanded{outline:2px solid var(--accent);outline-offset:4px;border-radius:8px}",
     "</style></head><body>",
     sanitizedMarkup,

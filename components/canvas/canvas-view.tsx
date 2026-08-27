@@ -66,13 +66,57 @@ export function CanvasView({
     };
   }, [snapshot?.painting, load, pollMs]);
 
+  // Task ids crossed off this session: each poll/repaint loads a fresh iframe
+  // document from the same static snapshot markup, so the optimistic cross-off
+  // must be re-applied on every load or ticks would visually revert.
+  const checkedRef = useRef<Set<string>>(new Set());
+
+  const applyDoneMarks = useCallback((doc: Document) => {
+    for (const el of Array.from(doc.querySelectorAll("[data-check]"))) {
+      const id = el.getAttribute("data-check");
+      if (id && checkedRef.current.has(id)) el.classList.add("cv-done");
+    }
+  }, []);
+
+  // data-check tap (SPEC §7.6): optimistic cross-off, then the same PATCH the
+  // dashboard checkbox sends — including its rollback-on-failure contract.
+  const completeTask = useCallback(
+    async (taskId: string) => {
+      if (checkedRef.current.has(taskId)) return; // already done or in flight
+      checkedRef.current.add(taskId);
+      const doc = frameRef.current?.contentDocument;
+      if (doc) applyDoneMarks(doc);
+      const res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "done" }),
+      }).catch(() => null);
+      if (!res?.ok) {
+        checkedRef.current.delete(taskId);
+        const cur = frameRef.current?.contentDocument;
+        for (const el of Array.from(cur?.querySelectorAll("[data-check]") ?? [])) {
+          if (el.getAttribute("data-check") === taskId) el.classList.remove("cv-done");
+        }
+      }
+    },
+    [applyDoneMarks]
+  );
+
   // Shell interaction primitives: host-attached, never from model markup.
   const wireShellBehaviors = useCallback(() => {
     const doc = frameRef.current?.contentDocument;
     if (!doc) return;
+    applyDoneMarks(doc);
     doc.addEventListener("click", (e) => {
-      const target = (e.target as Element | null)?.closest?.("[data-expand],[data-link]");
+      const target = (e.target as Element | null)?.closest?.(
+        "[data-expand],[data-link],[data-check]"
+      );
       if (!target) return;
+      const check = target.getAttribute("data-check");
+      if (check) {
+        void completeTask(check);
+        return;
+      }
       const link = target.getAttribute("data-link");
       if (link) {
         router.push(`/projects/${encodeURIComponent(link)}`);
@@ -80,7 +124,7 @@ export function CanvasView({
       }
       target.classList.toggle("cv-expanded");
     });
-  }, [router]);
+  }, [router, applyDoneMarks, completeTask]);
 
   const restore = async (id: string) => {
     const res = await fetch("/api/canvas", {
