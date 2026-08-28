@@ -56,9 +56,29 @@ export function ShopRequests() {
   const setPref = (r: ShopRequest, patch: Partial<Prefs>) =>
     setPrefsById((m) => ({ ...m, [r.id]: { ...prefsFor(r), ...patch } }));
 
+  // Actionable first, dead weight last — failed/shipped/rejected used to pin
+  // to the top by createdAt and pile up with no way to clear them.
+  const STATUS_RANK: Record<string, number> = {
+    planned: 0,
+    planning: 1,
+    building: 1,
+    approved: 1,
+    filed: 1,
+    failed: 2,
+    shipped: 3,
+    rejected: 4,
+  };
   const load = async () => {
     const res = await fetch("/api/shop");
-    if (res.ok) setRows(((await res.json()) as { requests: ShopRequest[] }).requests);
+    if (!res.ok) return;
+    const { requests } = (await res.json()) as { requests: ShopRequest[] };
+    setRows(
+      [...requests].sort(
+        (a, b) =>
+          (STATUS_RANK[a.status] ?? 1) - (STATUS_RANK[b.status] ?? 1) ||
+          b.updatedAt.localeCompare(a.updatedAt)
+      )
+    );
   };
   useEffect(() => {
     const t = setTimeout(() => void load(), 0);
@@ -230,7 +250,28 @@ export function ShopRequests() {
                   </button>
                 </div>
               )}
-              {feedbackFor === r.id && r.status === "planned" && (
+              {r.status === "failed" && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={() => {
+                      setFeedbackFor(feedbackFor === r.id ? null : r.id);
+                      setNotice(null);
+                    }}
+                    disabled={busy}
+                    className="rounded-full border border-edge px-4 py-1.5 text-xs text-muted hover:text-ink disabled:opacity-50"
+                  >
+                    Retry with feedback
+                  </button>
+                  <button
+                    onClick={() => void act(r, "reject")}
+                    disabled={busy}
+                    className="rounded-full border border-edge px-4 py-1.5 text-xs text-muted hover:text-ink disabled:opacity-50"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              )}
+              {feedbackFor === r.id && (r.status === "planned" || r.status === "failed") && (
                 <div className="flex flex-col gap-2">
                   <textarea
                     value={feedbackText}
