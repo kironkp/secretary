@@ -27,7 +27,6 @@ import {
   TriangleAlert,
   Wrench,
 } from "lucide-react";
-import { CanvasView } from "@/components/canvas/canvas-view";
 import {
   playRemoteStream,
   stopRemoteAudio,
@@ -122,22 +121,21 @@ export function VoiceMode({
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
     if (nearBottom) el.scrollTop = el.scrollHeight;
   }, [session.transcript]);
-  // Mobile lifelines: shrink the overlay to a floating pill (the page behind
-  // becomes usable), or swap the orb for the live canvas without leaving the
-  // call — navigating away would unmount the session.
+  // Mobile lifeline: shrink the overlay to a floating pill — the page behind
+  // becomes usable while the call (owned by the app shell) keeps running.
   const [minimized, setMinimized] = useState(startMinimized);
-  const [showCanvas, setShowCanvas] = useState(false);
 
-  // Auto-open (SPEC §7.6): a tool outcome asked for the canvas — flip the
-  // in-call canvas into view, expanding from the pill so it's actually seen.
+  // Auto-open (SPEC §7.6): a paint during the call goes to the Canvas TAB —
+  // the call shrinks to its pill and the app navigates. There is no in-call
+  // canvas view: one canvas, one place, nav always reachable.
   useEffect(() => {
     if (session.canvasSeq === 0) return;
     const t = setTimeout(() => {
-      setShowCanvas(true);
-      setMinimized(false);
+      setMinimized(true);
+      router.push("/canvas");
     }, 0);
     return () => clearTimeout(t);
-  }, [session.canvasSeq]);
+  }, [session.canvasSeq, router]);
   const [model, setModel] = useState(
     () => (typeof window !== "undefined" && localStorage.getItem("voice-model")) || MODELS[0].id
   );
@@ -564,27 +562,6 @@ export function VoiceMode({
             </Button>
           </div>
         </div>
-      ) : showCanvas ? (
-        /* In-call canvas: watch paints land live without leaving the call.
-           Scrolls as a page — the iframe auto-grows to its content. */
-        <div className="relative flex min-h-0 flex-1 flex-col">
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-2 [-webkit-overflow-scrolling:touch]">
-            <CanvasView pollMs={3000} />
-          </div>
-          <div className="pointer-events-none absolute right-4 top-2 flex w-64 max-w-[70vw] flex-col gap-2">
-            {session.toasts.map((t) => (
-              <div
-                key={t.key}
-                className="animate-toast-in flex items-start gap-1.5 rounded-lg border border-edge bg-card px-3 py-2 text-xs shadow-lg"
-              >
-                <span className="translate-y-[1px] flex-none">
-                  <ToastIcon glyph={t.icon} />
-                </span>
-                {t.text}
-              </div>
-            ))}
-          </div>
-        </div>
       ) : (
         <div className="relative flex flex-1 flex-col items-center justify-center gap-6">
           {/* Orb: ripple ring = your voice; core = assistant */}
@@ -685,14 +662,14 @@ export function VoiceMode({
           <AlignLeft size={18} strokeWidth={1.75} />
         </button>
         <button
-          onClick={() => setShowCanvas((s) => !s)}
-          title={showCanvas ? "Back to the orb" : "Show canvas"}
-          aria-label={showCanvas ? "Back to the orb" : "Show canvas"}
-          className={`flex h-12 w-12 items-center justify-center rounded-full border transition-colors ${
-            showCanvas
-              ? "border-accent bg-accent/20 text-accent"
-              : "border-edge bg-card text-ink hover:border-faint"
-          }`}
+          onClick={() => {
+            // Canvas tab + pill: same destination as auto-open, by hand.
+            setMinimized(true);
+            router.push("/canvas");
+          }}
+          title="Open the canvas (call keeps going)"
+          aria-label="Open the canvas"
+          className="flex h-12 w-12 items-center justify-center rounded-full border border-edge bg-card text-ink transition-colors hover:border-faint"
         >
           <Paintbrush size={18} strokeWidth={1.75} />
         </button>

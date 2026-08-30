@@ -163,9 +163,10 @@ export function ChatThread({
   const peekFrom = useRef(0);
 
   // Auto-open Canvas (SPEC §7.6): navigate to the Canvas TAB — the real page,
-  // nav intact. A fully-expanded dock drops to peek so the paint is seen.
+  // nav intact. The dock collapses all the way to the bar: the paint IS the
+  // answer, so nothing may sit on top of it.
   const showCanvas = () => {
-    if (dock?.state === "full") dock.setState("peek");
+    dock?.setState("bar");
     router.push("/canvas");
   };
 

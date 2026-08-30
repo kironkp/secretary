@@ -332,16 +332,15 @@ Rules:
   carries a UI-only `uiAction: {type: "show_canvas"}` beside its toast. It is
   transport, not content: never serialized into the model-visible tool result,
   never persisted. The shell reacts by navigating to the **Canvas tab** — the
-  real page, nav bar and all; the Canvas must never arrive as a modal sheet or
-  takeover that makes the rest of the app unreachable. Chat lives in the
-  persistent bottom dock (§7.7), so it is already visible alongside the opened
-  canvas; if the dock is fully expanded it drops to its peek height so the
-  paint is actually seen. In a voice call the docked in-call canvas flips open
-  (expanding from the pill if minimized) instead of navigating. The nav
-  indicator slides to Canvas (§7.7 tab motion); `prefers-reduced-motion` swaps
-  every animation for an instant cut. This transition is app chrome under
-  invariant 1: the model requests visibility with data; the shell owns all
-  movement.
+  real page, nav bar and all; the Canvas must never arrive as a modal sheet,
+  takeover, or embedded copy that makes the rest of the app unreachable —
+  there is ONE canvas view, and it lives on its tab. The chat dock (§7.7)
+  collapses to its bar — the paint is the answer, nothing sits on top of it.
+  In a voice call the call shrinks to its pill and the app navigates to the
+  same tab, the pill riding above it. The nav indicator slides to Canvas
+  (§7.7 tab motion); `prefers-reduced-motion` swaps every animation for an
+  instant cut. This transition is app chrome under invariant 1: the model
+  requests visibility with data; the shell owns all movement.
 - **Latency budget:** first visual paint < 3s, complete < 10s, patch < 2s.
   Small/fast model; the painter prompt lives in repo as `canvas-painter-prompt.md`.
 - **Data honesty:** the painter receives the same Signals JSON as the planner

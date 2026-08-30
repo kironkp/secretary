@@ -112,9 +112,17 @@ export function CanvasView({
   );
 
   // Shell interaction primitives: host-attached, never from model markup.
+  // Idempotent per DOCUMENT (WeakSet), because iframe onLoad is not a
+  // reliable wiring point everywhere: iOS WebKit can swap the initial
+  // about:blank document for the srcdoc one AFTER load fires, discarding any
+  // listeners attached to the first — taps then silently die (the iPhone
+  // data-check bug). A retry loop below re-wires whichever document actually
+  // committed; swapped-out documents fall out of the WeakSet on GC.
+  const wiredDocs = useRef(new WeakSet<Document>());
   const wireShellBehaviors = useCallback(() => {
     const doc = frameRef.current?.contentDocument;
-    if (!doc) return;
+    if (!doc || wiredDocs.current.has(doc)) return;
+    wiredDocs.current.add(doc);
     applyDoneMarks(doc);
     doc.addEventListener("click", (e) => {
       const target = (e.target as Element | null)?.closest?.(
@@ -134,6 +142,20 @@ export function CanvasView({
       target.classList.toggle("cv-expanded");
     });
   }, [router, applyDoneMarks, completeTask]);
+
+  // Wiring retry: after every snapshot (re)load, keep re-attempting for a few
+  // seconds so the committed document gets wired even where onLoad lied (see
+  // wireShellBehaviors). The per-document marker makes repeats free.
+  useEffect(() => {
+    if (!snapshot) return;
+    let tries = 0;
+    const t = setInterval(() => {
+      wireShellBehaviors();
+      measure();
+      if (++tries >= 16) clearInterval(t);
+    }, 300);
+    return () => clearInterval(t);
+  }, [snapshot, wireShellBehaviors, measure]);
 
   const restore = async (id: string) => {
     const res = await fetch("/api/canvas", {
