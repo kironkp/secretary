@@ -17,6 +17,9 @@ export function useVoiceSession() {
   const [muted, setMuted] = useState(false);
   const [assistantSpeaking, setAssistantSpeaking] = useState(false);
   const [model, setModel] = useState<string>("");
+  // Bumped when a tool outcome asks for the canvas (SPEC §7.6 auto-open);
+  // the call UI watches it and flips its in-call canvas into view.
+  const [canvasSeq, setCanvasSeq] = useState(0);
   const toastKey = useRef(0);
 
   // Lines are keyed by the server's item id: barge-in interleaves user and
@@ -50,6 +53,7 @@ export function useVoiceSession() {
       providerRef.current = provider;
       setTranscript([]);
       setToasts([]);
+      setCanvasSeq(0);
       setError(null);
       provider.on("status", (s, detail) => {
         setStatus(s);
@@ -61,7 +65,8 @@ export function useVoiceSession() {
       provider.on("assistantTranscript", appendTranscript("assistant"));
       provider.on("assistantSpeaking", setAssistantSpeaking);
       provider.on("modelChanged", setModel);
-      provider.on("toolResult", (_name, toast) => {
+      provider.on("toolResult", (_name, toast, uiAction) => {
+        if (uiAction?.type === "show_canvas") setCanvasSeq((s) => s + 1);
         if (!toast) return;
         const key = ++toastKey.current;
         setToasts((prev) => [...prev.slice(-3), { ...toast, key }]);
@@ -113,6 +118,7 @@ export function useVoiceSession() {
     error,
     transcript,
     toasts,
+    canvasSeq,
     muted,
     assistantSpeaking,
     model,

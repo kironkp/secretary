@@ -372,6 +372,7 @@ export const toolSchemas = {
       .min(1)
       .describe("The targeted change, e.g. 'make the album section bigger' — the rest stays"),
   }),
+  show_canvas: z.object({}),
   // --- Slow loop, tier 2 (SPEC §7.5): asks OUTSIDE the registry become code ---
   request_new_component: z.object({
     need: z
@@ -498,6 +499,8 @@ const toolDescriptions: Record<ToolName, string> = {
     "Paint the Canvas page: a free-form visual the user watches build live — posters, charts, big-number summaries, week views. Use for ANY 'show me / draw / visualize / put it on the canvas' ask. The painter READS THE RECENT CONVERSATION, so 'lay out the CPO statuses we just discussed' is a complete brief — everything the user just said will render. Never say you can't draw, and never promise a screen update without calling this. The result appears on the Canvas tab; say so.",
   edit_canvas:
     "Targeted change to the current canvas ('make the album section bigger') without repainting the rest. Requires an existing canvas — otherwise use paint_canvas.",
+  show_canvas:
+    "Bring the Canvas into view on the user's screen WITHOUT repainting — 'open the canvas', 'show me the canvas', 'put that back up'. paint_canvas and edit_canvas already open it automatically; use this only when the user wants to look at what's already there.",
   request_new_component:
     "The user wants a dashboard view that doesn't exist yet (outside the registry). Files a priority wishlist entry and starts a background build (a few minutes). ALSO call paint_canvas with the same ask so they see something NOW, and tell them honestly: 'Building that view — meanwhile, here's the nearest thing.' When the build lands, approval happens in chat via review_proposed_component.",
   review_proposed_component:
@@ -542,6 +545,9 @@ export const VOICE_TOOL_NAMES = [
   "amend_task",
   "schedule_checkin",
   "paint_canvas",
+  // "open the canvas" flips the in-call canvas into view (§7.6 auto-open)
+  // without burning a repaint
+  "show_canvas",
   "get_current_datetime",
   "queue_clarification",
   "resolve_clarification",

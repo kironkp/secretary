@@ -50,6 +50,7 @@ export default async function ChatPage({
           defaultVoiceEffort={userRow?.persona?.voiceEffort ?? "auto"}
           initialChatModel={userRow?.persona?.chatModel ?? "gpt-5.5"}
           initialChatEffort={userRow?.persona?.chatEffort ?? "medium"}
+          canHostCanvas
         />
       }
       dashboard={<DashboardPanel userId={userId} timezone={timezone} compact />}

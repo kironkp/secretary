@@ -156,6 +156,8 @@ export async function POST(req: Request) {
   let previousResponseId: string | undefined = canChain ? storedResponseId! : undefined;
 
   const toasts: NonNullable<ToolOutcome["toast"]>[] = [];
+  // UI-only actions (SPEC §7.6 auto-open) — transient, never model-visible.
+  const uiActions: NonNullable<ToolOutcome["uiAction"]>[] = [];
   let assistantText = "";
   let totalIn = 0;
   let totalOut = 0;
@@ -184,6 +186,7 @@ export async function POST(req: Request) {
       });
       assistantText = result.text;
       toasts.push(...result.toasts);
+      uiActions.push(...result.uiActions);
       totalIn = result.inputTokens;
       totalOut = result.outputTokens;
       servedBy = chip.model;
@@ -235,6 +238,7 @@ export async function POST(req: Request) {
           JSON.parse(call.arguments || "{}")
         );
         if (outcome.toast) toasts.push(outcome.toast);
+        if (outcome.uiAction) uiActions.push(outcome.uiAction);
         outputs.push({
           type: "function_call_output",
           call_id: call.call_id,
@@ -294,5 +298,6 @@ export async function POST(req: Request) {
       createdAt: assistantMessage.createdAt,
     },
     toasts,
+    uiActions,
   });
 }

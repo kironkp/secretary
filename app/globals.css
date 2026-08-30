@@ -78,6 +78,13 @@ body {
 }
 .animate-toast-in { animation: toast-in 0.25s ease-out; }
 
+/* Canvas sheet sliding up over the chat (auto-open, SPEC §7.6) */
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(100%); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-slide-up { animation: slide-up 0.3s ease-out; }
+
 /* Dictation bar subtle pulse */
 @keyframes pulse-subtle {
   0%, 100% { opacity: 1; }
