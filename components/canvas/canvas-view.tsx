@@ -15,6 +15,7 @@ type Snapshot = {
   painting: boolean;
   createdAt: string;
   srcdoc: string;
+  doneTaskIds: string[];
 };
 type HistoryRow = { id: string; brief: string; painting: boolean; createdAt: string };
 
@@ -44,17 +45,37 @@ export function CanvasView({
     return () => window.removeEventListener("resize", measure);
   }, [measure]);
 
+  // Task ids crossed off: optimistic taps this session, plus server-seeded
+  // done marks (doneTaskIds) so cross-offs survive a reload. Each poll/repaint
+  // loads a fresh iframe document from the same static snapshot markup, so the
+  // marks must be re-applied on every load or ticks would visually revert.
+  const checkedRef = useRef<Set<string>>(new Set());
+
+  const applyDoneMarks = useCallback((doc: Document) => {
+    for (const el of Array.from(doc.querySelectorAll("[data-check]"))) {
+      const id = el.getAttribute("data-check");
+      if (id && checkedRef.current.has(id)) el.classList.add("cv-done");
+    }
+  }, []);
+
   const load = useCallback(async () => {
     const dark = document.documentElement.classList.contains("dark") ? "1" : "0";
     const res = await fetch(`/api/canvas?dark=${dark}`);
     if (!res.ok) return;
     const data = (await res.json()) as { snapshot: Snapshot | null };
+    if (data.snapshot) {
+      // Union with in-flight optimistic taps; a task completed elsewhere gets
+      // crossed off here on the next poll even when the iframe doesn't reload.
+      for (const id of data.snapshot.doneTaskIds ?? []) checkedRef.current.add(id);
+      const doc = frameRef.current?.contentDocument;
+      if (doc) applyDoneMarks(doc);
+    }
     setSnapshot((prev) =>
       prev && data.snapshot && prev.id === data.snapshot.id && prev.srcdoc === data.snapshot.srcdoc
         ? prev
         : data.snapshot
     );
-  }, []);
+  }, [applyDoneMarks]);
 
   // Initial load + poll: fast while painting (progressive render), slow otherwise.
   useEffect(() => {
@@ -65,18 +86,6 @@ export function CanvasView({
       clearInterval(interval);
     };
   }, [snapshot?.painting, load, pollMs]);
-
-  // Task ids crossed off this session: each poll/repaint loads a fresh iframe
-  // document from the same static snapshot markup, so the optimistic cross-off
-  // must be re-applied on every load or ticks would visually revert.
-  const checkedRef = useRef<Set<string>>(new Set());
-
-  const applyDoneMarks = useCallback((doc: Document) => {
-    for (const el of Array.from(doc.querySelectorAll("[data-check]"))) {
-      const id = el.getAttribute("data-check");
-      if (id && checkedRef.current.has(id)) el.classList.add("cv-done");
-    }
-  }, []);
 
   // data-check tap (SPEC §7.6): optimistic cross-off, then the same PATCH the
   // dashboard checkbox sends — including its rollback-on-failure contract.
@@ -89,7 +98,7 @@ export function CanvasView({
       const res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "done" }),
+        body: JSON.stringify({ status: "done", source: "canvas" }),
       }).catch(() => null);
       if (!res?.ok) {
         checkedRef.current.delete(taskId);

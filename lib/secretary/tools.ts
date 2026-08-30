@@ -36,6 +36,7 @@ import { REGISTRY_COMPONENTS, REGISTRY_VERSION } from "@/lib/layout/registry";
 import { computeSignals } from "@/lib/layout/signals";
 import { applyBans, validatePlan } from "@/lib/layout/validator";
 import { findDuplicate, findDuplicateEvent } from "./dedupe";
+import { clearExpectationsFor } from "./expectations";
 import { spawnNextOccurrence } from "./recurrence";
 import { toolSchemas, type ToolName } from "./tool-schemas";
 
@@ -43,20 +44,6 @@ import { toolSchemas, type ToolName } from "./tool-schemas";
  *  the realtime model sometimes re-issues a create after a barge-in, and that
  *  must be idempotent, but "Email Ash" vs "Call Ash" must both go through. */
 const CREATE_GUARD_SIMILARITY = 0.85;
-
-/** SPEC §11: a user report clears open expectations for the task — silently. */
-async function clearExpectationsFor(userId: string, taskId: string): Promise<void> {
-  await db
-    .update(expectations)
-    .set({ status: "cleared", clearedAt: new Date() })
-    .where(
-      and(
-        eq(expectations.userId, userId),
-        eq(expectations.taskId, taskId),
-        eq(expectations.status, "open")
-      )
-    );
-}
 
 export type ToolContext = {
   userId: string;

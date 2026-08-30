@@ -4,7 +4,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { isErrorResponse, parseBody, requireSession } from "@/lib/api";
-import { latestSnapshot, listSnapshots, restoreSnapshot } from "@/lib/canvas/painter";
+import { doneCheckIds, latestSnapshot, listSnapshots, restoreSnapshot } from "@/lib/canvas/painter";
 import { buildCanvasSrcDoc } from "@/lib/canvas/sanitize";
 
 export async function GET(req: Request) {
@@ -24,6 +24,9 @@ export async function GET(req: Request) {
       painting: latest.painting,
       createdAt: latest.createdAt.toISOString(),
       srcdoc: buildCanvasSrcDoc(latest.markup, { dark }),
+      // Cross-offs survive reloads (SPEC §7.6): tasks in this markup already
+      // done, so the shell can seed its crossed-off set.
+      doneTaskIds: await doneCheckIds(user.id, latest.markup),
     },
   });
 }

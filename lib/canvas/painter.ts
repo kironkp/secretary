@@ -7,9 +7,9 @@
 // canvas_snapshots. The model call is injectable for tests.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { canvasSnapshots, messages } from "@/lib/db/schema";
+import { canvasSnapshots, messages, tasks } from "@/lib/db/schema";
 import { openai, PLANNER_MODEL } from "@/lib/openai";
 import { anthropicFor, brainSettings, claudeBrainEnabled } from "@/lib/anthropic";
 import type Anthropic from "@anthropic-ai/sdk";
@@ -182,6 +182,24 @@ export async function paintCanvas(
       .where(eq(canvasSnapshots.id, row.id));
   }
   return { snapshotId: row.id, markup: sanitizeCanvasMarkup(finalRaw) };
+}
+
+/** data-check ids in sanitized markup — attrs are normalized to name="value",
+ *  and values are id-shaped by the sanitizer, so this regex is exact. */
+export function collectCheckIds(markup: string): string[] {
+  return [...new Set([...markup.matchAll(/\bdata-check="([-a-zA-Z0-9_]+)"/g)].map((m) => m[1]))];
+}
+
+/** Which of the markup's data-check tasks are already done (user-scoped) —
+ *  seeds the shell's cross-off set so ticks survive a reload (SPEC §7.6). */
+export async function doneCheckIds(userId: string, markup: string): Promise<string[]> {
+  const ids = collectCheckIds(markup);
+  if (!ids.length) return [];
+  const rows = await db
+    .select({ id: tasks.id })
+    .from(tasks)
+    .where(and(eq(tasks.userId, userId), inArray(tasks.id, ids), eq(tasks.status, "done")));
+  return rows.map((r) => r.id);
 }
 
 export async function latestSnapshot(userId: string) {

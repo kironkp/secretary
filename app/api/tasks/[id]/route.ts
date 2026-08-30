@@ -4,6 +4,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { checkins, projects, tasks } from "@/lib/db/schema";
 import { isErrorResponse, parseBody, requireSession } from "@/lib/api";
+import { clearExpectationsFor } from "@/lib/secretary/expectations";
 import { spawnNextOccurrence } from "@/lib/secretary/recurrence";
 
 /** Full detail for the task dialog: every tool-writable field + history. */
@@ -42,6 +43,9 @@ const bodySchema = z.object({
   dueAt: z.string().datetime({ offset: true }).nullable().optional(),
   priority: z.number().int().min(0).max(3).optional(),
   stages: z.array(z.object({ name: z.string().min(1), done: z.boolean() })).optional(),
+  // Provenance for the done check-in note; absent = dashboard (the historical
+  // default — existing callers keep their wording).
+  source: z.enum(["dashboard", "canvas"]).optional(),
 });
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -88,8 +92,10 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       userId: user.id,
       taskId: id,
       type: "user_update",
-      note: "Marked done from dashboard",
+      note: `Marked done from ${parsed.source ?? "dashboard"}`,
     });
+    // SPEC §11: only matches open rows, so a repeat PATCH is a no-op.
+    await clearExpectationsFor(user.id, id);
     if (existing.status !== "done") await spawnNextOccurrence(updated);
   }
 
