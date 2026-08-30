@@ -41,8 +41,22 @@ describe("fast/slow split: the mouth is thin", () => {
       expect(names).not.toContain(heavy);
     }
     expect(names).toContain("paint_canvas"); // the voice's hands for anything visual
+    expect(names).toContain("show_canvas"); // "open the canvas" without a repaint (§7.6 auto-open)
     expect(names).toContain("consult_brain"); // …and its phone-a-friend for hard questions
     expect(names).toContain("search_history"); // cross-session recall on demand (SPEC §11)
+  });
+
+  // Auto-open (SPEC §7.6): the uiAction is shell transport beside the result —
+  // the model only ever sees JSON.stringify(outcome.result), so the action
+  // must never leak into it.
+  it("show_canvas rides all three tool-def builders and its action never reaches the model", async () => {
+    expect(VOICE_TOOL_NAMES).toContain("show_canvas");
+    expect(openAIToolDefs().some((t) => t.name === "show_canvas")).toBe(true);
+    expect(anthropicToolDefs().some((t) => t.name === "show_canvas")).toBe(true);
+    const outcome = await executeTool(ctx, "show_canvas", {});
+    expect(outcome.uiAction).toEqual({ type: "show_canvas" });
+    expect(JSON.stringify(outcome.result)).not.toContain("uiAction");
+    expect(JSON.stringify(outcome.result)).not.toContain("show_canvas");
   });
 
   it("voice search_history carries the time filters for 'what did I say last week?'", () => {

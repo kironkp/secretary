@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import {
   ArrowUp,
   Calendar,
+  ChevronDown,
   Clock,
   FileText,
   Flame,
@@ -19,9 +20,11 @@ import {
   X,
 } from "lucide-react";
 import type { BriefingCard } from "@/lib/secretary/briefing";
+import { CanvasView } from "@/components/canvas/canvas-view";
 import { unlockRemoteAudio } from "@/lib/realtime/remote-audio";
 import { DictationBar } from "./dictation-bar";
 import { ModelChip } from "./model-chip";
+import { requestShowCanvas } from "./show-canvas-event";
 import { useVoiceCall } from "./voice-call-provider";
 
 type Attachment = { id: string; mime: string; name: string };
@@ -117,6 +120,7 @@ export function ChatThread({
   defaultVoiceEffort = "auto",
   initialChatModel = "gpt-5.5",
   initialChatEffort = "medium",
+  canHostCanvas = false,
 }: {
   initialConversationId: string | null;
   initialMessages: Message[];
@@ -131,6 +135,9 @@ export function ChatThread({
   /** Composer chip: persisted chat model + effort. */
   initialChatModel?: string;
   initialChatEffort?: string;
+  /** This thread IS the chat page: an unclaimed auto-open Canvas shows as a
+   *  slide-up sheet here (draft survives underneath) instead of navigating. */
+  canHostCanvas?: boolean;
 }) {
   const router = useRouter();
   const [conversationId, setConversationId] = useState(initialConversationId);
@@ -148,6 +155,18 @@ export function ChatThread({
   const fileRef = useRef<HTMLInputElement>(null);
   const localKey = useRef(0);
   const [pending, setPending] = useState<PendingAttachment[]>([]);
+  // Auto-open Canvas (SPEC §7.6): the slide-up sheet over this thread.
+  const [canvasSheet, setCanvasSheet] = useState(false);
+
+  // A tool outcome asked for the canvas: a workspace pane claims the event on
+  // big screens; otherwise this thread hosts the sheet (chat state and the
+  // typed draft survive underneath); a surface with neither falls back to the
+  // Canvas tab.
+  const showCanvas = () => {
+    if (requestShowCanvas()) return;
+    if (canHostCanvas) setCanvasSheet(true);
+    else router.push("/canvas");
+  };
 
   // Pick → normalize (images to ≤1600px JPEG) → upload right away; the send
   // only passes ids. Failed uploads show inline and never block the text.
@@ -252,6 +271,8 @@ export function ChatThread({
         ...m.map((msg) => (msg.id === tempId ? { ...msg, id: body.userMessageId } : msg)),
         { ...body.assistantMessage, mode: "text" as const },
       ]);
+      const uiActions = (body.uiActions ?? []) as { type: string }[];
+      if (uiActions.some((a) => a.type === "show_canvas")) showCanvas();
       router.refresh(); // today strip + dashboard counts
     } catch {
       setMsgs((m) =>
@@ -610,6 +631,28 @@ export function ChatThread({
           )}
         </div>
       </div>
+
+      {/* Auto-open Canvas sheet (SPEC §7.6): slides up over the thread — the
+          chat never unmounts, so the draft is exactly where it was on return. */}
+      {canvasSheet && (
+        <div className="fixed inset-0 z-40 flex animate-slide-up flex-col bg-bg motion-reduce:animate-none">
+          <div className="flex flex-none items-center justify-between border-b border-edge px-4 py-3">
+            <h2 className="text-sm font-bold">Canvas</h2>
+            <button
+              onClick={() => setCanvasSheet(false)}
+              title="Back to chat"
+              aria-label="Back to chat"
+              className="flex items-center gap-1.5 rounded-full border border-edge bg-card px-3 py-1.5 text-xs text-muted transition-colors hover:text-ink"
+            >
+              <ChevronDown size={14} strokeWidth={2} className="flex-none" />
+              Back to chat
+            </button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(env(safe-area-inset-bottom),1rem)] pt-2 [-webkit-overflow-scrolling:touch]">
+            <CanvasView pollMs={3000} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -5,8 +5,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { conversations, messages, user } from "@/lib/db/schema";
+import { canvasSnapshots, conversations, messages, user } from "@/lib/db/schema";
 import { buildPainterInput, paintCanvas, painterPrompt } from "@/lib/canvas/painter";
+import { executeTool } from "@/lib/secretary/tools";
 
 const U = { id: `test-painter-${crypto.randomUUID()}`, email: `paint-${Date.now()}@cv.test` };
 
@@ -94,5 +95,24 @@ describe("paintCanvas conversation context (integration)", () => {
     await paintCanvas(U.id, "paint my week", { stream: captureStream });
     expect(received).not.toContain("CONVERSATION (");
     expect(received).toContain("BRIEF:\npaint my week");
+  });
+});
+
+// Auto-open (SPEC §7.6): show_canvas is pure chrome — the outcome carries the
+// UI action beside the result, and the canvas store is never touched.
+describe("show_canvas", () => {
+  const ctx = { userId: `test-show-${crypto.randomUUID()}`, timezone: "UTC" };
+
+  it("carries the uiAction, writes no snapshot, and keeps the action out of the model-visible result", async () => {
+    const outcome = await executeTool(ctx, "show_canvas", {});
+    expect(outcome.uiAction).toEqual({ type: "show_canvas" });
+    expect((outcome.result as { shown?: boolean }).shown).toBe(true);
+    // the model sees ONLY JSON.stringify(outcome.result) — no action in it
+    expect(JSON.stringify(outcome.result)).not.toContain("uiAction");
+    const rows = await db
+      .select()
+      .from(canvasSnapshots)
+      .where(eq(canvasSnapshots.userId, ctx.userId));
+    expect(rows).toHaveLength(0);
   });
 });

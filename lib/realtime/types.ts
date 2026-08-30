@@ -20,6 +20,10 @@ export type VoiceErrorKind =
 
 export type ToolToast = { icon: string; text: string };
 
+/** UI-only side channel on a tool outcome (SPEC §7.6 auto-open) — the shell
+ *  acts on it; the model never sees it. */
+export type ToolUIAction = { type: "show_canvas" };
+
 export type VoiceEvents = {
   status: (status: VoiceStatus, detail?: { kind?: VoiceErrorKind; message?: string }) => void;
   // id = the server's item/response id: transcript lines are keyed by it so
@@ -27,7 +31,7 @@ export type VoiceEvents = {
   userTranscript: (id: string, text: string, final: boolean) => void;
   assistantTranscript: (id: string, text: string, final: boolean) => void;
   assistantSpeaking: (speaking: boolean) => void;
-  toolResult: (name: string, toast?: ToolToast) => void;
+  toolResult: (name: string, toast?: ToolToast, uiAction?: ToolUIAction) => void;
   modelChanged: (model: string) => void;
 };
 

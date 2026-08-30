@@ -127,6 +127,17 @@ export function VoiceMode({
   // call — navigating away would unmount the session.
   const [minimized, setMinimized] = useState(startMinimized);
   const [showCanvas, setShowCanvas] = useState(false);
+
+  // Auto-open (SPEC §7.6): a tool outcome asked for the canvas — flip the
+  // in-call canvas into view, expanding from the pill so it's actually seen.
+  useEffect(() => {
+    if (session.canvasSeq === 0) return;
+    const t = setTimeout(() => {
+      setShowCanvas(true);
+      setMinimized(false);
+    }, 0);
+    return () => clearTimeout(t);
+  }, [session.canvasSeq]);
   const [model, setModel] = useState(
     () => (typeof window !== "undefined" && localStorage.getItem("voice-model")) || MODELS[0].id
   );

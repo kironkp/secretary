@@ -11,6 +11,8 @@ const MAX_TOOL_ROUNDS = 8;
 export type ClaudeChatResult = {
   text: string;
   toasts: NonNullable<ToolOutcome["toast"]>[];
+  /** UI-only actions (SPEC §7.6 auto-open) — transient, never model-visible. */
+  uiActions: NonNullable<ToolOutcome["uiAction"]>[];
   inputTokens: number;
   outputTokens: number;
 };
@@ -60,6 +62,7 @@ export async function runClaudeChat(opts: {
   ];
 
   const toasts: NonNullable<ToolOutcome["toast"]>[] = [];
+  const uiActions: NonNullable<ToolOutcome["uiAction"]>[] = [];
   let inputTokens = 0;
   let outputTokens = 0;
 
@@ -85,7 +88,7 @@ export async function runClaudeChat(opts: {
         .filter((b): b is Anthropic.TextBlock => b.type === "text")
         .map((b) => b.text)
         .join("");
-      return { text, toasts, inputTokens, outputTokens };
+      return { text, toasts, uiActions, inputTokens, outputTokens };
     }
 
     // Full assistant content back (thinking blocks included — required for
@@ -107,6 +110,7 @@ export async function runClaudeChat(opts: {
         continue;
       }
       if (outcome.toast) toasts.push(outcome.toast);
+      if (outcome.uiAction) uiActions.push(outcome.uiAction);
       results.push({
         type: "tool_result",
         tool_use_id: call.id,
@@ -116,5 +120,5 @@ export async function runClaudeChat(opts: {
     messages.push({ role: "user", content: results });
   }
 
-  return { text: "(done)", toasts, inputTokens, outputTokens };
+  return { text: "(done)", toasts, uiActions, inputTokens, outputTokens };
 }

@@ -7,6 +7,7 @@ import { EL_MOUTH_VOICE } from "@/lib/elevenlabs";
 import { playRemoteStream, remoteAudioState } from "./remote-audio";
 import type {
   ToolToast,
+  ToolUIAction,
   VoiceEvents,
   VoiceErrorKind,
   VoiceProvider,
@@ -494,7 +495,12 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
       },
     });
     this.send({ type: "response.create" });
-    this.emit("toolResult", name, body.toast as ToolToast | undefined);
+    this.emit(
+      "toolResult",
+      name,
+      body.toast as ToolToast | undefined,
+      body.uiAction as ToolUIAction | undefined
+    );
   }
 
   private handleEvent(event: { type: string } & Record<string, unknown>) {

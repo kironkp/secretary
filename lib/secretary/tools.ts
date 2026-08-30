@@ -65,9 +65,14 @@ export type ToolContext = {
   anchorMessageId?: string;
 };
 
+/** UI-only side channel (SPEC §7.6 auto-open): the shell acts on it; it never
+ *  reaches the model — only `result` is serialized into the tool result. */
+export type ToolUIAction = { type: "show_canvas" };
+
 export type ToolOutcome = {
   result: unknown;
   toast?: { icon: string; text: string };
+  uiAction?: ToolUIAction;
 };
 
 const OPEN_STATUSES = ["inbox", "todo", "in_progress", "blocked"] as const;
@@ -1664,9 +1669,10 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     return {
       result: {
         painting: true,
-        note: "Canvas is painting now — it streams in on the Canvas tab. Tell the user to look there (say 'on your screen' in voice).",
+        note: "Canvas is painting now and is being brought into view on the user's screen automatically — it streams in live (say 'on your screen' in voice).",
       },
       toast: { icon: "🎨", text: "Painting the canvas…" },
+      uiAction: { type: "show_canvas" },
     };
   },
 
@@ -1682,8 +1688,24 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     }).catch((e) => console.error("edit_canvas failed", e));
     await Promise.race([done, new Promise((r) => setTimeout(r, 1200))]);
     return {
-      result: { painting: true, note: "Patch is landing on the Canvas tab now." },
+      result: {
+        painting: true,
+        note: "Patch is landing now — the canvas is being brought into view on the user's screen.",
+      },
       toast: { icon: "🎨", text: "Updating the canvas…" },
+      uiAction: { type: "show_canvas" },
+    };
+  },
+
+  // Auto-open (SPEC §7.6): pure chrome — writes nothing, paints nothing. The
+  // shell reacts to the uiAction; the model only learns the canvas is visible.
+  async show_canvas() {
+    return {
+      result: {
+        shown: true,
+        note: "The Canvas is coming into view on the user's screen now.",
+      },
+      uiAction: { type: "show_canvas" as const },
     };
   },
 

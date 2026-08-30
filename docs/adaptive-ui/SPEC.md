@@ -319,7 +319,23 @@ Rules:
   sanitizer but get no behavior wiring — there the attribute stays inert.
 - **Chat tools:** `paint_canvas(brief)` — full repaint, streamed so first paint
   lands fast; `edit_canvas(patch)` — targeted change ("make the album section
-  bigger") without a full repaint.
+  bigger") without a full repaint; `show_canvas()` — bring the existing canvas
+  into view without touching it ("open the canvas", "put that back up").
+- **Auto-open (shell-owned chrome):** each canvas tool's successful outcome
+  carries a UI-only `uiAction: {type: "show_canvas"}` beside its toast. It is
+  transport, not content: never serialized into the model-visible tool result,
+  never persisted. The shell reacts by bringing the Canvas into view — on a
+  large chat screen the chat column shrinks to a compact rail while a Canvas
+  pane rises in beside it (width transition ~300ms ease-out); on small screens
+  the Canvas slides up over the chat as a full-screen sheet, leaving the thread
+  and any typed draft intact underneath; in a voice call the docked in-call
+  canvas flips open (expanding from the pill if minimized). Chat surfaces
+  negotiate via a cancelable `secretary:show-canvas` CustomEvent — the first
+  surface that can show the canvas in place claims it (`preventDefault`); with
+  no claimant the app falls back to navigating to the Canvas tab.
+  `prefers-reduced-motion` swaps every animation for an instant cut. This
+  transition is app chrome under invariant 1: the model requests visibility
+  with data; the shell owns all movement.
 - **Latency budget:** first visual paint < 3s, complete < 10s, patch < 2s.
   Small/fast model; the painter prompt lives in repo as `canvas-painter-prompt.md`.
 - **Data honesty:** the painter receives the same Signals JSON as the planner
@@ -505,6 +521,8 @@ claude.ai session used as a fixture (docs/adaptive-ui/transcript-2026-08-18).
 - **fast/slow split**: the realtime voice model (mouth/ears) carries only
   persona + today's brief + lexicon + thin tools (`log_status`,
   `create_commitment`, `amend_task`, `schedule_checkin`, `paint_canvas`,
+  `show_canvas` — "open the canvas" flips the in-call canvas into view
+  (§7.6 auto-open) without a repaint —
   `get_current_datetime`, `queue_clarification`, `resolve_clarification`,
   `consult_brain`, `request_capability`, `review_capability`,
   `search_history` — cross-session recall on demand ("what did I say about X
