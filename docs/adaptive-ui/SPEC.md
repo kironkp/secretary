@@ -315,7 +315,14 @@ Rules:
   in `SIGNALS.tasks` (open tasks only, never invented); the sanitizer drops
   values that aren't id-shaped; the shell ignores repeat taps and rolls the
   cross-off back if the API refuses; the server enforces per-user ownership, so
-  a hallucinated id can at worst 404. Dashboard dynamic components share the
+  a hallucinated id can at worst 404. Cross-offs are durable: the canvas GET
+  returns `doneTaskIds` — the snapshot's `data-check` ids whose tasks are
+  already done (user-scoped) — and the shell seeds its crossed-off set from it,
+  so a tapped task stays crossed off across reloads until the next repaint
+  drops it from the markup. The check-in note records canvas provenance
+  ("Marked done from canvas"). Marking done also clears the task's open
+  commitments silently (§11) — same as the chat/voice tools, on every surface
+  that shares the task API. Dashboard dynamic components share the
   sanitizer but get no behavior wiring — there the attribute stays inert.
 - **Chat tools:** `paint_canvas(brief)` — full repaint, streamed so first paint
   lands fast; `edit_canvas(patch)` — targeted change ("make the album section
@@ -467,7 +474,7 @@ responses (never live calls in CI).
 
 **Phase 2.5 — Canvas v0 (§7.6).** `paint_canvas` + `edit_canvas` chat tools;
 sanitizer + sandboxed iframe host + shell primitives (`data-expand`,
-`data-link`); streaming render; snapshot history with restore;
+`data-link`, `data-check`); streaming render; snapshot history with restore;
 `canvas-painter-prompt.md` in repo (given Signals + brief → one HTML fragment,
 inline styles from design tokens, no scripts, every number from signals).
 F9 green. Independent of Phase 2 — can be built right after Phase 1 if the
