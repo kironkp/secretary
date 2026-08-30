@@ -1,22 +1,23 @@
-// Bootstrap for the floating chat panel: the same thread state the /chat page
-// assembles server-side, fetched lazily when the panel first opens so every
-// page doesn't pay for it. Nudges aren't consumed here — a passive panel-open
-// isn't a session start; the budget stays with /chat and voice.
+// Bootstrap for the chat dock (SPEC §7.7): thread + briefing + persona,
+// fetched once after paint so no page load waits on it. ?c= loads a specific
+// conversation (push-receipt deep links). Nudges aren't consumed here — a
+// passive dock mount isn't a session start; the budget stays with voice.
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { user as userTable } from "@/lib/db/schema";
 import { isErrorResponse, requireSession } from "@/lib/api";
-import { getActiveConversation } from "@/lib/db/queries";
+import { getActiveConversation, getConversationWithMessages } from "@/lib/db/queries";
 import { buildBriefing } from "@/lib/secretary/briefing";
 
-export async function GET() {
+export async function GET(req: Request) {
   const user = await requireSession();
   if (isErrorResponse(user)) return user;
+  const c = new URL(req.url).searchParams.get("c");
   // getActiveConversation (not Latest): a thread idle >6h rolls over — the
   // panel opens fresh and the old thread becomes a quotable prior session.
   const [thread, briefing, [userRow]] = await Promise.all([
-    getActiveConversation(user.id),
+    c ? getConversationWithMessages(user.id, c) : getActiveConversation(user.id),
     buildBriefing(user.id, user.timezone),
     db.select({ persona: userTable.persona }).from(userTable).where(eq(userTable.id, user.id)),
   ]);

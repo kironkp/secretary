@@ -1,14 +1,16 @@
 "use client";
 
-// The chat home (W1): briefing card, message thread, input bar with dictation
-// mic + Talk button. One thread, both modes. Centered reading column; only the
-// thread scrolls, the input stays pinned to the bottom.
+// The chat thread, dock-shaped (SPEC §7.7): the composer is the always-visible
+// bar; the conversation lives in a panel that rises above it. Three states —
+// bar (composer only), peek (the exchange since the dock last opened), full
+// (whole history + briefing). The caret expands and minimizes.
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowUp,
   Calendar,
   ChevronDown,
+  ChevronUp,
   Clock,
   FileText,
   Flame,
@@ -20,12 +22,12 @@ import {
   X,
 } from "lucide-react";
 import type { BriefingCard } from "@/lib/secretary/briefing";
-import { CanvasView } from "@/components/canvas/canvas-view";
 import { unlockRemoteAudio } from "@/lib/realtime/remote-audio";
 import { DictationBar } from "./dictation-bar";
 import { ModelChip } from "./model-chip";
-import { requestShowCanvas } from "./show-canvas-event";
 import { useVoiceCall } from "./voice-call-provider";
+
+export type DockState = "bar" | "peek" | "full";
 
 type Attachment = { id: string; mime: string; name: string };
 
@@ -120,7 +122,7 @@ export function ChatThread({
   defaultVoiceEffort = "auto",
   initialChatModel = "gpt-5.5",
   initialChatEffort = "medium",
-  canHostCanvas = false,
+  dock,
 }: {
   initialConversationId: string | null;
   initialMessages: Message[];
@@ -135,9 +137,9 @@ export function ChatThread({
   /** Composer chip: persisted chat model + effort. */
   initialChatModel?: string;
   initialChatEffort?: string;
-  /** This thread IS the chat page: an unclaimed auto-open Canvas shows as a
-   *  slide-up sheet here (draft survives underneath) instead of navigating. */
-  canHostCanvas?: boolean;
+  /** Dock mode (SPEC §7.7): parent owns the bar/peek/full state; the thread
+   *  renders as a panel above the composer and drives sends → peek. */
+  dock?: { state: DockState; setState: (s: DockState) => void };
 }) {
   const router = useRouter();
   const [conversationId, setConversationId] = useState(initialConversationId);
@@ -155,17 +157,16 @@ export function ChatThread({
   const fileRef = useRef<HTMLInputElement>(null);
   const localKey = useRef(0);
   const [pending, setPending] = useState<PendingAttachment[]>([]);
-  // Auto-open Canvas (SPEC §7.6): the slide-up sheet over this thread.
-  const [canvasSheet, setCanvasSheet] = useState(false);
+  const dockState: DockState = dock?.state ?? "full";
+  // Peek window: index of the first message shown in peek — set at the send
+  // that opens it, so peek is "what happened since I opened the dock".
+  const peekFrom = useRef(0);
 
-  // A tool outcome asked for the canvas: a workspace pane claims the event on
-  // big screens; otherwise this thread hosts the sheet (chat state and the
-  // typed draft survive underneath); a surface with neither falls back to the
-  // Canvas tab.
+  // Auto-open Canvas (SPEC §7.6): navigate to the Canvas TAB — the real page,
+  // nav intact. A fully-expanded dock drops to peek so the paint is seen.
   const showCanvas = () => {
-    if (requestShowCanvas()) return;
-    if (canHostCanvas) setCanvasSheet(true);
-    else router.push("/canvas");
+    if (dock?.state === "full") dock.setState("peek");
+    router.push("/canvas");
   };
 
   // Pick → normalize (images to ≤1600px JPEG) → upload right away; the send
@@ -237,6 +238,12 @@ export function ChatThread({
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [msgs.length, liveLines.length]);
 
+  // Opening the panel (bar → peek/full) must land at the newest message —
+  // instant, because the panel itself is already animating its height.
+  useEffect(() => {
+    if (dockState !== "bar") bottomRef.current?.scrollIntoView();
+  }, [dockState]);
+
   // Payloads for undelivered messages, keyed by their local id — a failed
   // bubble can be re-sent verbatim (text + already-uploaded attachment ids).
   const retryPayloads = useRef(new Map<string, { text: string; attachmentIds: string[] }>());
@@ -299,6 +306,12 @@ export function ChatThread({
     // thumbnails render from the server from here on
     pending.forEach((a) => a.previewUrl && URL.revokeObjectURL(a.previewUrl));
     setPending([]);
+    // Sending from the closed bar opens the peek window at THIS message: the
+    // answer pops up above the composer without dragging in the whole thread.
+    if (dock && dock.state === "bar") {
+      peekFrom.current = msgs.length;
+      dock.setState("peek");
+    }
     const tempId = `local-${++localKey.current}`;
     retryPayloads.current.set(tempId, { text, attachmentIds: sentAttachments.map((a) => a.id) });
     setMsgs((m) => [
@@ -331,12 +344,53 @@ export function ChatThread({
   }, [call.ended, router]);
 
   const hasBriefing = briefing.hasContent;
+  // Peek shows only the exchange since the dock opened; full shows everything.
+  const shownMsgs = dockState === "peek" ? msgs.slice(peekFrom.current) : msgs;
+  const showExtras = dockState !== "peek"; // briefing + empty state
+
+  // The conversation panel: a card that rises above the composer. Height (not
+  // scale) animates between the three states so the composer never moves.
+  const panelClass = dock
+    ? `flex min-h-0 flex-none flex-col overflow-hidden rounded-2xl border bg-surface transition-all duration-300 ease-out motion-reduce:transition-none ${
+        dockState === "bar"
+          ? "pointer-events-none h-0 border-transparent opacity-0"
+          : dockState === "peek"
+            ? "mb-2 h-[min(45dvh,26rem)] border-edge opacity-100 shadow-2xl"
+            : "mb-2 h-[min(78dvh,46rem)] border-edge opacity-100 shadow-2xl"
+      }`
+    : "flex min-h-0 flex-1 flex-col";
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="min-h-0 flex-1 overflow-y-auto py-6">
-        <div className="mx-auto max-w-2xl space-y-4 px-1">
-          {hasBriefing && (
+    <div className="flex h-full min-h-0 flex-col justify-end">
+      <div className={panelClass} aria-hidden={dock ? dockState === "bar" : undefined}>
+        {dock && dockState !== "bar" && (
+          <div className="flex flex-none items-center justify-between border-b border-edge bg-card px-4 py-2">
+            <span className="text-sm font-bold">{secretaryName}</span>
+            <div className="flex items-center gap-0.5">
+              {dockState === "peek" && (
+                <button
+                  onClick={() => dock.setState("full")}
+                  title="Show full conversation"
+                  aria-label="Show full conversation"
+                  className="flex h-7 w-7 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-2 hover:text-ink"
+                >
+                  <ChevronUp size={16} strokeWidth={2} />
+                </button>
+              )}
+              <button
+                onClick={() => dock.setState("bar")}
+                title="Minimize"
+                aria-label="Minimize chat"
+                className="flex h-7 w-7 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-2 hover:text-ink"
+              >
+                <ChevronDown size={16} strokeWidth={2} />
+              </button>
+            </div>
+          </div>
+        )}
+      <div className="min-h-0 flex-1 overflow-y-auto py-5 [-webkit-overflow-scrolling:touch]">
+        <div className="mx-auto w-full max-w-2xl space-y-4 px-4">
+          {showExtras && hasBriefing && (
             <div className="rounded-2xl border border-edge bg-surface p-5">
               <p className="mb-2.5 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-muted">
                 <Sun size={14} strokeWidth={2} className="text-warn" />
@@ -385,7 +439,7 @@ export function ChatThread({
             </div>
           )}
 
-          {msgs.length === 0 && !hasBriefing && (
+          {showExtras && msgs.length === 0 && !hasBriefing && (
             <div className="flex flex-col items-center gap-3 pt-24 text-center">
               <span className="flex h-14 w-14 items-center justify-center rounded-full bg-accent/10 text-accent">
                 <WaveformGlyph size={24} />
@@ -397,7 +451,7 @@ export function ChatThread({
             </div>
           )}
 
-          {msgs
+          {shownMsgs
             .filter((m) => m.role !== "tool")
             .map((m) => (
               <div key={m.id}>
@@ -484,8 +538,9 @@ export function ChatThread({
           <div ref={bottomRef} />
         </div>
       </div>
+      </div>
 
-      <div className="flex-none pb-[max(env(safe-area-inset-bottom),1rem)] pt-1">
+      <div className={`flex-none ${dock ? "" : "pb-[max(env(safe-area-inset-bottom),1rem)] pt-1"}`}>
         <div className="mx-auto max-w-2xl px-1">
           {error && <p className="mb-2 text-xs text-danger">{error}</p>}
 
@@ -571,6 +626,20 @@ export function ChatThread({
                   e.target.value = "";
                 }}
               />
+              {dock && (
+                <button
+                  onClick={() => dock.setState(dockState === "bar" ? "full" : "bar")}
+                  title={dockState === "bar" ? "Show conversation" : "Minimize chat"}
+                  aria-label={dockState === "bar" ? "Show conversation" : "Minimize chat"}
+                  className="flex h-9 w-9 flex-none items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-2 hover:text-ink"
+                >
+                  {dockState === "bar" ? (
+                    <ChevronUp size={18} strokeWidth={2} />
+                  ) : (
+                    <ChevronDown size={18} strokeWidth={2} />
+                  )}
+                </button>
+              )}
               <button
                 onClick={() => fileRef.current?.click()}
                 disabled={pending.length >= MAX_ATTACHMENTS}
@@ -632,27 +701,6 @@ export function ChatThread({
         </div>
       </div>
 
-      {/* Auto-open Canvas sheet (SPEC §7.6): slides up over the thread — the
-          chat never unmounts, so the draft is exactly where it was on return. */}
-      {canvasSheet && (
-        <div className="fixed inset-0 z-40 flex animate-slide-up flex-col bg-bg motion-reduce:animate-none">
-          <div className="flex flex-none items-center justify-between border-b border-edge px-4 py-3">
-            <h2 className="text-sm font-bold">Canvas</h2>
-            <button
-              onClick={() => setCanvasSheet(false)}
-              title="Back to chat"
-              aria-label="Back to chat"
-              className="flex items-center gap-1.5 rounded-full border border-edge bg-card px-3 py-1.5 text-xs text-muted transition-colors hover:text-ink"
-            >
-              <ChevronDown size={14} strokeWidth={2} className="flex-none" />
-              Back to chat
-            </button>
-          </div>
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(env(safe-area-inset-bottom),1rem)] pt-2 [-webkit-overflow-scrolling:touch]">
-            <CanvasView pollMs={3000} />
-          </div>
-        </div>
-      )}
     </div>
   );
 }

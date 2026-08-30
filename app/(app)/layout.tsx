@@ -1,13 +1,13 @@
+import { Suspense } from "react";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { getTodayStrip } from "@/lib/db/queries";
-import { FloatingChat } from "@/components/chat/floating-chat";
+import { DockedChat } from "@/components/chat/docked-chat";
 import { VoiceCallProvider } from "@/components/chat/voice-call-provider";
 import { DetailDialog } from "@/components/shell/detail-dialog";
 import { EventChipButton } from "@/components/shell/event-chip";
 import { NavTabs } from "@/components/shell/nav-tabs";
-import { SplitToggle } from "@/components/shell/split-toggle";
 import { ThemeToggle } from "@/components/shell/theme";
 
 export default async function AppLayout({
@@ -53,7 +53,6 @@ export default async function AppLayout({
             <span className="whitespace-nowrap rounded-full border border-edge bg-card px-3 py-1 text-muted">
               {strip.dueTodayCount} due today
             </span>
-            <SplitToggle />
             <ThemeToggle />
           </div>
         </div>
@@ -62,10 +61,15 @@ export default async function AppLayout({
         </div>
       </header>
       <main className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto h-full w-full max-w-7xl px-4">{children}</div>
+        {/* pb clears the docked chat bar so page bottoms stay reachable */}
+        <div className="mx-auto h-full w-full max-w-7xl px-4 pb-24">{children}</div>
       </main>
       <DetailDialog />
-      <FloatingChat />
+      {/* Chat is not a tab (SPEC §7.7): the dock rides every page. Suspense
+          because it reads searchParams for the ?c= push-receipt deep link. */}
+      <Suspense fallback={null}>
+        <DockedChat />
+      </Suspense>
     </div>
     </VoiceCallProvider>
   );

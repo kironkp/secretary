@@ -324,18 +324,17 @@ Rules:
 - **Auto-open (shell-owned chrome):** each canvas tool's successful outcome
   carries a UI-only `uiAction: {type: "show_canvas"}` beside its toast. It is
   transport, not content: never serialized into the model-visible tool result,
-  never persisted. The shell reacts by bringing the Canvas into view — on a
-  large chat screen the chat column shrinks to a compact rail while a Canvas
-  pane rises in beside it (width transition ~300ms ease-out); on small screens
-  the Canvas slides up over the chat as a full-screen sheet, leaving the thread
-  and any typed draft intact underneath; in a voice call the docked in-call
-  canvas flips open (expanding from the pill if minimized). Chat surfaces
-  negotiate via a cancelable `secretary:show-canvas` CustomEvent — the first
-  surface that can show the canvas in place claims it (`preventDefault`); with
-  no claimant the app falls back to navigating to the Canvas tab.
-  `prefers-reduced-motion` swaps every animation for an instant cut. This
-  transition is app chrome under invariant 1: the model requests visibility
-  with data; the shell owns all movement.
+  never persisted. The shell reacts by navigating to the **Canvas tab** — the
+  real page, nav bar and all; the Canvas must never arrive as a modal sheet or
+  takeover that makes the rest of the app unreachable. Chat lives in the
+  persistent bottom dock (§7.7), so it is already visible alongside the opened
+  canvas; if the dock is fully expanded it drops to its peek height so the
+  paint is actually seen. In a voice call the docked in-call canvas flips open
+  (expanding from the pill if minimized) instead of navigating. The nav
+  indicator slides to Canvas (§7.7 tab motion); `prefers-reduced-motion` swaps
+  every animation for an instant cut. This transition is app chrome under
+  invariant 1: the model requests visibility with data; the shell owns all
+  movement.
 - **Latency budget:** first visual paint < 3s, complete < 10s, patch < 2s.
   Small/fast model; the painter prompt lives in repo as `canvas-painter-prompt.md`.
 - **Data honesty:** the painter receives the same Signals JSON as the planner
@@ -349,6 +348,34 @@ Rules:
   promotion to interactive happens only after it survives a week of real use.
   (Coding agents are far more reliable generating a picture of data than a
   stateful widget — let new things earn statefulness.)
+
+---
+
+## 7.7 The chat dock and tab motion (app chrome)
+
+Chat is not a tab. It is a **persistent dock** pinned to the bottom of every
+page — the secretary is always one tap away, never a navigation away. The dock
+has three states, all shell-owned chrome (invariant 1):
+
+- **Bar** (default): just the composer — text field, attach, model chip,
+  dictation mic, Talk. Tapping the field gives room to type; it does NOT pull
+  up history.
+- **Peek**: after a send, the exchange since the dock was last opened pops up
+  in a panel above the bar — the user sees the answer without the whole
+  thread. Ephemeral window: collapsing back to the bar resets it.
+- **Full**: the caret expands to the complete thread (briefing card included).
+  The caret is the only way in and out — up to expand, down to minimize.
+
+Talk from the dock starts the global voice call pill-first (unchanged). The
+`?c=` deep link (push receipts) opens the dock in Full on the linked thread.
+
+Tabs (Dashboard · Canvas · Spreadsheet · …) keep a single sliding indicator:
+one accent bar that **travels** to the active tab on every change — click or
+programmatic — never teleports. Motion: the edge facing the destination leads
+(faster curve) while the trailing edge settles behind it, so the indicator
+stretches toward the target and contracts into place (~350ms, standard
+easing). Off-tab routes (projects, documents) fade the indicator out.
+`prefers-reduced-motion` cuts instantly. Home (`/`) is the Dashboard.
 
 ---
 
