@@ -52,8 +52,31 @@ export type DocRow = {
   hasContent: boolean;
 };
 
+// iOS momentum-tap guard: on a scrolling list, the tap that STOPS the scroll
+// also dispatches a click on whatever row it lands over — that's "catching
+// the list", not intent, and it was opening dialogs (and could cross off
+// tasks) while the user just scrolled. Scroll events stream throughout
+// momentum, so "a scroll event fired a moment ago" is a reliable signature;
+// the capture-phase listener sees every inner scroll container.
+let lastScrollAt = 0;
+if (typeof window !== "undefined") {
+  window.addEventListener(
+    "scroll",
+    () => {
+      lastScrollAt = Date.now();
+    },
+    { capture: true, passive: true }
+  );
+}
+
+/** True while a scroll is in flight (or just stopped) — swallow row taps. */
+export function isMomentumTap(): boolean {
+  return Date.now() - lastScrollAt < 150;
+}
+
 /** Open the global detail dialog (mounted in the app shell) for any item. */
 export function openDetail(kind: "task" | "event", id: string) {
+  if (isMomentumTap()) return; // the tap was a scroll-stop, not a request
   window.dispatchEvent(new CustomEvent("secretary:open-detail", { detail: { kind, id } }));
 }
 

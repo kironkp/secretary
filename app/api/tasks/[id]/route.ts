@@ -43,6 +43,10 @@ const bodySchema = z.object({
   dueAt: z.string().datetime({ offset: true }).nullable().optional(),
   priority: z.number().int().min(0).max(3).optional(),
   stages: z.array(z.object({ name: z.string().min(1), done: z.boolean() })).optional(),
+  // Full-editor fields: refile under a project (null = unfiled) and replace
+  // the reminder set (each an ISO datetime; the minute-scanner rings them).
+  projectId: z.string().nullable().optional(),
+  reminders: z.array(z.string().datetime({ offset: true })).max(10).optional(),
   // Provenance for the done check-in note; absent = dashboard (the historical
   // default — existing callers keep their wording).
   source: z.enum(["dashboard", "canvas"]).optional(),
@@ -79,6 +83,21 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       updates.postponedCount = existing.postponedCount + 1;
     }
     updates.dueAt = newDue;
+  }
+  if (parsed.reminders !== undefined) {
+    updates.reminders = [...parsed.reminders].sort();
+  }
+  if (parsed.projectId !== undefined) {
+    if (parsed.projectId !== null) {
+      // never let a task be filed under someone else's (or a ghost) project
+      const [proj] = await db
+        .select({ id: projects.id })
+        .from(projects)
+        .where(and(eq(projects.id, parsed.projectId), eq(projects.userId, user.id)))
+        .limit(1);
+      if (!proj) return NextResponse.json({ error: "Unknown project" }, { status: 400 });
+    }
+    updates.projectId = parsed.projectId;
   }
 
   const [updated] = await db

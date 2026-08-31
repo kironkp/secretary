@@ -11,6 +11,7 @@ import type { LayoutSpec } from "@/lib/layout/spec";
 import type { LayoutPlan } from "@/lib/layout/plan";
 import { PlanView, type PlanProject } from "./plan-view";
 import { RefreshOnFocus } from "@/components/shell/refresh-on-focus";
+import { isMomentumTap } from "./shared";
 import type { DocRow, EventRow, TaskRow } from "./shared";
 import { AdaptiveView } from "./adaptive-view";
 import { CalendarView } from "./calendar-view";
@@ -99,6 +100,7 @@ export function DashboardViews({
   }, [serverTasks, events, docs]);
 
   const markDone = async (id: string) => {
+    if (isMomentumTap()) return; // scroll-stop tap must never complete a task
     setCrossing((s) => new Set(s).add(id));
     // let the cross-off animation play before the row visually settles
     setTimeout(() => {

@@ -21,6 +21,7 @@ import {
 import Link from "next/link";
 import { ChevronRight, FileText } from "lucide-react";
 import {
+  isMomentumTap,
   CheckButton,
   ProvenanceLink,
   ReminderChip,
@@ -812,6 +813,7 @@ export function SuggestedZone({ suggestions }: { suggestions: TaskRow[] }) {
   const [busy, setBusy] = useState<string | null>(null);
 
   const act = async (id: string, status: "todo" | "dropped") => {
+    if (isMomentumTap()) return; // scroll-stop tap must never accept/dismiss
     setBusy(id);
     const res = await fetch(`/api/tasks/${id}`, {
       method: "PATCH",

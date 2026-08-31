@@ -16,9 +16,11 @@ import {
   FolderKanban,
   MapPin,
   MessageSquare,
+  Pencil,
   Repeat,
   X,
 } from "lucide-react";
+import { TaskEditor, isoToLocalInput, localInputToIso } from "./task-editor";
 
 type TaskDetail = {
   kind: "task";
@@ -34,6 +36,7 @@ type TaskDetail = {
     recurrence: string | null;
     source: string;
     postponedCount: number;
+    projectId: string | null;
     createdAt: string;
     createdFromConversationId: string | null;
     createdFromMessageId: string | null;
@@ -88,6 +91,33 @@ export function DetailDialog() {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [error, setError] = useState(false);
   const [togglingStage, setTogglingStage] = useState<string | null>(null);
+  // Quick edits in place (the dialog IS the minimized edit view): due date via
+  // the native picker, notes via tap-to-type. The Edit button opens the full
+  // editor for everything else.
+  const [editing, setEditing] = useState(false);
+  const [dueDraft, setDueDraft] = useState<string | null>(null); // datetime-local value
+  const [notesDraft, setNotesDraft] = useState<string | null>(null); // null = not editing
+  const [patchError, setPatchError] = useState(false);
+
+  const patchTask = useCallback(
+    async (id: string, body: Record<string, unknown>): Promise<boolean> => {
+      setPatchError(false);
+      const res = await fetch(`/api/tasks/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }).catch(() => null);
+      if (!res?.ok) {
+        setPatchError(true);
+        return false;
+      }
+      const { task } = (await res.json()) as { task: Record<string, unknown> };
+      setDetail((d) => (d?.kind === "task" ? { ...d, task: { ...d.task, ...task } } : d));
+      router.refresh();
+      return true;
+    },
+    [router]
+  );
 
   const toggleStage = async (taskId: string, stages: { name: string; done: boolean }[], name: string) => {
     setTogglingStage(name);
@@ -128,6 +158,10 @@ export function DetailDialog() {
       setTarget({ kind, id });
       setDetail(null);
       setError(false);
+      setEditing(false);
+      setDueDraft(null);
+      setNotesDraft(null);
+      setPatchError(false);
       void load(kind, id);
     };
     window.addEventListener("secretary:open-detail", onOpen);
@@ -145,11 +179,13 @@ export function DetailDialog() {
   useEffect(() => {
     if (!target) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setTarget(null);
+      if (e.key !== "Escape") return;
+      if (editing) setEditing(false); // peel the full editor first
+      else setTarget(null);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [target]);
+  }, [target, editing]);
 
   if (!target) return null;
 
@@ -181,9 +217,6 @@ export function DetailDialog() {
             {fmtFull(r)}
           </span>
         ))}
-        <span className="self-center text-[10px] uppercase tracking-wide text-faint">
-          logged only — no device alerts yet
-        </span>
       </span>
     );
 
@@ -205,10 +238,18 @@ export function DetailDialog() {
 
         {detail?.kind === "task" && (
           <>
-            <div className="mb-3 flex items-start gap-3">
+            <div className="mb-3 flex items-start gap-2">
               <h2 className="min-w-0 flex-1 text-base font-bold leading-snug">
                 {detail.task.title}
               </h2>
+              <button
+                onClick={() => setEditing(true)}
+                aria-label="Edit task"
+                className="flex h-7 flex-none items-center gap-1.5 rounded-full border border-edge bg-card px-2.5 text-xs font-semibold text-muted hover:text-ink"
+              >
+                <Pencil size={12} strokeWidth={2} />
+                Edit
+              </button>
               <button
                 onClick={() => setTarget(null)}
                 aria-label="Close"
@@ -237,17 +278,47 @@ export function DetailDialog() {
                 )}
               </Row>
               <Row label="Due">
-                {detail.task.dueAt ? (
-                  fmtFull(detail.task.dueAt)
-                ) : (
-                  <span className="text-warn">no date</span>
-                )}
-                {detail.task.recurrence && (
-                  <span className="ml-2 inline-flex items-center gap-1 text-xs text-muted">
-                    <Repeat size={11} strokeWidth={2} />
-                    repeats {detail.task.recurrence}
-                  </span>
-                )}
+                {/* Native picker in place: draft locally, PATCH once on close —
+                    iOS fires change per wheel-tick, and each later-than-before
+                    PATCH would count as another postponement. */}
+                <span className="flex flex-wrap items-center gap-1.5">
+                  <input
+                    type="datetime-local"
+                    value={dueDraft ?? isoToLocalInput(detail.task.dueAt)}
+                    onChange={(e) => setDueDraft(e.target.value)}
+                    onBlur={() => {
+                      if (dueDraft === null || dueDraft === isoToLocalInput(detail.task.dueAt))
+                        return;
+                      void patchTask(detail.task.id, { dueAt: localInputToIso(dueDraft) }).then(
+                        (ok) => ok && setDueDraft(null)
+                      );
+                    }}
+                    aria-label="Due date"
+                    className="rounded-lg border border-edge bg-surface-2 px-2 py-1 text-sm text-ink outline-none focus:border-accent"
+                  />
+                  {!detail.task.dueAt && (dueDraft ?? "") === "" && (
+                    <span className="text-xs text-warn">no date</span>
+                  )}
+                  {detail.task.dueAt && (
+                    <button
+                      onClick={() => {
+                        setDueDraft(null);
+                        void patchTask(detail.task.id, { dueAt: null });
+                      }}
+                      title="Clear due date"
+                      aria-label="Clear due date"
+                      className="flex h-6 w-6 flex-none items-center justify-center rounded-full text-muted hover:text-danger"
+                    >
+                      <X size={12} strokeWidth={2.25} />
+                    </button>
+                  )}
+                  {detail.task.recurrence && (
+                    <span className="inline-flex items-center gap-1 text-xs text-muted">
+                      <Repeat size={11} strokeWidth={2} />
+                      repeats {detail.task.recurrence}
+                    </span>
+                  )}
+                </span>
               </Row>
               {(detail.task.stages ?? []).length > 0 && (
                 <div className="py-1.5">
@@ -287,10 +358,47 @@ export function DetailDialog() {
                 </Row>
               )}
               <Row label="Notes">
-                {detail.task.notes ? (
-                  <span className="whitespace-pre-wrap">{detail.task.notes}</span>
+                {notesDraft !== null ? (
+                  <span className="flex flex-col gap-1.5">
+                    <textarea
+                      value={notesDraft}
+                      onChange={(e) => setNotesDraft(e.target.value)}
+                      rows={3}
+                      autoFocus
+                      placeholder="Type a note…"
+                      className="w-full resize-y rounded-lg border border-edge bg-surface-2 px-2.5 py-1.5 text-sm text-ink outline-none focus:border-accent"
+                    />
+                    <span className="flex gap-2">
+                      <button
+                        onClick={() =>
+                          void patchTask(detail.task.id, {
+                            notes: notesDraft.trim() || null,
+                          }).then((ok) => ok && setNotesDraft(null))
+                        }
+                        className="rounded-full bg-accent px-3 py-1 text-xs font-bold text-bg"
+                      >
+                        Save
+                      </button>
+                      <button
+                        onClick={() => setNotesDraft(null)}
+                        className="rounded-full border border-edge px-3 py-1 text-xs text-muted hover:text-ink"
+                      >
+                        Cancel
+                      </button>
+                    </span>
+                  </span>
                 ) : (
-                  <span className="text-faint">—</span>
+                  <button
+                    onClick={() => setNotesDraft(detail.task.notes ?? "")}
+                    title="Edit notes"
+                    className="block w-full text-left"
+                  >
+                    {detail.task.notes ? (
+                      <span className="whitespace-pre-wrap">{detail.task.notes}</span>
+                    ) : (
+                      <span className="text-faint">tap to add a note</span>
+                    )}
+                  </button>
                 )}
               </Row>
               <Row label="Reminders">{reminderChips(detail.task.reminders ?? [])}</Row>
@@ -317,6 +425,22 @@ export function DetailDialog() {
                 </div>
               )}
             </div>
+            {patchError && (
+              <p className="mt-2 text-xs text-danger">
+                Couldn&apos;t save that change — check the connection and try again.
+              </p>
+            )}
+            {editing && (
+              <TaskEditor
+                task={detail.task}
+                projectId={detail.task.projectId}
+                onClose={() => setEditing(false)}
+                onSaved={() => {
+                  void load("task", detail.task.id);
+                  router.refresh();
+                }}
+              />
+            )}
           </>
         )}
 
