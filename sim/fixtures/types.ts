@@ -33,6 +33,8 @@ export const expectedOutcomeSchema = z.discriminatedUnion("kind", [
     status: z.string().optional(),
     stage_done: z.string().optional(),
     due: z.string().optional(),
+    // SPEC §11: a blocked task must end up carrying WHY, not just the word.
+    blocked_reason: z.string().optional(),
   }),
   z.object({ kind: z.literal("task_completed"), title_like: z.string() }),
   z.object({

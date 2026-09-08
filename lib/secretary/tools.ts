@@ -424,6 +424,15 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
       updates.recurrence = a.recurrence === "none" ? null : a.recurrence;
     }
     if (a.stakes !== undefined) updates.stakes = a.stakes === "" ? null : a.stakes;
+    // SPEC §11: a blocked task carries WHY. An explicit value wins; otherwise
+    // any status that isn't "blocked" clears the blocker — an item that moved
+    // is no longer stuck on what it was stuck on, and a stale reason spoken
+    // aloud is worse than none.
+    if (a.blocked_reason !== undefined) {
+      updates.blockedReason = a.blocked_reason === "" ? null : a.blocked_reason;
+    } else if (a.status && a.status !== "blocked") {
+      updates.blockedReason = null;
+    }
     if (a.stages !== undefined) {
       // replace the stage list, preserving done-ness of stages that survive
       updates.stages = a.stages.map((name) => ({
@@ -492,6 +501,7 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         status: updated.status,
         due_at: updated.dueAt,
         postponed_count: updated.postponedCount,
+        ...(updated.blockedReason ? { blocked_reason: updated.blockedReason } : {}),
         ...(movedTo !== undefined ? { project: movedTo, project_match: projectMatch } : {}),
         ...(updated.stages.length
           ? {
@@ -530,7 +540,8 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     if (!task) return { result: { error: `No task matching "${a.task}"` } };
     const [updated] = await db
       .update(tasks)
-      .set({ status: "done", completedAt: new Date(), updatedAt: new Date() })
+      // done is a signal like any other: whatever it was stuck on, it isn't now
+      .set({ status: "done", completedAt: new Date(), blockedReason: null, updatedAt: new Date() })
       .where(and(eq(tasks.userId, ctx.userId), eq(tasks.id, task.id)))
       .returning();
     await db.insert(checkins).values({
@@ -1321,14 +1332,34 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
   async log_status(ctx, args) {
     const a = toolSchemas.log_status.parse(args);
     if (a.signal === "done") return handlers.complete_task(ctx, { task: a.task });
-    return handlers.update_task(ctx, {
+    const outcome = await handlers.update_task(ctx, {
       task: a.task,
       ...(a.signal === "started" ? { status: "in_progress" } : {}),
       ...(a.signal === "blocked" ? { status: "blocked" } : {}),
       ...(a.signal === "dropped" ? { status: "dropped" } : {}),
       ...(a.signal === "postponed" && a.new_due_at ? { due_at: a.new_due_at } : {}),
       ...(a.note ? { notes: a.note } : {}),
+      // SPEC §11: on a block the note IS the reason — it lands in its own
+      // field so later sessions can say what the thing is waiting on instead
+      // of reciting the status word. (notes is free-form and the next
+      // amend_task overwrites it; this survives.)
+      ...(a.signal === "blocked" && a.note ? { blocked_reason: a.note } : {}),
     });
+    // A blocker with no reason is a status word waiting to be recited. Steer
+    // the mouth to ask NOW — same idiom as queue_clarification's note, but the
+    // opposite instruction, and licensed only because the question is about
+    // the item just spoken.
+    const result = outcome.result as { error?: string } | null;
+    if (a.signal === "blocked" && !a.note && result && !result.error) {
+      return {
+        ...outcome,
+        result: {
+          ...result,
+          note: "Blocked with no reason recorded. Ask right now, in one line — 'what's it waiting on?' — then log_status blocked again with their answer as the note. Do NOT queue this one; it's about what was just said. If they're mid-thought or asked you to hold, let it wait.",
+        },
+      };
+    }
+    return outcome;
   },
 
   async create_commitment(ctx, args) {
