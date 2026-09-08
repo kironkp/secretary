@@ -262,6 +262,11 @@ export const tasks = pgTable("tasks", {
   // SPEC §11: the consequence the user named ("miss reconcile → strike from
   // HQ"). Nags MUST cite stakes when present — sternness stays honest.
   stakes: text("stakes"),
+  // SPEC §11 voice modality rule: what a blocked task is stuck ON ("waiting on
+  // Teresa's signature"). Same rationale as stakes — a bare status word is a
+  // database row read aloud; this is what makes it a person's answer. Set by
+  // log_status's note, cleared the moment any other signal moves the item.
+  blockedReason: text("blocked_reason"),
   // 'daily' | 'weekly' | 'monthly' | 'yearly' — completing the task spawns
   // the next occurrence (lib/secretary/recurrence.ts). Null = one-shot.
   recurrence: text("recurrence"),

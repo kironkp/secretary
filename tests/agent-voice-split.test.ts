@@ -7,7 +7,11 @@ import { and, eq, ilike } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { checkins, conversations, expectations, memories, tasks, user } from "@/lib/db/schema";
 import { applyExtraction } from "@/lib/secretary/extraction";
-import { VOICE_MODALITY_RULES } from "@/lib/secretary/persona";
+import {
+  NY_SECRETARY_PERSONA,
+  personaDirectives,
+  VOICE_MODALITY_RULES,
+} from "@/lib/secretary/persona";
 import {
   anthropicToolDefs,
   openAIToolDefs,
@@ -272,5 +276,36 @@ describe("voice modality rule", () => {
   it("keeps capture independent of external apps", () => {
     expect(VOICE_MODALITY_RULES).toContain("system of record");
     expect(VOICE_MODALITY_RULES).toContain("cannot fail on someone else's permission");
+  });
+
+  // The recital failure: "CPO 2073, blocked." A status word is a database row
+  // read aloud — the voice names the blocker and what clears it, and asks when
+  // it doesn't know. (SPEC §11 voice modality rule.)
+  it("outlaws the bare status word and licenses the ONE in-flow question", () => {
+    expect(VOICE_MODALITY_RULES).toContain("A STATUS IS NEVER A WORD");
+    expect(VOICE_MODALITY_RULES).toContain("stuck ON and what clears it");
+    expect(VOICE_MODALITY_RULES).toContain("ASK THEM RIGHT THEN");
+    expect(VOICE_MODALITY_RULES).toContain("What's it waiting on?");
+    expect(VOICE_MODALITY_RULES).toContain("ONE question that goes in-flow");
+  });
+
+  // RISK the plan named: an in-flow licence must not turn pauses into
+  // interrogations. The clause has to fence itself.
+  it("fences the in-flow licence so it can't erode the silence discipline", () => {
+    expect(VOICE_MODALITY_RULES).toContain("This licence changes NOTHING about silence");
+    expect(VOICE_MODALITY_RULES).toContain("once per item");
+    // everything that is NOT the thing just spoken still goes to the queue
+    expect(VOICE_MODALITY_RULES).toContain("still goes to queue_clarification for a natural pause");
+    expect(VOICE_MODALITY_RULES).toContain("reason unknown");
+  });
+
+  // The contour lives in the character, so the sass<=2 branch stays flat —
+  // a robotic register must not start improvising colour about blockers.
+  it("puts the human status contour in the character, not the flat registers", () => {
+    expect(NY_SECRETARY_PERSONA).toContain("like a person who has been handling it");
+    expect(NY_SECRETARY_PERSONA).toContain("what would free it");
+    const flat = personaDirectives({ sass: 1 });
+    expect(flat).toContain("ROBOTIC");
+    expect(flat).not.toContain("what would free it");
   });
 });

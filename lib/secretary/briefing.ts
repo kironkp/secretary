@@ -392,8 +392,17 @@ export async function buildBriefing(
             stages.find((s) => !s.done) ? ` (next: ${stages.find((s) => !s.done)!.name})` : ""
           }`
         : "";
+      // SPEC §11 voice modality rule: never hand the mouth a bare status word.
+      // Either it can say what the thing is stuck on, or it knows to ask — at
+      // a natural pause, since a stale blocker isn't what was just spoken.
+      const blockedInfo =
+        t.status !== "blocked"
+          ? ""
+          : t.blockedReason
+            ? `: ${t.blockedReason}`
+            : " (reason unknown — ask if it comes up)";
       lines.push(
-        `- [${t.id}] "${t.title}" · ${t.status}${t.dueAt ? ` · due ${fmt(t.dueAt, timezone)}` : ""}${t.postponedCount ? ` · pushed ${t.postponedCount}×` : ""}${projectName ? ` · project "${projectName}"` : ""}${stageInfo}${t.recurrence ? ` · repeats ${t.recurrence}` : ""}`
+        `- [${t.id}] "${t.title}" · ${t.status}${blockedInfo}${t.dueAt ? ` · due ${fmt(t.dueAt, timezone)}` : ""}${t.postponedCount ? ` · pushed ${t.postponedCount}×` : ""}${projectName ? ` · project "${projectName}"` : ""}${stageInfo}${t.recurrence ? ` · repeats ${t.recurrence}` : ""}`
       );
     }
   }

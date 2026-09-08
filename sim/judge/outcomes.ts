@@ -93,6 +93,13 @@ export function matchOutcomes(opts: {
         if (o.status && hit.after.status !== o.status)
           fail(o, `status "${hit.after.status}" ≠ "${o.status}"`);
         if (o.due && !dueMatches(hit.after.dueAt, o.due, now)) fail(o, `due mismatch`);
+        if (o.blocked_reason) {
+          // `like` treats "" as a substring of everything — an unrecorded
+          // blocker must fail, not match by accident.
+          const recorded = String(hit.after.blockedReason ?? "");
+          if (!recorded || !like(recorded, o.blocked_reason))
+            fail(o, `blocker "${recorded || "(none recorded)"}" ≠ "${o.blocked_reason}"`);
+        }
         if (o.stage_done) {
           const stages = hit.after.stages as { name: string; done: boolean }[];
           const s = stages.find((x) => like(x.name, o.stage_done!));

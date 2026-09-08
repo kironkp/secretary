@@ -541,6 +541,20 @@ claude.ai session used as a fixture (docs/adaptive-ui/transcript-2026-08-18).
   ending with the single next action. Anything visual routes to a surface
   (Canvas paint or Dashboard plan edit) and the voice says "on your screen."
   "I can't draw a chart out loud" is a forbidden answer.
+  A status is never spoken as a bare word: "blocked" alone is a database row
+  read aloud, not an answer. The voice names what the item is stuck ON and
+  what clears it ("the CPO's sitting with Teresa till she signs it"), read
+  from the blocker recorded on the task (`tasks.blocked_reason`, set by
+  `log_status`'s note and cleared the moment any other signal moves the item).
+  When the reason is NOT recorded, that one question is asked IN FLOW, once —
+  the sole exception to the clarification queue, and only because it is about
+  the thing just spoken; topical adjacency is what makes it conversation
+  rather than an interrogation. Anything else the voice is unsure of still
+  goes to `queue_clarification` for a natural pause, and the pause rules are
+  untouched: a hold ("one sec") is still met with silence, never this
+  question. A stale blocker surfaces in the briefing as
+  `blocked (reason unknown — ask if it comes up)` so it gets asked at a pause
+  instead of re-litigated mid-flow.
 - **cross-session recall**: every session (voice and text) opens with real
   prior-conversation context: the current thread's NEWEST turns (a window that
   keeps what was just said, never the opening turns of a long thread) plus a

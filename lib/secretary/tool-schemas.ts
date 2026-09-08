@@ -68,6 +68,12 @@ export const toolSchemas = {
       .string()
       .optional()
       .describe("Set/replace the named consequence of missing this task; \"\" clears it"),
+    blocked_reason: z
+      .string()
+      .optional()
+      .describe(
+        'What the task is stuck ON and what would clear it ("waiting on Teresa\'s signature"); "" clears it. Setting any status other than blocked clears it automatically.'
+      ),
     postpone_reason: z
       .string()
       .optional()
@@ -217,7 +223,12 @@ export const toolSchemas = {
     task: z.string().min(1).describe("Task id or a distinctive title fragment"),
     signal: z.enum(["done", "started", "postponed", "blocked", "progress", "dropped"]),
     new_due_at: z.string().optional().describe("If postponed: the new date, ISO 8601"),
-    note: z.string().optional().describe("What the user said, briefly"),
+    note: z
+      .string()
+      .optional()
+      .describe(
+        "What the user said, briefly. On signal blocked this is THE REASON — what it's stuck on and what would clear it (\"waiting on Teresa's signature\") — stored on the task so later sessions can explain the block instead of reciting the word.",
+      ),
   }),
   create_commitment: z.object({
     title: z.string().min(1).describe("Short imperative title"),
@@ -476,7 +487,7 @@ const toolDescriptions: Record<ToolName, string> = {
   edit_layout_plan:
     "Rearrange the user's dashboard NOW: move/remove/add sections or change their props (variant, expanded, accent). User-initiated changes apply immediately. For 'never show X again' use set_layout_preference instead.",
   log_status:
-    "Voice: the user reported where something stands ('updated it this morning', 'pushing that to Friday'). One call PER ITEM — a list spoken in one breath is several calls in the same turn, blocked items included (put the blocker in the note). 'That shouldn't be a task' / 'forget that one' / 'take it off the list' → signal dropped: removes it from the checklist on the spot (reinstatable by asking). Drop ONLY the exact task the user named — when unsure which one they mean, ask first. If the drop states a standing rule ('never make Caltrans checks a task'), ALSO call remember_fact in the SAME turn. The store is the only truth; log it the moment you hear it.",
+    "Voice: the user reported where something stands ('updated it this morning', 'pushing that to Friday'). One call PER ITEM — a list spoken in one breath is several calls in the same turn, blocked items included: on signal blocked the note is the REASON ('waiting on Teresa's signature'), stored on the task so you can explain the block later instead of reciting the word. If the user hasn't said why it's stuck, log it anyway and ask them right then, in one line. 'That shouldn't be a task' / 'forget that one' / 'take it off the list' → signal dropped: removes it from the checklist on the spot (reinstatable by asking). Drop ONLY the exact task the user named — when unsure which one they mean, ask first. If the drop states a standing rule ('never make Caltrans checks a task'), ALSO call remember_fact in the SAME turn. The store is the only truth; log it the moment you hear it.",
   create_commitment:
     "Voice: the user took something on. Log it immediately with any stated deadline and stakes ('so I don't get a strike'). Several items mentioned together = several calls in the same turn. Never wait to be asked.",
   schedule_checkin:
