@@ -12,7 +12,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { formatUsd } from "@/lib/pricing";
-import { KIND_LABEL, type SpendPeriod, type SpendReport } from "@/lib/spend";
+// From spend-types, NOT lib/spend: importing a value from there would pull the
+// database (and pg, and node:dns) into the browser bundle and fail the build.
+import { KIND_LABEL, type SpendPeriod, type SpendReport } from "@/lib/spend-types";
 
 const PERIODS: { id: SpendPeriod; label: string }[] = [
   { id: "day", label: "1 day" },

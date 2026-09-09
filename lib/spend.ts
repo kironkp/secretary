@@ -9,23 +9,17 @@ import { and, desc, eq, gte, lt, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { usage } from "@/lib/db/schema";
 import { tzOffsetMs } from "@/lib/time";
+import type { SpendBucket, SpendPeriod, SpendReport, SpendWindow } from "./spend-types";
 
-/** 1 day, 7 days, 30 days — and the unit you step through when navigating. */
-export type SpendPeriod = "day" | "week" | "month";
-
-export type SpendWindow = {
-  period: SpendPeriod;
-  /** 0 = the current one, -1 = the previous, and so on. Never positive. */
-  offset: number;
-  start: Date;
-  end: Date;
-  /** "Today", "This week", "September" — what the user is looking at. */
-  label: string;
-  /** False for the current period: you cannot step into the future. */
-  hasNext: boolean;
-  /** Days in the window, for the daily bars and the per-day average. */
-  days: number;
-};
+// Shapes and labels live in lib/spend-types.ts so the client panel can import
+// them without pulling this file's database import into the browser bundle.
+export type {
+  SpendPeriod,
+  SpendWindow,
+  SpendBucket,
+  SpendReport,
+} from "./spend-types";
+export { KIND_LABEL } from "./spend-types";
 
 /** Local calendar parts for an instant, in the user's timezone. */
 function localParts(tz: string, at: Date) {
@@ -109,56 +103,6 @@ function fmtRange(tz: string, start: Date, end: Date) {
   const b = fmt(tz, { month: "short", day: "numeric" }).format(last);
   return `${a} – ${b}`;
 }
-
-export type SpendBucket = {
-  key: string;
-  calls: number;
-  usd: number;
-  inputTokens: number;
-  outputTokens: number;
-  /** Any row in the bucket whose price rests on an assumption. */
-  estimated: boolean;
-};
-
-export type SpendReport = {
-  window: SpendWindow;
-  days: number;
-  totalUsd: number;
-  calls: number;
-  /** Straight-line projection from the window; a hint, not a forecast. */
-  perDayUsd: number;
-  monthlyRunRateUsd: number;
-  byKind: SpendBucket[];
-  byModel: SpendBucket[];
-  daily: { day: string; usd: number }[];
-  /** The individual calls that cost the most — usually the real story. */
-  biggest: {
-    id: string;
-    kind: string;
-    model: string | null;
-    usd: number;
-    inputTokens: number;
-    outputTokens: number;
-    at: string;
-  }[];
-  /** True when any priced row is an estimate, so the UI can say so. */
-  anyEstimated: boolean;
-};
-
-/** Human labels for the internal kind values. */
-export const KIND_LABEL: Record<string, string> = {
-  voice: "Voice calls",
-  transcribe: "Dictation",
-  extraction: "Reading your messages",
-  layout: "Dashboard planning",
-  chat: "Chat",
-  consult: "Deep thinking",
-  paint: "Canvas painting",
-  slow_loop: "Building components",
-  email: "Email intake",
-  speech: "Speech",
-  other: "Other",
-};
 
 const num = (v: unknown) => (v === null || v === undefined ? 0 : Number(v));
 
