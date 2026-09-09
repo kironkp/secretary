@@ -5,7 +5,7 @@ import { after } from "next/server";
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { attachments, conversations, messages, usage, user as userTable } from "@/lib/db/schema";
+import { attachments, conversations, messages, user as userTable } from "@/lib/db/schema";
 import { inArray } from "drizzle-orm";
 import { isErrorResponse, parseBody, requireSession } from "@/lib/api";
 import { loadHistoryWindow } from "@/lib/db/queries";
@@ -17,6 +17,7 @@ import { runExtraction } from "@/lib/secretary/extraction";
 import { openai, TEXT_MODEL } from "@/lib/openai";
 import { anthropicFor, chatProvider, chatSettings, claudeBrainEnabled } from "@/lib/anthropic";
 import { runClaudeChat } from "@/lib/secretary/chat-claude";
+import { recordUsage } from "@/lib/usage";
 import {
   openAIAttachmentBlocks,
   storedAttachmentText,
@@ -167,6 +168,7 @@ export async function POST(req: Request) {
   const uiActions: NonNullable<ToolOutcome["uiAction"]>[] = [];
   let assistantText = "";
   let totalIn = 0;
+  let totalCached = 0;
   let totalOut = 0;
   let servedBy = openAIModel;
   let claudeServed = false;
@@ -195,6 +197,7 @@ export async function POST(req: Request) {
       toasts.push(...result.toasts);
       uiActions.push(...result.uiActions);
       totalIn = result.inputTokens;
+      totalCached = result.cachedInputTokens;
       totalOut = result.outputTokens;
       servedBy = chip.model;
       claudeServed = true;
@@ -229,6 +232,8 @@ export async function POST(req: Request) {
       });
       previousResponseId = response.id;
       totalIn += response.usage?.input_tokens ?? 0;
+      // OpenAI caches automatically; this is what it actually served cached.
+      totalCached += response.usage?.input_tokens_details?.cached_tokens ?? 0;
       totalOut += response.usage?.output_tokens ?? 0;
 
       const calls = response.output.filter((o) => o.type === "function_call");
@@ -286,12 +291,17 @@ export async function POST(req: Request) {
     })
     .returning();
 
-  await db.insert(usage).values({
+  // Priced through the shared recorder, and carrying the cached-input count so
+  // the spend panel shows whether prompt caching is actually being HIT. A cache
+  // that silently stops working looks exactly like one that works, until the
+  // bill arrives.
+  await recordUsage({
     userId: user.id,
     kind: "chat",
     model: servedBy,
     inputTokens: totalIn,
     outputTokens: totalOut,
+    cachedInputTokens: totalCached,
   });
 
   // Safety-net extraction over the new turn (incremental — extractedAt

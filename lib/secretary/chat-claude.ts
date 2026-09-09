@@ -16,6 +16,9 @@ export type ClaudeChatResult = {
   uiActions: NonNullable<ToolOutcome["uiAction"]>[];
   inputTokens: number;
   outputTokens: number;
+  /** Of inputTokens, how many were served from the prompt cache (billed ~10%).
+   *  Reported so a cache that silently stops working is visible. */
+  cachedInputTokens: number;
 };
 
 export async function runClaudeChat(opts: {
@@ -48,17 +51,44 @@ export async function runClaudeChat(opts: {
   const uiActions: NonNullable<ToolOutcome["uiAction"]>[] = [];
   let inputTokens = 0;
   let outputTokens = 0;
+  let cachedInputTokens = 0;
+
+  // THE COST FIX. A single user turn runs up to MAX_TOOL_ROUNDS requests, and
+  // every one re-sends the identical prefix: instructions (~6k tokens) plus the
+  // full tool schemas (~9.5k). Measured, that prefix is ~15.6k tokens and it
+  // was being charged at full price on every round — which is why one turn
+  // averaged 47k input tokens and peaked at 76k.
+  //
+  // Two cache breakpoints, ordered longest-stable-first the way the API
+  // requires: tools change only when the code changes, instructions change per
+  // session. Everything before a breakpoint is cached, so rounds 2..N of a turn
+  // — and later turns in the same session — re-read the prefix at a tenth the
+  // price instead of paying for it again.
+  const cachedTools = anthropicToolDefs().map((tool, i, all) =>
+    i === all.length - 1
+      ? { ...tool, cache_control: { type: "ephemeral" as const } }
+      : tool
+  ) as Anthropic.Tool[];
+  const cachedSystem: Anthropic.TextBlockParam[] = [
+    { type: "text", text: opts.instructions, cache_control: { type: "ephemeral" } },
+  ];
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const response = await opts.client.messages.create({
       model: opts.model,
       max_tokens: 8000,
-      system: opts.instructions,
+      system: cachedSystem,
       output_config: { effort: opts.effort as "low" | "medium" | "high" | "xhigh" | "max" },
-      tools: anthropicToolDefs() as Anthropic.Tool[],
+      tools: cachedTools,
       messages,
     });
-    inputTokens += response.usage.input_tokens;
+    // cache_read is billed at ~10% and cache_creation at ~125%, so both are
+    // counted as input and the read portion is reported separately — the only
+    // way to know the cache is actually being HIT rather than merely enabled.
+    const cacheRead = response.usage.cache_read_input_tokens ?? 0;
+    const cacheWrite = response.usage.cache_creation_input_tokens ?? 0;
+    inputTokens += response.usage.input_tokens + cacheRead + cacheWrite;
+    cachedInputTokens += cacheRead;
     outputTokens += response.usage.output_tokens;
 
     if (response.stop_reason === "refusal") throw new Error("claude refusal");
@@ -71,7 +101,7 @@ export async function runClaudeChat(opts: {
         .filter((b): b is Anthropic.TextBlock => b.type === "text")
         .map((b) => b.text)
         .join("");
-      return { text, toasts, uiActions, inputTokens, outputTokens };
+      return { text, toasts, uiActions, inputTokens, outputTokens, cachedInputTokens };
     }
 
     // Full assistant content back (thinking blocks included — required for
@@ -103,5 +133,5 @@ export async function runClaudeChat(opts: {
     messages.push({ role: "user", content: results });
   }
 
-  return { text: "(done)", toasts, uiActions, inputTokens, outputTokens };
+  return { text: "(done)", toasts, uiActions, inputTokens, outputTokens, cachedInputTokens };
 }
