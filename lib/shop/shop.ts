@@ -12,6 +12,7 @@
 // - Failed branches are kept for autopsy and never auto-retried.
 // - The build must not touch lib/auth.ts, .env.local, or deployment scripts.
 import { spawn } from "node:child_process";
+import { titleSimilarity } from "@/lib/secretary/dedupe";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { capabilityRequests } from "@/lib/db/schema";
@@ -27,6 +28,13 @@ export const shopSlug = (need: string) =>
     .replace(/-+/g, "-");
 
 const IN_FLIGHT = ["planning", "building"] as const;
+
+/** Dice-coefficient threshold for "this is the same ask, worded differently".
+ *  Deliberately looser than extraction's task matcher: two capability requests
+ *  describing the same feature share their nouns but little else, and the cost
+ *  of a false match (the user is told it already exists) is far lower than a
+ *  false miss (a duplicate build they sit through). */
+const SIMILAR_NEED = 0.5;
 
 // The lane is GLOBAL by default — one machine, one repo, one claude at a time,
 // regardless of which user filed. `laneScope` narrows every lane check and
@@ -67,14 +75,39 @@ export async function fileRequest(
   context?: string,
   conversationId?: string,
   laneScope?: string
-): Promise<{ id: string; status: string; deduped: boolean; queued: boolean }> {
+): Promise<{
+  id: string;
+  status: string;
+  deduped: boolean;
+  queued: boolean;
+  /** A shipped twin: the ability is already in the app, do not build it again. */
+  alreadyExists?: boolean;
+}> {
   const rows = await db
     .select()
     .from(capabilityRequests)
     .where(eq(capabilityRequests.userId, userId));
-  const twin = rows.find((r) => normalize(r.need) === normalize(need));
-  if (twin && twin.status !== "failed") {
-    return { id: twin.id, status: twin.status, deduped: true, queued: false };
+  // Dedupe by MEANING, not by exact string. Exact-match normalization let the
+  // same ability be filed four times under four phrasings — "make canvas
+  // visuals interactive", "make canvas items clickable", "make checkboxes on
+  // the canvas directly clickable" — with two of them already shipped. The
+  // model rephrases every time it asks, so an exact matcher never fires.
+  const exact = rows.find((r) => normalize(r.need) === normalize(need));
+  const fuzzy =
+    exact ??
+    rows
+      .map((r) => ({ r, score: titleSimilarity(r.need, need) }))
+      .filter((x) => x.score >= SIMILAR_NEED)
+      .sort((a, b) => b.score - a.score)[0]?.r;
+
+  // A shipped twin is the important case: the ability EXISTS, so re-filing it
+  // is a build the user has to sit through for something already done. Say so
+  // loudly enough that the model tells them instead of promising a new build.
+  if (fuzzy && fuzzy.status === "shipped") {
+    return { id: fuzzy.id, status: "shipped", deduped: true, queued: false, alreadyExists: true };
+  }
+  if (fuzzy && fuzzy.status !== "failed") {
+    return { id: fuzzy.id, status: fuzzy.status, deduped: true, queued: false };
   }
 
   const [row] = await db

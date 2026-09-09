@@ -18,6 +18,7 @@ import {
 } from "@/lib/shop/shop";
 import { anthropicToolDefs, openAIToolDefs, VOICE_TOOL_NAMES } from "@/lib/secretary/tool-schemas";
 import { buildInstructions } from "@/lib/secretary/persona";
+import { titleSimilarity } from "@/lib/secretary/dedupe";
 
 const U = { id: `test-shop-${crypto.randomUUID()}`, email: `shop-${Date.now()}@shop.test` };
 
@@ -203,5 +204,53 @@ describe("the dead-end killer is wired in", () => {
     const instructions = buildInstructions("BRIEFING", { persona: null });
     expect(instructions).toContain("NEVER the end of the sentence");
     expect(instructions).toContain("request_capability");
+  });
+});
+
+// The circle this prevents: the canvas-checkbox ability was filed FOUR times
+// under four phrasings, twice AFTER it had already shipped, because dedupe
+// compared exact normalized strings and the model rewords the ask every time.
+describe("the shop recognises the same ask worded differently", () => {
+  const SHIPPED =
+    "Make canvas items clickable so the user can check them off directly on the canvas and have those changes update the underlying tasks and commitments.";
+  const REPHRASED =
+    "Make checkboxes on the Canvas directly clickable so the user can mark items complete or unchecked from the visual view";
+
+  it("scores a real-world rephrasing above the dedupe threshold", () => {
+    expect(titleSimilarity(SHIPPED, REPHRASED)).toBeGreaterThanOrEqual(0.5);
+  });
+
+  it("and keeps genuinely different asks well below it", () => {
+    for (const other of [
+      "Set a push notification reminder at a specific time without creating a new task",
+      "Reorder projects in the dashboard, including moving a chosen project to the top",
+      "Add spend tracking so I can see where my API money goes",
+    ]) {
+      expect(titleSimilarity(SHIPPED, other)).toBeLessThan(0.4);
+    }
+  });
+
+  it("returns the shipped twin instead of filing a second build", async () => {
+    // Its own user, so the shared lane and the suite's other rows can't skew it.
+    const u = `test-dupe-${crypto.randomUUID()}`;
+    await db.insert(user).values({ id: u, name: "Dupe Tester", email: `${u}@shop.test` });
+    const first = await fileRequest(u, SHIPPED, undefined, undefined, u);
+    await db
+      .update(capabilityRequests)
+      .set({ status: "shipped" })
+      .where(eq(capabilityRequests.id, first.id));
+
+    const second = await fileRequest(u, REPHRASED, undefined, undefined, u);
+    expect(second.id).toBe(first.id);
+    expect(second.deduped).toBe(true);
+    // The signal the tool uses to tell the user it already exists.
+    expect(second.alreadyExists).toBe(true);
+
+    const rows = await db
+      .select()
+      .from(capabilityRequests)
+      .where(eq(capabilityRequests.userId, u));
+    expect(rows).toHaveLength(1); // no duplicate row was created
+    await db.delete(user).where(eq(user.id, u));
   });
 });

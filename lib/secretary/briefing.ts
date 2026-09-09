@@ -581,6 +581,20 @@ export async function buildBriefing(
       (r.status === "shipped" || r.status === "failed") &&
       now.getTime() - r.updatedAt.getTime() < 36 * 60 * 60 * 1000
   );
+  // A DURABLE inventory of what the app can already do. Recent outcomes below
+  // only cover ~36 hours, so anything shipped earlier was invisible to the
+  // model — which is how the canvas checkbox ability got filed FOUR times under
+  // four phrasings, twice after it had already shipped, and the user watched it
+  // go in circles. Shipped abilities do not expire; neither should knowing
+  // about them. Costs ~150 tokens and prevents whole duplicate builds.
+  const shipped = shopRows.filter((r) => r.status === "shipped");
+  if (shipped.length) {
+    lines.push(
+      "",
+      "ABILITIES ALREADY BUILT (these EXIST in the app — use them; NEVER say you can't and NEVER file them again):"
+    );
+    for (const r of shipped) lines.push(`- ${r.need.replace(/\s+/g, " ").slice(0, 130)}`);
+  }
   if (awaiting.length) {
     lines.push(
       "",

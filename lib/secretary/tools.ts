@@ -1247,13 +1247,28 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     const a = toolSchemas.request_capability.parse(args);
     const { fileRequest } = await import("@/lib/shop/shop");
     const res = await fileRequest(ctx.userId, a.need, a.context, ctx.conversationId);
+    // A shipped twin means the ability is ALREADY IN THE APP. Saying "I'll send
+    // that to the shop" here is how the same feature got built more than once
+    // while the user watched — so the tool result has to correct the model
+    // rather than quietly confirm.
+    if (res.alreadyExists) {
+      return {
+        result: {
+          request_id: res.id,
+          status: "shipped",
+          already_exists: true,
+          note: "This ALREADY EXISTS — it was built and shipped. Do NOT say you can't do it and do NOT file it again. Tell the user it's already there, say plainly how to use it, and if it isn't working for them treat that as a BUG worth describing, not a missing feature.",
+        },
+        toast: { icon: "✓", text: "Already built — nothing to file" },
+      };
+    }
     return {
       result: {
         request_id: res.id,
         status: res.status,
         already_filed: res.deduped,
         note: res.deduped
-          ? `Already in the shop (${res.status}).`
+          ? `Already in the shop (${res.status}) — same ask, already tracked. Don't file it twice.`
           : res.queued
             ? "Filed — the shop is mid-job; this one is next in line."
             : "Filed — the shop is drafting a plan now. The user approves it in a later session or in Settings.",
