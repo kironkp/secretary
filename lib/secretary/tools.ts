@@ -26,8 +26,11 @@ import {
   applyCanvasOps,
   compositionToMarkup,
   describeComposition,
+  redoCanvas,
+  undoCanvas,
   type CanvasOp,
 } from "@/lib/canvas/composition";
+import { resolveReference } from "@/lib/canvas/focus";
 import {
   addWish,
   approveProposal,
@@ -1709,15 +1712,71 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     if (!latest || !composition) {
       return { result: { error: "Nothing on the canvas yet — paint something first." } };
     }
-    const { composition: next, applied, rejected } = applyCanvasOps(
-      composition,
-      a.operations as CanvasOp[]
-    );
+    // Undo/redo are whole-canvas and take no reference — handle them first.
+    const rewind = a.operations.find((o) => o.op === "undo" || o.op === "redo");
+    if (rewind) {
+      const { composition: next, changed, label } =
+        rewind.op === "undo" ? undoCanvas(composition) : redoCanvas(composition);
+      if (!changed) return { result: { error: label } };
+      await db
+        .update(canvasSnapshots)
+        .set({ composition: next, markup: compositionToMarkup(next) })
+        .where(and(eq(canvasSnapshots.id, latest.id), eq(canvasSnapshots.userId, ctx.userId)));
+      return {
+        result: { [rewind.op]: label },
+        uiAction: { type: "show_canvas" },
+        toast: { icon: "↺", text: label === "undone" ? "Undone" : "Redone" },
+      };
+    }
+
+    // Resolve the user's OWN WORDS against shared voice+touch state. Ambiguity
+    // is reported with the candidates rather than guessed — especially for
+    // remove, where a wrong guess destroys something.
+    const seen = describeComposition(composition);
+    const focus = composition.focus ?? {};
+    const resolved: CanvasOp[] = [];
+    for (const op of a.operations) {
+      if (op.op === "set_theme") {
+        // Flat wire shape → the strict union the composition validates.
+        const theme = {
+          ...(op.scale !== undefined ? { scale: op.scale } : {}),
+          ...(op.density ? { density: op.density } : {}),
+          ...(op.font ? { font: op.font } : {}),
+          ...(op.accent ? { accent: op.accent } : {}),
+          ...(op.radius ? { radius: op.radius } : {}),
+        };
+        if (Object.keys(theme).length) resolved.push({ op: "set_theme", theme });
+        continue;
+      }
+      if (op.op === "undo" || op.op === "redo") continue; // handled above
+      if (!op.id) {
+        return { result: { error: `${op.op} needs to say which block — nothing was named.` } };
+      }
+      const ref = resolveReference(op.id, seen, focus);
+      if (!ref.ok) {
+        return {
+          result: {
+            needs_clarification: ref.reason,
+            candidates: seen
+              .filter((b) => !ref.candidates.length || ref.candidates.includes(b.id))
+              .map((b) => `${b.id}: ${b.summary}`),
+            say: "Ask which one they mean — name the options in your own words. Do not guess.",
+          },
+        };
+      }
+      for (const id of ref.ids) {
+        if (op.op === "move") resolved.push({ op: "move", id, to: op.to ?? 0 });
+        else if (op.op === "resize") resolved.push({ op: "resize", id, span: op.span ?? "full" });
+        else resolved.push({ op: op.op, id });
+      }
+    }
+
+    const { composition: next, applied, rejected } = applyCanvasOps(composition, resolved);
     if (!applied.length) {
       return {
         result: {
           error: rejected[0]?.reason ?? "Nothing to change.",
-          on_canvas: describeComposition(composition).map((b) => `${b.id}: ${b.summary}`),
+          on_canvas: seen.map((b) => `${b.id}: ${b.summary}`),
         },
       };
     }

@@ -309,3 +309,26 @@ describe("voice modality rule", () => {
     expect(flat).not.toContain("what would free it");
   });
 });
+
+// A tool schema the Realtime API rejects fails the WHOLE session, and the user
+// just sees "Couldn't start the call" with no clue which tool did it. zod
+// renders a discriminated union as `oneOf`, which is exactly such a construct —
+// this caught it once and exists so it cannot happen silently again.
+describe("voice tool schemas stay Realtime-compatible", () => {
+  it("uses no construct the Realtime API rejects", () => {
+    for (const def of openAIVoiceToolDefs()) {
+      const schema = JSON.stringify(def.parameters);
+      expect(schema, `${def.name} must not use oneOf`).not.toContain('"oneOf"');
+      expect(schema, `${def.name} must not use allOf`).not.toContain('"allOf"');
+      expect(schema, `${def.name} must not use $ref`).not.toContain('"$ref"');
+    }
+  });
+
+  it("bounds every integer, rather than emitting a 2^53 maximum", () => {
+    for (const def of openAIVoiceToolDefs()) {
+      expect(JSON.stringify(def.parameters), def.name).not.toContain(
+        '"maximum":9007199254740991'
+      );
+    }
+  });
+});

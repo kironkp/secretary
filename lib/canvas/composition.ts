@@ -17,6 +17,7 @@
 // what a block means. That is what keeps canvases from all looking alike.
 import { z } from "zod";
 import { composeBlocks, segmentBlocks, verifyBlock } from "./blocks";
+import { canvasFocusSchema, noteFocus, pruneFocus, type CanvasFocus } from "./focus";
 
 /** Ids are already id-shaped by the sanitizer; mirror that exactly. */
 const idSchema = z.string().regex(/^[-a-zA-Z0-9_]+$/).max(64);
@@ -46,10 +47,35 @@ export type CanvasBlockSpec = z.infer<typeof canvasBlockSchema>;
 
 const MAX_BLOCKS = 40;
 
+/** Undo state for SHELL operations. Geometry only — no markup — so the stack
+ *  stays tiny and undo is a pure, instant swap with no model call and no
+ *  regeneration. Content changes are undone by restoring a snapshot instead
+ *  (history already does that), which is why markup never enters here. */
+const geometrySchema = z.object({
+  theme: canvasThemeSchema,
+  blocks: z.array(
+    z.object({
+      id: idSchema,
+      span: z.enum(["full", "half"]),
+      hidden: z.boolean(),
+      pinned: z.boolean(),
+      /** Position, so undo restores order without carrying markup. */
+      at: z.number().int().min(0),
+    })
+  ),
+});
+export type CanvasGeometry = z.infer<typeof geometrySchema>;
+
+const UNDO_DEPTH = 25;
+
 export const canvasCompositionSchema = z.object({
   v: z.literal(1),
   theme: canvasThemeSchema,
   blocks: z.array(canvasBlockSchema).max(MAX_BLOCKS),
+  /** Shared world model: what "that" and "those" currently mean. */
+  focus: canvasFocusSchema.optional(),
+  past: z.array(geometrySchema).max(UNDO_DEPTH).optional(),
+  future: z.array(geometrySchema).max(UNDO_DEPTH).optional(),
 });
 export type CanvasComposition = z.infer<typeof canvasCompositionSchema>;
 
@@ -72,7 +98,7 @@ export function compositionFromMarkup(
   // there — the assistant arranges the room, what his hand touched stays put.
   const prior = new Map(opts.previous?.blocks.map((b) => [b.id, b]));
 
-  return canvasCompositionSchema.parse({
+  const next = canvasCompositionSchema.parse({
     v: 1,
     theme: { ...(opts.previous?.theme ?? {}), ...(opts.theme ?? {}) },
     blocks: blocks.map((b) => {
@@ -85,7 +111,22 @@ export function compositionFromMarkup(
         pinned: was?.pinned ?? false,
       };
     }),
+    // Referents survive a repaint, minus anything that no longer exists — a
+    // pronoun pointing at a vanished block is worse than no pronoun.
+    focus: opts.previous?.focus
+      ? pruneFocus(opts.previous.focus, blocks.map((b) => b.id))
+      : undefined,
   });
+
+  // A block that wasn't there before IS the thing "that" refers to next: after
+  // "add my music projects", "move that to the right" must mean the new one.
+  const added = blocks.filter((b) => !prior.has(b.id));
+  if (added.length === 1) {
+    next.focus = noteFocus(next.focus ?? {}, { kind: "create", id: added[0].id });
+  } else if (added.length > 1) {
+    next.focus = noteFocus(next.focus ?? {}, { kind: "group", ids: added.map((b) => b.id) });
+  }
+  return next;
 }
 
 /** The composed fragment: visible blocks, in order. Kept in sync with the
@@ -132,6 +173,72 @@ export function validateComposition(
 // A CLOSED vocabulary, like edit_layout_plan: an unknown op is rejected outright
 // rather than interpreted. These are the whole point — each one is instant.
 
+/** Geometry alone, for the undo stack. */
+export function snapshotGeometry(c: CanvasComposition): CanvasGeometry {
+  return {
+    theme: c.theme,
+    blocks: c.blocks.map((b, at) => ({
+      id: b.id,
+      span: b.span,
+      hidden: b.hidden,
+      pinned: b.pinned,
+      at,
+    })),
+  };
+}
+
+/** Put a geometry back on the current blocks. Blocks that appeared since are
+ *  kept (appended) rather than destroyed — undoing a move must not delete
+ *  something that arrived afterwards. */
+function restoreGeometry(c: CanvasComposition, g: CanvasGeometry): CanvasComposition {
+  const byId = new Map(c.blocks.map((b) => [b.id, b]));
+  const ordered = g.blocks
+    .slice()
+    .sort((a, b) => a.at - b.at)
+    .flatMap((spec) => {
+      const block = byId.get(spec.id);
+      if (!block) return [];
+      byId.delete(spec.id);
+      return [{ ...block, span: spec.span, hidden: spec.hidden, pinned: spec.pinned }];
+    });
+  return { ...c, theme: g.theme, blocks: [...ordered, ...byId.values()] };
+}
+
+export type UndoResult = { composition: CanvasComposition; changed: boolean; label: string };
+
+/** Instant, deterministic, no model call. */
+export function undoCanvas(c: CanvasComposition): UndoResult {
+  const past = c.past ?? [];
+  if (!past.length) return { composition: c, changed: false, label: "nothing to undo" };
+  const previous = past[past.length - 1];
+  const restored = restoreGeometry(c, previous);
+  return {
+    composition: {
+      ...restored,
+      past: past.slice(0, -1),
+      future: [...(c.future ?? []), snapshotGeometry(c)].slice(-UNDO_DEPTH),
+    },
+    changed: true,
+    label: "undone",
+  };
+}
+
+export function redoCanvas(c: CanvasComposition): UndoResult {
+  const future = c.future ?? [];
+  if (!future.length) return { composition: c, changed: false, label: "nothing to redo" };
+  const next = future[future.length - 1];
+  const restored = restoreGeometry(c, next);
+  return {
+    composition: {
+      ...restored,
+      past: [...(c.past ?? []), snapshotGeometry(c)].slice(-UNDO_DEPTH),
+      future: future.slice(0, -1),
+    },
+    changed: true,
+    label: "redone",
+  };
+}
+
 export const canvasOpSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("move"), id: idSchema, to: z.number().int().min(0).max(MAX_BLOCKS) }),
   z.object({ op: z.literal("resize"), id: idSchema, span: z.enum(["full", "half"]) }),
@@ -167,8 +274,10 @@ export type OpResult = {
 export function applyCanvasOps(base: CanvasComposition, ops: CanvasOp[]): OpResult {
   let blocks = base.blocks.slice();
   let theme = base.theme;
+  let focus: CanvasFocus = base.focus ?? {};
   const applied: string[] = [];
   const rejected: { op: string; reason: string }[] = [];
+  const touched: string[] = [];
 
   const indexOf = (id: string) => blocks.findIndex((b) => b.id === id);
 
@@ -193,11 +302,13 @@ export function applyCanvasOps(base: CanvasComposition, ops: CanvasOp[]): OpResu
         // Touching a block pins it: the user's hand beats the planner.
         next.splice(to, 0, { ...moved, pinned: true });
         blocks = next;
+        focus = noteFocus(focus, { kind: "move", id: op.id });
         applied.push(`move ${op.id}→${to}`);
         break;
       }
       case "resize":
         blocks = blocks.map((b, n) => (n === i ? { ...b, span: op.span, pinned: true } : b));
+        focus = noteFocus(focus, { kind: "resize", id: op.id });
         applied.push(`resize ${op.id}=${op.span}`);
         break;
       case "hide":
@@ -213,6 +324,7 @@ export function applyCanvasOps(base: CanvasComposition, ops: CanvasOp[]): OpResu
         applied.push(`remove ${op.id}`);
         break;
     }
+    touched.push(op.id);
   }
 
   // Never leave the user with an empty canvas: a remove/hide that would clear
@@ -225,7 +337,25 @@ export function applyCanvasOps(base: CanvasComposition, ops: CanvasOp[]): OpResu
     };
   }
 
-  return { composition: { v: 1, theme, blocks }, applied, rejected };
+  // A batch acting on several blocks is what "those" means next time.
+  const distinct = [...new Set(touched)];
+  if (distinct.length > 1) focus = noteFocus(focus, { kind: "group", ids: distinct });
+
+  return {
+    composition: {
+      v: 1,
+      theme,
+      blocks,
+      focus,
+      // One undo entry per BATCH, not per op: "move it up" is one thing the
+      // user did, even when the model emits it as several operations.
+      past: [...(base.past ?? []), snapshotGeometry(base)].slice(-UNDO_DEPTH),
+      // A new action forks the timeline; anything redone-past is gone.
+      future: [],
+    },
+    applied,
+    rejected,
+  };
 }
 
 /** What the model is told is on screen, so it can refer to it by name.

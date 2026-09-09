@@ -19,6 +19,7 @@ import { History, Paintbrush } from "lucide-react";
 import { CANVAS_SANDBOX } from "@/lib/canvas/sanitize";
 import { CANVAS_REFRESH_EVENT } from "@/lib/canvas/refresh";
 import { isMomentumTap } from "@/components/dashboard/shared";
+import { canvasPerf, perfEnabled, type PerfSnapshot } from "@/lib/canvas/perf";
 
 type Block = { id: string; span: "full" | "half"; pinned: boolean; srcdoc: string };
 type Snapshot = {
@@ -182,15 +183,22 @@ export function CanvasView({ pollMs = 15000 }: { pollMs?: number } = {}) {
     }
   }, [layout, blocks]);
 
-  // Which block moved: it leads, the displaced ones trail behind it.
+  // Which block moved: it leads, the displaced ones trail behind it. This is
+  // also where an operation stops being a request and becomes visible motion —
+  // the number that answers "did the world respond when I spoke?".
   useEffect(() => {
     const order = blocks.map((b) => b.id);
     const before = prevOrder.current;
     if (before.length && order.length) {
       const moved = order.find((id, i) => before[i] !== id && before.includes(id));
       leadId.current = moved ?? null;
+      if (moved) {
+        canvasPerf.opPainted();
+        canvasPerf.sampleFrames();
+      }
     }
     prevOrder.current = order;
+    canvasPerf.blocks = order.length;
   }, [blocks]);
 
   useEffect(() => {
@@ -241,6 +249,18 @@ export function CanvasView({ pollMs = 15000 }: { pollMs?: number } = {}) {
     [applyDoneMarks, eachDoc, isChecked]
   );
 
+  // Selection lives on the SERVER because voice reads it there. Optimistic
+  // locally so the ring appears on touch, not on the round trip.
+  const [selected, setSelected] = useState<string | null>(null);
+  const selectBlock = useCallback(async (id: string) => {
+    setSelected(id);
+    await fetch("/api/canvas", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "select", id }),
+    }).catch(() => null);
+  }, []);
+
   const wireDoc = useCallback(
     (doc: Document, blockId: string | null) => {
       if (wiredDocs.current.has(doc)) return;
@@ -256,6 +276,11 @@ export function CanvasView({ pollMs = 15000 }: { pollMs?: number } = {}) {
           if (id) void completeTask(id);
           return;
         }
+        // Any tap inside a block SELECTS it — this is the shared world model:
+        // tapping here is what makes "make this bigger" mean this block a
+        // second later, on the same state the voice tools read.
+        if (blockId) void selectBlock(blockId);
+
         const target = el?.closest?.("[data-expand],[data-link],[data-check]");
         if (!target) return;
         const link = target.getAttribute("data-link");
@@ -267,7 +292,7 @@ export function CanvasView({ pollMs = 15000 }: { pollMs?: number } = {}) {
         if (blockId) requestAnimationFrame(() => measure(blockId));
       });
     },
-    [applyDoneMarks, completeTask, measure, router]
+    [applyDoneMarks, completeTask, measure, router, selectBlock]
   );
 
   const wireAll = useCallback(() => {
@@ -338,11 +363,31 @@ export function CanvasView({ pollMs = 15000 }: { pollMs?: number } = {}) {
 
   // A canvas operation just started: reload now rather than waiting out the
   // idle poll, which was invisible-for-15s exactly when the user was watching.
+  // This is also the clock start for "spoke → saw it move".
   useEffect(() => {
-    const onRefresh = () => void load();
+    const onRefresh = () => {
+      canvasPerf.opStarted();
+      void load();
+    };
     window.addEventListener(CANVAS_REFRESH_EVENT, onRefresh);
     return () => window.removeEventListener(CANVAS_REFRESH_EVENT, onRefresh);
   }, [load]);
+
+  const mountedAt = useRef(0);
+  const [perf, setPerf] = useState<PerfSnapshot | null>(null);
+  useEffect(() => {
+    mountedAt.current = performance.now();
+    if (!perfEnabled()) return;
+    canvasPerf.start();
+    const update = () => setPerf(canvasPerf.snapshot());
+    const off = canvasPerf.subscribe(update);
+    const t = setInterval(update, 1000);
+    return () => {
+      off();
+      clearInterval(t);
+      canvasPerf.stop();
+    };
+  }, []);
 
   const restore = async (id: string) => {
     const res = await fetch("/api/canvas", {
@@ -376,6 +421,38 @@ export function CanvasView({ pollMs = 15000 }: { pollMs?: number } = {}) {
 
   return (
     <div className="space-y-3">
+      {perf && (
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-0.5 rounded-xl border border-edge bg-surface-2 p-2.5 font-mono text-[10px] leading-snug text-muted sm:grid-cols-4">
+          <Stat k="blocks" v={`${perf.blocks} · ${perf.frames} frames`} />
+          <Stat k="first render" v={perf.firstRenderMs === null ? "—" : `${perf.firstRenderMs}ms`} />
+          <Stat
+            k="frame load"
+            v={perf.frameLoadMs ? `${perf.frameLoadMs.mean}ms ~ ${perf.frameLoadMs.max}ms` : "—"}
+          />
+          <Stat
+            k="op → moved"
+            v={
+              perf.opLatencyMs.n
+                ? `${perf.opLatencyMs.last ?? "—"}ms (~${perf.opLatencyMs.mean}, max ${perf.opLatencyMs.max})`
+                : "—"
+            }
+          />
+          <Stat
+            k="long tasks"
+            v={
+              perf.longTasks.count
+                ? `${perf.longTasks.count} · max ${perf.longTasks.maxMs}ms`
+                : "0 (or unsupported)"
+            }
+          />
+          <Stat
+            k="slow frames"
+            v={perf.jank.sampled ? `${perf.jank.slow}/${perf.jank.sampled}` : "—"}
+          />
+          <Stat k="heap" v={perf.memoryMB === null ? "n/a" : `${perf.memoryMB} MB`} />
+          <Stat k="selected" v={selected ?? "—"} />
+        </dl>
+      )}
       <div className="flex items-center justify-between text-xs text-muted">
         <span className="inline-flex items-center gap-1.5">
           <Paintbrush
@@ -434,7 +511,9 @@ export function CanvasView({ pollMs = 15000 }: { pollMs?: number } = {}) {
                 else holderRefs.current.delete(b.id);
               }}
               data-block={b.id}
-              className="absolute left-0 top-0 overflow-hidden rounded-2xl border border-edge bg-surface"
+              className={`absolute left-0 top-0 overflow-hidden rounded-2xl border bg-surface ${
+                selected === b.id ? "border-accent ring-2 ring-accent/25" : "border-edge"
+              }`}
             >
               <iframe
                 ref={(el) => {
@@ -445,6 +524,7 @@ export function CanvasView({ pollMs = 15000 }: { pollMs?: number } = {}) {
                 sandbox={CANVAS_SANDBOX}
                 srcDoc={b.srcdoc}
                 onLoad={() => {
+                  canvasPerf.frameLoaded(performance.now() - mountedAt.current);
                   wireAll();
                   measure(b.id);
                   setTimeout(() => measure(b.id), 350);
@@ -471,6 +551,15 @@ export function CanvasView({ pollMs = 15000 }: { pollMs?: number } = {}) {
           className="min-h-[45vh] w-full rounded-2xl border border-edge bg-surface"
         />
       )}
+    </div>
+  );
+}
+
+function Stat({ k, v }: { k: string; v: string }) {
+  return (
+    <div className="flex min-w-0 justify-between gap-2">
+      <dt className="shrink-0 opacity-70">{k}</dt>
+      <dd className="truncate text-ink">{v}</dd>
     </div>
   );
 }

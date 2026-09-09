@@ -23,8 +23,11 @@ import {
   applyCanvasOps,
   canvasOpSchema,
   compositionToMarkup,
+  redoCanvas,
+  undoCanvas,
   DEFAULT_THEME,
 } from "@/lib/canvas/composition";
+import { noteFocus } from "@/lib/canvas/focus";
 
 export async function GET(req: Request) {
   const user = await requireSession();
@@ -69,6 +72,12 @@ export async function GET(req: Request) {
 const bodySchema = z.union([
   z.object({ action: z.literal("restore"), id: z.string().min(1) }),
   z.object({ action: z.literal("ops"), ops: z.array(canvasOpSchema).min(1).max(20) }),
+  // Touch feeding the SHARED world model: tapping a block is what makes "make
+  // this bigger" mean that block a second later. Same state the voice tools
+  // read — there is no separate touch context.
+  z.object({ action: z.literal("select"), id: z.string().min(1) }),
+  z.object({ action: z.literal("undo") }),
+  z.object({ action: z.literal("redo") }),
 ]);
 
 export async function POST(req: Request) {
@@ -92,12 +101,32 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "No canvas yet" }, { status: 404 });
   }
 
-  const { composition: next, applied, rejected } = applyCanvasOps(composition, parsed.ops);
-  if (applied.length) {
+  const persist = async (next: typeof composition) => {
     await db
       .update(canvasSnapshots)
       .set({ composition: next, markup: compositionToMarkup(next) })
       .where(and(eq(canvasSnapshots.id, latest.id), eq(canvasSnapshots.userId, user.id)));
+  };
+
+  if (parsed.action === "select") {
+    if (!composition.blocks.some((b) => b.id === parsed.id)) {
+      return NextResponse.json({ error: "No such block" }, { status: 404 });
+    }
+    await persist({
+      ...composition,
+      focus: noteFocus(composition.focus ?? {}, { kind: "select", id: parsed.id }),
+    });
+    return NextResponse.json({ ok: true, selected: parsed.id });
   }
+
+  if (parsed.action === "undo" || parsed.action === "redo") {
+    const { composition: next, changed, label } =
+      parsed.action === "undo" ? undoCanvas(composition) : redoCanvas(composition);
+    if (changed) await persist(next);
+    return NextResponse.json({ ok: changed, label });
+  }
+
+  const { composition: next, applied, rejected } = applyCanvasOps(composition, parsed.ops);
+  if (applied.length) await persist(next);
   return NextResponse.json({ ok: applied.length > 0, applied, rejected });
 }

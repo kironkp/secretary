@@ -2,6 +2,16 @@
 // API (text chat). One source of truth: zod schemas → OpenAI JSON schemas.
 import { z } from "zod";
 
+/** A block reference: an id from the briefing, OR the words the user actually
+ *  used. Resolved server-side against shared voice+touch interaction state. */
+const refField = z
+  .string()
+  .min(1)
+  .max(120)
+  .describe(
+    'Which block: an id from the CANVAS list, or the user\'s own words — "that", "this", "the other one", "the top one", "the caltrans one", "those". Prefer their words over guessing an id.'
+  );
+
 export const toolSchemas = {
   create_task: z.object({
     title: z.string().min(1).describe("Short imperative title, e.g. 'Renew passport'"),
@@ -385,36 +395,52 @@ export const toolSchemas = {
   }),
   // Geometry: pure data ops on what is already on screen. No repaint, no
   // generation — the shell moves things and animates. This is the workspace.
+  //
+  // Ids accept the user's OWN WORDS, not just ids: the server resolves "that",
+  // "this", "the other one", "the top one", "the caltrans one" against shared
+  // interaction state that touch updates too. Pass through what they said.
+  // FLAT on purpose, not a discriminated union: zod renders a union as `oneOf`,
+  // which the Realtime API rejects outright — and a rejected tool schema fails
+  // the whole session, so the user just gets "couldn't start the call". The
+  // strict union still guards the server side; this is only the wire shape.
   arrange_canvas: z.object({
     operations: z
       .array(
-        z.discriminatedUnion("op", [
-          z.object({
-            op: z.literal("move"),
-            id: z.string().describe("Block id, from the CANVAS list in your briefing"),
-            to: z.number().int().min(0).describe("0 = top of the canvas"),
-          }),
-          z.object({
-            op: z.literal("resize"),
-            id: z.string(),
-            span: z.enum(["full", "half"]).describe("full = whole width, half = side by side"),
-          }),
-          z.object({ op: z.literal("hide"), id: z.string() }),
-          z.object({ op: z.literal("show"), id: z.string() }),
-          z.object({ op: z.literal("remove"), id: z.string() }),
-          z.object({
-            op: z.literal("set_theme"),
-            theme: z
-              .object({
-                scale: z.number().min(0.75).max(2).optional().describe("1 = normal, 1.25 = bigger"),
-                density: z.enum(["tight", "normal", "roomy"]).optional(),
-                font: z.enum(["system", "serif", "mono", "condensed"]).optional(),
-                accent: z.enum(["default", "grape", "ok", "warn", "danger"]).optional(),
-                radius: z.enum(["sharp", "soft", "round"]).optional(),
-              })
-              .describe("Only the properties being changed"),
-          }),
-        ])
+        z.object({
+          op: z
+            .enum(["move", "resize", "hide", "show", "remove", "set_theme", "undo", "redo"])
+            .describe("What to do. undo/redo take no other fields."),
+          id: refField.optional().describe(
+            'Which block — an id from the CANVAS list, or the user\'s own words ("that", "this", "the other one", "the top one", "the caltrans one"). Required for move/resize/hide/show/remove.'
+          ),
+          to: z
+            .number()
+            .int()
+            .min(0)
+            .max(40)
+            .optional()
+            .describe("move only: 0 = top of the canvas"),
+          span: z
+            .enum(["full", "half"])
+            .optional()
+            .describe("resize only: full = whole width, half = side by side"),
+          scale: z
+            .number()
+            .min(0.75)
+            .max(2)
+            .optional()
+            .describe("set_theme only: 1 = normal, 1.25 = bigger text"),
+          density: z.enum(["tight", "normal", "roomy"]).optional().describe("set_theme only"),
+          font: z
+            .enum(["system", "serif", "mono", "condensed"])
+            .optional()
+            .describe("set_theme only"),
+          accent: z
+            .enum(["default", "grape", "ok", "warn", "danger"])
+            .optional()
+            .describe("set_theme only"),
+          radius: z.enum(["sharp", "soft", "round"]).optional().describe("set_theme only"),
+        })
       )
       .min(1)
       .max(20),
