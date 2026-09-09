@@ -484,8 +484,11 @@ export function ChatThread({
   }, [call.ended, router]);
 
   const hasBriefing = briefing.hasContent;
-  // Peek shows only the exchange since the dock opened; full shows everything.
-  const shownMsgs = dockState === "peek" ? msgs.slice(peekFrom.current) : msgs;
+  // Peek is deliberately ONE message — the latest thing said, by either of us,
+  // and nothing else. It is a glance, not a transcript: no header, no briefing,
+  // no scrollback. Anything more and it competes with the canvas it floats
+  // over. Tap it to open the full conversation.
+  const shownMsgs = dockState === "peek" ? msgs.slice(-1) : msgs;
   const showExtras = dockState !== "peek"; // briefing + empty state
 
   // The conversation panel: a card that rises above the composer. Height (not
@@ -495,7 +498,9 @@ export function ChatThread({
         dockState === "bar"
           ? "pointer-events-none h-0 border-transparent opacity-0"
           : dockState === "peek"
-            ? "mb-2 h-[min(45dvh,26rem)] border-edge opacity-100 shadow-2xl"
+            ? // Sized to its one message rather than a fixed slab, so a short
+              // reply is a small card instead of a mostly-empty panel.
+              "mb-2 max-h-[min(32dvh,18rem)] border-edge opacity-100 shadow-2xl"
             : "mb-2 h-[min(78dvh,46rem)] border-edge opacity-100 shadow-2xl"
       }`
     : "flex min-h-0 flex-1 flex-col";
@@ -503,20 +508,12 @@ export function ChatThread({
   return (
     <div className="flex h-full min-h-0 flex-col justify-end">
       <div className={panelClass} aria-hidden={dock ? dockState === "bar" : undefined}>
-        {dock && dockState !== "bar" && (
+        {/* No header in peek: it is one message, and a title bar over a single
+            line is more chrome than content. Full keeps it. */}
+        {dock && dockState === "full" && (
           <div className="flex flex-none items-center justify-between border-b border-edge bg-card px-4 py-2">
             <span className="text-sm font-bold">{secretaryName}</span>
             <div className="flex items-center gap-0.5">
-              {dockState === "peek" && (
-                <button
-                  onClick={() => dock.setState("full")}
-                  title="Show full conversation"
-                  aria-label="Show full conversation"
-                  className="flex h-7 w-7 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-2 hover:text-ink"
-                >
-                  <ChevronUp size={16} strokeWidth={2} />
-                </button>
-              )}
               <button
                 onClick={() => dock.setState("bar")}
                 title="Minimize"
@@ -528,7 +525,12 @@ export function ChatThread({
             </div>
           </div>
         )}
-      <div className="min-h-0 flex-1 overflow-y-auto py-5 [-webkit-overflow-scrolling:touch]">
+      <div
+        onClick={dock && dockState === "peek" ? () => dock.setState("full") : undefined}
+        className={`min-h-0 flex-1 overflow-y-auto [-webkit-overflow-scrolling:touch] ${
+          dock && dockState === "peek" ? "cursor-pointer py-3" : "py-5"
+        }`}
+      >
         <div className="mx-auto w-full max-w-2xl space-y-4 px-4">
           {showExtras && hasBriefing && (
             <div className="rounded-2xl border border-edge bg-surface p-5">
@@ -793,6 +795,17 @@ export function ChatThread({
                   e.target.value = "";
                 }}
               />
+              <button
+                onClick={() => fileRef.current?.click()}
+                disabled={pending.length >= MAX_ATTACHMENTS}
+                title="Attach a file"
+                aria-label="Attach a file"
+                className="flex h-9 w-9 flex-none items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-2 hover:text-ink disabled:opacity-40"
+              >
+                <Paperclip size={18} strokeWidth={1.75} />
+              </button>
+              <ModelChip initialModel={initialChatModel} initialEffort={initialChatEffort} />
+              <div className="min-w-0 flex-1" />
               {dock && (
                 <button
                   onClick={() => dock.setState(dockState === "bar" ? "full" : "bar")}
@@ -807,17 +820,6 @@ export function ChatThread({
                   )}
                 </button>
               )}
-              <button
-                onClick={() => fileRef.current?.click()}
-                disabled={pending.length >= MAX_ATTACHMENTS}
-                title="Attach a file"
-                aria-label="Attach a file"
-                className="flex h-9 w-9 flex-none items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-2 hover:text-ink disabled:opacity-40"
-              >
-                <Paperclip size={18} strokeWidth={1.75} />
-              </button>
-              <ModelChip initialModel={initialChatModel} initialEffort={initialChatEffort} />
-              <div className="min-w-0 flex-1" />
               {input.trim() || pending.some((a) => a.id) ? (
                 <button
                   onClick={send}
