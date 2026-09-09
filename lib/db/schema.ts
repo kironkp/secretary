@@ -547,6 +547,13 @@ export const canvasSnapshots = pgTable("canvas_snapshots", {
     .references(() => user.id, { onDelete: "cascade" }),
   brief: text("brief").notNull(),
   markup: text("markup").notNull(),
+  // The workspace model: blocks + geometry + theme — the SHELL's state, which
+  // it changes with no model call. Nullable because every snapshot painted
+  // before this is markup-only; those migrate lazily into a one-block
+  // composition on read. `markup` stays the composed rendering and remains
+  // authoritative for every existing reader (done-marks, history, restore),
+  // so nothing downstream needed to change.
+  composition: jsonb("composition"),
   // streaming flag: true while the painter is still appending chunks
   painting: boolean("painting").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

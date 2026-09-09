@@ -121,29 +121,37 @@ export function verifyBlock(markup: string): { ok: true } | { ok: false; reason:
   const trimmed = markup.trim();
   if (!trimmed) return { ok: false, reason: "empty" };
 
-  let depth = 0;
+  // A NAME stack, not a counter. `<div><span>x</div></span>` balances by count
+  // but is mis-nested: a browser re-parses it into a different tree than the
+  // one verified, so counting alone would wave through exactly the fragments
+  // that corrupt a document when spliced.
+  const stack: string[] = [];
   let roots = 0;
-  let closedEarly = false;
+  let mismatch = "";
 
   for (const t of tokens(trimmed)) {
     if (t.close) {
-      if (depth === 0) {
-        closedEarly = true;
+      if (!stack.length) {
+        mismatch = "closing tag with no matching open";
         break;
       }
-      depth--;
-      if (depth === 0) roots++;
+      const open = stack.pop();
+      if (open !== t.tag) {
+        mismatch = `</${t.tag}> closes <${open}>`;
+        break;
+      }
+      if (!stack.length) roots++;
       continue;
     }
     if (t.selfClose) {
-      if (depth === 0) roots++;
+      if (!stack.length) roots++;
       continue;
     }
-    depth++;
+    stack.push(t.tag);
   }
 
-  if (closedEarly) return { ok: false, reason: "closing tag with no matching open" };
-  if (depth !== 0) return { ok: false, reason: "unclosed element" };
+  if (mismatch) return { ok: false, reason: mismatch };
+  if (stack.length) return { ok: false, reason: "unclosed element" };
   if (roots === 0) return { ok: false, reason: "no element" };
   if (roots > 1) return { ok: false, reason: `${roots} root elements, expected 1` };
   return { ok: true };

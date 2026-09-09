@@ -383,6 +383,42 @@ export const toolSchemas = {
       .min(1)
       .describe("The targeted change, e.g. 'make the album section bigger' — the rest stays"),
   }),
+  // Geometry: pure data ops on what is already on screen. No repaint, no
+  // generation — the shell moves things and animates. This is the workspace.
+  arrange_canvas: z.object({
+    operations: z
+      .array(
+        z.discriminatedUnion("op", [
+          z.object({
+            op: z.literal("move"),
+            id: z.string().describe("Block id, from the CANVAS list in your briefing"),
+            to: z.number().int().min(0).describe("0 = top of the canvas"),
+          }),
+          z.object({
+            op: z.literal("resize"),
+            id: z.string(),
+            span: z.enum(["full", "half"]).describe("full = whole width, half = side by side"),
+          }),
+          z.object({ op: z.literal("hide"), id: z.string() }),
+          z.object({ op: z.literal("show"), id: z.string() }),
+          z.object({ op: z.literal("remove"), id: z.string() }),
+          z.object({
+            op: z.literal("set_theme"),
+            theme: z
+              .object({
+                scale: z.number().min(0.75).max(2).optional().describe("1 = normal, 1.25 = bigger"),
+                density: z.enum(["tight", "normal", "roomy"]).optional(),
+                font: z.enum(["system", "serif", "mono", "condensed"]).optional(),
+                accent: z.enum(["default", "grape", "ok", "warn", "danger"]).optional(),
+                radius: z.enum(["sharp", "soft", "round"]).optional(),
+              })
+              .describe("Only the properties being changed"),
+          }),
+        ])
+      )
+      .min(1)
+      .max(20),
+  }),
   show_canvas: z.object({}),
   // --- Slow loop, tier 2 (SPEC §7.5): asks OUTSIDE the registry become code ---
   request_new_component: z.object({
@@ -510,6 +546,8 @@ const toolDescriptions: Record<ToolName, string> = {
     "Paint a NEW canvas: a free-form visual the user watches build live — posters, charts, big-number summaries, week views. Use for 'show me / draw / visualize / put it on the canvas' when there is nothing on the canvas yet, or when they want a genuinely different picture. If a canvas already exists and they are CHANGING it, use edit_canvas instead — repainting throws away what they are looking at. The painter READS THE RECENT CONVERSATION, so 'lay out the CPO statuses we just discussed' is a complete brief — everything the user just said will render. Never say you can't draw, and never promise a screen update without calling this or edit_canvas. The result appears on the Canvas tab; say so.",
   edit_canvas:
     "THE DEFAULT when something is already on the canvas and the user changes it. Anything that modifies the existing view — 'add one more thing', 'make that purple', 'move this above that', 'only show the Caltrans items', 'make the urgent one bigger', 'put these on the right', 'change the title', 'drop the empty column' — is an EDIT: the current canvas is kept and changed. Use paint_canvas ONLY when they want a genuinely different picture ('now show me the album instead', 'paint my week'). If in doubt and a canvas exists, edit. Requires an existing canvas — otherwise use paint_canvas.",
+  arrange_canvas:
+    "REARRANGE what is already on the canvas — instant, no repainting, nothing regenerated. Use this for anything about WHERE, HOW BIG, WHAT'S VISIBLE, or HOW IT LOOKS: 'move the album up' / 'put that at the top' (move), 'make that bigger/smaller', 'put those side by side' (resize), 'hide the finished ones' / 'just show me Caltrans' (hide), 'bring back the album' (show), 'bigger font', 'more spacing', 'use a serif' (set_theme). Block ids come from the CANVAS list in your briefing — refer to what the user can SEE. This is NOT edit_canvas: use edit_canvas only when the CONTENT of a block must change (different tasks, new wording, a rewritten note). Rearranging is free and instant; repainting is neither.",
   show_canvas:
     "Bring the Canvas into view on the user's screen WITHOUT repainting — 'open the canvas', 'show me the canvas', 'put that back up'. paint_canvas and edit_canvas already open it automatically; use this only when the user wants to look at what's already there.",
   request_new_component:
@@ -562,6 +600,9 @@ export const VOICE_TOOL_NAMES = [
   // copy of the current canvas and therefore paints a different one from
   // scratch. The persona has always instructed the model to call this.
   "edit_canvas",
+  // Geometry with no model call at all: "move the album up" must be instant
+  // mid-call, which is the whole point of the workspace.
+  "arrange_canvas",
   // "open the canvas" flips the in-call canvas into view (§7.6 auto-open)
   // without burning a repaint
   "show_canvas",

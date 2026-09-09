@@ -37,6 +37,7 @@ describe("canvas tool outcomes carry the auto-open action", () => {
       userId: ctx.userId,
       brief: "",
       markup: "", // no paint yet — edit_canvas must refuse
+      composition: null,
       painting: false,
       createdAt: new Date(0),
     });

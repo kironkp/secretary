@@ -57,6 +57,21 @@ function fmt(d: Date, tz: string, withTime = true) {
  * items surfaced for nudging get lastNudgedAt stamped so the same item isn't
  * nagged twice in a day.
  */
+/** The blocks currently on the canvas — best-effort: the briefing must never
+ *  fail because the canvas is mid-paint or empty. */
+async function canvasBlockList(
+  userId: string
+): Promise<{ id: string; span: string; hidden: boolean; summary: string }[]> {
+  try {
+    const { latestSnapshot, readComposition } = await import("@/lib/canvas/painter");
+    const { describeComposition } = await import("@/lib/canvas/composition");
+    const composition = readComposition(await latestSnapshot(userId));
+    return composition ? describeComposition(composition) : [];
+  } catch {
+    return [];
+  }
+}
+
 export async function buildBriefing(
   userId: string,
   timezone: string,
@@ -380,6 +395,20 @@ export async function buildBriefing(
       const ev = eventCounts.find((c) => c.projectId === p.id)?.n ?? 0;
       lines.push(
         `- "${p.name}" (${n} open task${n === 1 ? "" : "s"}${ev ? ` · ${ev} event${ev === 1 ? "" : "s"} this week` : ""})`
+      );
+    }
+  }
+  // What is on screen right now, so "move that one up" has a referent. Ids
+  // only — never the markup — so this stays small enough for a voice turn.
+  const onCanvas = await canvasBlockList(userId);
+  if (onCanvas.length) {
+    lines.push(
+      "",
+      "CANVAS (what the user is looking at, top to bottom). Use these ids with arrange_canvas to move/resize/hide — instant, no repaint. Only use edit_canvas when a block's CONTENT must change:"
+    );
+    for (const b of onCanvas) {
+      lines.push(
+        `- ${b.id}${b.span === "half" ? " (half width)" : ""}${b.hidden ? " (hidden)" : ""}: ${b.summary}`
       );
     }
   }

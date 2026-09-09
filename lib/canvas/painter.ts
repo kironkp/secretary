@@ -15,6 +15,12 @@ import { anthropicFor, brainSettings, claudeBrainEnabled } from "@/lib/anthropic
 import type Anthropic from "@anthropic-ai/sdk";
 import { computeSignals } from "@/lib/layout/signals";
 import { sanitizeCanvasMarkup } from "./sanitize";
+import {
+  compositionFromMarkup,
+  compositionToMarkup,
+  validateComposition,
+  type CanvasComposition,
+} from "./composition";
 
 let promptCache: string | null = null;
 export function painterPrompt(): string {
@@ -144,8 +150,11 @@ export async function paintCanvas(
   // it there: an EDIT keeps the old canvas until the new one is complete (a
   // change should never look like a teardown), while a fresh paint starts
   // streaming only once it has something substantial to show.
-  const hold = opts.baseMarkup ?? (await latestSnapshot(userId))?.markup ?? "";
+  const previous = await latestSnapshot(userId);
+  const hold = opts.baseMarkup ?? previous?.markup ?? "";
   const isEdit = Boolean(opts.baseMarkup);
+  // Carried through the repaint so hand-placed geometry survives it.
+  const holdComposition = readComposition(previous);
 
   const [row] = await db
     .insert(canvasSnapshots)
@@ -204,13 +213,38 @@ export async function paintCanvas(
     // A failed, aborted or empty generation leaves what was on screen alone
     // rather than clearing it — losing the canvas is worse than not changing it.
     const markup = painted.trim() ? painted : hold;
+    // Segment into the workspace model. Geometry the user set by hand (a moved
+    // or resized block) carries forward when the block is still there, so a
+    // repaint doesn't undo their arrangement.
+    const composition = compositionFromMarkup(markup, { previous: holdComposition });
     await db
       .update(canvasSnapshots)
-      .set({ markup, painting: false })
+      .set({
+        markup: compositionToMarkup(composition),
+        composition,
+        painting: false,
+      })
       .where(eq(canvasSnapshots.id, row.id));
     finalMarkup = markup;
   }
   return { snapshotId: row.id, markup: finalMarkup };
+}
+
+/**
+ * The workspace state for a snapshot. Snapshots painted before the composition
+ * column existed have none, so they migrate lazily here into a one-block
+ * composition — nothing in the history needs a backfill, and a restore of an
+ * old snapshot still lands in the new model.
+ */
+export function readComposition(
+  row: { markup: string; composition: unknown } | null | undefined
+): CanvasComposition | undefined {
+  if (!row?.markup) return undefined;
+  if (row.composition) {
+    const { composition } = validateComposition(row.composition);
+    if (composition) return composition;
+  }
+  return compositionFromMarkup(row.markup);
 }
 
 /** data-check ids in sanitized markup — attrs are normalized to name="value",

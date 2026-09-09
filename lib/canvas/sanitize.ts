@@ -159,7 +159,50 @@ export function sanitizeCanvasMarkup(input: string): string {
  * inline styles only. The <style> block carries the app's design tokens so
  * painted inline styles can reference var(--…).
  */
-export function buildCanvasSrcDoc(sanitizedMarkup: string, opts: { dark?: boolean } = {}): string {
+/** Theme enums → CSS variables. The shell compiles them; the model only ever
+ *  picks an enum value, so "make the font bigger" is data, not authored style.
+ *  Painted markup already styles with var(--…), so a theme change reaches it
+ *  without touching a single byte of model output. */
+export type CanvasThemeVars = {
+  scale?: number;
+  density?: "tight" | "normal" | "roomy";
+  font?: "system" | "serif" | "mono" | "condensed";
+  accent?: "default" | "grape" | "ok" | "warn" | "danger";
+  radius?: "sharp" | "soft" | "round";
+};
+
+const FONT_STACKS: Record<string, string> = {
+  system: "system-ui,-apple-system,sans-serif",
+  serif: "ui-serif,Georgia,'Times New Roman',serif",
+  mono: "ui-monospace,SFMono-Regular,Menlo,monospace",
+  condensed: "'Avenir Next Condensed','Helvetica Neue',system-ui,sans-serif",
+};
+const DENSITY_SPACE: Record<string, string> = { tight: "10px", normal: "16px", roomy: "24px" };
+const RADIUS: Record<string, string> = { sharp: "2px", soft: "14px", round: "22px" };
+
+function themeVars(theme: CanvasThemeVars = {}): string {
+  const scale = Math.max(0.75, Math.min(2, theme.scale ?? 1));
+  const base = 14 * scale;
+  const step = (n: number) => `${Math.round(base * Math.pow(1.25, n) * 100) / 100}px`;
+  const accent = theme.accent && theme.accent !== "default" ? `var(--${theme.accent})` : null;
+  return [
+    `--font-ui:${FONT_STACKS[theme.font ?? "system"] ?? FONT_STACKS.system}`,
+    `--space:${DENSITY_SPACE[theme.density ?? "normal"] ?? DENSITY_SPACE.normal}`,
+    `--radius:${RADIUS[theme.radius ?? "soft"] ?? RADIUS.soft}`,
+    `--s0:${step(-1)}`,
+    `--s1:${step(0)}`,
+    `--s2:${step(1)}`,
+    `--s3:${step(2)}`,
+    `--s4:${step(3)}`,
+    `--fs:${step(0)}`,
+    ...(accent ? [`--accent:${accent}`] : []),
+  ].join(";");
+}
+
+export function buildCanvasSrcDoc(
+  sanitizedMarkup: string,
+  opts: { dark?: boolean; theme?: CanvasThemeVars; block?: boolean } = {}
+): string {
   // Mirrors app/globals.css exactly — these drifted, so a painted canvas used
   // slightly different blues and greens from the app around it.
   const tokens = opts.dark
@@ -173,7 +216,14 @@ export function buildCanvasSrcDoc(sanitizedMarkup: string, opts: { dark?: boolea
     `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'none'; form-action 'none'">`,
     "<style>",
     tokens,
-    "html,body{margin:0;padding:16px;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,sans-serif;font-size:14px;line-height:1.5}",
+    // Theme vars ride the same :root the tokens do, so painted markup that
+    // already uses var(--…) picks them up with no repaint.
+    `:root{${themeVars(opts.theme)}}`,
+    // A per-block frame is transparent and unpadded: the SHELL owns the gap
+    // between blocks and the page background, because it owns the layout.
+    opts.block
+      ? "html,body{margin:0;padding:0;background:transparent;color:var(--ink);font-family:var(--font-ui);font-size:var(--fs);line-height:1.5}"
+      : "html,body{margin:0;padding:16px;background:var(--bg);color:var(--ink);font-family:var(--font-ui);font-size:var(--fs);line-height:1.5}",
     "[data-expand]{cursor:pointer}",
     "[data-link]{cursor:pointer;text-decoration:underline;text-decoration-color:var(--accent);text-underline-offset:2px}",
     "[data-check]{cursor:pointer}",

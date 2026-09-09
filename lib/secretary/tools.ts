@@ -20,8 +20,14 @@ import {
   user as userTable,
   type DocSection,
 } from "@/lib/db/schema";
-import { layoutPreferences } from "@/lib/db/schema";
-import { latestSnapshot, paintCanvas } from "@/lib/canvas/painter";
+import { canvasSnapshots, layoutPreferences } from "@/lib/db/schema";
+import { latestSnapshot, paintCanvas, readComposition } from "@/lib/canvas/painter";
+import {
+  applyCanvasOps,
+  compositionToMarkup,
+  describeComposition,
+  type CanvasOp,
+} from "@/lib/canvas/composition";
 import {
   addWish,
   approveProposal,
@@ -1694,6 +1700,37 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     };
   },
 
+  /** Geometry only: the shell rearranges its own furniture. No model call, no
+   *  repaint, no new snapshot — rearranging the room is not a new picture. */
+  async arrange_canvas(ctx, args) {
+    const a = toolSchemas.arrange_canvas.parse(args);
+    const latest = await latestSnapshot(ctx.userId);
+    const composition = readComposition(latest);
+    if (!latest || !composition) {
+      return { result: { error: "Nothing on the canvas yet — paint something first." } };
+    }
+    const { composition: next, applied, rejected } = applyCanvasOps(
+      composition,
+      a.operations as CanvasOp[]
+    );
+    if (!applied.length) {
+      return {
+        result: {
+          error: rejected[0]?.reason ?? "Nothing to change.",
+          on_canvas: describeComposition(composition).map((b) => `${b.id}: ${b.summary}`),
+        },
+      };
+    }
+    await db
+      .update(canvasSnapshots)
+      .set({ composition: next, markup: compositionToMarkup(next) })
+      .where(and(eq(canvasSnapshots.id, latest.id), eq(canvasSnapshots.userId, ctx.userId)));
+    return {
+      result: { arranged: applied, rejected: rejected.length ? rejected : undefined },
+      uiAction: { type: "show_canvas" },
+      toast: { icon: "⇄", text: "Canvas rearranged" },
+    };
+  },
   async edit_canvas(ctx, args) {
     const a = toolSchemas.edit_canvas.parse(args);
     const current = await latestSnapshot(ctx.userId);
