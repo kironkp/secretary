@@ -19,6 +19,7 @@ import { History, Paintbrush } from "lucide-react";
 import { CANVAS_SANDBOX } from "@/lib/canvas/sanitize";
 import { CANVAS_REFRESH_EVENT } from "@/lib/canvas/refresh";
 import { isMomentumTap } from "@/components/dashboard/shared";
+import { applyCheckState, wireCanvasDocument } from "@/lib/canvas/interaction";
 import { canvasPerf, perfEnabled, type PerfSnapshot } from "@/lib/canvas/perf";
 
 type Block = { id: string; span: "full" | "half"; pinned: boolean; srcdoc: string };
@@ -73,33 +74,7 @@ export function CanvasView({ pollMs = 15000 }: { pollMs?: number } = {}) {
   );
 
   const applyDoneMarks = useCallback(
-    (doc: Document) => {
-      for (const el of Array.from(doc.querySelectorAll("[data-check]"))) {
-        const id = el.getAttribute("data-check");
-        if (!id) continue;
-        // A table row can't host a positioned box; use its first cell.
-        const host =
-          el.tagName === "TR"
-            ? (el.querySelector(":scope > td, :scope > th") as HTMLElement | null)
-            : (el as HTMLElement);
-        if (!host) continue;
-        let box = host.querySelector(":scope > .cv-box");
-        if (!box) {
-          box = doc.createElement("span");
-          box.className = "cv-box";
-          box.setAttribute("role", "checkbox");
-          host.classList.add("cv-checkable");
-          // Painted cards carry inline padding, which beats the stylesheet —
-          // reserve the gutter inline, and only if it isn't already wide enough.
-          const current = parseFloat(doc.defaultView?.getComputedStyle(host).paddingLeft || "0");
-          if (!(current >= 30)) host.style.paddingLeft = "30px";
-          host.insertBefore(box, host.firstChild);
-        }
-        const on = isChecked(id);
-        box.setAttribute("aria-checked", on ? "true" : "false");
-        el.classList.toggle("cv-done", on);
-      }
-    },
+    (doc: Document) => applyCheckState(doc, isChecked),
     [isChecked]
   );
 
@@ -231,6 +206,9 @@ export function CanvasView({ pollMs = 15000 }: { pollMs?: number } = {}) {
   // to the first — a retry loop re-wires whichever document actually committed.
   const wiredDocs = useRef(new WeakSet<Document>());
 
+  // Surfaced when an optimistic tick is rolled back.
+  const [checkError, setCheckError] = useState<string | null>(null);
+
   const completeTask = useCallback(
     async (taskId: string) => {
       if (isChecked(taskId)) return;
@@ -242,8 +220,18 @@ export function CanvasView({ pollMs = 15000 }: { pollMs?: number } = {}) {
         body: JSON.stringify({ status: "done", source: "canvas" }),
       }).catch(() => null);
       if (!res?.ok) {
+        // Roll the tick back AND say so. A checkbox that silently un-ticks
+        // itself reads as "the app is broken", which is exactly how this
+        // feature felt before.
         pendingRef.current.delete(taskId);
         eachDoc(applyDoneMarks);
+        setCheckError(
+          res
+            ? "Couldn't mark that done — it may have been changed elsewhere."
+            : "Couldn't reach the server — that one didn't save."
+        );
+      } else {
+        setCheckError(null);
       }
     },
     [applyDoneMarks, eachDoc, isChecked]
@@ -263,33 +251,19 @@ export function CanvasView({ pollMs = 15000 }: { pollMs?: number } = {}) {
 
   const wireDoc = useCallback(
     (doc: Document, blockId: string | null) => {
+      // Boxes are re-applied on every pass, not just the first: a document can
+      // be swapped under us (the iOS srcdoc bug) and applyCheckState is
+      // idempotent, so this is cheap insurance against a canvas that renders
+      // without its checkboxes.
+      applyDoneMarks(doc);
       if (wiredDocs.current.has(doc)) return;
       wiredDocs.current.add(doc);
-      applyDoneMarks(doc);
-      doc.addEventListener("click", (e) => {
-        // The tap that STOPS a momentum scroll is not intent.
-        if (isMomentumTap()) return;
-        const el = e.target as Element | null;
-        const box = el?.closest?.(".cv-box");
-        if (box) {
-          const id = box.closest("[data-check]")?.getAttribute("data-check");
-          if (id) void completeTask(id);
-          return;
-        }
-        // Any tap inside a block SELECTS it — this is the shared world model:
-        // tapping here is what makes "make this bigger" mean this block a
-        // second later, on the same state the voice tools read.
-        if (blockId) void selectBlock(blockId);
-
-        const target = el?.closest?.("[data-expand],[data-link],[data-check]");
-        if (!target) return;
-        const link = target.getAttribute("data-link");
-        if (link) {
-          router.push(`/projects/${encodeURIComponent(link)}`);
-          return;
-        }
-        target.classList.toggle("cv-expanded");
-        if (blockId) requestAnimationFrame(() => measure(blockId));
+      wireCanvasDocument(doc, {
+        onCheck: (id) => void completeTask(id),
+        onLink: (id) => router.push(`/projects/${encodeURIComponent(id)}`),
+        onSelect: blockId ? () => void selectBlock(blockId) : undefined,
+        onResize: blockId ? () => requestAnimationFrame(() => measure(blockId)) : undefined,
+        isMomentumTap,
       });
     },
     [applyDoneMarks, completeTask, measure, router, selectBlock]
@@ -497,6 +471,20 @@ export function CanvasView({ pollMs = 15000 }: { pollMs?: number } = {}) {
         </ul>
       )}
 
+      {checkError && (
+        <p
+          role="status"
+          className="flex items-center justify-between gap-3 rounded-xl border border-danger/40 bg-danger/10 px-3 py-2 text-xs text-danger"
+        >
+          {checkError}
+          <button
+            onClick={() => setCheckError(null)}
+            className="shrink-0 font-semibold underline"
+          >
+            Dismiss
+          </button>
+        </p>
+      )}
       {useBlocks ? (
         <div
           ref={boardRef}

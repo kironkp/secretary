@@ -65,15 +65,28 @@ describe("3. prefers-reduced-motion is honored", () => {
 });
 
 describe("4. momentum scrolling cannot complete a task", () => {
-  it("the canvas click handler consults the same guard the dashboard uses", () => {
-    const src = read("components/canvas/canvas-view.tsx");
+  // The interaction path now lives in lib/canvas/interaction.ts precisely so it
+  // can be tested by driving a real DOM — see tests/canvas-interaction.test.ts,
+  // which asserts the BEHAVIOUR these two once approximated by reading source.
+  it("the canvas still consults the dashboard's guard for card-level taps", () => {
+    const src = read("lib/canvas/interaction.ts");
     expect(src).toContain("isMomentumTap");
-    expect(src).toMatch(/if \(isMomentumTap\(\)\) return;/);
+    expect(src).toMatch(/if \(handlers\.isMomentumTap\?\.\(\)\) return;/);
+    expect(read("components/canvas/canvas-view.tsx")).toContain("isMomentumTap");
+  });
+
+  it("but the guard is NOT what stands between a tap and the checkbox", () => {
+    // The regression: board re-measurement changes document height, which fires
+    // scroll events, which kept the guard true and ate every checkbox click.
+    const src = read("lib/canvas/interaction.ts");
+    const box = src.indexOf("const box = el?.closest?.(`.${BOX_CLASS}`);");
+    const guard = src.indexOf("if (handlers.isMomentumTap?.()) return;");
+    expect(box).toBeGreaterThan(-1);
+    expect(guard).toBeGreaterThan(box); // the box is hit-tested FIRST
   });
 
   it("and completion requires the shell's checkbox, not the whole card", () => {
-    const src = read("components/canvas/canvas-view.tsx");
-    expect(src).toContain('closest?.(".cv-box")');
+    expect(read("lib/canvas/interaction.ts")).toContain("closest?.(`.${BOX_CLASS}`)");
   });
 
   it("so every data-check is guaranteed a checkbox that can render", () => {

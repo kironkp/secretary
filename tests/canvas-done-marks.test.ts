@@ -6,7 +6,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { checkins, tasks, user } from "@/lib/db/schema";
+import { checkins, projects, tasks, user } from "@/lib/db/schema";
 import { collectCheckIds, doneCheckIds } from "@/lib/canvas/painter";
 
 const A = { id: `test-cv-done-a-${crypto.randomUUID()}`, email: `a-${Date.now()}@cvdone.test` };
@@ -121,5 +121,45 @@ describe("PATCH provenance (check-in note source)", () => {
   it("rejects an unknown source", async () => {
     const res = await patch(aOpen, { status: "done", source: "carrier-pigeon" });
     expect(res.status).toBe(400);
+  });
+});
+
+// Persistence across re-render, reopen and reload. The checkbox has to mutate
+// the underlying task, not just the pixels: what survives is whatever the
+// SERVER says, re-derived on every load rather than remembered client-side.
+describe("a ticked checkbox survives everything", () => {
+  it("re-derives done state from the task record, not from the markup", async () => {
+    const u = `canvas-dup-${crypto.randomUUID()}`;
+    await db.insert(user).values({ id: u, name: "Dup Tester", email: `${u}@test.local` });
+    const [proj] = await db
+      .insert(projects)
+      .values({ userId: u, name: "Caltrans" })
+      .returning();
+    const [a, b] = await db
+      .insert(tasks)
+      .values([
+        { userId: u, projectId: proj.id, title: "Follow up", status: "todo" },
+        { userId: u, projectId: proj.id, title: "Follow up", status: "todo" },
+      ])
+      .returning();
+
+    // Two rows with IDENTICAL text — only the ids distinguish them.
+    const markup =
+      `<div data-check="${a.id}">Follow up</div><div data-check="${b.id}">Follow up</div>`;
+    expect(collectCheckIds(markup).sort()).toEqual([a.id, b.id].sort());
+    expect(await doneCheckIds(u, markup)).toEqual([]);
+
+    // Tick exactly one, the way the canvas PATCH does.
+    await db.update(tasks).set({ status: "done" }).where(eq(tasks.id, b.id));
+
+    // A fresh load (page reload, canvas reopen, re-render) asks the server
+    // again and gets only the one that was actually completed.
+    expect(await doneCheckIds(u, markup)).toEqual([b.id]);
+
+    // Reopening it elsewhere must un-tick it here too — state is not sticky.
+    await db.update(tasks).set({ status: "todo" }).where(eq(tasks.id, b.id));
+    expect(await doneCheckIds(u, markup)).toEqual([]);
+
+    await db.delete(user).where(eq(user.id, u));
   });
 });
