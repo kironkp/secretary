@@ -38,7 +38,16 @@ export default async function RootLayout({
       data-theme={theme}
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      {/* suppressHydrationWarning covers ATTRIBUTES ON THIS ELEMENT ONLY, not
+          its subtree. It is provably safe here because body's className is a
+          static literal with no dynamic input — so any server/client attribute
+          difference on <body> comes from outside React (an iOS/Safari
+          extension or injected script touching the DOM before hydration),
+          which is exactly the case Next's own error text calls out. A real
+          mismatch in our own markup would still surface, one element deeper. */}
+      <body suppressHydrationWarning className="min-h-full flex flex-col">
+        {children}
+      </body>
     </html>
   );
 }

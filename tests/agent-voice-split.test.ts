@@ -7,6 +7,7 @@ import { and, eq, ilike } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { checkins, conversations, expectations, memories, tasks, user } from "@/lib/db/schema";
 import { applyExtraction } from "@/lib/secretary/extraction";
+import { lexiconPrompt } from "@/lib/secretary/lexicon";
 import {
   NY_SECRETARY_PERSONA,
   personaDirectives,
@@ -330,5 +331,35 @@ describe("voice tool schemas stay Realtime-compatible", () => {
         '"maximum":9007199254740991'
       );
     }
+  });
+});
+
+// The Realtime API caps the transcription prompt at 1024 characters and
+// rejects the ENTIRE session request when it is longer. That turned an
+// ordinary "the entity store grew" day into "Couldn't start the call" with
+// nothing in the UI to explain it — a data-driven outage, not a code change.
+describe("the transcription lexicon cannot grow past the API limit", () => {
+  it("stays under 1024 characters no matter how many terms exist", () => {
+    const many = Array.from({ length: 400 }, (_, i) => `Entity-Name-Number-${i}`);
+    const prompt = lexiconPrompt(many);
+    expect(prompt).toBeDefined();
+    expect(prompt!.length).toBeLessThanOrEqual(1024);
+  });
+
+  it("cuts at a whole term rather than mid-word", () => {
+    const prompt = lexiconPrompt(Array.from({ length: 400 }, (_, i) => `Term${i}`))!;
+    expect(prompt.endsWith(".")).toBe(true);
+    const last = prompt.replace(/\.$/, "").split(", ").at(-1)!;
+    expect(last).toMatch(/^Term\d+$/);
+  });
+
+  it("keeps the most useful terms — the head of the list", () => {
+    const prompt = lexiconPrompt(["CPO", "CalCard", ...Array.from({ length: 400 }, (_, i) => `Filler${i}`)])!;
+    expect(prompt).toContain("CPO");
+    expect(prompt).toContain("CalCard");
+  });
+
+  it("still returns nothing when there is no vocabulary", () => {
+    expect(lexiconPrompt([])).toBeUndefined();
   });
 });

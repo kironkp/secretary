@@ -38,7 +38,27 @@ export async function buildLexicon(userId: string): Promise<string[]> {
 }
 
 /** The transcription-biasing prompt for the realtime session. */
+/** The Realtime API caps this prompt at 1024 characters and rejects the whole
+ *  session request if it is longer — which means an ordinary "the entity store
+ *  grew" day silently becomes "Couldn't start the call", with nothing in the
+ *  UI to explain it. The lexicon is a recognition HINT, so dropping the tail is
+ *  a small loss; failing the call is not. Terms arrive most-useful-first, so we
+ *  keep the head and cut at a whole term. */
+const TRANSCRIPTION_PROMPT_MAX = 1024;
+
 export function lexiconPrompt(terms: string[]): string | undefined {
   if (!terms.length) return undefined;
-  return `Vocabulary likely to appear (bias recognition toward these exact spellings): ${terms.join(", ")}.`;
+  const head = "Vocabulary likely to appear (bias recognition toward these exact spellings): ";
+  const budget = TRANSCRIPTION_PROMPT_MAX - head.length - 1; // trailing "."
+
+  const kept: string[] = [];
+  let used = 0;
+  for (const term of terms) {
+    const cost = (kept.length ? 2 : 0) + term.length; // ", " + term
+    if (used + cost > budget) break;
+    kept.push(term);
+    used += cost;
+  }
+  if (!kept.length) return undefined;
+  return `${head}${kept.join(", ")}.`;
 }
