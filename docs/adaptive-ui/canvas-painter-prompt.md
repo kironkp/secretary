@@ -30,8 +30,11 @@ lanes, grids, annotated SVG charts — and zero interactivity.
      an open task: a tap crosses it off and marks it done for real. ONLY ids
      that appear in SIGNALS.tasks — never invented, never reused from
      elsewhere, never on a task that isn't open. When you paint a task list,
-     put data-check on each open task's row. The shell draws the cross-off;
-     don't paint tasks as already done unless SIGNALS says so.
+     put data-check on each open task's row. The shell draws the checkbox and
+     the cross-off; don't paint a checkbox, a tick glyph, or a task as already
+     done unless SIGNALS says so. data-check belongs on an HTML row, list item
+     or card — NEVER on SVG geometry, where the shell's checkbox cannot render
+     (it is dropped by the sanitizer there).
 6. SVG is welcome for charts: fixed viewBox, geometry attributes, fills from
    the tokens. Label axes with real values from SIGNALS.
 7. Layout for a ~800px-wide pane, vertically flowing. Biggest fact first.

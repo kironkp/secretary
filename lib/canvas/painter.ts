@@ -76,6 +76,9 @@ export function claudePainterStream(client: Anthropic, model: string): PainterSt
 }
 
 const FLUSH_EVERY_MS = 600;
+/** Below this, streamed markup is a stub (an opening wrapper and a heading).
+ *  Never replace a canvas the user is looking at with one. */
+const MIN_REPLACE_CHARS = 600;
 
 /** Pure input assembly (unit-tested): the painter's whole world. */
 export function buildPainterInput(
@@ -136,9 +139,17 @@ export async function paintCanvas(
       : undefined,
   });
 
+  // The user must never watch their canvas blank out because a model call is
+  // in flight. Seed the new snapshot with what is currently on screen and hold
+  // it there: an EDIT keeps the old canvas until the new one is complete (a
+  // change should never look like a teardown), while a fresh paint starts
+  // streaming only once it has something substantial to show.
+  const hold = opts.baseMarkup ?? (await latestSnapshot(userId))?.markup ?? "";
+  const isEdit = Boolean(opts.baseMarkup);
+
   const [row] = await db
     .insert(canvasSnapshots)
-    .values({ userId, brief, markup: "", painting: true })
+    .values({ userId, brief, markup: hold, painting: true })
     .returning();
 
   const claude = !opts.stream && claudeBrainEnabled() ? await anthropicFor(userId) : null;
@@ -147,19 +158,32 @@ export async function paintCanvas(
     opts.stream ??
     (claude ? claudePainterStream(claude, (await brainSettings(userId)).model) : livePainterStream);
   let finalRaw = "";
+  let finalMarkup = hold;
+  // Only a stream that ran to completion may be committed. finalRaw holds the
+  // cumulative partial, so without this an aborted or truncated generation
+  // would replace a complete canvas with half of one — the failure mode this
+  // whole continuity change exists to prevent.
+  let completed = false;
   const run = async (stream: PainterStream) => {
-    let lastFlush = 0;
+    // Start the clock now, not at 0 — an epoch-zero lastFlush makes the very
+    // first delta flush immediately, which would wipe the seeded markup a few
+    // hundred milliseconds in and blank the canvas after all.
+    let lastFlush = Date.now();
     for await (const raw of stream(painterPrompt(), input)) {
       finalRaw = raw;
+      // An edit holds the existing canvas until the replacement is complete.
+      if (isEdit) continue;
       const now = Date.now();
-      if (now - lastFlush >= FLUSH_EVERY_MS) {
-        lastFlush = now;
-        await db
-          .update(canvasSnapshots)
-          .set({ markup: sanitizeCanvasMarkup(raw) })
-          .where(eq(canvasSnapshots.id, row.id));
-      }
+      if (now - lastFlush < FLUSH_EVERY_MS) continue;
+      const next = sanitizeCanvasMarkup(raw);
+      if (hold && next.length < MIN_REPLACE_CHARS) continue;
+      lastFlush = now;
+      await db
+        .update(canvasSnapshots)
+        .set({ markup: next })
+        .where(eq(canvasSnapshots.id, row.id));
     }
+    completed = true;
   };
   try {
     try {
@@ -172,16 +196,21 @@ export async function paintCanvas(
         e instanceof Error ? e.message : e
       );
       finalRaw = "";
+      completed = false;
       await run(livePainterStream);
     }
   } finally {
-    const markup = sanitizeCanvasMarkup(finalRaw);
+    const painted = completed ? sanitizeCanvasMarkup(finalRaw) : "";
+    // A failed, aborted or empty generation leaves what was on screen alone
+    // rather than clearing it — losing the canvas is worse than not changing it.
+    const markup = painted.trim() ? painted : hold;
     await db
       .update(canvasSnapshots)
       .set({ markup, painting: false })
       .where(eq(canvasSnapshots.id, row.id));
+    finalMarkup = markup;
   }
-  return { snapshotId: row.id, markup: sanitizeCanvasMarkup(finalRaw) };
+  return { snapshotId: row.id, markup: finalMarkup };
 }
 
 /** data-check ids in sanitized markup — attrs are normalized to name="value",

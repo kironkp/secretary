@@ -130,3 +130,21 @@ body {
   to { opacity: 1; transform: translateY(0); box-shadow: 0 0 0 2px transparent; }
 }
 .animate-task-in { animation: task-in 0.8s ease-out; }
+
+/* Reduced motion (SPEC §7.6/§7.7). Motion in this app carries meaning —
+   continuity and causality — so the setting calms it rather than removing the
+   information: animations collapse to a single instantaneous frame and
+   transitions stop, but nothing is hidden and no layout changes. This has to
+   be last: it wins by source order, not specificity.
+   `breathe` and `pulse-subtle` are infinite, so they are the two that most
+   need this. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

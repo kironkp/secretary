@@ -5,17 +5,12 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { attachments } from "@/lib/db/schema";
 import { isErrorResponse, requireSession } from "@/lib/api";
+import { MAX_STORE_BYTES, safeName } from "@/lib/attachments";
 
-// Images the vision model accepts; the client converts everything else
-// (HEIC included) to JPEG before upload. PDFs go through as files.
-const ALLOWED_MIME = new Set([
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "image/gif",
-  "application/pdf",
-]);
-const MAX_BYTES = 8 * 1024 * 1024;
+// Any file type may be stored. What the model can do with it is decided later
+// by classifyAttachment, and what the browser is allowed to do with it is
+// decided by the serving route — the mime here is client-supplied and is never
+// trusted as a safety boundary.
 
 export async function POST(req: Request) {
   const user = await requireSession();
@@ -26,14 +21,11 @@ export async function POST(req: Request) {
   if (!(file instanceof File)) {
     return NextResponse.json({ error: "No file" }, { status: 400 });
   }
-  if (!ALLOWED_MIME.has(file.type)) {
-    return NextResponse.json(
-      { error: "Photos (JPEG/PNG/WebP/GIF) and PDFs only." },
-      { status: 415 }
-    );
+  if (file.size === 0) {
+    return NextResponse.json({ error: "That file is empty." }, { status: 400 });
   }
-  if (file.size > MAX_BYTES) {
-    return NextResponse.json({ error: "Too large — 8 MB max." }, { status: 413 });
+  if (file.size > MAX_STORE_BYTES) {
+    return NextResponse.json({ error: "Too large — 25 MB max." }, { status: 413 });
   }
 
   const data = Buffer.from(await file.arrayBuffer());
@@ -41,8 +33,8 @@ export async function POST(req: Request) {
     .insert(attachments)
     .values({
       userId: user.id,
-      mime: file.type,
-      name: (file.name || "photo").slice(0, 200),
+      mime: file.type || "application/octet-stream",
+      name: safeName(file.name || "file"),
       data,
     })
     .returning({ id: attachments.id, mime: attachments.mime, name: attachments.name });

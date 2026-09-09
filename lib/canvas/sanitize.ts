@@ -35,15 +35,66 @@ const ALLOWED_ATTRS = new Set([
   "gradientunits", "id",
 ]);
 
-/** style values may not smuggle loads or behavior */
+/** style values may not smuggle loads, behavior, or an escape from their own box.
+ *
+ *  The escape clause matters because this sanitizer also guards the one path
+ *  that renders model markup INLINE in the app document (approved slow-loop
+ *  templates): there, `position:fixed;inset:0` is an app-covering overlay.
+ *  A CSS backslash can spell any function name (`\75 rl(`), so a raw backslash
+ *  is rejected outright — neither painter prompt ever emits one. */
 function safeStyle(value: string): string | null {
+  if (value.includes("\\")) return null;
   const lower = value.toLowerCase();
   if (lower.includes("url(") || lower.includes("expression") || lower.includes("@import"))
     return null;
+  if (lower.includes("image-set(") || lower.includes("-webkit-image-set(")) return null;
+  // Comments can hide the keyword from a naive scan: position:/*x*/fixed.
+  const flat = lower.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\s+/g, "");
+  if (/position:(fixed|sticky|absolute)/.test(flat)) return null;
   return value;
 }
 
-function sanitizeAttrs(rawAttrs: string): string {
+/** Class names the SHELL owns: it injects .cv-box, and toggles .cv-done /
+ *  .cv-expanded / .cv-checkable as state. Model markup may never carry them —
+ *  a painted `<span class="cv-box">` would satisfy the host's "already has a
+ *  checkbox" guard and become the completion target, i.e. a checkbox the model
+ *  drew and controls. */
+const HOST_CLASSES = new Set(["cv-box", "cv-checkable", "cv-done", "cv-expanded"]);
+
+/**
+ * Class names are namespaced, not free text.
+ *
+ * Model markup is normally rendered inside the sandboxed canvas iframe, where
+ * an arbitrary class is inert — no app stylesheet is loaded there. But the same
+ * sanitizer guards the ONE path that renders model-authored markup inline in
+ * the main document (approved slow-loop templates on the dashboard), where
+ * Tailwind's full utility set IS live. There, `class="fixed inset-0 z-50"`
+ * would be an app-covering overlay with no style attribute at all — a layout
+ * escape hatch that never goes through safeStyle.
+ *
+ * Neither painter prompt asks the model to use classes (both compose with
+ * inline styles), so restricting to the shell's own namespaces costs nothing
+ * and closes the hole everywhere at once.
+ */
+const CLASS_TOKEN = /^(?:cv|sl)-[a-zA-Z0-9_-]+$/;
+function safeClass(value: string): string | null {
+  const kept = value
+    .split(/\s+/)
+    .filter((t) => t && CLASS_TOKEN.test(t) && !HOST_CLASSES.has(t));
+  return kept.length ? kept.join(" ") : null;
+}
+
+// SVG geometry cannot host the shell's checkbox: an HTML <span> created inside
+// an SVG subtree is in the wrong namespace and simply never renders. A
+// data-check there would be a tap target with no visible checkbox and, since
+// completion now requires the checkbox, no way to complete at all. Drop it at
+// the gate so every surviving data-check is guaranteed a real checkbox.
+const SVG_TAGS = new Set([
+  "svg", "g", "rect", "circle", "ellipse", "line", "polyline", "polygon", "path",
+  "text", "tspan", "defs", "lineargradient", "stop",
+]);
+
+function sanitizeAttrs(rawAttrs: string, tag: string): string {
   let out = "";
   // attr="v" | attr='v' | attr=v | bare attr
   const re = /([a-zA-Z_:][-a-zA-Z0-9_:.]*)(?:\s*=\s*("([^"]*)"|'([^']*)'|[^\s"'>]+))?/g;
@@ -52,9 +103,15 @@ function sanitizeAttrs(rawAttrs: string): string {
     const name = m[1].toLowerCase();
     if (name.startsWith("on")) continue; // event handlers, always
     if (!ALLOWED_ATTRS.has(name)) continue;
+    if (name === "data-check" && SVG_TAGS.has(tag)) continue;
     let value = m[3] ?? m[4] ?? (m[2] && !m[2].startsWith('"') && !m[2].startsWith("'") ? m[2] : "");
     if (name === "style") {
       const safe = safeStyle(value);
+      if (safe === null) continue;
+      value = safe;
+    }
+    if (name === "class") {
+      const safe = safeClass(value);
       if (safe === null) continue;
       value = safe;
     }
@@ -92,7 +149,7 @@ export function sanitizeCanvasMarkup(input: string): string {
       if (!ALLOWED_TAGS.has(tag)) return "";
       if (whole.startsWith("</")) return `</${tag}>`;
       const selfClose = VOID_TAGS.has(tag) || /\/\s*$/.test(attrs);
-      return `<${tag}${sanitizeAttrs(attrs)}${selfClose ? " /" : ""}>`;
+      return `<${tag}${sanitizeAttrs(attrs, tag)}${selfClose ? " /" : ""}>`;
     }
   );
 }
@@ -103,9 +160,11 @@ export function sanitizeCanvasMarkup(input: string): string {
  * painted inline styles can reference var(--…).
  */
 export function buildCanvasSrcDoc(sanitizedMarkup: string, opts: { dark?: boolean } = {}): string {
+  // Mirrors app/globals.css exactly — these drifted, so a painted canvas used
+  // slightly different blues and greens from the app around it.
   const tokens = opts.dark
-    ? ":root{--bg:#0b1220;--card:#131c2b;--edge:rgba(255,255,255,.1);--ink:#eef2f8;--muted:#a9b6c9;--accent:#5b8def;--ok:#0ca30c;--warn:#fab219;--danger:#d03b3b}"
-    : ":root{--bg:#f7f8fa;--card:#ffffff;--edge:#e4e7ec;--ink:#111827;--muted:#6b7280;--accent:#4f6ef7;--ok:#0f9d58;--warn:#c77d0a;--danger:#c0392b}";
+    ? ":root{--bg:#0f1115;--surface:#171a21;--surface-2:#1e222b;--card:#232834;--edge:#2e3442;--ink:#e8eaf0;--muted:#9aa3b5;--faint:#6b7386;--accent:#7aa2ff;--ok:#4ade80;--warn:#fbbf24;--danger:#f87171;--grape:#c084fc}"
+    : ":root{--bg:#f6f7f9;--surface:#ffffff;--surface-2:#eef0f4;--card:#ffffff;--edge:#e4e7ee;--ink:#171a21;--muted:#5a6375;--faint:#8b93a5;--accent:#4a6fe8;--ok:#15803d;--warn:#b45309;--danger:#dc2626;--grape:#7e22ce}";
   return [
     "<!doctype html><html><head>",
     '<meta charset="utf-8">',
@@ -120,6 +179,26 @@ export function buildCanvasSrcDoc(sanitizedMarkup: string, opts: { dark?: boolea
     "[data-check]{cursor:pointer}",
     ".cv-done{text-decoration:line-through;opacity:.55;transition:opacity .2s}",
     ".cv-expanded{outline:2px solid var(--accent);outline-offset:4px;border-radius:8px}",
+    // Shell-owned checkbox (SPEC §7.6): the HOST injects .cv-box into every
+    // [data-check] and owns its state. The model never draws it, so it can't
+    // be faked, and "put checkboxes on those" needs no repaint.
+    // border-box so the gutter eats into the element's own width rather than
+    // widening it out of a flex/grid track. The 30px is a floor: the host also
+    // sets padding-left inline, because painted cards carry their own inline
+    // padding, which would otherwise beat this rule and leave the box sitting
+    // on top of the card's text.
+    ".cv-checkable{position:relative;box-sizing:border-box;padding-left:30px}",
+    ".cv-box{position:absolute;left:8px;top:calc(50% - 9px);width:18px;height:18px;" +
+      "border:1.5px solid var(--muted);border-radius:5px;background:var(--surface);" +
+      "cursor:pointer;box-sizing:border-box;transition:background .15s,border-color .15s}",
+    ".cv-box::after{content:'';position:absolute;left:5px;top:1.5px;width:5px;height:10px;" +
+      "border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg);opacity:0;transition:opacity .15s}",
+    '.cv-box[aria-checked="true"]{background:var(--ok);border-color:var(--ok)}',
+    '.cv-box[aria-checked="true"]::after{opacity:1}',
+    // Accessibility settings win over motion, inside the canvas too.
+    "@media (prefers-reduced-motion: reduce){*{animation-duration:.01ms !important;" +
+      "animation-iteration-count:1 !important;transition-duration:.01ms !important;" +
+      "scroll-behavior:auto !important}}",
     "</style></head><body>",
     sanitizedMarkup,
     "</body></html>",

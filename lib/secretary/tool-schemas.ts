@@ -507,9 +507,9 @@ const toolDescriptions: Record<ToolName, string> = {
   apply_pipeline:
     "Instantiate a saved pipeline template onto a task: sets its stages with computed per-step dates. 'Where am I on X' is then answered from the task's stage state — never from memory.",
   paint_canvas:
-    "Paint the Canvas page: a free-form visual the user watches build live — posters, charts, big-number summaries, week views. Use for ANY 'show me / draw / visualize / put it on the canvas' ask. The painter READS THE RECENT CONVERSATION, so 'lay out the CPO statuses we just discussed' is a complete brief — everything the user just said will render. Never say you can't draw, and never promise a screen update without calling this. The result appears on the Canvas tab; say so.",
+    "Paint a NEW canvas: a free-form visual the user watches build live — posters, charts, big-number summaries, week views. Use for 'show me / draw / visualize / put it on the canvas' when there is nothing on the canvas yet, or when they want a genuinely different picture. If a canvas already exists and they are CHANGING it, use edit_canvas instead — repainting throws away what they are looking at. The painter READS THE RECENT CONVERSATION, so 'lay out the CPO statuses we just discussed' is a complete brief — everything the user just said will render. Never say you can't draw, and never promise a screen update without calling this or edit_canvas. The result appears on the Canvas tab; say so.",
   edit_canvas:
-    "Targeted change to the current canvas ('make the album section bigger') without repainting the rest. Requires an existing canvas — otherwise use paint_canvas.",
+    "THE DEFAULT when something is already on the canvas and the user changes it. Anything that modifies the existing view — 'add one more thing', 'make that purple', 'move this above that', 'only show the Caltrans items', 'make the urgent one bigger', 'put these on the right', 'change the title', 'drop the empty column' — is an EDIT: the current canvas is kept and changed. Use paint_canvas ONLY when they want a genuinely different picture ('now show me the album instead', 'paint my week'). If in doubt and a canvas exists, edit. Requires an existing canvas — otherwise use paint_canvas.",
   show_canvas:
     "Bring the Canvas into view on the user's screen WITHOUT repainting — 'open the canvas', 'show me the canvas', 'put that back up'. paint_canvas and edit_canvas already open it automatically; use this only when the user wants to look at what's already there.",
   request_new_component:
@@ -556,6 +556,12 @@ export const VOICE_TOOL_NAMES = [
   "amend_task",
   "schedule_checkin",
   "paint_canvas",
+  // Changing something already on screen is an EDIT, not a new painting.
+  // Without this the voice session had no edit tool at all, so every spoken
+  // "add one more thing" fell through to paint_canvas — which is handed no
+  // copy of the current canvas and therefore paints a different one from
+  // scratch. The persona has always instructed the model to call this.
+  "edit_canvas",
   // "open the canvas" flips the in-call canvas into view (§7.6 auto-open)
   // without burning a repaint
   "show_canvas",

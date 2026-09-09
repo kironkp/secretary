@@ -12,7 +12,14 @@ import {
   ChevronDown,
   ChevronUp,
   Clock,
+  File as FileIcon,
+  FileArchive,
+  FileAudio,
+  FileCode,
+  FileImage,
+  FileSpreadsheet,
   FileText,
+  FileVideo,
   Flame,
   Mic,
   Paperclip,
@@ -22,6 +29,8 @@ import {
   X,
 } from "lucide-react";
 import type { BriefingCard } from "@/lib/secretary/briefing";
+import { INLINE_MIME } from "@/lib/attachments";
+import { requestCanvasRefresh } from "@/lib/canvas/refresh";
 import { unlockRemoteAudio } from "@/lib/realtime/remote-audio";
 import { DictationBar } from "./dictation-bar";
 import { ModelChip } from "./model-chip";
@@ -46,6 +55,7 @@ type PendingAttachment = {
   key: number;
   name: string;
   mime: string;
+  size: number;
   previewUrl: string | null; // object URL for images
   id: string | null; // server id once uploaded
   error: string | null;
@@ -54,9 +64,73 @@ type PendingAttachment = {
 const MAX_ATTACHMENTS = 4;
 const IMAGE_MAX_EDGE = 1600;
 
+/** Raster types Safari can decode into a canvas — the only files normalizeImage
+ *  may touch. HEIC/HEIF included: with no `accept` attribute iOS stops
+ *  transcoding for us, so a Files-app pick can now be a real .heic and Safari
+ *  decodes it natively. SVG is excluded on purpose: it's markup, and it travels
+ *  to the server as opaque bytes. */
+const RASTER_MIME = /^image\/(jpeg|png|webp|gif|heic|heif|avif|bmp|tiff?)$/i;
+const RASTER_EXT = /\.(jpe?g|png|webp|gif|heic|heif|avif|bmp|tiff?)$/i;
+
+function isRasterImage(f: File): boolean {
+  if (f.type === "image/svg+xml") return false;
+  // iOS hands back an empty type for some Files-app picks — fall back to name.
+  return f.type ? RASTER_MIME.test(f.type) : RASTER_EXT.test(f.name);
+}
+
+// Only consulted when the browser gives us no type at all.
+const EXT_MIME: Record<string, string> = {
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  xls: "application/vnd.ms-excel",
+  csv: "text/csv",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  doc: "application/msword",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  ppt: "application/vnd.ms-powerpoint",
+  pdf: "application/pdf",
+  txt: "text/plain",
+  md: "text/markdown",
+  json: "application/json",
+  zip: "application/zip",
+};
+
+function mimeOf(f: File): string {
+  if (f.type) return f.type;
+  const ext = f.name.split(".").pop()?.toLowerCase() ?? "";
+  return EXT_MIME[ext] ?? "application/octet-stream";
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** A glyph that tells you what the file is before you read its name. */
+function TypeIcon({ mime, name, size = 20 }: { mime: string; name: string; size?: number }) {
+  const ext = name.split(".").pop()?.toLowerCase() ?? "";
+  const is = (...x: string[]) => x.includes(ext);
+  const cls = "text-muted";
+  if (is("xlsx", "xls", "csv", "numbers") || mime.includes("spreadsheet"))
+    return <FileSpreadsheet size={size} strokeWidth={1.75} className={cls} />;
+  if (mime === "application/pdf" || is("pdf", "doc", "docx", "txt", "md", "rtf", "pages"))
+    return <FileText size={size} strokeWidth={1.75} className={cls} />;
+  if (is("zip", "rar", "7z", "tar", "gz"))
+    return <FileArchive size={size} strokeWidth={1.75} className={cls} />;
+  if (is("json", "js", "ts", "html", "xml", "yml", "yaml", "css", "py", "sh"))
+    return <FileCode size={size} strokeWidth={1.75} className={cls} />;
+  if (mime.startsWith("image/")) return <FileImage size={size} strokeWidth={1.75} className={cls} />;
+  if (mime.startsWith("video/")) return <FileVideo size={size} strokeWidth={1.75} className={cls} />;
+  if (mime.startsWith("audio/")) return <FileAudio size={size} strokeWidth={1.75} className={cls} />;
+  return <FileIcon size={size} strokeWidth={1.75} className={cls} />;
+}
+
 /** Downscale + JPEG-encode a picked image (handles HEIC on iOS — Safari
- *  decodes it natively, and the canvas re-encodes to a mime the model takes). */
-async function normalizeImage(file: File): Promise<Blob> {
+ *  decodes it natively, and the canvas re-encodes to a mime the model takes).
+ *  Returns null when the bytes won't decode: the caller then uploads the
+ *  ORIGINAL under its real type and name, because claiming image/jpeg for
+ *  something the canvas never re-encoded is how a file gets corrupted. */
+async function normalizeImage(file: File): Promise<Blob | null> {
   const url = URL.createObjectURL(file);
   try {
     const img = await new Promise<HTMLImageElement>((resolve, reject) => {
@@ -70,11 +144,11 @@ async function normalizeImage(file: File): Promise<Blob> {
     canvas.width = Math.round(img.naturalWidth * scale);
     canvas.height = Math.round(img.naturalHeight * scale);
     canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height);
-    const blob = await new Promise<Blob | null>((resolve) =>
+    return await new Promise<Blob | null>((resolve) =>
       canvas.toBlob(resolve, "image/jpeg", 0.85)
     );
-    if (!blob) throw new Error("encode failed");
-    return blob;
+  } catch {
+    return null;
   } finally {
     URL.revokeObjectURL(url);
   }
@@ -157,6 +231,8 @@ export function ChatThread({
   const fileRef = useRef<HTMLInputElement>(null);
   const localKey = useRef(0);
   const [pending, setPending] = useState<PendingAttachment[]>([]);
+  // Attachment slots held, tracked synchronously — see addFiles.
+  const slotsTaken = useRef(0);
   const dockState: DockState = dock?.state ?? "full";
   // Peek window: index of the first message shown in peek — set at the send
   // that opens it, so peek is "what happened since I opened the dock".
@@ -166,61 +242,123 @@ export function ChatThread({
   // nav intact. The dock collapses all the way to the bar: the paint IS the
   // answer, so nothing may sit on top of it.
   const showCanvas = () => {
+    // The push below is a no-op when the Canvas tab is already open — which is
+    // precisely when the user is watching — so nudge the view to reload now.
+    requestCanvasRefresh();
     dock?.setState("bar");
     router.push("/canvas");
   };
 
-  // Pick → normalize (images to ≤1600px JPEG) → upload right away; the send
-  // only passes ids. Failed uploads show inline and never block the text.
-  const addFiles = async (files: FileList | null) => {
+  // Pick/paste/drop → normalize photos (≤1600px JPEG) → upload right away; the
+  // send only passes ids. Any file type is accepted; what the model can do with
+  // it is decided server-side. Failed uploads show inline, never block the text.
+  const addFiles = async (files: FileList | File[] | null) => {
     if (!files) return;
-    for (const file of Array.from(files).slice(0, MAX_ATTACHMENTS - pending.length)) {
-      const key = ++localKey.current;
-      const isPdf = file.type === "application/pdf";
-      const entry: PendingAttachment = {
-        key,
-        name: file.name || "photo",
-        mime: isPdf ? "application/pdf" : "image/jpeg",
-        previewUrl: null,
-        id: null,
-        error: null,
-      };
-      setPending((p) => [...p, entry]);
-      try {
-        const blob = isPdf ? file : await normalizeImage(file);
-        if (!isPdf) {
-          const previewUrl = URL.createObjectURL(blob);
-          setPending((p) => p.map((a) => (a.key === key ? { ...a, previewUrl } : a)));
-        }
-        const form = new FormData();
-        form.append(
-          "file",
-          new File([blob], isPdf ? entry.name : entry.name.replace(/\.\w+$/, "") + ".jpg", {
-            type: entry.mime,
-          })
-        );
-        const res = await fetch("/api/attachments", { method: "POST", body: form });
-        const body = await res.json();
-        if (!res.ok) throw new Error(body.error ?? "upload failed");
-        setPending((p) => p.map((a) => (a.key === key ? { ...a, id: body.id } : a)));
-      } catch (e) {
-        setPending((p) =>
-          p.map((a) =>
-            a.key === key
-              ? { ...a, error: e instanceof Error ? e.message : "upload failed" }
-              : a
-          )
-        );
-      }
+    const incoming = Array.from(files as ArrayLike<File>);
+    if (incoming.length === 0) return;
+
+    // Reserve slots synchronously against a ref. `pending` is a render-closure
+    // value, so two calls in the same tick (picker + paste, or paste + drop)
+    // would each read the same stale length and both admit a full batch.
+    const room = Math.max(0, MAX_ATTACHMENTS - slotsTaken.current);
+    if (room === 0) {
+      setError(`Up to ${MAX_ATTACHMENTS} attachments.`);
+      return;
     }
+    const admitted = incoming.slice(0, room);
+    slotsTaken.current += admitted.length;
+    if (incoming.length > admitted.length) {
+      setError(`Attached the first ${room} — ${MAX_ATTACHMENTS} files max.`);
+    }
+
+    // Concurrent: each chip owns its state by key, and four uploads shouldn't
+    // queue behind each other on a phone connection.
+    await Promise.all(
+      admitted.map(async (file) => {
+        const key = ++localKey.current;
+        const raster = isRasterImage(file);
+        const originalName = file.name || (raster ? "photo" : "file");
+        const entry: PendingAttachment = {
+          key,
+          name: originalName,
+          mime: mimeOf(file),
+          size: file.size,
+          previewUrl: null,
+          id: null,
+          error: null,
+        };
+        setPending((p) => [...p, entry]);
+        try {
+          // Only claim image/jpeg when the canvas actually re-encoded — a HEIC
+          // that fails to decode uploads as itself rather than as a lie.
+          const encoded = raster ? await normalizeImage(file) : null;
+          const blob: Blob = encoded ?? file;
+          const name = encoded ? originalName.replace(/\.\w+$/, "") + ".jpg" : originalName;
+          const mime = encoded ? "image/jpeg" : entry.mime;
+          if (raster) {
+            const previewUrl = URL.createObjectURL(blob);
+            setPending((p) =>
+              p.map((a) =>
+                a.key === key ? { ...a, previewUrl, name, mime, size: blob.size } : a
+              )
+            );
+          }
+          const form = new FormData();
+          form.append("file", new File([blob], name, { type: mime }));
+          const res = await fetch("/api/attachments", { method: "POST", body: form });
+          const body = await res.json();
+          if (!res.ok) throw new Error(body.error ?? "upload failed");
+          setPending((p) => p.map((a) => (a.key === key ? { ...a, id: body.id } : a)));
+        } catch (e) {
+          setPending((p) =>
+            p.map((a) =>
+              a.key === key
+                ? { ...a, error: e instanceof Error ? e.message : "upload failed" }
+                : a
+            )
+          );
+        }
+      })
+    );
   };
 
   const removePending = (key: number) => {
     setPending((p) => {
       const gone = p.find((a) => a.key === key);
       if (gone?.previewUrl) URL.revokeObjectURL(gone.previewUrl);
+      if (gone) slotsTaken.current = Math.max(0, slotsTaken.current - 1);
       return p.filter((a) => a.key !== key);
     });
+  };
+
+  // Paste-to-attach. The clipboard must be read SYNCHRONOUSLY — DataTransfer is
+  // neutered the moment this handler returns — so collect Files first, upload
+  // after. A text or rich-text paste carries no File and falls straight through
+  // to the browser's own insert (and its undo).
+  const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const dt = e.clipboardData;
+    if (!dt) return;
+    let picked: File[] = Array.from(dt.files ?? []);
+    if (picked.length === 0 && dt.items) {
+      picked = Array.from(dt.items)
+        .filter((i) => i.kind === "file")
+        .map((i) => i.getAsFile())
+        .filter((f): f is File => f !== null);
+    }
+    if (picked.length === 0) {
+      // iOS can announce "Files" on the pasteboard while handing over a file
+      // promise WebKit won't materialize. Say so rather than dropping it
+      // silently — but never preventDefault: there may be real text too.
+      if (Array.from(dt.types ?? []).includes("Files")) {
+        setError("Couldn't read that file from the clipboard — use the paperclip.");
+      }
+      return;
+    }
+    // A file paste is an attach, not an insert: stop the default so a filename
+    // never lands in the textarea.
+    e.preventDefault();
+    setError("");
+    void addFiles(picked);
   };
 
   useEffect(() => {
@@ -307,6 +445,7 @@ export function ChatThread({
     // thumbnails render from the server from here on
     pending.forEach((a) => a.previewUrl && URL.revokeObjectURL(a.previewUrl));
     setPending([]);
+    slotsTaken.current = 0;
     // Sending from the closed bar opens the peek window at THIS message: the
     // answer pops up above the composer without dragging in the whole thread.
     if (dock && dock.state === "bar") {
@@ -471,6 +610,9 @@ export function ChatThread({
                 )}
                 {m.attachments && m.attachments.length > 0 && (
                   <span className="mb-1.5 flex flex-wrap gap-1.5">
+                    {/* Keyed on the SAME inline set the serving route uses:
+                        anything else comes back as octet-stream and would
+                        render as a broken <img>. */}
                     {m.attachments.map((a) =>
                       a.mime === "application/pdf" ? (
                         <a
@@ -483,7 +625,7 @@ export function ChatThread({
                           <FileText size={13} strokeWidth={1.75} className="flex-none" />
                           <span className="max-w-[10rem] truncate">{a.name}</span>
                         </a>
-                      ) : (
+                      ) : INLINE_MIME.has(a.mime) ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
                           key={a.id}
@@ -491,6 +633,15 @@ export function ChatThread({
                           alt={a.name}
                           className="max-h-48 max-w-full rounded-lg border border-edge object-cover"
                         />
+                      ) : (
+                        <a
+                          key={a.id}
+                          href={`/api/attachments/${a.id}?download=1`}
+                          className="flex items-center gap-1.5 rounded-lg border border-edge bg-card px-2.5 py-1.5 text-xs text-muted hover:text-ink"
+                        >
+                          <TypeIcon mime={a.mime} name={a.name} size={13} />
+                          <span className="max-w-[10rem] truncate">{a.name}</span>
+                        </a>
                       )
                     )}
                   </span>
@@ -576,11 +727,21 @@ export function ChatThread({
                           className="h-12 w-12 rounded object-cover"
                         />
                       ) : (
-                        <FileText size={16} strokeWidth={1.75} className="mx-1 text-muted" />
+                        <span className="flex h-12 w-12 flex-none items-center justify-center rounded bg-surface-2">
+                          <TypeIcon mime={a.mime} name={a.name} />
+                        </span>
                       )}
-                      <span className="max-w-[8rem] truncate">
-                        {a.error ?? a.name}
-                        {!a.id && !a.error && <span className="animate-pulse"> ↑</span>}
+                      <span className="flex min-w-0 flex-col">
+                        {/* Truncate the stem, keep the extension — on a
+                            "Weekly Status Report.xlsx" the suffix is the part
+                            that tells you which file this is. */}
+                        <span className="flex min-w-0 max-w-[9rem]">
+                          <span className="truncate">{a.name.replace(/\.\w+$/, "")}</span>
+                          <span className="flex-none">{(a.name.match(/\.\w+$/) ?? [""])[0]}</span>
+                        </span>
+                        <span className="text-[10px] text-faint">
+                          {a.error ? a.error : a.id ? formatBytes(a.size) : "uploading…"}
+                        </span>
                       </span>
                       <button
                         onClick={() => removePending(a.key)}
@@ -609,6 +770,7 @@ export function ChatThread({
                     send();
                   }
                 }}
+                onPaste={onPaste}
                 placeholder="Message your secretary…"
                 className="max-h-[140px] w-full resize-none bg-transparent px-1.5 py-1.5 text-[15px] leading-relaxed text-ink outline-none placeholder:text-faint"
               />
@@ -618,8 +780,12 @@ export function ChatThread({
               <input
                 ref={fileRef}
                 type="file"
-                // image/* makes iOS offer Take Photo / Photo Library natively
-                accept="image/*,application/pdf"
+                // No `accept`: iOS maps each accept entry to a UTI and greys out
+                // everything unmapped — that's why .xlsx was unselectable. "*/*"
+                // isn't mappable and behaves inconsistently across iOS versions;
+                // omitting the attribute is what presents the picker as
+                // public.item. Take Photo / Photo Library survive — accept
+                // narrowed that sheet, it didn't create it.
                 multiple
                 className="hidden"
                 onChange={(e) => {
@@ -644,8 +810,8 @@ export function ChatThread({
               <button
                 onClick={() => fileRef.current?.click()}
                 disabled={pending.length >= MAX_ATTACHMENTS}
-                title="Attach a photo or file"
-                aria-label="Attach a photo or file"
+                title="Attach a file"
+                aria-label="Attach a file"
                 className="flex h-9 w-9 flex-none items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-2 hover:text-ink disabled:opacity-40"
               >
                 <Paperclip size={18} strokeWidth={1.75} />

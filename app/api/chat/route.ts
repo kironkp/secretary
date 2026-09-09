@@ -17,6 +17,10 @@ import { runExtraction } from "@/lib/secretary/extraction";
 import { openai, TEXT_MODEL } from "@/lib/openai";
 import { anthropicFor, chatProvider, chatSettings, claudeBrainEnabled } from "@/lib/anthropic";
 import { runClaudeChat } from "@/lib/secretary/chat-claude";
+import {
+  openAIAttachmentBlocks,
+  storedAttachmentText,
+} from "@/lib/secretary/attachment-blocks";
 
 const bodySchema = z.object({
   // Empty text is fine when attachments carry the message ("here's the flyer").
@@ -35,13 +39,20 @@ export async function POST(req: Request) {
   const parsed = parseBody(bodySchema, await req.json().catch(() => ({})));
   if (isErrorResponse(parsed)) return parsed;
 
-  // Load the user's uploaded-but-unbound attachments for this message.
+  // Load the user's uploaded-but-unbound attachments for this message. The
+  // query has no ORDER BY, so restore the order the user attached them in —
+  // with several documents, which one is "the first" carries meaning.
   const attachRows = parsed.attachmentIds?.length
     ? await db
         .select()
         .from(attachments)
         .where(
           and(eq(attachments.userId, user.id), inArray(attachments.id, parsed.attachmentIds))
+        )
+        .then((rows) =>
+          [...rows].sort(
+            (a, b) => parsed.attachmentIds!.indexOf(a.id) - parsed.attachmentIds!.indexOf(b.id)
+          )
         )
     : [];
   if (!parsed.message.trim() && attachRows.length === 0) {
@@ -68,9 +79,16 @@ export async function POST(req: Request) {
     conversationId = conv.id;
   }
 
-  const storedText =
-    parsed.message.trim() ||
-    (attachRows.length === 1 ? `(sent ${attachRows[0].name})` : `(sent ${attachRows.length} files)`);
+  // What gets persisted as the user's turn. Attachment bytes never replay —
+  // history is text-only and OpenAI's server-side chain is dropped after any
+  // Claude turn — so a bounded fenced extract goes into the stored message.
+  // Without it, "what was in row 14?" reaches a model holding only a filename.
+  const storedText = [
+    parsed.message.trim(),
+    attachRows.length ? storedAttachmentText(attachRows) : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
   const [userMessage] = await db
     .insert(messages)
     .values({
@@ -127,18 +145,7 @@ export async function POST(req: Request) {
         role: "user",
         content: [
           ...(parsed.message.trim() ? [{ type: "input_text", text: parsed.message }] : []),
-          ...attachRows.map((a) =>
-            a.mime === "application/pdf"
-              ? {
-                  type: "input_file",
-                  filename: a.name,
-                  file_data: `data:application/pdf;base64,${a.data.toString("base64")}`,
-                }
-              : {
-                  type: "input_image",
-                  image_url: `data:${a.mime};base64,${a.data.toString("base64")}`,
-                }
-          ),
+          ...openAIAttachmentBlocks(attachRows),
         ],
       }
     : { role: "user", content: parsed.message };
@@ -199,8 +206,12 @@ export async function POST(req: Request) {
         .where(and(eq(conversations.id, conversationId), eq(conversations.userId, user.id)));
       previousResponseId = undefined;
     } catch (e) {
+      // Distinguish the attachment path: a systematic failure there would
+      // otherwise be invisible behind a working OpenAI fallback.
       console.error(
-        "claude chat failed, falling back to openai:",
+        attachRows.length
+          ? `claude chat failed WITH ${attachRows.length} attachment(s), falling back to openai:`
+          : "claude chat failed, falling back to openai:",
         e instanceof Error ? e.message : e
       );
     }

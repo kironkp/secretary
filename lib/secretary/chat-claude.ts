@@ -4,6 +4,7 @@
 // OpenAI if this throws (refusal included) — the chip can never brick chat.
 import type Anthropic from "@anthropic-ai/sdk";
 import { anthropicToolDefs } from "./tool-schemas";
+import { anthropicAttachmentBlocks } from "./attachment-blocks";
 import type { ToolContext, ToolOutcome } from "./tools";
 
 const MAX_TOOL_ROUNDS = 8;
@@ -34,25 +35,7 @@ export async function runClaudeChat(opts: {
     ...(opts.message.trim()
       ? [{ type: "text" as const, text: opts.message }]
       : []),
-    ...opts.attachments.map((a): Anthropic.ContentBlockParam =>
-      a.mime === "application/pdf"
-        ? {
-            type: "document",
-            source: {
-              type: "base64",
-              media_type: "application/pdf",
-              data: a.data.toString("base64"),
-            },
-          }
-        : {
-            type: "image",
-            source: {
-              type: "base64",
-              media_type: a.mime as "image/jpeg" | "image/png" | "image/webp" | "image/gif",
-              data: a.data.toString("base64"),
-            },
-          }
-    ),
+    ...anthropicAttachmentBlocks(opts.attachments),
   ];
   if (userContent.length === 0) userContent.push({ type: "text", text: "(empty)" });
 

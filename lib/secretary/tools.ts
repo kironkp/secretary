@@ -1700,6 +1700,17 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     if (!current || !current.markup) {
       return { result: { error: "No canvas yet — use paint_canvas first." } };
     }
+    // A paint in flight is seeded with the PREVIOUS canvas, so editing it now
+    // would base the change on markup that is about to be replaced — the edit
+    // would silently vanish when the paint lands.
+    if (current.painting) {
+      return {
+        result: {
+          error:
+            "The canvas is still painting. Tell the user it's landing now and ask them to say the change again in a moment, so it applies to the finished canvas.",
+        },
+      };
+    }
     const done = paintCanvas(ctx.userId, a.patch, {
       baseMarkup: current.markup,
       conversationId: ctx.conversationId,

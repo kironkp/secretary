@@ -1,5 +1,38 @@
 # secretary
 
+## North star: JARVIS
+- The goal is ONE persistent intelligent system you talk to — it knows the
+  user's information, can act on it, and fluidly manipulates a visual
+  workspace while you talk. Not "a good dashboard" plus "a good voice
+  assistant". The UI is the visual extension of the conversation.
+- Voice is the PRIMARY interaction; touch complements it. Never build separate
+  "voice state" and "touch state" — a spoken move and a dragged move are the
+  same operation on the same object.
+- Whatever voice provider is active (OpenAI Realtime today, Hume later) uses
+  the SAME Secretary tool system. Never a second set of business logic.
+- The Canvas is a WORKSPACE, not a picture. Shell owns geometry: position,
+  size, order, z-order, spacing, type scale, visibility, scroll, expansion,
+  selection, interaction state, animation, drag, transitions, viewport state.
+  The model owns the CONTENT inside visual objects. "Move the album up",
+  "make these smaller", "hide the finished ones" must require NO model call.
+- PERCEIVED CONTINUITY beats literal patching. A full rebuild is acceptable
+  internally if the user never experiences one. Never: blank → partial HTML →
+  layout jump → scroll reset. Always: current state → objects move → new
+  state. Motion communicates continuity and causality, never decoration —
+  reuse the app's real language (340ms, the nav-tabs easing pair, leading edge
+  first). Honor prefers-reduced-motion.
+- Do NOT build a rigid component registry for the Canvas. Widget/type ids may
+  exist as metadata, but shell code must never become an `if type === …` tree.
+  A conversation might become a priority stack, a timeline, a cluster of
+  notes, a comparison, one giant card, or something not yet designed.
+- Judge success by feel, not by exit codes: time to first visible response,
+  whether old state stayed stable during generation, whether scroll and
+  expansion and object identity survived, whether interruption and undo work.
+  The metric is "does this feel like a living workspace I manipulate with my
+  voice", not "did the model return HTML".
+- Migration is incremental; never throw away the working backend, database,
+  tools, or visual capability to get there.
+
 ## Adaptive dashboard (LayoutPlan system)
 - Dashboard layout is data: a LayoutPlan rendered by the layout renderer.
   Never hardcode section order; change DEFAULT_PLAN or the planner instead.
@@ -16,5 +49,13 @@
   ever. The shell owns all interactivity (data-expand, data-link, data-check —
   the last is the one sanctioned write: tap an open task to mark it done, ids
   from SIGNALS.tasks only). Everywhere else, model output is data.
+  `class` is namespaced to `cv-`/`sl-` by the sanitizer: the same sanitizer
+  guards the one path that renders model markup INLINE in the app document
+  (approved slow-loop templates), where a free-form Tailwind class would be an
+  app-covering overlay that never passes through safeStyle.
+- Changing what is already on the canvas is `edit_canvas`, never
+  `paint_canvas`. A canvas operation must never blank the canvas: the new
+  snapshot is seeded with what is on screen, an edit holds it until the
+  replacement completes, and a failed generation leaves it untouched.
 - Full spec: docs/adaptive-ui/SPEC.md — source of truth. To change behavior,
   update the spec first, then the code.

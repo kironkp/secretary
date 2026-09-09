@@ -61,9 +61,79 @@ describe("F9 sanitizer", () => {
       sanitizeCanvasMarkup(`<li data-check="4f9d2c10-93ab-4bfb-8c0e-1234567890ab">flyers</li>`)
     ).toContain('data-check="4f9d2c10-93ab-4bfb-8c0e-1234567890ab"');
     // truncated mid-tag: incomplete token dropped, no throw
-    expect(sanitizeCanvasMarkup(`<div class="a">ok</div><p cla`)).toBe(`<div class="a">ok</div>`);
+    expect(sanitizeCanvasMarkup(`<div class="cv-a">ok</div><p cla`)).toBe(
+      `<div class="cv-a">ok</div>`
+    );
     // unclosed <script (truncation) never leaks content
     expect(sanitizeCanvasMarkup(`<script>fetch("http://x")`)).not.toContain("fetch");
+  });
+
+  // The sanitizer also guards the ONE path that renders model markup inline in
+  // the main document (approved slow-loop templates), where Tailwind is live.
+  // A free-form class there is an app-covering overlay with no style attribute.
+  it("namespaces class so it cannot reach app-level utility styles", () => {
+    const overlay = sanitizeCanvasMarkup(`<div class="fixed inset-0 z-50 bg-white">x</div>`);
+    expect(overlay).toBe("<div>x</div>");
+    expect(overlay).not.toContain("fixed");
+    expect(overlay).not.toContain("inset-0");
+
+    // namespaced classes survive, alongside dropped tokens
+    expect(sanitizeCanvasMarkup(`<div class="cv-chart">x</div>`)).toContain('class="cv-chart"');
+    expect(sanitizeCanvasMarkup(`<div class="sl-row">x</div>`)).toContain('class="sl-row"');
+    expect(sanitizeCanvasMarkup(`<div class="cv-chart fixed">x</div>`)).not.toContain("fixed");
+
+    // a class that merely starts with the namespace text isn't a free pass
+    expect(sanitizeCanvasMarkup(`<div class="cvfixed">x</div>`)).toBe("<div>x</div>");
+  });
+
+  // The shell injects .cv-box and toggles .cv-done/.cv-expanded as state. A
+  // model that could paint them would own the checkbox contract: a fake box
+  // satisfies the host's "already has one" guard and becomes the tap target.
+  it("reserves the shell's own state classes", () => {
+    for (const c of ["cv-box", "cv-checkable", "cv-done", "cv-expanded"]) {
+      expect(sanitizeCanvasMarkup(`<div class="${c}">x</div>`)).toBe("<div>x</div>");
+    }
+    // and cannot be smuggled alongside a legitimate one
+    expect(sanitizeCanvasMarkup(`<div class="cv-chart cv-box">x</div>`)).toBe(
+      '<div class="cv-chart">x</div>'
+    );
+  });
+
+  it("keeps markup inside its own box on the inline render path", () => {
+    // The dashboard renders approved templates through this same sanitizer,
+    // inline in the app document, where these are app-covering overlays.
+    for (const s of [
+      "position:fixed;inset:0",
+      "POSITION : FIXED;inset:0",
+      "position:/*x*/fixed;inset:0",
+      "position:absolute;top:0",
+      "position:sticky;top:0",
+    ]) {
+      expect(sanitizeCanvasMarkup(`<div style="${s}">x</div>`)).toBe("<div>x</div>");
+    }
+    // a backslash can spell any function name (\75 rl() → url()
+    expect(sanitizeCanvasMarkup(`<div style="background:\\75 rl(http://x)">x</div>`)).toBe(
+      "<div>x</div>"
+    );
+    expect(sanitizeCanvasMarkup(`<div style="background:image-set('http://x')">x</div>`)).toBe(
+      "<div>x</div>"
+    );
+    // ordinary painted styles are untouched
+    expect(sanitizeCanvasMarkup(`<div style="color:var(--ink);padding:16px">x</div>`)).toContain(
+      "padding:16px"
+    );
+  });
+
+  // Completion now requires the shell's checkbox, and an HTML element created
+  // inside an SVG subtree never renders — so a data-check there would be a tap
+  // target that can never be completed. Drop it at the gate instead.
+  it("does not let data-check land on SVG geometry", () => {
+    const id = "4f9d2c10-93ab-4bfb-8c0e-1234567890ab";
+    expect(sanitizeCanvasMarkup(`<rect data-check="${id}" />`)).not.toContain("data-check");
+    expect(sanitizeCanvasMarkup(`<g data-check="${id}"></g>`)).not.toContain("data-check");
+    // still fine on real HTML rows and cards
+    expect(sanitizeCanvasMarkup(`<li data-check="${id}">x</li>`)).toContain("data-check");
+    expect(sanitizeCanvasMarkup(`<tr data-check="${id}"></tr>`)).toContain("data-check");
   });
 });
 

@@ -32,6 +32,7 @@ import {
   stopRemoteAudio,
   unlockRemoteAudio,
 } from "@/lib/realtime/remote-audio";
+import { requestCanvasRefresh } from "@/lib/canvas/refresh";
 import { useVoiceSession, type TranscriptLine } from "./use-voice-session";
 import { Button } from "@/components/ui";
 
@@ -132,6 +133,8 @@ export function VoiceMode({
     if (session.canvasSeq === 0) return;
     const t = setTimeout(() => {
       setMinimized(true);
+      // No-op if the Canvas tab is already open, so ask the view to reload too.
+      requestCanvasRefresh();
       router.push("/canvas");
     }, 0);
     return () => clearTimeout(t);

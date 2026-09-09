@@ -324,10 +324,37 @@ Rules:
   commitments silently (§11) — same as the chat/voice tools, on every surface
   that shares the task API. Dashboard dynamic components share the
   sanitizer but get no behavior wiring — there the attribute stays inert.
-- **Chat tools:** `paint_canvas(brief)` — full repaint, streamed so first paint
-  lands fast; `edit_canvas(patch)` — targeted change ("make the album section
-  bigger") without a full repaint; `show_canvas()` — bring the existing canvas
-  into view without touching it ("open the canvas", "put that back up").
+- **Chat AND voice tools:** `paint_canvas(brief)` — a NEW canvas, streamed so
+  first paint lands fast; `edit_canvas(patch)` — a change to the canvas the
+  user is looking at ("add one more thing", "make that purple", "only show the
+  Caltrans items"); `show_canvas()` — bring the existing canvas into view
+  without touching it. **All three ride the voice session**: a spoken change
+  with no edit tool available can only become a from-scratch repaint, which is
+  the failure this rule exists to prevent. `edit_canvas` is the DEFAULT
+  whenever a canvas exists and the user is modifying it; `paint_canvas` is for
+  a genuinely different picture.
+- **Continuity (never blank):** a canvas operation must never take the canvas
+  away from the user while a model call is in flight. The new snapshot is
+  seeded with what is currently on screen; an **edit holds that markup until
+  the replacement is complete** (a change must never look like a teardown); a
+  fresh paint begins streaming only once its output is substantial; and a
+  failed or empty generation leaves the previous canvas intact rather than
+  clearing it. The shell is told to reload the moment an operation starts —
+  waiting out the idle poll is indistinguishable from a frozen screen.
+- **The checkbox is shell-owned.** The host injects a real checkbox into every
+  `[data-check]` and owns its state, so "put checkboxes on those" is a UI
+  state change requiring no repaint, and the model can neither omit nor fake
+  one. Completion requires tapping the checkbox itself — a whole-card
+  destructive target is not acceptable on a scrolling touch surface — and the
+  canvas applies the same momentum-tap guard as the dashboard, so the tap that
+  stops a scroll never completes a task. Crossed-off state is re-derived from
+  the live task records on every load, never from the markup, so a task
+  reopened elsewhere shows as open here. Two rules keep that contract true:
+  `cv-box`/`cv-checkable`/`cv-done`/`cv-expanded` are HOST-owned class names the
+  sanitizer strips from model output (a painted `.cv-box` would otherwise
+  become the tap target), and `data-check` is dropped from SVG geometry, where
+  an injected HTML checkbox cannot render — so every surviving `data-check` is
+  guaranteed a real, shell-drawn checkbox.
 - **Auto-open (shell-owned chrome):** each canvas tool's successful outcome
   carries a UI-only `uiAction: {type: "show_canvas"}` beside its toast. It is
   transport, not content: never serialized into the model-visible tool result,
@@ -382,6 +409,50 @@ programmatic — never teleports. Motion: the edge facing the destination leads
 stretches toward the target and contracts into place (~350ms, standard
 easing). Off-tab routes (projects, documents) fade the indicator out.
 `prefers-reduced-motion` cuts instantly. Home (`/`) is the Dashboard.
+
+---
+
+## 7.8 Attachments (any file type, safely)
+
+The composer accepts **any** file type — the picker carries no `accept`
+attribute, because iOS maps each accept entry to a UTI and greys out everything
+unmapped (this is what made `.xlsx` unselectable). Files arrive by paperclip,
+by paste, and by drop. What a file *is* is decided once, in
+`classifyAttachment` (`lib/attachments.ts`), from its mime with its extension as
+a fallback — never stored as a column, because the classifier changes and a
+stored kind would go stale.
+
+**Serving is the security boundary, not the upload.** The mime on an upload is
+client-supplied and is never trusted. Only `INLINE_MIME` — the four raster
+types plus PDF — is served back with its own `Content-Type` and
+`Content-Disposition: inline`. Everything else is `application/octet-stream`
+with `attachment`, so a stored `.html` or `.svg` can never become a same-origin
+document running script under the session cookie. `next.config.ts` adds
+`default-src 'none'` for `/api/attachments/:id`; that entry **must sit after
+the catch-all**, because for a duplicate header key the last matching entry
+wins and a route handler cannot set its own CSP at all. Any UI that renders an
+attachment keys on the same `INLINE_MIME` set — a `startsWith("image/")` test
+would show a broken `<img>` for an SVG.
+
+**File content is untrusted data.** Extracted text is fenced exactly like
+inbound email: a bracketed header carrying the rule inline, `----- BEGIN/END
+FILE CONTENT -----` delimiters, the terminator scrubbed from the payload so a
+file cannot close its own fence, and CR/LF stripped from the filename so it
+cannot forge a header line. Truncation is always stated, never silent.
+
+**The two providers differ in exactly one declared place**, `CAN_READ_OFFICE`:
+OpenAI reads docx/xlsx/pptx/csv through `input_file`; Anthropic's document block
+is PDF-only. A file the chosen model cannot read produces an honest note —
+stored, contents not extracted, do not guess — never a fabricated image block.
+
+**Stored size and sent size are separate ceilings.** `MAX_STORE_BYTES` (25 MB)
+is what may be kept; `MAX_SEND_BYTES` (8 MB per file) and `MAX_TURN_SEND_BYTES`
+(12 MB per turn) bound what is base64'd into a model request. A file over the
+send ceiling is still stored, and the model is told it exists but wasn't
+readable. Because attachment bytes never replay — history is text-only and the
+OpenAI server-side chain is dropped after any Claude turn — a bounded fenced
+extract is persisted into the stored user message so a later "what was in row
+14?" still has something to read.
 
 ---
 

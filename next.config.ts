@@ -52,7 +52,26 @@ const nextConfig: NextConfig = {
   distDir: process.env.NEXT_DIST_DIR ?? ".next",
   ...(allowedDevOrigins.length ? { allowedDevOrigins } : {}),
   async headers() {
-    return [{ source: "/(.*)", headers: securityHeaders }];
+    return [
+      { source: "/(.*)", headers: securityHeaders },
+      {
+        // Attachment bytes are untrusted user content served from our own
+        // origin. This entry MUST come after the catch-all: for a duplicate
+        // header key the last matching entry wins, and a route handler cannot
+        // set its own CSP at all (the config's value replaces it). Keys the
+        // catch-all sets and this one doesn't — nosniff, Referrer-Policy,
+        // X-Frame-Options — still reach this path. `default-src 'none'` covers
+        // script-src, so a stored HTML file navigated to directly cannot run
+        // its own inline script. No `sandbox` token: it adds opaque-origin
+        // isolation we don't need once the bytes are octet-stream, and it
+        // breaks the built-in PDF viewer.
+        source: "/api/attachments/:id",
+        headers: [
+          { key: "Content-Security-Policy", value: "default-src 'none'" },
+          { key: "Cross-Origin-Resource-Policy", value: "same-origin" },
+        ],
+      },
+    ];
   },
 };
 
