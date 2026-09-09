@@ -445,8 +445,28 @@ type TlRow = {
   eventMarks: { pct: number; label: string }[];
 };
 
+/**
+ * The timeline's clock, quantized to the top of the hour.
+ *
+ * Positions here are a fraction of a 35-day horizon measured from "now". With
+ * a live Date.now() the server renders at T and the client hydrates a second
+ * later at T+1s, so every marker lands at a microscopically different percent —
+ * 40.474362% vs 40.4743322420635% — and React reports a hydration mismatch on
+ * every dashboard load. It is invisible to the eye and fatal to hydration.
+ *
+ * A day is the resolution this view actually expresses — one day is 2.9% of the
+ * horizon, and nothing here can render finer. Quantizing to it makes every
+ * position identical on both sides of hydration for the whole day rather than
+ * merely most of the time, which an hourly tick would still get wrong for any
+ * load straddling the boundary. It also stabilises the useMemo.
+ */
+const TIMELINE_TICK_MS = 24 * 60 * 60 * 1000;
+function timelineNow(): number {
+  return Math.floor(Date.now() / TIMELINE_TICK_MS) * TIMELINE_TICK_MS;
+}
+
 export function timelineRows(tasks: TaskRow[], events: EventRow[] = []): TlRow[] {
-  const now = Date.now();
+  const now = timelineNow();
   const byProject = new Map<string, TaskRow[]>();
   for (const t of tasks) {
     if (!OPEN.has(t.status)) continue;
@@ -495,7 +515,9 @@ export function timelineRows(tasks: TaskRow[], events: EventRow[] = []): TlRow[]
 }
 
 function weekTicks() {
-  const now = Date.now();
+  // Same quantized clock as timelineRows — these labels are rendered on both
+  // sides of hydration too.
+  const now = timelineNow();
   return [7, 14, 21, 28].map((d) => ({
     pct: (d / HORIZON_DAYS) * 100,
     label: shortDate(new Date(now + d * DAY)),

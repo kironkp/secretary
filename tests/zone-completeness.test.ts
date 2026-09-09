@@ -131,3 +131,31 @@ describe("render completeness: five-week chart", () => {
     expect(rows.find((r) => r.name === "DAW patent")?.eventMarks).toHaveLength(1);
   });
 });
+
+// Hydration determinism. Positions on the 5-week timeline are a fraction of a
+// 35-day horizon measured from "now" — with a live clock the server renders at
+// T and the client hydrates at T+1s, so every marker landed at a slightly
+// different percent (40.474362% vs 40.4743322420635%) and React reported a
+// hydration mismatch on every single dashboard load.
+describe("the timeline renders identically on server and client", () => {
+  it("gives the same positions when rendered again moments later", async () => {
+    const first = timelineRows([task], [event]);
+    await new Promise((r) => setTimeout(r, 25));
+    const second = timelineRows([task], [event]);
+    // Deep equality, because a mismatch anywhere in the tree is the bug.
+    expect(second).toEqual(first);
+  });
+
+  it("positions do not drift with elapsed time within the day", () => {
+    const marks = () =>
+      timelineRows([task], [event]).flatMap((r) => r.eventMarks.map((m) => m.pct));
+    const a = marks();
+    // Busy-wait past a few milliseconds without faking timers, the way a real
+    // SSR→hydration gap behaves.
+    const until = Date.now() + 15;
+    while (Date.now() < until) {
+      /* spin */
+    }
+    expect(marks()).toEqual(a);
+  });
+});
