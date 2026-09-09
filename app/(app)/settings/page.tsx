@@ -5,6 +5,8 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { user } from "@/lib/db/schema";
 import { BrainSettings } from "@/components/settings/brain-settings";
+import { SpendSummary } from "@/components/settings/spend-summary";
+import { spendAllTime, spendReport } from "@/lib/spend";
 import { CalmModeToggle } from "@/components/settings/calm-mode-toggle";
 import { ConnectedAccounts } from "@/components/settings/connected-accounts";
 import { NotificationsSection } from "@/components/settings/notifications";
@@ -24,7 +26,7 @@ export default async function SettingsPage() {
   if (!session) redirect("/sign-in");
 
   const timezone = (session.user as { timezone?: string }).timezone ?? "UTC";
-  const [[userRow], prefRows] = await Promise.all([
+  const [[userRow], prefRows, spend, allTime] = await Promise.all([
     db
       .select({ calmMode: user.calmMode, persona: user.persona })
       .from(user)
@@ -33,6 +35,8 @@ export default async function SettingsPage() {
       .select({ id: layoutPreferences.id, kind: layoutPreferences.kind, value: layoutPreferences.value })
       .from(layoutPreferences)
       .where(eq(layoutPreferences.userId, session.user.id)),
+    spendReport(session.user.id, 30),
+    spendAllTime(session.user.id),
   ]);
 
   return (
@@ -133,6 +137,8 @@ export default async function SettingsPage() {
           initialEffort={userRow?.persona?.brainEffort ?? "high"}
         />
       </section>
+
+      <SpendSummary report={spend} allTime={allTime} />
 
       <section className="rounded-xl border border-edge bg-surface p-5">
         <h2 className="mb-1 text-sm font-bold">Dashboard</h2>

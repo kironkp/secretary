@@ -6,8 +6,9 @@
 import { z } from "zod";
 import { and, desc, eq, gte } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { events, memories, tasks, usage } from "@/lib/db/schema";
+import { events, memories, tasks } from "@/lib/db/schema";
 import { openai, TEXT_MODEL } from "@/lib/openai";
+import { recordUsage } from "@/lib/usage";
 import { findDuplicate } from "./dedupe";
 
 const suggestionSchema = z.object({
@@ -112,9 +113,12 @@ export async function generateSuggestions(userId: string, timezone: string): Pro
     const { suggestions } = suggestionSchema.parse(JSON.parse(response.output_text || "{}"));
     await insertSuggestions(userId, suggestions.slice(0, 3), allTasks);
 
-    await db.insert(usage).values({
+    // "other", not "extraction": this is a separate prediction pass, and
+    // filing it under extraction made two different costs indistinguishable in
+    // the spend report.
+    await recordUsage({
       userId,
-      kind: "extraction",
+      kind: "other",
       model: TEXT_MODEL,
       inputTokens: response.usage?.input_tokens ?? 0,
       outputTokens: response.usage?.output_tokens ?? 0,

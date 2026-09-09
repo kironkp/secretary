@@ -154,6 +154,22 @@ export async function persistPlan(userId: string, bundle: PlanBundle): Promise<v
       call: claude ? claudePlannerCall(claude, (await brainSettings(userId)).model) : undefined,
       dynamicComponents: await listDynamicComponents(userId),
     });
+    // Bill the planner BEFORE any of the reasons this function returns early —
+    // the tokens were spent whether or not the refinement lands. A cache hit
+    // spent nothing, so it has nothing to record.
+    if (refined.source === "llm") {
+      const { lastPlannerUsage } = await import("./plan-from-llm");
+      if (lastPlannerUsage.model) {
+        const { recordUsage } = await import("@/lib/usage");
+        await recordUsage({
+          userId,
+          kind: "layout",
+          model: lastPlannerUsage.model,
+          inputTokens: lastPlannerUsage.input,
+          outputTokens: lastPlannerUsage.output,
+        });
+      }
+    }
     if (refined.source !== "llm" && refined.source !== "llm-cache") return;
     if (planContent(refined.plan) === planContent(bundle.plan)) return;
     const head = await getPlanHead(userId);

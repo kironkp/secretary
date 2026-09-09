@@ -4,6 +4,7 @@ import {
   index,
   integer,
   jsonb,
+  numeric,
   pgEnum,
   pgTable,
   real,
@@ -140,6 +141,18 @@ export const usageKind = pgEnum("usage_kind", [
   "chat",
   // consult_brain: the voice/chat asking the Claude brain a hard question
   "consult",
+  // Canvas paints and edits. Previously invisible, and among the most
+  // expensive calls in the app: a multi-thousand-token generation, sometimes
+  // several per conversation.
+  "paint",
+  // Nightly slow loop: proposing dashboard components.
+  "slow_loop",
+  // Inbound email: reading forwarded attachments with a vision model.
+  "email",
+  // Speech synthesis (ElevenLabs), billed per character rather than per token.
+  "speech",
+  // Anything not yet categorised — better an "other" bucket than a silent gap.
+  "other",
 ]);
 
 const uuid = () => crypto.randomUUID();
@@ -625,5 +638,18 @@ export const usage = pgTable("usage", {
   seconds: integer("seconds").notNull().default(0),
   inputTokens: integer("input_tokens").notNull().default(0),
   outputTokens: integer("output_tokens").notNull().default(0),
+  // Realtime charges audio input 8× text input under the SAME model id, so
+  // without this split a voice row cannot be priced within a factor of eight.
+  audioInputTokens: integer("audio_input_tokens"),
+  audioOutputTokens: integer("audio_output_tokens"),
+  // Re-read input is a tenth the price; counting it as fresh overstates spend
+  // and hides the benefit of caching.
+  cachedInputTokens: integer("cached_input_tokens"),
+  // Dollars, computed at insert from lib/pricing.ts. Stored rather than
+  // derived so a historical row keeps the price that was actually charged when
+  // the rate card changes.
+  costUsd: numeric("cost_usd", { precision: 12, scale: 6 }),
+  /** False when the model had no rate — the cost is a ceiling, not a fact. */
+  costEstimated: boolean("cost_estimated").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

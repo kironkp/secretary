@@ -28,6 +28,22 @@ export function plannerPrompt(): string {
 // background budget, not a render stall.
 const LLM_TIMEOUT_MS = 60000;
 
+/** What the last planner call cost. The planner runs in the background on
+ *  every dashboard render whose signals changed, so it is real recurring
+ *  spend — and it recorded nothing from the day ADAPTIVE_V2 shipped, because
+ *  the usage row lived in the v0 generator this path replaced. */
+export const lastPlannerUsage: { model: string | null; input: number; output: number } = {
+  model: null,
+  input: 0,
+  output: 0,
+};
+
+function notePlannerUsage(model: string, input: number, output: number) {
+  lastPlannerUsage.model = model;
+  lastPlannerUsage.input = input;
+  lastPlannerUsage.output = output;
+}
+
 export const livePlannerCall: PlannerCall = async (systemPrompt, signalsJson) => {
   const response = await openai.responses.create({
     model: PLANNER_MODEL,
@@ -36,6 +52,11 @@ export const livePlannerCall: PlannerCall = async (systemPrompt, signalsJson) =>
     text: { format: { type: "json_object" } },
     temperature: 0.2,
   });
+  notePlannerUsage(
+    PLANNER_MODEL,
+    response.usage?.input_tokens ?? 0,
+    response.usage?.output_tokens ?? 0
+  );
   return response.output_text ?? "";
 };
 
@@ -58,6 +79,7 @@ export function claudePlannerCall(client: Anthropic, model: string): PlannerCall
       ],
       output_config: { effort: "low" },
     });
+    notePlannerUsage(model, response.usage.input_tokens, response.usage.output_tokens);
     if (response.stop_reason === "refusal") throw new Error("claude refusal");
     const text = response.content
       .filter((b): b is Extract<(typeof response.content)[number], { type: "text" }> => b.type === "text")

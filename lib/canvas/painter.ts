@@ -14,6 +14,7 @@ import { openai, PLANNER_MODEL } from "@/lib/openai";
 import { anthropicFor, brainSettings, claudeBrainEnabled } from "@/lib/anthropic";
 import type Anthropic from "@anthropic-ai/sdk";
 import { computeSignals } from "@/lib/layout/signals";
+import { recordUsage } from "@/lib/usage";
 import { sanitizeCanvasMarkup } from "./sanitize";
 import {
   compositionFromMarkup,
@@ -37,6 +38,29 @@ export type PainterStream = (
   input: string
 ) => AsyncIterable<string>;
 
+/**
+ * What the last painter run actually cost.
+ *
+ * Paints were the single largest untracked expense in the app — a
+ * multi-thousand-token generation, sometimes several per conversation,
+ * recording nothing. Streaming APIs only report usage on the final message, so
+ * the streams write here and paintCanvas records it once the run completes.
+ * Module-level because PainterStream's signature is (system, input) => chunks
+ * and threading a return value through it would change every implementation
+ * and every test double.
+ */
+export const lastPainterUsage: { model: string | null; input: number; output: number } = {
+  model: null,
+  input: 0,
+  output: 0,
+};
+
+function notePainterUsage(model: string, input: number, output: number) {
+  lastPainterUsage.model = model;
+  lastPainterUsage.input = input;
+  lastPainterUsage.output = output;
+}
+
 export const livePainterStream: PainterStream = async function* (systemPrompt, input) {
   const stream = await openai.responses.create({
     model: PLANNER_MODEL,
@@ -49,6 +73,13 @@ export const livePainterStream: PainterStream = async function* (systemPrompt, i
     if (event.type === "response.output_text.delta") {
       acc += event.delta;
       yield acc;
+    }
+    if (event.type === "response.completed") {
+      notePainterUsage(
+        PLANNER_MODEL,
+        event.response.usage?.input_tokens ?? 0,
+        event.response.usage?.output_tokens ?? 0
+      );
     }
   }
   yield acc;
@@ -76,6 +107,7 @@ export function claudePainterStream(client: Anthropic, model: string): PainterSt
       }
     }
     const final = await stream.finalMessage();
+    notePainterUsage(model, final.usage.input_tokens, final.usage.output_tokens);
     if (final.stop_reason === "refusal") throw new Error("claude refusal");
     yield acc;
   };
@@ -161,6 +193,12 @@ export async function paintCanvas(
     .values({ userId, brief, markup: hold, painting: true })
     .returning();
 
+  // Reset before the run so a failed paint can't be billed twice, and so a
+  // stubbed stream (tests) records nothing rather than the previous run's cost.
+  lastPainterUsage.model = null;
+  lastPainterUsage.input = 0;
+  lastPainterUsage.output = 0;
+
   const claude = !opts.stream && claudeBrainEnabled() ? await anthropicFor(userId) : null;
   const useClaude = Boolean(claude);
   const chosen =
@@ -226,6 +264,19 @@ export async function paintCanvas(
       })
       .where(eq(canvasSnapshots.id, row.id));
     finalMarkup = markup;
+
+    // Paints are among the most expensive calls in the app and used to record
+    // nothing at all. Billed even when the generation failed — the tokens were
+    // still spent.
+    if (lastPainterUsage.model) {
+      await recordUsage({
+        userId,
+        kind: "paint",
+        model: lastPainterUsage.model,
+        inputTokens: lastPainterUsage.input,
+        outputTokens: lastPainterUsage.output,
+      });
+    }
   }
   return { snapshotId: row.id, markup: finalMarkup };
 }

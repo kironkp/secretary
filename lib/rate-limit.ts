@@ -58,6 +58,10 @@ export async function checkVoiceQuota(
   // 5 minutes is an orphan (crashed tab, killed server) — close it out here
   // rather than blocking the user until a 30-minute window rolls over.
   const ORPHAN_MS = 5 * 60 * 1000;
+  // seconds: 1 is a sentinel meaning "closed out, real duration unknown" — it
+  // only ever lands on rows that never reported one (seconds = 0), so it can
+  // no longer destroy a real duration. Spend reporting treats these as
+  // unmeasured rather than as one-second calls.
   await db
     .update(usage)
     .set({ seconds: 1 })
