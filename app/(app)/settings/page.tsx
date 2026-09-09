@@ -6,7 +6,7 @@ import { db } from "@/lib/db";
 import { user } from "@/lib/db/schema";
 import { BrainSettings } from "@/components/settings/brain-settings";
 import { SpendSummary } from "@/components/settings/spend-summary";
-import { spendAllTime, spendReport } from "@/lib/spend";
+import { spendAllTime, spendReport, spendWindow } from "@/lib/spend";
 import { CalmModeToggle } from "@/components/settings/calm-mode-toggle";
 import { ConnectedAccounts } from "@/components/settings/connected-accounts";
 import { NotificationsSection } from "@/components/settings/notifications";
@@ -35,7 +35,7 @@ export default async function SettingsPage() {
       .select({ id: layoutPreferences.id, kind: layoutPreferences.kind, value: layoutPreferences.value })
       .from(layoutPreferences)
       .where(eq(layoutPreferences.userId, session.user.id)),
-    spendReport(session.user.id, 30),
+    spendReport(session.user.id, spendWindow("month", 0, timezone), timezone),
     spendAllTime(session.user.id),
   ]);
 
@@ -138,7 +138,7 @@ export default async function SettingsPage() {
         />
       </section>
 
-      <SpendSummary report={spend} allTime={allTime} />
+      <SpendSummary initial={spend} allTime={allTime} />
 
       <section className="rounded-xl border border-edge bg-surface p-5">
         <h2 className="mb-1 text-sm font-bold">Dashboard</h2>
