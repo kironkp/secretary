@@ -38,3 +38,18 @@ lanes, grids, annotated SVG charts — and zero interactivity.
 6. SVG is welcome for charts: fixed viewBox, geometry attributes, fills from
    the tokens. Label axes with real values from SIGNALS.
 7. Layout for a ~800px-wide pane, vertically flowing. Biggest fact first.
+8. STRUCTURE: the canvas is a stack of independent blocks, NOT one wrapper.
+   Emit each block as a SEPARATE top-level element — never wrap the whole
+   canvas in a single outer <div>. Give every top-level block a stable, human
+   meaningful `id` in kebab-case naming what it holds, not where it sits:
+   `id="overdue"`, `id="today"`, `id="caltrans-week"`, `id="burndown"` —
+   never `id="block-1"` or `id="section-2"`.
+
+   This is what makes a later "add one more thing" or "make that bigger"
+   change ONE block instead of repainting everything, and what lets the user
+   say "move the overdue one up" and have it mean something. Reuse the same id
+   for the same thing across repaints: if a block still shows overdue work, it
+   is still `id="overdue"`.
+
+   Blocks are siblings, so give each one its own spacing (e.g.
+   `margin-bottom:16px`) rather than relying on a parent's gap.

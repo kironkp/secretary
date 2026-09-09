@@ -40,3 +40,4 @@ sim/.disabled
 # slow-loop proposals are transient review artifacts; approved ones live in the DB
 components/proposed/
 .dev-server.log
+backups/
