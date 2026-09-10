@@ -209,30 +209,39 @@ export function CanvasView({ pollMs = 15000 }: { pollMs?: number } = {}) {
   // Surfaced when an optimistic tick is rolled back.
   const [checkError, setCheckError] = useState<string | null>(null);
 
-  const completeTask = useCallback(
-    async (taskId: string) => {
-      if (isChecked(taskId)) return;
-      pendingRef.current.add(taskId);
+  // Tap to tick, tap again to un-tick. Optimistic either way, rolled back with
+  // a reason if the server disagrees — an accidental tap has to be undoable on
+  // the surface where it happened, not only from the dashboard.
+  const setTaskDone = useCallback(
+    async (taskId: string, next: boolean) => {
+      if (isChecked(taskId) === next) return;
+      if (next) pendingRef.current.add(taskId);
+      else {
+        pendingRef.current.delete(taskId);
+        checkedRef.current.delete(taskId);
+      }
       eachDoc(applyDoneMarks);
+
       const res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "done", source: "canvas" }),
+        body: JSON.stringify({ status: next ? "done" : "todo", source: "canvas" }),
       }).catch(() => null);
+
       if (!res?.ok) {
-        // Roll the tick back AND say so. A checkbox that silently un-ticks
-        // itself reads as "the app is broken", which is exactly how this
-        // feature felt before.
-        pendingRef.current.delete(taskId);
+        // Put it back exactly as it was.
+        if (next) pendingRef.current.delete(taskId);
+        else checkedRef.current.add(taskId);
         eachDoc(applyDoneMarks);
         setCheckError(
           res
-            ? "Couldn't mark that done — it may have been changed elsewhere."
+            ? `Couldn't mark that ${next ? "done" : "not done"} — it may have changed elsewhere.`
             : "Couldn't reach the server — that one didn't save."
         );
-      } else {
-        setCheckError(null);
+        return;
       }
+      setCheckError(null);
+      if (!next) checkedRef.current.delete(taskId);
     },
     [applyDoneMarks, eachDoc, isChecked]
   );
@@ -264,9 +273,9 @@ export function CanvasView({ pollMs = 15000 }: { pollMs?: number } = {}) {
       doc.documentElement.dataset.cvWired = "1";
       canvasPerf.docsWired++;
       wireCanvasDocument(doc, {
-        onCheck: (id) => {
+        onCheck: (id, next) => {
           canvasPerf.checksFired++;
-          void completeTask(id);
+          void setTaskDone(id, next);
         },
         onLink: (id) => router.push(`/projects/${encodeURIComponent(id)}`),
         onSelect: blockId ? () => void selectBlock(blockId) : undefined,
@@ -274,7 +283,7 @@ export function CanvasView({ pollMs = 15000 }: { pollMs?: number } = {}) {
         isMomentumTap,
       });
     },
-    [applyDoneMarks, completeTask, measure, router, selectBlock]
+    [applyDoneMarks, setTaskDone, measure, router, selectBlock]
   );
 
   const wireAll = useCallback(() => {

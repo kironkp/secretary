@@ -13,8 +13,10 @@
 export type CheckState = (taskId: string) => boolean;
 
 export type CanvasHandlers = {
-  /** The user deliberately ticked a task's checkbox. */
-  onCheck: (taskId: string) => void;
+  /** The user tapped a task's checkbox. `next` is the state they asked for —
+   *  tapping a ticked box UN-ticks it, because an accidental tap must be
+   *  undoable on the surface where it happened. */
+  onCheck: (taskId: string, next: boolean) => void;
   /** A card wants to open its project/entity. */
   onLink: (id: string) => void;
   /** A tap landed inside this document's block (shared world model). */
@@ -107,7 +109,7 @@ export function wireCanvasDocument(doc: Document, handlers: CanvasHandlers): () 
       // Stop the card underneath from also navigating on the same tap.
       e.preventDefault();
       e.stopPropagation();
-      if (id) handlers.onCheck(id);
+      if (id) handlers.onCheck(id, box.getAttribute("aria-checked") !== "true");
       return;
     }
 
@@ -134,7 +136,7 @@ export function wireCanvasDocument(doc: Document, handlers: CanvasHandlers): () 
     if (!box) return;
     e.preventDefault();
     const id = taskIdForBox(box);
-    if (id) handlers.onCheck(id);
+    if (id) handlers.onCheck(id, box.getAttribute("aria-checked") !== "true");
   };
 
   doc.addEventListener("click", onClick);

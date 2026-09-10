@@ -80,7 +80,7 @@ describe("clicking the checkbox", () => {
     const { handlers } = canvas(row(TASK_A, "x"));
     click(boxes()[0]);
     expect(handlers.onCheck).toHaveBeenCalledTimes(1);
-    expect(handlers.onCheck).toHaveBeenCalledWith(TASK_A);
+    expect(handlers.onCheck).toHaveBeenCalledWith(TASK_A, true);
   });
 
   it("does NOT also navigate, select, or expand the card underneath", () => {
@@ -99,7 +99,7 @@ describe("clicking the checkbox", () => {
     const { handlers } = canvas(row(TASK_A, "x"));
     handlers.isMomentumTap.mockReturnValue(true);
     click(boxes()[0]);
-    expect(handlers.onCheck).toHaveBeenCalledWith(TASK_A);
+    expect(handlers.onCheck).toHaveBeenCalledWith(TASK_A, true);
   });
 
   it("but a scroll-stop tap on the CARD is still swallowed", () => {
@@ -117,9 +117,9 @@ describe("clicking the checkbox", () => {
     expect(boxes()).toHaveLength(2);
     click(boxes()[1]);
     expect(handlers.onCheck).toHaveBeenCalledTimes(1);
-    expect(handlers.onCheck).toHaveBeenCalledWith(TASK_B);
+    expect(handlers.onCheck).toHaveBeenCalledWith(TASK_B, true);
     click(boxes()[0]);
-    expect(handlers.onCheck).toHaveBeenLastCalledWith(TASK_A);
+    expect(handlers.onCheck).toHaveBeenLastCalledWith(TASK_A, true);
   });
 
   it("works from the keyboard with Space and Enter", () => {
@@ -128,7 +128,7 @@ describe("clicking the checkbox", () => {
     box.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
     box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     expect(handlers.onCheck).toHaveBeenCalledTimes(2);
-    expect(handlers.onCheck).toHaveBeenCalledWith(TASK_A);
+    expect(handlers.onCheck).toHaveBeenCalledWith(TASK_A, true);
   });
 
   it("ignores other keys", () => {
@@ -174,5 +174,39 @@ describe("the rest of the canvas still works", () => {
     teardown();
     click(boxes()[0]);
     expect(handlers.onCheck).not.toHaveBeenCalled();
+  });
+});
+
+// An accidental tap has to be undoable where it happened. Before this, a ticked
+// box was inert: the only way back was the dashboard.
+describe("un-checking", () => {
+  it("a ticked box asks to be un-ticked", () => {
+    const { handlers } = canvas(row(TASK_A, "x"), new Set([TASK_A]));
+    expect(boxes()[0].getAttribute("aria-checked")).toBe("true");
+    click(boxes()[0]);
+    expect(handlers.onCheck).toHaveBeenCalledWith(TASK_A, false);
+  });
+
+  it("and an un-ticked box asks to be ticked", () => {
+    const { handlers } = canvas(row(TASK_A, "x"));
+    click(boxes()[0]);
+    expect(handlers.onCheck).toHaveBeenCalledWith(TASK_A, true);
+  });
+
+  it("toggles from the keyboard too", () => {
+    const { handlers } = canvas(row(TASK_A, "x"), new Set([TASK_A]));
+    boxes()[0].dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
+    expect(handlers.onCheck).toHaveBeenCalledWith(TASK_A, false);
+  });
+
+  it("only the tapped row toggles when two read identically", () => {
+    const { handlers } = canvas(
+      row(TASK_A, "Follow up") + row(TASK_B, "Follow up"),
+      new Set([TASK_A])
+    );
+    click(boxes()[0]);
+    expect(handlers.onCheck).toHaveBeenLastCalledWith(TASK_A, false);
+    click(boxes()[1]);
+    expect(handlers.onCheck).toHaveBeenLastCalledWith(TASK_B, true);
   });
 });
