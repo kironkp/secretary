@@ -256,10 +256,18 @@ export function CanvasView({ pollMs = 15000 }: { pollMs?: number } = {}) {
       // idempotent, so this is cheap insurance against a canvas that renders
       // without its checkboxes.
       applyDoneMarks(doc);
-      if (wiredDocs.current.has(doc)) return;
+      // The marker lives ON the document, not only in a WeakSet: a swapped-in
+      // document is a different object and must be re-wired, and a document we
+      // already wired must never be wired twice (double completion).
+      if (wiredDocs.current.has(doc) || doc.documentElement.dataset.cvWired === "1") return;
       wiredDocs.current.add(doc);
+      doc.documentElement.dataset.cvWired = "1";
+      canvasPerf.docsWired++;
       wireCanvasDocument(doc, {
-        onCheck: (id) => void completeTask(id),
+        onCheck: (id) => {
+          canvasPerf.checksFired++;
+          void completeTask(id);
+        },
         onLink: (id) => router.push(`/projects/${encodeURIComponent(id)}`),
         onSelect: blockId ? () => void selectBlock(blockId) : undefined,
         onResize: blockId ? () => requestAnimationFrame(() => measure(blockId)) : undefined,
@@ -284,15 +292,32 @@ export function CanvasView({ pollMs = 15000 }: { pollMs?: number } = {}) {
     }
   }, [measure, useBlocks, wireDoc]);
 
+  // Keep wiring, for as long as the canvas is on screen.
+  //
+  // This used to be a 16x300ms interval in an effect keyed on wireAll — and
+  // wireAll's identity changes on every measure()->layout()->setBoardH()
+  // render, so the interval was cleared and restarted before it could ever
+  // fire. onLoad was therefore the ONLY wiring attempt, and when that fires
+  // against the initial about:blank document (iOS/WebKit swaps in the srcdoc
+  // document afterwards) nothing was ever attached to the document the user
+  // actually sees. That is a canvas whose checkboxes cannot be clicked, ever.
+  //
+  // A ref holds the latest wireAll so the interval is created ONCE per mount
+  // and never restarted. Re-wiring is idempotent and cheap (a WeakSet check
+  // plus an attribute-marked document), so running it for the life of the
+  // canvas costs nothing and survives any document swap.
+  const wireAllRef = useRef(wireAll);
+  // Written in an effect, not during render: assigning a ref while rendering is
+  // unsafe under concurrent rendering (the render may be thrown away).
   useEffect(() => {
-    if (!snapshot) return;
-    let tries = 0;
-    const t = setInterval(() => {
-      wireAll();
-      if (++tries >= 16) clearInterval(t);
-    }, 300);
+    wireAllRef.current = wireAll;
+  }, [wireAll]);
+  useEffect(() => {
+    const tick = () => wireAllRef.current();
+    tick();
+    const t = setInterval(tick, 500);
     return () => clearInterval(t);
-  }, [snapshot, wireAll]);
+  }, []);
 
   // ── data ──────────────────────────────────────────────────────────────────
   const loadSeq = useRef(0);
@@ -398,6 +423,7 @@ export function CanvasView({ pollMs = 15000 }: { pollMs?: number } = {}) {
       {perf && (
         <dl className="grid grid-cols-2 gap-x-4 gap-y-0.5 rounded-xl border border-edge bg-surface-2 p-2.5 font-mono text-[10px] leading-snug text-muted sm:grid-cols-4">
           <Stat k="blocks" v={`${perf.blocks} · ${perf.frames} frames`} />
+          <Stat k="wired / taps" v={`${perf.docsWired} docs · ${perf.checksFired} taps`} />
           <Stat k="first render" v={perf.firstRenderMs === null ? "—" : `${perf.firstRenderMs}ms`} />
           <Stat
             k="frame load"

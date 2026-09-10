@@ -14,6 +14,8 @@
 export type PerfSnapshot = {
   blocks: number;
   frames: number;
+  docsWired: number;
+  checksFired: number;
   /** First block document painted, from navigation start. */
   firstRenderMs: number | null;
   /** Slowest and mean iframe load. */
@@ -47,6 +49,14 @@ function ring(): { push: (v: number) => void; stats: () => { mean: number; max: 
 class CanvasPerf {
   blocks = 0;
   frames = 0;
+  /** Documents the shell successfully attached its click handling to. If this
+   *  is 0 while blocks > 0, the canvas is rendering but is not interactive —
+   *  which is exactly the failure that made checkboxes unclickable. */
+  docsWired = 0;
+  /** Checkbox clicks that reached the handler. 0 after tapping one means the
+   *  event never arrived; >0 with nothing happening means the server call is
+   *  the problem. This single number separates the two. */
+  checksFired = 0;
   firstRenderMs: number | null = null;
   private frameLoads = ring();
   private opLatencies = ring();
@@ -140,6 +150,8 @@ class CanvasPerf {
     return {
       blocks: this.blocks,
       frames: this.frames,
+      docsWired: this.docsWired,
+      checksFired: this.checksFired,
       firstRenderMs: this.firstRenderMs,
       frameLoadMs: this.frameLoads.stats().n ? this.frameLoads.stats() : null,
       opLatencyMs: { last: this.lastOp, ...this.opLatencies.stats() },
