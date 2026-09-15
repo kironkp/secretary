@@ -7,6 +7,58 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 ---
 
+## v0.10 — The flaw audit (2026-09-15)
+
+`57ac051` and this commit
+
+No behaviour changed. A three-agent adversarial audit read the canvas renderer,
+the cost architecture and the verification/ops surface, and every claim below
+was then confirmed by hand against source or a live command.
+
+**It found the canvas bugs that four rounds of fixes missed**, because all four
+targeted the wiring and the real defects are in layout and touch:
+
+- **No `<meta name="viewport">` in the canvas srcdoc** (`sanitize.ts:213-216`).
+  iOS therefore applies its legacy ~350 ms tap delay and double-tap-to-zoom.
+  Invisible in jsdom and in desktop Chrome — which is why it survived four
+  attempts. This is the best single explanation for "I still can't check things
+  off" on the phone.
+- **The checkbox is 18×18 px** (`sanitize.ts:241`) — under half the 44 pt
+  minimum — sitting on a row that carries `data-link`, so a near-miss doesn't
+  do nothing, it **navigates away from the canvas**.
+- **Voice reorder reloads the board.** `canvas-view.tsx:10-13` documents "DOM
+  ORDER NEVER CHANGES"; line 529 maps `blocks` in composition order, so a move
+  reconciles keyed holders with `insertBefore` and every iframe below the moved
+  one re-navigates. The flagship no-model-call operation blanks the board.
+- **Every block is clipped by 24 px.** The iframe carries Tailwind `p-3`
+  (`:556`) while `measure()` writes content height into `style.height` (`:196`),
+  so the viewport is permanently 24 px shorter than its content — and short
+  blocks staircase-shrink 24 px per 500 ms tick.
+- **Direct manipulation does not exist**: zero `pointerdown`/`touchstart`
+  handlers anywhere in `components/canvas` or `lib/canvas`.
+
+**It found that the cost number being steered by is wrong.** 53 of 58 voice
+rows are flagged `cost_estimated` and priced as 100 % audio at $32/M when most
+of those tokens are cached text at $0.40/M; five more are NULL and read as
+$0.00. Anthropic caching is real but capped at 59.8 % because
+`briefing.ts:286-294` bakes the current **minute** into the top of the system
+block, invalidating that breakpoint every 60 seconds.
+
+**It found production down.** Heroku release v8 deployed commit `9701f7d9` —
+not an object in this repository — from the dashboard integration still pointed
+at `kironkp/personal-assistant`. `web.1: crashed`, `npm error Missing script:
+"start"`, the URL returning **503**, unnoticed for 25 minutes.
+
+**And it found why all of this reaches the user instead of CI:** 47 test files,
+exactly one opts into jsdom, `vitest.config.ts` does not even match `.tsx`, no
+React component is ever rendered by a test, 3 of 29 API routes are covered,
+`canvas-invariants.test.ts` asserts by grepping source strings, and the only
+end-to-end harness has been switched off since 11 August (`sim/.disabled`).
+
+Full detail, with fixes, in `docs/HANDOFF.md`.
+
+---
+
 ## v0.9 — Deployment moves to CI (2026-09-15)
 
 `a7bbd04`

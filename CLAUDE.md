@@ -2,6 +2,11 @@
 
 ## READ FIRST (2026-09-15 handoff)
 
+> **Production was down when this was written.** Heroku is crash-looping on a
+> deploy of an unrelated repository (`kironkp/personal-assistant`, release v8,
+> commit `9701f7d9` — not in this repo). Check `heroku ps -a secretary-kiron`
+> before assuming it was fixed. `docs/HANDOFF.md` §Heroku has the sequence.
+
 1. `docs/HANDOFF.md` — what is genuinely broken, ranked, and what to do first.
    The user's own verdict on this build: **"the flaws are horrendous, canvas is
    virtually unusable."** Take that at face value; do not defend the code.
@@ -9,9 +14,13 @@
 3. This file — the standing rules below still hold.
 
 **Do not start new features until the Canvas is genuinely usable.** The canvas
-checkbox alone took four attempts and was still reported broken. Three real
-causes were found and fixed, but **none of it was ever verified in a real
-browser** — there was no browser automation available. Verify before building.
+checkbox alone took four attempts and was still reported broken. All four
+targeted the *wiring*, which is now correct. A later audit found the probable
+real causes in layers the test suite cannot see: **no `<meta name="viewport">`
+in the canvas iframe** (so iOS applies its ~350 ms tap delay) and an **18×18 px
+tap target** sitting on a `data-link` row, so a near-miss navigates away.
+**Nothing here was ever verified in a real browser** — there was no browser
+automation available. Verify before building.
 
 **Heroku is the source of truth as of 2026-09-15.** The Mac is for development
 and beta testing only; nothing in the local database is authoritative. Deploys
