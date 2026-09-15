@@ -357,6 +357,33 @@ Also outstanding:
 
 ---
 
+## The folder cutover is done (2026-09-15 13:26 PDT)
+
+**`~/code/secretary` is the live working folder.** `~/code/personal-assistant`
+is a read-only archive and has been made inert:
+
+- Its git remotes (`origin` → `kironkp/secretary`, `heroku`) were **removed**, so
+  a stray `git push` from the archive cannot overwrite your work or deploy stale
+  code. Restore with `git remote add` if ever needed.
+- Nothing runs from it: Postgres (:5432) and `next dev` (:3000) were stopped
+  there and restarted from `~/code/secretary`.
+- `~/.local/bin/secretary-nightly-push.sh` and `secretary-daily-sync.sh` now
+  point at the new folder.
+- `secretary-daily-sync.sh` additionally **refuses to run** unless
+  `SECRETARY_ALLOW_DESTRUCTIVE_SYNC=yes` — a second line of defence behind the
+  renamed plist, because it mirrors local→Heroku and would destroy production.
+
+The Postgres data directory was re-copied **cold** (with the server stopped)
+rather than kept from the hot rsync, and verified: `database system was shut
+down` on startup — no crash recovery — and the fingerprint matches exactly,
+**29 tables / 1,993 rows**, every per-table count and freshness marker identical.
+
+The archive still holds ~3.3GB of `.next` build cache. `rm -rf
+~/code/personal-assistant/.next ~/code/personal-assistant/.next-sim` reclaims it
+and destroys nothing.
+
+---
+
 ## Operational landmines
 
 - **`lib/auth.ts` is deliberately never committed.** It carries a dynamic auth

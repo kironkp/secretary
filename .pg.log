@@ -1,0 +1,15 @@
+2026-09-15 13:24:43.331 PDT [65129] LOG:  starting PostgreSQL 18.4 on x86_64-apple-darwin24.6.0, compiled by Apple clang version 17.0.0 (clang-1700.6.3.2), 64-bit
+
+2026-09-15 13:24:43.334 PDT [65129] LOG:  listening on IPv6 address "::1", port 5432
+2026-09-15 13:24:43.334 PDT [65129] LOG:  listening on IPv4 address "127.0.0.1", port 5432
+
+2026-09-15 13:24:43.335 PDT [65129] LOG:  listening on Unix socket "/tmp/.s.PGSQL.5432"
+
+2026-09-15 13:24:43.346 PDT [65173] LOG:  database system was shut down at 2026-09-15 13:24:06 PDT
+
+2026-09-15 13:24:43.352 PDT [65129] LOG:  database system is ready to accept connections
+
+Postgres running on postgresql://postgres:postgres@localhost:5432/secretary — Ctrl-C to stop.
+2026-09-15 13:24:52.727 PDT [65198] ERROR:  column "created_at" does not exist at character 32
+2026-09-15 13:24:52.727 PDT [65198] STATEMENT:  SELECT count(*)::int AS n, max(created_at) AS newest FROM "conversations"
+
