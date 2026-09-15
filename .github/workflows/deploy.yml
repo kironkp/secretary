@@ -1,0 +1,125 @@
+# CI, then deploy to Heroku.
+#
+# Replaces Heroku's dashboard GitHub integration, which loops on connect in
+# Firefox (its OAuth handshake needs cross-site cookies that Enhanced Tracking
+# Protection blocks) and which was pointed at the WRONG repository — it deployed
+# kironkp/personal-assistant, an unrelated January repo with no start script,
+# and crash-looped. Deploying from here is version-controlled, needs no browser,
+# and can gate on tests.
+#
+# The gate matters more than usual now that Heroku is the source of truth: a bad
+# push must not reach a production database you depend on.
+name: CI and deploy
+
+on:
+  push:
+    branches: [main]
+  # Beta branches get the full check WITHOUT deploying — open a PR to see it.
+  pull_request:
+
+# A newer push supersedes an in-flight run rather than racing it to the dyno.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: secretary
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/secretary
+      # The tests never call a provider — they stub the streams — but
+      # lib/openai.ts constructs its client at module load and the SDK THROWS
+      # on a missing key, so anything importing it would fail to import at all.
+      # A placeholder keeps that constructor happy without a real credential.
+      OPENAI_API_KEY: ci-placeholder-not-a-real-key
+      # Voice is disabled so nothing tries to open a realtime session.
+      VOICE_DISABLED: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - run: npm ci
+
+      # The repo has no migration files (drizzle-kit push only), so the test
+      # database is built from the schema exactly as local and Heroku are.
+      - name: Create the schema
+        run: npx drizzle-kit push --force
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Tests
+        run: npm test
+
+      # Catches what tsc cannot: a server-only import crossing into a client
+      # component. That shipped a broken build once already.
+      - name: Production build
+        run: npx next build
+
+  deploy:
+    needs: verify
+    runs-on: ubuntu-latest
+    # Only a real push to main, never a PR — and only once DEPLOY_ENABLED is
+    # set to "true" in the repo's Actions variables. That switch exists so this
+    # file can land and be exercised BEFORE Heroku is ready to receive it (its
+    # config vars and database still need work).
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      vars.DEPLOY_ENABLED == 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Heroku's git receiver needs real history, not a shallow clone.
+          fetch-depth: 0
+
+      - name: Push to Heroku
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+          HEROKU_APP: secretary-kiron
+        run: |
+          if [ -z "$HEROKU_API_KEY" ]; then
+            echo "HEROKU_API_KEY secret is not set — add it in repo Settings → Secrets → Actions"
+            exit 1
+          fi
+          git push --force \
+            "https://heroku:$HEROKU_API_KEY@git.heroku.com/$HEROKU_APP.git" \
+            HEAD:refs/heads/main
+
+      - name: Confirm the dyno came up
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: |
+          # A green deploy step only means the slug built. This asks Heroku what
+          # the dyno is actually doing, so a crash-loop fails the run instead of
+          # being reported as a success.
+          sleep 25
+          state=$(curl -sf -X GET "https://api.heroku.com/apps/secretary-kiron/dynos" \
+            -H "Accept: application/vnd.heroku+json; version=3" \
+            -H "Authorization: Bearer $HEROKU_API_KEY" \
+            | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[0]['state'] if d else 'none')")
+          echo "web dyno state: $state"
+          [ "$state" = "up" ] || [ "$state" = "starting" ] || {
+            echo "dyno is '$state' — check: heroku logs -a secretary-kiron"
+            exit 1
+          }
