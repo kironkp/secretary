@@ -155,17 +155,36 @@ commit. It is the tool for any future whole-database move (either direction —
 it is just `--from` and `--to`), and it refuses to run if the two schemas
 differ. It never runs on a schedule.
 
-A separate launchd job, `com.kironkp.secretary-nightly-push`, still runs
-`git push origin main` at 02:00. Harmless before; now that Heroku auto-deploys
-`main`, **a commit left on local `main` deploys overnight.** Keep unfinished
-work on a branch.
+### Pushing
+
+Every iteration ends in a push — to `main` (deploys) or to `test` (verified by
+CI, never deployed). `main` is the default when nothing is said. Both branches
+run the full check; only `main` reaches the dyno.
+
+The 02:00 launchd job `com.kironkp.secretary-nightly-push` that pushed `main`
+unattended is **unloaded and its plist renamed `.disabled`** (2026-09-15). With
+`main` auto-deploying, an unattended push is an unattended release. Pushes are
+deliberate now.
+
+### Config vars: `scripts/env-sync.ts`
+
+```
+npx tsx scripts/env-sync.ts          # report drift, names only, no writes
+npx tsx scripts/env-sync.ts --yes    # set the keys Heroku is missing
+```
+
+Do NOT copy `.env.local` up wholesale. `DATABASE_URL`, `BETTER_AUTH_URL`,
+`NEXT_PUBLIC_APP_URL`, `TRUSTED_ORIGINS`, `ON_HEROKU`, `PORT`, `NODE_ENV` are
+per-environment; sending the local `DATABASE_URL` would point the dyno at a
+laptop. The script refuses those outright, skips keys that are empty locally,
+adds `SHOP_DISABLED=true` (the Shop spawns processes a dyno does not have), and
+leaves any key that already exists on Heroku alone — including
+`BETTER_AUTH_SECRET`, which signs sessions and derives the at-rest key for
+connected-account secrets. Run the report whenever a key is added; `--overwrite`
+is a deliberate act, never a default.
 
 ### Still outstanding on Heroku
 
-- 10 config vars have local values but are not set there: `ANTHROPIC_API_KEY`,
-  `CLAUDE_BRAIN`, `ADAPTIVE_V2`, `ELEVENLABS_*`, `REALTIME_MODEL_*`, `VAPID_*`.
-  Until they are, every turn falls back to OpenAI and the dashboard renders the
-  old v0 layout. `SHOP_DISABLED=true` belongs in the same `config:set`.
 - The Shop and the sim harness spawn headless Claude Code against this checkout
   and cannot run on a dyno. They stay on the Mac and need to point at the
   Heroku database.

@@ -258,6 +258,9 @@ classifier will not let the agent write secrets.
    anyway; Heroku's `kolkrabbi` API shows the truth when the page does not.)*
 2. ~~`heroku pg:backups:capture -a secretary-kiron`~~ **Done: `b037`, 16:05.**
 3. **Add the missing config vars — the one step left, for Kiron:**
+   `npx tsx scripts/env-sync.ts --yes` (report first with no flag). It sets the
+   11 keys Heroku lacks, refuses the per-environment ones, and leaves
+   `BETTER_AUTH_SECRET` (which differs) alone. Equivalent by hand:
    `heroku config:set -a secretary-kiron SHOP_DISABLED=true $(grep -E '^(ADAPTIVE_V2|ANTHROPIC_API_KEY|CLAUDE_BRAIN|ELEVENLABS_API_KEY|ELEVENLABS_VOICE_ID|REALTIME_MODEL_DEFAULT|REALTIME_MODEL_MINI|VAPID_PRIVATE_KEY|VAPID_PUBLIC_KEY|VAPID_SUBJECT)=' .env.local | xargs)`
    (values checked: none contain spaces or quotes). Background: the app reads 39 distinct `process.env`
    keys; Heroku has 15. Diffed 2026-09-15: 16 are missing, of which **10 have

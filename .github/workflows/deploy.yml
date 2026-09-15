@@ -14,8 +14,8 @@ name: CI and deploy
 
 on:
   push:
-    branches: [main]
-  # Beta branches get the full check WITHOUT deploying — open a PR to see it.
+    # main deploys (Heroku waits on these checks); test is verified, never deployed.
+    branches: [main, test]
   pull_request:
 
 # A newer push supersedes an in-flight run rather than racing it to the dyno.
