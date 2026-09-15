@@ -13,3 +13,39 @@ Postgres running on postgresql://postgres:postgres@localhost:5432/secretary — 
 2026-09-15 13:24:52.727 PDT [65198] ERROR:  column "created_at" does not exist at character 32
 2026-09-15 13:24:52.727 PDT [65198] STATEMENT:  SELECT count(*)::int AS n, max(created_at) AS newest FROM "conversations"
 
+2026-09-15 13:29:43.388 PDT [65171] LOG:  checkpoint starting: time
+
+2026-09-15 13:29:43.393 PDT [65171] LOG:  checkpoint complete: wrote 0 buffers (0.0%), wrote 2 SLRU buffers; 0 WAL file(s) added, 0 removed, 0 recycled; write=0.002 s, sync=0.001 s, total=0.006 s; sync files=3, longest=0.001 s, average=0.001 s; distance=0 kB, estimate=0 kB; lsn=0/9198B00, redo lsn=0/9198AA8
+
+2026-09-15 13:45:06.185 PDT [67414] ERROR:  duplicate key value violates unique constraint "push_log_key_unique"
+2026-09-15 13:45:06.185 PDT [67414] DETAIL:  Key (key)=(test:test-push-ca1fd544-2f3e-416b-9f1a-9a98e6fc1da8:1789505106179) already exists.
+2026-09-15 13:45:06.185 PDT [67414] STATEMENT:  insert into "push_log" ("id", "user_id", "key", "sent_at") values ($1, $2, $3, default)
+
+2026-09-15 13:45:06.250 PDT [67416] ERROR:  duplicate key value violates unique constraint "push_log_key_unique"
+2026-09-15 13:45:06.250 PDT [67416] DETAIL:  Key (key)=(task:a5c0c7d6-e79c-49e2-842c-2a62ef749cf6:2026-09-15T20:43:06.188Z) already exists.
+2026-09-15 13:45:06.250 PDT [67416] STATEMENT:  insert into "push_log" ("id", "user_id", "key", "sent_at") values ($1, $2, $3, default)
+
+2026-09-15 13:45:06.330 PDT [67417] ERROR:  duplicate key value violates unique constraint "push_log_key_unique"
+2026-09-15 13:45:06.330 PDT [67417] DETAIL:  Key (key)=(task:a5c0c7d6-e79c-49e2-842c-2a62ef749cf6:2026-09-15T20:43:06.188Z) already exists.
+2026-09-15 13:45:06.330 PDT [67417] STATEMENT:  insert into "push_log" ("id", "user_id", "key", "sent_at") values ($1, $2, $3, default)
+
+2026-09-15 13:48:07.002 PDT [67759] ERROR:  duplicate key value violates unique constraint "push_log_key_unique"
+2026-09-15 13:48:07.002 PDT [67759] DETAIL:  Key (key)=(email:<2c8d4e83-310a-4b80-8c62-c2c27e244876@test>) already exists.
+2026-09-15 13:48:07.002 PDT [67759] STATEMENT:  insert into "push_log" ("id", "user_id", "key", "sent_at") values ($1, $2, $3, default)
+
+2026-09-15 13:48:09.766 PDT [67770] ERROR:  duplicate key value violates unique constraint "push_log_key_unique"
+2026-09-15 13:48:09.766 PDT [67770] DETAIL:  Key (key)=(test:test-push-58506e81-81ff-4c12-bce4-75f5c70eea56:1789505289762) already exists.
+2026-09-15 13:48:09.766 PDT [67770] STATEMENT:  insert into "push_log" ("id", "user_id", "key", "sent_at") values ($1, $2, $3, default)
+
+2026-09-15 13:48:09.815 PDT [67771] ERROR:  duplicate key value violates unique constraint "push_log_key_unique"
+2026-09-15 13:48:09.815 PDT [67771] DETAIL:  Key (key)=(task:4e4608ad-fac3-4b81-8534-4813f74c525e:2026-09-15T20:46:09.768Z) already exists.
+2026-09-15 13:48:09.815 PDT [67771] STATEMENT:  insert into "push_log" ("id", "user_id", "key", "sent_at") values ($1, $2, $3, default)
+
+2026-09-15 13:48:09.907 PDT [67772] ERROR:  duplicate key value violates unique constraint "push_log_key_unique"
+2026-09-15 13:48:09.907 PDT [67772] DETAIL:  Key (key)=(task:4e4608ad-fac3-4b81-8534-4813f74c525e:2026-09-15T20:46:09.768Z) already exists.
+2026-09-15 13:48:09.907 PDT [67772] STATEMENT:  insert into "push_log" ("id", "user_id", "key", "sent_at") values ($1, $2, $3, default)
+
+2026-09-15 13:49:43.446 PDT [65171] LOG:  checkpoint starting: time
+
+2026-09-15 13:50:01.050 PDT [65171] LOG:  checkpoint complete: wrote 174 buffers (1.1%), wrote 1 SLRU buffers; 0 WAL file(s) added, 0 removed, 0 recycled; write=17.595 s, sync=0.008 s, total=17.606 s; sync files=71, longest=0.001 s, average=0.001 s; distance=1159 kB, estimate=1159 kB; lsn=0/92BA800, redo lsn=0/92BA770
+

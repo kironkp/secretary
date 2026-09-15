@@ -218,17 +218,24 @@ https://secretary-kiron-606a3b1e1a65.herokuapp.com/  →  503
 ```
 
 `git cat-file -t 9701f7d9` → **`Not a valid object name`**. That commit is not in
-this repository. Heroku's **dashboard GitHub integration is still connected to
-`kironkp/personal-assistant`** — an unrelated January repo with no `start`
-script. It deployed itself this morning and has been 503 ever since.
+this repository. Heroku's dashboard GitHub integration deployed it from
+`kironkp/personal-assistant` — an unrelated January repo with no `start`
+script — at 09:58, and the app has been 503 ever since. At 10:03 the link was
+re-pointed at `kironkp/secretary` (auto-deploy off, so it never deployed
+anything), and at 13:45 it was **removed entirely** via Heroku's API
+(`DELETE https://kolkrabbi.heroku.com/apps/<app-id>/github`); the webhook it
+had installed on the repo went with it. Verified: the link endpoint now 404s
+and the repo has zero hooks. The dashboard cannot re-add it by accident.
 
 **Order of operations:**
 
-1. **Disconnect the dashboard integration** (Heroku → Deploy tab → Disconnect).
-   Until this is gone it will keep deploying the wrong repo over anything CI
-   pushes. *(Note: it loops on connect in Firefox — its OAuth needs cross-site
-   cookies that Enhanced Tracking Protection blocks. Use Safari or Chrome, or
-   disable ETP for the page.)*
+1. ~~**Disconnect the dashboard integration**~~ **Done 2026-09-15 13:45.**
+   Removed via the `kolkrabbi` API above, no browser involved. *(The dashboard
+   loops on connect in both Firefox and Safari — the GitHub OAuth popup needs a
+   cross-site cookie that Enhanced Tracking Protection and "Prevent cross-site
+   tracking" both block. The backend link was created anyway; only the page
+   never showed it. Chrome, or disabling the setting for the page, would show
+   it. Irrelevant now: deploys come from the workflow.)*
 2. `heroku pg:backups:capture -a secretary-kiron`
 3. **Add the ~16 missing config vars.** The app reads 34 distinct
    `process.env` keys; Heroku has 15. Missing ones include **`ANTHROPIC_API_KEY`**
@@ -243,7 +250,12 @@ script. It deployed itself this morning and has been 503 ever since.
    `drizzle-kit push --force`, which will not prompt.
 5. **Migrate local → Heroku once**, then never again in that direction.
 6. Set repo secret `HEROKU_API_KEY` and repo variable `DEPLOY_ENABLED=true`.
-   Only now is `.github/workflows/deploy.yml` allowed to fire.
+   Only now is `.github/workflows/deploy.yml` allowed to fire. *(2026-09-15:
+   the workflow's `verify` job had never passed — all four runs failed the
+   `Tests` step because CI set no `BETTER_AUTH_SECRET` and no VAPID pair; the
+   scanner short-circuits without one. Fixed in the workflow: placeholder
+   secret, throwaway VAPID pair generated per run. `next build` in CI has
+   therefore never run yet either; the next push is the first time it will.)*
 7. **Gate the Shop on Heroku.** `instrumentation.ts:15-18` calls `kickQueue()`
    every 60 s on every Node server; the Shop spawns `npx tsx`, `git worktree`
    and the `claude` CLI. Gate on capability, not on an env var someone has to

@@ -47,6 +47,9 @@ jobs:
       OPENAI_API_KEY: ci-placeholder-not-a-real-key
       # Voice is disabled so nothing tries to open a realtime session.
       VOICE_DISABLED: "true"
+      # lib/crypto.ts derives the at-rest key for connected-account secrets
+      # from this and throws without it; the encryption tests need any value.
+      BETTER_AUTH_SECRET: ci-placeholder-not-a-real-secret
     steps:
       - uses: actions/checkout@v4
 
@@ -56,6 +59,19 @@ jobs:
           cache: npm
 
       - run: npm ci
+
+      # scanDueReminders returns 0 before touching the database when the VAPID
+      # pair is missing, so the reminder tests silently claim nothing and fail.
+      # web-push validates the key format, so a placeholder string will not do:
+      # a throwaway pair is generated per run. It never signs a real push — the
+      # test user has no subscriptions.
+      - name: Generate throwaway VAPID keys
+        run: |
+          node -e '
+            const k = require("web-push").generateVAPIDKeys();
+            console.log("VAPID_PUBLIC_KEY=" + k.publicKey);
+            console.log("VAPID_PRIVATE_KEY=" + k.privateKey);
+          ' >> "$GITHUB_ENV"
 
       # The repo has no migration files (drizzle-kit push only), so the test
       # database is built from the schema exactly as local and Heroku are.

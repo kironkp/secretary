@@ -35,8 +35,18 @@ const trustedOrigins = (process.env.TRUSTED_ORIGINS ?? "")
   .map((s) => s.trim())
   .filter(Boolean);
 
+// Auth base URL: static when BETTER_AUTH_URL is set (Heroku); otherwise
+// resolved per request from the Host header so OAuth callbacks return to
+// whichever origin the user is on (localhost, the ts.net proxy, a cloudflare
+// tunnel) instead of hardcoding localhost. Hosts are allowlisted from
+// TRUSTED_ORIGINS; localhost:* also covers the sim harness's second server.
+const baseURL = process.env.BETTER_AUTH_URL ?? {
+  allowedHosts: ["localhost:*", ...trustedOrigins.map((u) => new URL(u).host)],
+  fallback: "http://localhost:3000",
+};
+
 export const auth = betterAuth({
-  baseURL: process.env.BETTER_AUTH_URL,
+  baseURL,
   secret: process.env.BETTER_AUTH_SECRET,
   ...(trustedOrigins.length ? { trustedOrigins } : {}),
   database: drizzleAdapter(db, { provider: "pg", schema }),

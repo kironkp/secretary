@@ -7,6 +7,42 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 ---
 
+## v0.11 — Deploys belong to the workflow (2026-09-15)
+
+this commit
+
+**Heroku's dashboard GitHub link is gone.** It had been re-pointed from
+`personal-assistant` to `secretary` at 10:03 (the browser looped on the OAuth
+popup in Firefox *and* Safari, but the backend link was created anyway — the
+page just never showed it). Auto-deploy was off, so it never deployed anything,
+but as long as it existed a stray "Deploy Branch" could race CI to the dyno.
+Removed at 13:45 via `DELETE kolkrabbi.heroku.com/apps/<id>/github`; the hook
+it had installed on the GitHub repo disappeared with it. `HANDOFF.md` step 1 is
+struck through.
+
+**CI had never gone green.** All four runs of `deploy.yml` failed at `Tests`:
+
+- `BETTER_AUTH_SECRET` was unset, so `lib/crypto.ts` threw in the three
+  connected-account encryption tests.
+- No VAPID pair, so `scanDueReminders` returned 0 before touching the
+  database and the just-due reminder test claimed nothing. `web-push` validates
+  key format, so a placeholder string is not enough; the workflow now generates
+  a throwaway pair per run and exports it through `$GITHUB_ENV`.
+
+Both reproduced locally by running the two files with `.env.local` masked and
+only CI's values present, and both pass with the fix. Because `Tests` sits
+before `Production build`, `next build` has never actually run in CI; the next
+push to `main` is its first outing.
+
+**Still gated.** `DEPLOY_ENABLED` is unset and `HEROKU_API_KEY` is not yet in
+the repo's secrets (the auto-mode classifier refuses secret-store writes, so
+that is a one-liner for Kiron). Until both are in, a push to `main` runs the
+checks and stops. Steps 2–5 of the handoff — backup, the sixteen config vars,
+reading the `drizzle-kit push` plan, the one-time data migration — are
+unchanged and still come first.
+
+---
+
 ## v0.10 — The flaw audit (2026-09-15)
 
 `57ac051` and this commit
