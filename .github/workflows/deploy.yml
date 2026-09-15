@@ -1,11 +1,12 @@
-# CI, then deploy to Heroku.
+# CI, and (dormant) deploy to Heroku.
 #
-# Replaces Heroku's dashboard GitHub integration, which loops on connect in
-# Firefox (its OAuth handshake needs cross-site cookies that Enhanced Tracking
-# Protection blocks) and which was pointed at the WRONG repository — it deployed
-# kironkp/personal-assistant, an unrelated January repo with no start script,
-# and crash-looped. Deploying from here is version-controlled, needs no browser,
-# and can gate on tests.
+# The `verify` job is the GitHub check that Heroku's dashboard integration
+# waits on before it auto-deploys `main` ("Wait for GitHub checks to pass").
+# The `deploy` job is an alternative deployer kept behind DEPLOY_ENABLED; it
+# must stay off while the dashboard integration exists, or both push the same
+# commit and race to the dyno. History: the dashboard link was once pointed at
+# kironkp/personal-assistant, an unrelated repo with no start script, which
+# crash-looped production — if a release looks alien, check the Deploy tab.
 #
 # The gate matters more than usual now that Heroku is the source of truth: a bad
 # push must not reach a production database you depend on.

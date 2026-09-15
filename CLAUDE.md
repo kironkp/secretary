@@ -25,8 +25,10 @@ tap target** sitting on a `data-link` row, so a near-miss navigates away.
 automation available. Verify before building.
 
 **Heroku is the source of truth as of 2026-09-15.** The Mac is for development
-and beta testing only; nothing in the local database is authoritative. Deploys
-run from `.github/workflows/deploy.yml`, not Heroku's dashboard integration. The
+and beta testing only; nothing in the local database is authoritative. CI runs
+in `.github/workflows/deploy.yml`; Heroku's dashboard integration deploys
+`main` once those checks pass, and the workflow's own deploy job stays gated
+off so there is exactly one deployer. The
 3:00 AM `com.secretary.dailysync` job overwrote Heroku from local and is
 DISABLED — re-enabling it would destroy production nightly. See the README's
 Deployment section for what still has to happen before Heroku can take over.

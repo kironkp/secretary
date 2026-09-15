@@ -222,40 +222,64 @@ this repository. Heroku's dashboard GitHub integration deployed it from
 `kironkp/personal-assistant` — an unrelated January repo with no `start`
 script — at 09:58, and the app has been 503 ever since. At 10:03 the link was
 re-pointed at `kironkp/secretary` (auto-deploy off, so it never deployed
-anything), and at 13:45 it was **removed entirely** via Heroku's API
-(`DELETE https://kolkrabbi.heroku.com/apps/<app-id>/github`); the webhook it
-had installed on the repo went with it. Verified: the link endpoint now 404s
-and the repo has zero hooks. The dashboard cannot re-add it by accident.
+anything), and at 13:45 it was removed via Heroku's API
+(`DELETE https://kolkrabbi.heroku.com/apps/<app-id>/github`). At 15:20 Kiron
+re-created it from the dashboard, pointed at `kironkp/secretary` `main` with
+**automatic deploys ON**. That is now the deploy path: the workflow verifies,
+the dashboard deploys once GitHub checks pass. Until "Wait for GitHub checks"
+is ticked it deploys every push to `main` immediately, tests or not.
+
+**Update 15:45:** v9 (`5d0549c`) auto-deployed at 15:28 and the dyno is up,
+but **sign-in 500s** — `column "calm_mode" does not exist`. The release phase
+ran and applied nothing: `drizzle-kit push` tried to `DROP VIEW` the two
+`pg_stat_statements` views Heroku's extension owns, Postgres refused, and
+drizzle-kit exited 0 regardless. Fixed by `tablesFilter` in
+`drizzle.config.ts` (see step 4); the next deploy migrates the schema.
 
 **Order of operations:**
 
-1. ~~**Disconnect the dashboard integration**~~ **Done 2026-09-15 13:45.**
-   Removed via the `kolkrabbi` API above, no browser involved. *(The dashboard
-   loops on connect in both Firefox and Safari — the GitHub OAuth popup needs a
-   cross-site cookie that Enhanced Tracking Protection and "Prevent cross-site
-   tracking" both block. The backend link was created anyway; only the page
-   never showed it. Chrome, or disabling the setting for the page, would show
-   it. Irrelevant now: deploys come from the workflow.)*
+1. ~~**Disconnect the dashboard integration**~~ **Superseded 2026-09-15.**
+   It was removed at 13:45 and deliberately re-created at 15:20 pointing at
+   the right repo. Decision: **the dashboard integration deploys; the workflow
+   is the CI it waits on.** Two things follow. (a) "Wait for GitHub checks to
+   pass before deploy" must be ticked, or every push to `main` deploys with no
+   gate. (b) `DEPLOY_ENABLED` must stay unset, or the workflow's own deploy job
+   and the dashboard both push the same commit and race to the dyno. *(The
+   dashboard's connect popup loops in Firefox and Safari — it needs a
+   cross-site cookie both browsers block — but the backend link is created
+   anyway; Heroku's `kolkrabbi` API shows the truth when the page does not.)*
 2. `heroku pg:backups:capture -a secretary-kiron`
-3. **Add the ~16 missing config vars.** The app reads 34 distinct
-   `process.env` keys; Heroku has 15. Missing ones include **`ANTHROPIC_API_KEY`**
-   (the brain — without it `anthropicFor` returns null and every turn silently
-   falls back to OpenAI), `CLAUDE_BRAIN`, `ADAPTIVE_V2` (without it the dashboard
-   silently renders the old v0 layout), `VAPID_*`, `INBOUND_EMAIL_*`. Generate
-   the list mechanically:
+3. **Add the missing config vars.** The app reads 39 distinct `process.env`
+   keys; Heroku has 15. Diffed 2026-09-15: 16 are missing, of which **10 have
+   values in `.env.local`** — `ANTHROPIC_API_KEY` (the brain — without it
+   `anthropicFor` returns null and every turn silently falls back to OpenAI),
+   `CLAUDE_BRAIN`, `ADAPTIVE_V2` (without it the dashboard silently renders
+   the old v0 layout), `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`,
+   `REALTIME_MODEL_DEFAULT`, `REALTIME_MODEL_MINI`, `VAPID_PUBLIC_KEY`,
+   `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` — and 6 are empty locally too
+   (`APPLE_CLIENT_ID/SECRET`, the four `INBOUND_EMAIL_*`), so nothing to copy. Add
+   **`SHOP_DISABLED=true`** at the same time: it is the kill switch
+   `lib/shop/shop.ts:56` already honours, and covers step 7 without new code.
+   Regenerate the list mechanically:
    `/usr/bin/grep -rho 'process\.env\.[A-Z0-9_]*' app lib components | sort -u`
-4. **Run `npx drizzle-kit push` against Heroku interactively once and read the
-   plan.** Its database is 16 tables against 29 in the schema and holds August
-   data (25 tasks vs 102 local). The Procfile release phase runs
-   `drizzle-kit push --force`, which will not prompt.
+4. ~~Run `npx drizzle-kit push` against Heroku interactively once and read the
+   plan.~~ **Read offline 2026-09-15** (see LOGBOOK v0.11): against Heroku's
+   exact schema the plan is 13 `CREATE TABLE`, 18 `ADD COLUMN` (every NOT
+   NULL one has a DEFAULT), 2 indexes, 16 FKs, and nothing dropped or
+   retyped. Additive; safe on populated tables. What was NOT safe was the
+   release phase itself: without `tablesFilter` in `drizzle.config.ts`,
+   `push` tries to drop Heroku's `pg_stat_statements` views, fails, and
+   applies nothing — which is why v9 came up with 16 tables and a 500 on
+   sign-in. The filter is in; the next deploy is the migration.
 5. **Migrate local → Heroku once**, then never again in that direction.
-6. Set repo secret `HEROKU_API_KEY` and repo variable `DEPLOY_ENABLED=true`.
-   Only now is `.github/workflows/deploy.yml` allowed to fire. *(2026-09-15:
-   the workflow's `verify` job had never passed — all four runs failed the
-   `Tests` step because CI set no `BETTER_AUTH_SECRET` and no VAPID pair; the
-   scanner short-circuits without one. Fixed in the workflow: placeholder
-   secret, throwaway VAPID pair generated per run. `next build` in CI has
-   therefore never run yet either; the next push is the first time it will.)*
+6. ~~Set repo secret `HEROKU_API_KEY` and repo variable `DEPLOY_ENABLED=true`.~~
+   **Not needed while the dashboard deploys** — leave both unset (see step 1).
+   What *is* needed: the workflow's `verify` job must be green, because that is
+   the check the dashboard waits on. *(2026-09-15: it had never passed — all
+   four runs failed `Tests` because CI set no `BETTER_AUTH_SECRET` and no
+   VAPID pair; the scanner short-circuits without one. Fixed in the workflow:
+   placeholder secret, throwaway VAPID pair generated per run. `next build` in
+   CI has therefore never run yet either; the next push is the first time.)*
 7. **Gate the Shop on Heroku.** `instrumentation.ts:15-18` calls `kickQueue()`
    every 60 s on every Node server; the Shop spawns `npx tsx`, `git worktree`
    and the `claude` CLI. Gate on capability, not on an env var someone has to

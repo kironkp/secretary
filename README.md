@@ -125,14 +125,18 @@ is the app you use. The Mac is for development and beta testing only; its
 database is a scratch copy and nothing there is authoritative.
 
 - Code: private GitHub repo (`kironkp/secretary`).
-- Deploys run from `.github/workflows/deploy.yml` on push to `main`: CI first
-  (Postgres service, schema push, tsc, lint, tests, production build), then a
-  push to the Heroku git remote. Gated on the repo variable
-  `DEPLOY_ENABLED == "true"` and the `HEROKU_API_KEY` secret.
-- Do NOT use Heroku's dashboard GitHub integration. It loops on connect in
-  Firefox (its OAuth needs cross-site cookies that Enhanced Tracking Protection
-  blocks) and it had been connected to the wrong repository
-  (`kironkp/personal-assistant`), which crash-looped on a missing start script.
+- CI runs from `.github/workflows/deploy.yml` on every push and PR: Postgres
+  service, schema push, tsc, lint, tests, production build.
+- Heroku's dashboard GitHub integration deploys `main` automatically once
+  those checks pass ("Wait for GitHub checks to pass before deploy" must stay
+  ticked). It is connected to `kironkp/secretary`; it was once pointed at the
+  wrong repo (`kironkp/personal-assistant`, no start script, crash-loop), so
+  check the Deploy tab if a release looks alien.
+- The workflow also carries a dormant deploy job. Leave `DEPLOY_ENABLED` and
+  `HEROKU_API_KEY` unset while the dashboard deploys, or the two race.
+- The dashboard's GitHub connect popup loops in Firefox and Safari (it needs a
+  cross-site cookie both block by default). The link is usually created
+  anyway; Heroku's API shows it even when the page does not.
 - Pull requests run the full CI without deploying, so a beta branch is checked
   before it ever reaches `main`.
 - Heroku-side Postgres backups: `heroku pg:backups -a secretary-kiron`.

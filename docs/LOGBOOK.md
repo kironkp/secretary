@@ -7,18 +7,19 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 ---
 
-## v0.11 — Deploys belong to the workflow (2026-09-15)
+## v0.11 — One deployer, CI that runs, a release phase that applies (2026-09-15)
 
-this commit
+`5d0549c` (committed as "test line", pushed 15:18) and this commit
 
-**Heroku's dashboard GitHub link is gone.** It had been re-pointed from
-`personal-assistant` to `secretary` at 10:03 (the browser looped on the OAuth
-popup in Firefox *and* Safari, but the backend link was created anyway — the
-page just never showed it). Auto-deploy was off, so it never deployed anything,
-but as long as it existed a stray "Deploy Branch" could race CI to the dyno.
-Removed at 13:45 via `DELETE kolkrabbi.heroku.com/apps/<id>/github`; the hook
-it had installed on the GitHub repo disappeared with it. `HANDOFF.md` step 1 is
-struck through.
+**The dashboard GitHub integration is the deployer; the workflow is its CI.**
+The link had been re-pointed from `personal-assistant` to `secretary` at 10:03
+(the OAuth popup loops in Firefox *and* Safari, but the backend link is created
+anyway — the page just never shows it). It was removed at 13:45 via
+`DELETE kolkrabbi.heroku.com/apps/<id>/github`, then Kiron re-created it at
+15:20 with automatic deploys on. Fine — but only one thing may deploy, so the
+workflow's deploy job stays gated off (`DEPLOY_ENABLED` unset, no
+`HEROKU_API_KEY`), and "Wait for GitHub checks" has to be ticked or the
+dashboard deploys unverified pushes. README, CLAUDE.md and the handoff say so.
 
 **CI had never gone green.** All four runs of `deploy.yml` failed at `Tests`:
 
@@ -30,16 +31,38 @@ struck through.
   a throwaway pair per run and exports it through `$GITHUB_ENV`.
 
 Both reproduced locally by running the two files with `.env.local` masked and
-only CI's values present, and both pass with the fix. Because `Tests` sits
-before `Production build`, `next build` has never actually run in CI; the next
-push to `main` is its first outing.
+only CI's values present, and both pass with the fix. Run 35030287366 on
+`5d0549c` is the first green run — and the first time `next build` ran in CI.
 
-**Still gated.** `DEPLOY_ENABLED` is unset and `HEROKU_API_KEY` is not yet in
-the repo's secrets (the auto-mode classifier refuses secret-store writes, so
-that is a one-liner for Kiron). Until both are in, a push to `main` runs the
-checks and stops. Steps 2–5 of the handoff — backup, the sixteen config vars,
-reading the `drizzle-kit push` plan, the one-time data migration — are
-unchanged and still come first.
+**Heroku auto-deployed that commit (v9, 15:28) and the release phase did
+nothing.** The dyno is up and `/` answers, but every sign-in 500s:
+`column "calm_mode" does not exist`. `heroku releases:output v9` shows why:
+`drizzle-kit push` introspected the two views Heroku's `pg_stat_statements`
+extension keeps in `public`, found them absent from the schema, emitted
+`DROP VIEW`, and Postgres refused (`extension pg_stat_statements requires it`).
+drizzle-kit exited 0 anyway, so Heroku called the release good. The database
+stayed at 16 tables. Fix: `tablesFilter: ["!pg_stat_statements",
+"!pg_stat_statements_info"]` in `drizzle.config.ts` — drizzle-kit 0.31 applies
+that filter to views as well as tables (`bin.cjs:18114`).
+
+Verified three ways on a scratch database, never against production:
+
+- Two dummy views with those names: the old config drops them, the new one
+  leaves them and creates all 29 tables; a second run reports no changes.
+- **The release-phase plan, dry-run against Heroku's exact schema** (the
+  Aug 12 deploy `b741ed18`: 16 tables, no `calm_mode`) plus the two views:
+  13 `CREATE TABLE`, 18 `ADD COLUMN`, 2 indexes, 16 foreign keys, and **no
+  DROP, no type change, no NOT NULL without a DEFAULT**. It is additive; it
+  will apply to populated tables. That is handoff step 4, done offline.
+
+**Data, for the record.** The nightly local → Heroku sync last succeeded on
+2026-08-18 and has failed 28 nights running since 2026-08-19 (`column
+"calm_mode" of relation "user" does not exist` — local grew a column Heroku
+never got, because nothing was deployed after 2026-08-12). So Heroku holds
+local's data as of August 18 for 16 of 29 tables; local has 102 tasks, newest
+2026-09-10, across 29 tables. Steps 2–5 of the handoff — backup, the sixteen
+config vars, reading the `drizzle-kit push` plan, the one-time migration —
+still come before the first automatic deploy is allowed to land.
 
 ---
 
