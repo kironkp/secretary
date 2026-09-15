@@ -1,5 +1,32 @@
 # secretary
 
+## READ FIRST (2026-09-15 handoff)
+
+1. `docs/HANDOFF.md` — what is genuinely broken, ranked, and what to do first.
+   The user's own verdict on this build: **"the flaws are horrendous, canvas is
+   virtually unusable."** Take that at face value; do not defend the code.
+2. `docs/LOGBOOK.md` — what changed this session and why, per version.
+3. This file — the standing rules below still hold.
+
+**Do not start new features until the Canvas is genuinely usable.** The canvas
+checkbox alone took four attempts and was still reported broken. Three real
+causes were found and fixed, but **none of it was ever verified in a real
+browser** — there was no browser automation available. Verify before building.
+
+**Heroku is the source of truth as of 2026-09-15.** The Mac is for development
+and beta testing only; nothing in the local database is authoritative. Deploys
+run from `.github/workflows/deploy.yml`, not Heroku's dashboard integration. The
+3:00 AM `com.secretary.dailysync` job overwrote Heroku from local and is
+DISABLED — re-enabling it would destroy production nightly. See the README's
+Deployment section for what still has to happen before Heroku can take over.
+
+**The Canvas target is the `canvas-board` design artifact**, which the user
+endorsed. Its thesis: *"Stop painting one picture. Start arranging a board of
+things. The shell owns the frame — position, size, order, type scale, every
+animation. The model owns the fill."* Judge the Canvas against that, not against
+whether the code runs.
+
+
 ## North star: JARVIS
 - The goal is ONE persistent intelligent system you talk to — it knows the
   user's information, can act on it, and fluidly manipulates a visual
