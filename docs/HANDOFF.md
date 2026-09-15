@@ -236,6 +236,14 @@ ran and applied nothing: `drizzle-kit push` tried to `DROP VIEW` the two
 drizzle-kit exited 0 regardless. Fixed by `tablesFilter` in
 `drizzle.config.ts` (see step 4); the next deploy migrates the schema.
 
+**Update 16:10 — cutover done.** v10 (`cf23263`) applied the schema
+(`Changes applied`, 29 tables). Backup `b037` taken. Then
+`scripts/copy-db.ts` copied **1,993 rows across all 29 tables** from local
+into Heroku in one transaction, counts verified before commit. The site serves
+`/sign-in` with 200 and the log is clean. Heroku now holds everything the Mac
+had as of 16:07 PDT. Only step 3 (config vars) remains, and only because the
+classifier will not let the agent write secrets.
+
 **Order of operations:**
 
 1. ~~**Disconnect the dashboard integration**~~ **Superseded 2026-09-15.**
@@ -248,8 +256,10 @@ drizzle-kit exited 0 regardless. Fixed by `tablesFilter` in
    dashboard's connect popup loops in Firefox and Safari — it needs a
    cross-site cookie both browsers block — but the backend link is created
    anyway; Heroku's `kolkrabbi` API shows the truth when the page does not.)*
-2. `heroku pg:backups:capture -a secretary-kiron`
-3. **Add the missing config vars.** The app reads 39 distinct `process.env`
+2. ~~`heroku pg:backups:capture -a secretary-kiron`~~ **Done: `b037`, 16:05.**
+3. **Add the missing config vars — the one step left, for Kiron:**
+   `heroku config:set -a secretary-kiron SHOP_DISABLED=true $(grep -E '^(ADAPTIVE_V2|ANTHROPIC_API_KEY|CLAUDE_BRAIN|ELEVENLABS_API_KEY|ELEVENLABS_VOICE_ID|REALTIME_MODEL_DEFAULT|REALTIME_MODEL_MINI|VAPID_PRIVATE_KEY|VAPID_PUBLIC_KEY|VAPID_SUBJECT)=' .env.local | xargs)`
+   (values checked: none contain spaces or quotes). Background: the app reads 39 distinct `process.env`
    keys; Heroku has 15. Diffed 2026-09-15: 16 are missing, of which **10 have
    values in `.env.local`** — `ANTHROPIC_API_KEY` (the brain — without it
    `anthropicFor` returns null and every turn silently falls back to OpenAI),
@@ -271,7 +281,9 @@ drizzle-kit exited 0 regardless. Fixed by `tablesFilter` in
    `push` tries to drop Heroku's `pg_stat_statements` views, fails, and
    applies nothing — which is why v9 came up with 16 tables and a 500 on
    sign-in. The filter is in; the next deploy is the migration.
-5. **Migrate local → Heroku once**, then never again in that direction.
+5. ~~**Migrate local → Heroku once**, then never again in that direction.~~
+   **Done 16:07** with `scripts/copy-db.ts` (see LOGBOOK v0.11). Never again
+   in that direction: `sync-to-heroku.mjs` is deleted.
 6. ~~Set repo secret `HEROKU_API_KEY` and repo variable `DEPLOY_ENABLED=true`.~~
    **Not needed while the dashboard deploys** — leave both unset (see step 1).
    What *is* needed: the workflow's `verify` job must be green, because that is
@@ -280,7 +292,9 @@ drizzle-kit exited 0 regardless. Fixed by `tablesFilter` in
    VAPID pair; the scanner short-circuits without one. Fixed in the workflow:
    placeholder secret, throwaway VAPID pair generated per run. `next build` in
    CI has therefore never run yet either; the next push is the first time.)*
-7. **Gate the Shop on Heroku.** `instrumentation.ts:15-18` calls `kickQueue()`
+7. **Gate the Shop on Heroku.** Covered by `SHOP_DISABLED=true` in the step 3
+   one-liner (`lib/shop/shop.ts:56` honours it). The capability gate below is
+   still the better long-term shape. `instrumentation.ts:15-18` calls `kickQueue()`
    every 60 s on every Node server; the Shop spawns `npx tsx`, `git worktree`
    and the `claude` CLI. Gate on capability, not on an env var someone has to
    remember: `if (process.env.ON_HEROKU || !existsSync('.git')) return`.
@@ -289,6 +303,11 @@ drizzle-kit exited 0 regardless. Fixed by `tablesFilter` in
    `curl` a real `/api/health`.
 
 ### The backup and sync scripts are lying to you
+
+*(2026-09-15 16:10: `sync-to-heroku.mjs` is deleted; `scripts/copy-db.ts`
+replaces it — every table from `information_schema`, FK order from
+`pg_constraint`, one transaction, count-verified, refuses on schema drift,
+never scheduled. The analysis below is kept as the record of why.)*
 
 `scripts/sync-to-heroku.mjs` claims a "JSON snapshot of every table" (`:5`) but
 hardcodes **16 of the 29** tables (`:25-41`). The 13 omitted include:

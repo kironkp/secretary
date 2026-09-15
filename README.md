@@ -141,26 +141,33 @@ database is a scratch copy and nothing there is authoritative.
   before it ever reaches `main`.
 - Heroku-side Postgres backups: `heroku pg:backups -a secretary-kiron`.
 
-### The 3:00 AM sync is DISABLED and must stay that way
+### The nightly local → Heroku sync is gone
 
-`scripts/sync-to-heroku.mjs` copies **local → Heroku, overwriting Heroku**. That
-was correct when local was truth. It is now destructive: it would wipe a day of
-production every night. The launchd job `com.secretary.dailysync` is unloaded
-and its plist renamed `.disabled`. Do not re-enable it. If a
-Heroku → local direction is wanted for beta data, that is a different script
-and has not been written.
+`scripts/sync-to-heroku.mjs` copied local over Heroku every night (16 of 29
+tables, and it had failed silently since 2026-08-19). It is deleted. The launchd
+job `com.secretary.dailysync` that ran it stays unloaded, plist renamed
+`.disabled`. Do not resurrect either: Heroku is the truth now, and a copy in
+that direction would wipe a day of production.
 
-### Outstanding before Heroku can actually take over
+The one-time cutover copy ran on 2026-09-15 with `scripts/copy-db.ts`: every
+public table, foreign-key order, one transaction, counts verified before
+commit. It is the tool for any future whole-database move (either direction —
+it is just `--from` and `--to`), and it refuses to run if the two schemas
+differ. It never runs on a schedule.
 
-- 16 config vars are missing there, including `ANTHROPIC_API_KEY`,
-  `CLAUDE_BRAIN`, `ADAPTIVE_V2`, `VAPID_*` and `INBOUND_EMAIL_*`. Without
-  `ADAPTIVE_V2` the dashboard silently falls back to the old v0 renderer.
-- Its database holds **August** data (25 tasks against 102 locally). A one-time
-  local → Heroku migration is needed, then never again.
-- The first real deploy carries two schema migrations via the Procfile release
-  phase. Take a backup first.
+A separate launchd job, `com.kironkp.secretary-nightly-push`, still runs
+`git push origin main` at 02:00. Harmless before; now that Heroku auto-deploys
+`main`, **a commit left on local `main` deploys overnight.** Keep unfinished
+work on a branch.
+
+### Still outstanding on Heroku
+
+- 10 config vars have local values but are not set there: `ANTHROPIC_API_KEY`,
+  `CLAUDE_BRAIN`, `ADAPTIVE_V2`, `ELEVENLABS_*`, `REALTIME_MODEL_*`, `VAPID_*`.
+  Until they are, every turn falls back to OpenAI and the dashboard renders the
+  old v0 layout. `SHOP_DISABLED=true` belongs in the same `config:set`.
 - The Shop and the sim harness spawn headless Claude Code against this checkout
-  and cannot run on a dyno. They stay on the Mac and will need to point at the
+  and cannot run on a dyno. They stay on the Mac and need to point at the
   Heroku database.
 
 ## Tests

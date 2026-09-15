@@ -55,6 +55,24 @@ Verified three ways on a scratch database, never against production:
   DROP, no type change, no NOT NULL without a DEFAULT**. It is additive; it
   will apply to populated tables. That is handoff step 4, done offline.
 
+**The cutover itself.** `cf23263` pushed 15:59, CI green 16:02, v10 live and
+`Changes applied` by 16:04 — Heroku at 29 tables. Backup `b037` at 16:05. Then
+the new `scripts/copy-db.ts` — every public table from `information_schema`,
+insertion order from the target's own `pg_constraint`, self-references in
+waves, every value read as text and written back with an explicit cast, one
+transaction with counts verified before COMMIT, and a refusal if the two
+schemas differ — copied **1,993 rows across 29 tables** into Heroku at 16:07.
+Rehearsed first local → scratch: counts matched, a column-order-independent
+content hash (`row_to_json → jsonb`) matched on all 29 tables, the abort path
+left a target untouched when a table was missing, and a second run was
+idempotent. `sync-to-heroku.mjs` is deleted. Config vars are still Kiron's
+one-liner (the classifier refuses secret writes); until then the brain falls
+back to OpenAI and the dashboard is v0, but the app is up with all the data.
+
+One consequence to know about: the 02:00 launchd job
+`com.kironkp.secretary-nightly-push` runs `git push origin main`, and `main`
+now auto-deploys. A commit left on local `main` ships overnight.
+
 **Data, for the record.** The nightly local → Heroku sync last succeeded on
 2026-08-18 and has failed 28 nights running since 2026-08-19 (`column
 "calm_mode" of relation "user" does not exist` — local grew a column Heroku
