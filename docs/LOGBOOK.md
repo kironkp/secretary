@@ -7,6 +7,27 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 ---
 
+## v0.12 — The agent guide (2026-09-16)
+
+this commit
+
+Documentation only. `docs/secretary-agent-guide.md` is the first canonical
+guide to what Secretary is meant to be and what the repository actually
+holds: mission and JARVIS-as-the-bar, the persona as the code enforces it,
+where live data lives and how it is read, a Project Intelligence contract
+(durable per-project record with attempts and a resume pointer — designed
+here, not yet in the schema, with an interim `memories` tagging convention),
+answer patterns for the four core questions, Canvas rules against the
+unfixed defect list, approval and truthfulness policy, delegation, runtime
+boundaries, and a draft OpenClaw configuration that names the agent
+Secretary and is explicitly not created. Every state claim carries evidence
+from four read-only surveys of the tree at `70df98d`; all 29 cited commits
+and all cited paths were checked to exist. Also recorded: v13 (2026-09-16)
+set the eleven config vars including `ADAPTIVE_V2` and `SHOP_DISABLED`, so
+the adaptive dashboard is live on Heroku for the first time.
+
+---
+
 ## v0.11 — One deployer, CI that runs, a release phase that applies (2026-09-15)
 
 `5d0549c` (committed as "test line", pushed 15:18) and this commit

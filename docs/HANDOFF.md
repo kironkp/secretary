@@ -489,6 +489,9 @@ and destroys nothing.
 
 ## What to read next
 
+- `docs/secretary-agent-guide.md` — the canonical guide: mission, project
+  intelligence contract, behaviour rules, and an evidence index of what is
+  designed vs implemented vs verified (2026-09-16)
 - `docs/LOGBOOK.md` — what changed this session, per version, with commit hashes
 - `CLAUDE.md` — the standing rules and the JARVIS north star
 - The `canvas-board` design artifact — the endorsed target for the Canvas
