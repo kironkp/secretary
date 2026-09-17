@@ -99,3 +99,16 @@ whether the code runs.
   replacement completes, and a failed generation leaves it untouched.
 - Full spec: docs/adaptive-ui/SPEC.md — source of truth. To change behavior,
   update the spec first, then the code.
+
+## The Workspace (proposed, not built)
+- `docs/workspace/SPEC.md` is the plan for the surface that replaces the Canvas:
+  a board of draggable, resizable widgets bound to LIVE data, driven equally by
+  voice and touch. The Canvas stays on its own tab, untouched, until it wins.
+- The decision that makes it possible: **widgets render inline in the app
+  document, not one iframe per widget.** Nearly every Canvas defect — no drag,
+  the measure loop, remount-on-reorder, the tap delay, whole-canvas repaints —
+  follows from the iframe. Inline rendering makes the sanitizer the whole
+  security boundary; §7 of that spec is therefore binding, not advisory.
+- The model authors markup carrying binding attributes; the query itself is a
+  validated object on the widget, never in the markup. Still no component
+  registry, still no `if type === …` tree.

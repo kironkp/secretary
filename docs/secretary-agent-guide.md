@@ -413,6 +413,11 @@ the flaw audit (`docs/HANDOFF.md`, `5ea38b5`) is still present:
 The user's verdict, recorded in `CLAUDE.md`: *"the flaws are horrendous,
 canvas is virtually unusable."* This guide takes that at face value.
 
+*Direction of travel:* `docs/workspace/SPEC.md` (proposed 2026-09-17) plans a
+successor surface — a board of draggable, resizable widgets bound to live data —
+on the finding that the defects above follow from one iframe per block. Until it
+ships, everything below governs the Canvas as it stands.
+
 ### 7.4 Rules for Secretary on the Canvas
 
 - **Changing what is on the canvas is `edit_canvas`, never `paint_canvas`.**
