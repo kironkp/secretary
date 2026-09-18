@@ -14,14 +14,13 @@ import type { FullConfig } from "@playwright/test";
 import { Client } from "pg";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { STORAGE_STATE } from "./paths";
 
 export const TEST_USER = {
   email: "e2e@secretary.test",
   password: "e2e-password-not-a-secret",
   name: "E2E Tester",
 };
-
-const STATE_PATH = "e2e/.auth/user.json";
 
 type StateCookie = {
   name: string;
@@ -149,7 +148,10 @@ export default async function globalSetup(config: FullConfig) {
     );
   }
 
-  mkdirSync(dirname(STATE_PATH), { recursive: true });
-  writeFileSync(STATE_PATH, JSON.stringify({ cookies, origins: [] }, null, 2));
-  console.log(`[e2e] signed in as ${TEST_USER.email} (${cookies.length} cookie(s) saved)`);
+  mkdirSync(dirname(STORAGE_STATE), { recursive: true });
+  writeFileSync(STORAGE_STATE, JSON.stringify({ cookies, origins: [] }, null, 2));
+  console.log(
+    `[e2e] signed in as ${TEST_USER.email}: ` +
+      `${cookies.map((c) => c.name).join(", ")} -> ${STORAGE_STATE}`
+  );
 }

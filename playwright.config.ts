@@ -13,6 +13,7 @@
 // the point: the iOS tap delay and Safari's hit-testing do not reproduce in
 // Chromium, and that is precisely why four rounds of Canvas fixes missed them.
 import { defineConfig, devices } from "@playwright/test";
+import { STORAGE_STATE } from "./e2e/paths";
 
 const PORT = Number(process.env.E2E_PORT ?? 3000);
 // `localhost`, not 127.0.0.1: lib/auth.ts allowlists hosts as `localhost:*`
@@ -35,7 +36,7 @@ export default defineConfig({
 
   use: {
     baseURL: BASE_URL,
-    storageState: "e2e/.auth/user.json",
+    storageState: STORAGE_STATE,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     video: "off",

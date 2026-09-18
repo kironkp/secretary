@@ -4,6 +4,16 @@
 import { test, expect } from "@playwright/test";
 
 test.describe("signed in, on a phone", () => {
+  // If the saved session did not survive into the browser context, every test
+  // below fails as a redirect and reads like an app bug. Say so once, here.
+  test.beforeEach(async ({ context }) => {
+    const jar = await context.cookies();
+    expect(
+      jar.map((c) => c.name),
+      "the browser context carries no cookies: global setup's storage state did not load"
+    ).toContain("better-auth.session_token");
+  });
+
   test("the dashboard renders", async ({ page }) => {
     await page.goto("/dashboard");
     // Not a redirect back to sign-in: the saved session is real.
