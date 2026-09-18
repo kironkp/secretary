@@ -18,6 +18,9 @@ async function boxOf(page: Page, id: string) {
 /** Drag by the handle, in steps, so the pointer move is real rather than a jump. */
 async function dragBy(page: Page, id: string, dx: number, dy: number) {
   const handle = page.locator(`[data-drag-handle="${id}"]`);
+  // A widget pushed below the fold by an earlier test would otherwise be
+  // dragged from coordinates outside the viewport, and the gesture goes nowhere.
+  await handle.scrollIntoViewIfNeeded();
   const h = await handle.boundingBox();
   if (!h) throw new Error(`no handle for ${id}`);
   const from = { x: h.x + h.width / 2, y: h.y + h.height / 2 };
@@ -30,6 +33,11 @@ async function dragBy(page: Page, id: string, dx: number, dy: number) {
 }
 
 test.beforeEach(async ({ page }) => {
+  // Every test starts from a packed board. These specs share one board and one
+  // database, so without this each drag leaves the next test's widget lower
+  // than the last — which is exactly how "undo puts it back" passed on one
+  // branch and failed on another from the identical commit.
+  await page.request.post("/api/workspace", { data: { operations: [{ op: "tidy" }] } });
   await page.goto("/workspace");
   await expect(board(page)).toBeVisible();
 });
