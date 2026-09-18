@@ -39,7 +39,7 @@ async function withDb<T>(fn: (c: Client) => Promise<T>): Promise<T> {
 }
 
 export default async function globalSetup(config: FullConfig) {
-  const baseURL = config.projects[0]?.use?.baseURL ?? "http://127.0.0.1:3000";
+  const baseURL = config.projects[0]?.use?.baseURL ?? "http://localhost:3000";
 
   // Idempotent: a re-run must not trip the unique email constraint. The cascade
   // takes the user's sessions, accounts and any rows a previous run created.
@@ -47,9 +47,13 @@ export default async function globalSetup(config: FullConfig) {
     await c.query('DELETE FROM "user" WHERE email = $1', [TEST_USER.email]);
   });
 
+  // Better Auth rejects a state-changing POST with no Origin
+  // (MISSING_OR_NULL_ORIGIN) — a browser always sends one, Node's fetch does
+  // not. Send the app's own origin so the CSRF check passes without weakening
+  // it. Found by the first CI run of this harness, 2026-09-17.
   const signUp = await fetch(`${baseURL}/api/auth/sign-up/email`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", Origin: baseURL },
     body: JSON.stringify(TEST_USER),
   });
   if (!signUp.ok && signUp.status !== 422) {

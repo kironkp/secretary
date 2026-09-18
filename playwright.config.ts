@@ -13,7 +13,9 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const PORT = Number(process.env.E2E_PORT ?? 3000);
-export const BASE_URL = `http://127.0.0.1:${PORT}`;
+// `localhost`, not 127.0.0.1: lib/auth.ts allowlists hosts as `localhost:*`
+// when BETTER_AUTH_URL is unset, and the loopback IP is not that string.
+export const BASE_URL = `http://localhost:${PORT}`;
 
 export default defineConfig({
   testDir: "./e2e",
