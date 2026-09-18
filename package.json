@@ -24,7 +24,9 @@
     "sim:gen": "tsx sim/generate-personas.ts",
     "sim:selftest": "tsx sim/run.ts --selftest",
     "sim:hook:install": "sh sim/hooks/install.sh",
-    "slow-loop:nightly": "tsx --env-file=.env.local scripts/slow-loop.ts --nightly"
+    "slow-loop:nightly": "tsx --env-file=.env.local scripts/slow-loop.ts --nightly",
+    "e2e": "playwright test",
+    "e2e:install": "playwright install --with-deps chromium"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.119.0",
@@ -48,6 +50,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4",
     "@types/jsdom": "^30.0.0",
     "@types/node": "^20",

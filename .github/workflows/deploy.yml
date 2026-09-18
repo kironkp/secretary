@@ -93,6 +93,24 @@ jobs:
       - name: Production build
         run: npx next build
 
+      # The only step in this file that executes layout, hit-testing and touch.
+      # Everything above it passed green through four Canvas rebuilds that a
+      # human could not use. Runs here and not on the dev Mac because Playwright
+      # refuses to install Chromium on macOS 12.
+      - name: Install Chromium for browser tests
+        run: npx playwright install --with-deps chromium
+
+      - name: Browser tests (iPhone profile)
+        run: npx playwright test
+
+      - name: Upload the trace when a browser test fails
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
   deploy:
     needs: verify
     runs-on: ubuntu-latest
