@@ -304,15 +304,15 @@ async function resolveCheckins(userId: string, q: BindingQuery, tz: string): Pro
 }
 
 /**
- * Strip the prototype from every row's field map. A template names fields, and
- * a name like `constructor` must resolve to nothing rather than to whatever
- * Object.prototype happens to carry.
+ * One query to rows. Unknown sources return nothing rather than throwing.
+ *
+ * Rows stay PLAIN objects. An earlier version handed back null-prototype maps
+ * to keep `data-field="constructor"` from reaching Object.prototype, and React
+ * refused to serialize them from a server component to a client one — the
+ * Workspace page threw on every load. The guard belongs at the lookup instead:
+ * apply-bindings uses Object.hasOwn, which returns false for inherited names
+ * and needs no exotic object to do it.
  */
-function harden(rows: BoundRow[]): BoundRow[] {
-  return rows.map((r) => ({ id: r.id, fields: Object.assign(Object.create(null), r.fields) }));
-}
-
-/** One query to rows. Unknown sources return nothing rather than throwing. */
 export async function resolveBinding(
   userId: string,
   query: BindingQuery,
@@ -321,15 +321,15 @@ export async function resolveBinding(
 ): Promise<BoundRow[]> {
   switch (query.source) {
     case "tasks":
-      return harden(await resolveTasks(userId, query, tz, now));
+      return resolveTasks(userId, query, tz, now);
     case "events":
-      return harden(await resolveEvents(userId, query, tz, now));
+      return resolveEvents(userId, query, tz, now);
     case "projects":
-      return harden(await resolveProjects(userId, query, tz, now));
+      return resolveProjects(userId, query, tz, now);
     case "documents":
-      return harden(await resolveDocuments(userId, query, tz, now));
+      return resolveDocuments(userId, query, tz, now);
     case "checkins":
-      return harden(await resolveCheckins(userId, query, tz));
+      return resolveCheckins(userId, query, tz);
     default:
       return [];
   }
