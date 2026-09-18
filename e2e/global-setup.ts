@@ -8,7 +8,7 @@
 // Order: create the user through better-auth's own HTTP route so the password
 // is hashed the way the app hashes it, flip email_verified in Postgres, then
 // sign in through the actual form so the saved state came from the real path.
-import { chromium, type FullConfig } from "@playwright/test";
+import { webkit, type FullConfig } from "@playwright/test";
 import { Client } from "pg";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
@@ -70,8 +70,11 @@ export default async function globalSetup(config: FullConfig) {
   if (!verified) throw new Error("test user was not created; sign-up route did not persist a row");
 
   // Sign in through the form, not the API, so the saved cookies come from the
-  // path a person takes.
-  const browser = await chromium.launch();
+  // path a person takes — and in WebKit, the same engine the specs run in.
+  // Cookies saved from Chromium did not authenticate the WebKit contexts
+  // (every signed-in spec bounced to /sign-in); keeping one engine end to end
+  // removes the whole class of problem. Found by CI run 4, 2026-09-17.
+  const browser = await webkit.launch();
   const page = await browser.newPage({ baseURL });
   try {
     await page.goto("/sign-in");
@@ -82,7 +85,12 @@ export default async function globalSetup(config: FullConfig) {
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
     await page.waitForURL((url) => !url.pathname.startsWith("/sign-in"), { timeout: 20_000 });
     mkdirSync(dirname(STATE_PATH), { recursive: true });
-    await page.context().storageState({ path: STATE_PATH });
+    const state = await page.context().storageState({ path: STATE_PATH });
+    // Fail here, loudly, rather than letting every signed-in spec bounce to
+    // /sign-in and look like an app bug.
+    if (state.cookies.length === 0) {
+      throw new Error("signed in but captured no cookies; storage state would be useless");
+    }
   } finally {
     await browser.close();
   }
