@@ -77,7 +77,9 @@ export default async function globalSetup(config: FullConfig) {
     await page.goto("/sign-in");
     await page.getByLabel(/email/i).fill(TEST_USER.email);
     await page.getByLabel(/password/i).fill(TEST_USER.password);
-    await page.getByRole("button", { name: /sign in/i }).click();
+    // Exact: the page also carries "Sign in with a passkey", and a loose
+    // regex matches both.
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
     await page.waitForURL((url) => !url.pathname.startsWith("/sign-in"), { timeout: 20_000 });
     mkdirSync(dirname(STATE_PATH), { recursive: true });
     await page.context().storageState({ path: STATE_PATH });
