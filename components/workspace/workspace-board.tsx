@@ -65,8 +65,13 @@ const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n
 
 export function WorkspaceBoard({ initial }: { initial: BoardState }) {
   const [state, setState] = useState<BoardState>(initial);
+  // The gesture lives in a REF, and state only mirrors it for rendering.
+  // Reading it from state made the first pointermove events see `idle`,
+  // because React had not committed the pointerdown update yet — under CI load
+  // every move in a short drag could be dropped and the widget never moved.
+  // A ref is current the instant the handler returns.
+  const gestureRef = useRef<Gesture>({ kind: "idle" });
   const [gesture, setGesture] = useState<Gesture>({ kind: "idle" });
-  const gestureRef = useRef(false);
   const [narrow, setNarrow] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const boardRef = useRef<HTMLDivElement>(null);
@@ -96,7 +101,7 @@ export function WorkspaceBoard({ initial }: { initial: BoardState }) {
       setState((s) => ({
         version: data.version,
         // A gesture in flight owns geometry; a refresh must not yank it back.
-        widgets: gestureRef.current ? s.widgets : data.widgets,
+        widgets: gestureRef.current.kind !== "idle" ? s.widgets : data.widgets,
         rows: data.rows ?? {},
         focusId: data.focusId ?? null,
         canUndo: !!data.canUndo,
@@ -187,7 +192,7 @@ export function WorkspaceBoard({ initial }: { initial: BoardState }) {
     e.preventDefault();
     e.stopPropagation();
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    setGesture({
+    const started: Gesture = {
       kind,
       id: w.id,
       startX: e.clientX,
@@ -195,28 +200,30 @@ export function WorkspaceBoard({ initial }: { initial: BoardState }) {
       origin: { x: w.x, y: w.y, w: w.w, h: w.h },
       dx: 0,
       dy: 0,
-    });
+    };
+    gestureRef.current = started;
+    setGesture(started);
     // Deliberately no request here. A POST on pointer-down re-resolved every
     // binding on the board before the finger had even moved; focus and raise
     // ride along with the move that follows, or with the click if it was a tap.
   };
 
-  useEffect(() => {
-    gestureRef.current = gesture.kind !== "idle";
-  }, [gesture]);
-
   const onPointerMove = (e: React.PointerEvent) => {
-    if (gesture.kind === "idle") return;
-    setGesture({ ...gesture, dx: e.clientX - gesture.startX, dy: e.clientY - gesture.startY });
+    const g = gestureRef.current;
+    if (g.kind === "idle") return;
+    const next = { ...g, dx: e.clientX - g.startX, dy: e.clientY - g.startY };
+    gestureRef.current = next;
+    setGesture(next);
   };
 
   const endGesture = () => {
-    if (gesture.kind === "idle") return;
+    const g = gestureRef.current;
+    if (g.kind === "idle") return;
     const unit = colPx;
     const rowUnit = GRID_ROW_PX + GRID_GAP_PX;
-    const dCols = Math.round(gesture.dx / unit);
-    const dRows = Math.round(gesture.dy / rowUnit);
-    const g = gesture;
+    const dCols = Math.round(g.dx / unit);
+    const dRows = Math.round(g.dy / rowUnit);
+    gestureRef.current = { kind: "idle" };
     setGesture({ kind: "idle" });
     if (dCols === 0 && dRows === 0) return;
 
