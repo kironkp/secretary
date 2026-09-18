@@ -1,9 +1,12 @@
 // One absolute path for the saved session, imported by both the config and
-// global setup. Relative paths resolve against different bases in those two
-// places (config dir vs process cwd), and a mismatch reads as "the app logged
-// me out" in every spec rather than as a missing file.
-import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+// global setup. A bare relative path resolves against the config directory in
+// one and process.cwd() in the other, and a mismatch is silent: every spec just
+// looks logged out.
+//
+// Resolved from cwd rather than from this file's own location because
+// Playwright transpiles config and setup to CommonJS, where `import.meta` is a
+// syntax error (CI run 7). Both processes are launched from the repo root, so
+// cwd is the stable anchor here.
+import { resolve } from "node:path";
 
-const here = dirname(fileURLToPath(import.meta.url));
-export const STORAGE_STATE = resolve(here, ".auth", "user.json");
+export const STORAGE_STATE = resolve(process.cwd(), "e2e", ".auth", "user.json");
