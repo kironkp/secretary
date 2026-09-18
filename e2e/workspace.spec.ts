@@ -9,10 +9,18 @@ import { test, expect, type Page } from "@playwright/test";
 const board = (page: Page) => page.getByTestId("workspace-board");
 const widget = (page: Page, id: string) => page.locator(`[data-widget="${id}"]`);
 
+/**
+ * Position in DOCUMENT coordinates, not viewport coordinates.
+ *
+ * boundingBox() is relative to the viewport, so any scroll between two
+ * measurements silently changes the answer — scrolling a handle into view
+ * before a drag cancelled the drag exactly, and the test read 197 both times.
+ */
 async function boxOf(page: Page, id: string) {
   const b = await widget(page, id).boundingBox();
   if (!b) throw new Error(`widget ${id} has no box`);
-  return b;
+  const scroll = await page.evaluate(() => ({ x: window.scrollX, y: window.scrollY }));
+  return { ...b, x: b.x + scroll.x, y: b.y + scroll.y };
 }
 
 /** Drag by the handle, in steps, so the pointer move is real rather than a jump. */
