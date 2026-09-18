@@ -18,8 +18,21 @@
 // surface rests on: the host can see pointer events, so drag and resize are
 // possible at all, and heights are real DOM heights.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { applyBindings } from "@/lib/workspace/apply-bindings";
 import { boardRows } from "@/lib/workspace/ops";
-import { GRID_COLS, GRID_GAP_PX, GRID_ROW_PX, MIN_H, MIN_W, type Widget } from "@/lib/workspace/types";
+import {
+  GRID_COLS,
+  GRID_GAP_PX,
+  GRID_ROW_PX,
+  MIN_H,
+  MIN_W,
+  type BoundRow,
+  type Widget,
+} from "@/lib/workspace/types";
+
+/** How often the board checks for changes made elsewhere — voice on a phone,
+ *  another tab, the extractor. Matches the Canvas's own poll. */
+const POLL_MS = 15_000;
 
 // The app's motion language (CLAUDE.md): 340ms, leading edge first. Geometry
 // animates; a drag in progress does not, because the finger is the animation.
@@ -29,6 +42,8 @@ const EASE = "cubic-bezier(0.22, 0.9, 0.32, 1)";
 type BoardState = {
   version: number;
   widgets: Widget[];
+  /** Resolved rows per widget id. Live data; the template never changes. */
+  rows: Record<string, BoundRow[]>;
   focusId: string | null;
   canUndo: boolean;
   canRedo: boolean;
@@ -51,6 +66,7 @@ const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n
 export function WorkspaceBoard({ initial }: { initial: BoardState }) {
   const [state, setState] = useState<BoardState>(initial);
   const [gesture, setGesture] = useState<Gesture>({ kind: "idle" });
+  const gestureRef = useRef(false);
   const [narrow, setNarrow] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const boardRef = useRef<HTMLDivElement>(null);
@@ -68,6 +84,42 @@ export function WorkspaceBoard({ initial }: { initial: BoardState }) {
     mq.addEventListener("change", sync);
     return () => mq.removeEventListener("change", sync);
   }, []);
+
+  // Freshness (docs/workspace/SPEC.md §5): three triggers, no new transport.
+  // A refresh replaces ROWS, never the template, so scroll and selection inside
+  // a widget survive — that is the point of applying bindings in the DOM.
+  const refresh = useCallback(async () => {
+    try {
+      const res = await fetch("/api/workspace", { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json();
+      setState((s) => ({
+        version: data.version,
+        // A gesture in flight owns geometry; a refresh must not yank it back.
+        widgets: gestureRef.current ? s.widgets : data.widgets,
+        rows: data.rows ?? {},
+        focusId: data.focusId ?? null,
+        canUndo: !!data.canUndo,
+        canRedo: !!data.canRedo,
+      }));
+    } catch {
+      // A failed poll is not worth a message: the next one is 15s away.
+    }
+  }, []);
+
+  useEffect(() => {
+    const id = setInterval(refresh, POLL_MS);
+    const onFocus = () => void refresh();
+    // Any write elsewhere in the app can say so and the board updates at once.
+    const onChanged = () => void refresh();
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("secretary:data-changed", onChanged);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("secretary:data-changed", onChanged);
+    };
+  }, [refresh]);
 
   const measure = useCallback(() => {
     const el = boardRef.current;
@@ -106,6 +158,7 @@ export function WorkspaceBoard({ initial }: { initial: BoardState }) {
         setState({
           version: data.version,
           widgets: data.widgets,
+          rows: data.rows ?? {},
           focusId: data.focusId ?? null,
           canUndo: !!data.canUndo,
           canRedo: !!data.canRedo,
@@ -143,8 +196,14 @@ export function WorkspaceBoard({ initial }: { initial: BoardState }) {
       dx: 0,
       dy: 0,
     });
-    if (state.focusId !== w.id) void send([{ op: "focus", id: w.id }, { op: "raise", id: w.id }]);
+    // Deliberately no request here. A POST on pointer-down re-resolved every
+    // binding on the board before the finger had even moved; focus and raise
+    // ride along with the move that follows, or with the click if it was a tap.
   };
+
+  useEffect(() => {
+    gestureRef.current = gesture.kind !== "idle";
+  }, [gesture]);
 
   const onPointerMove = (e: React.PointerEvent) => {
     if (gesture.kind === "idle") return;
@@ -164,8 +223,13 @@ export function WorkspaceBoard({ initial }: { initial: BoardState }) {
     if (g.kind === "drag") {
       const x = clamp(g.origin.x + dCols, 0, GRID_COLS - g.origin.w);
       const y = Math.max(0, g.origin.y + dRows);
+      // One batch, so one request and one undo step for one gesture.
       void send(
-        [{ op: "move", id: g.id, x, y, w: g.origin.w }],
+        [
+          { op: "move", id: g.id, x, y, w: g.origin.w },
+          { op: "raise", id: g.id },
+          { op: "focus", id: g.id },
+        ],
         state.widgets.map((w) => (w.id === g.id ? { ...w, x, y } : w))
       );
     } else {
@@ -272,15 +336,7 @@ export function WorkspaceBoard({ initial }: { initial: BoardState }) {
                 </button>
               </header>
 
-              {!w.collapsed && (
-                <div
-                  className="wk-body min-h-0 flex-1 overflow-auto px-4 py-3 text-sm text-ink"
-                  // Sanitized on the server before it ever reaches this file;
-                  // see app/(app)/workspace/page.tsx. Phase 2 adds binding
-                  // attributes, and §7 of the SPEC governs that allowlist.
-                  dangerouslySetInnerHTML={{ __html: w.body }}
-                />
-              )}
+              {!w.collapsed && <WidgetBody widget={w} rows={state.rows[w.id]} />}
 
               {!narrow && !w.collapsed && (
                 <button
@@ -299,6 +355,43 @@ export function WorkspaceBoard({ initial }: { initial: BoardState }) {
         })}
       </div>
     </div>
+  );
+}
+
+/**
+ * A widget's content. The template is written to the DOM exactly ONCE — keyed
+ * by its markup — and every later change is applied to the existing nodes by
+ * applyBindings. That is what keeps scroll position, selection and focus inside
+ * a widget alive across a data refresh, instead of the blank-then-rebuild the
+ * Canvas does.
+ */
+function WidgetBody({ widget, rows }: { widget: Widget; rows?: BoundRow[] }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const written = useRef<string | null>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    // Sanitized on the server before it reached this file; see
+    // app/(app)/workspace/page.tsx. Re-written only when the template itself
+    // changes, which is a model edit, not a data change.
+    if (written.current !== widget.body) {
+      el.innerHTML = widget.body;
+      written.current = widget.body;
+    }
+    if (widget.query) {
+      applyBindings(el, rows ?? [], { checkable: widget.query.source === "tasks" });
+    }
+    // widget.query is an object from state and would change identity on every
+    // render; its SOURCE is the only part this effect depends on.
+  }, [widget.body, widget.query, rows]);
+
+  return (
+    <div
+      ref={ref}
+      data-body={widget.id}
+      className="wk-body min-h-0 flex-1 overflow-auto px-4 py-3 text-sm text-ink"
+    />
   );
 }
 

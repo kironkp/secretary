@@ -119,9 +119,16 @@ Five attributes, all allow-listed in the sanitizer with validated values.
 |---|---|
 | `data-each` | On a container: repeat its first element child once per row |
 | `data-field="title"` | Replace text content with that field of the current row |
-| `data-check` | The existing shell-owned checkbox; the id is filled from the row |
+| `data-count` | Replace text content with the number of rows |
+| `data-row-check` | Marks a row as tickable. The shell writes the real task id into `data-check` |
 | `data-action="add-task"` | An affordance the shell wires to a write |
 | `data-empty` | Shown only when the query returns zero rows |
+
+`data-row-check` exists because `data-check` keeps an absolute rule: it must
+always carry an id-shaped value, because it reaches the task API. A template has
+no id yet, so it carries the marker and the shell fills the real attribute once
+it has a row. The Canvas's guarantee is unchanged, and a widget bound to
+projects or events never gets `data-check` at all.
 
 The model writes one item as a template and the shell repeats it. So this:
 
@@ -346,9 +353,13 @@ rebuilds.
 
 ## 11. Open questions
 
-1. **Field vocabulary.** Which fields are exposed per source? A first cut for
-   tasks: `title`, `due`, `status`, `project`, `stage`, `stakes`, `blocked`,
-   `notes`. Needs a decision before phase 2.
+1. ~~**Field vocabulary.**~~ **Decided, phase 2.** `FIELDS` in
+   `lib/workspace/types.ts` is the closed per-source list: tasks get `title`,
+   `due`, `status`, `project`, `stage`, `stakes`, `blocked`, `notes`, `created`;
+   events `title`, `when`, `location`, `project`, `notes`; projects `name`,
+   `status`, `deadline`, `open`; documents `title`, `project`, `updated`;
+   checkins `note`, `task`, `when`. The sanitizer keeps its own copy so it stays
+   dependency-free, and a test asserts the two cannot drift.
 2. **Multiple boards or one?** The model allows many. The first release should
    probably ship one default board and hide the rest until named boards earn
    themselves.

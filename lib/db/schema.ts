@@ -239,7 +239,9 @@ export const projects = pgTable("projects", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-export const tasks = pgTable("tasks", {
+export const tasks = pgTable(
+  "tasks",
+  {
   id: text("id").primaryKey().$defaultFn(uuid),
   userId: text("user_id")
     .notNull()
@@ -285,10 +287,19 @@ export const tasks = pgTable("tasks", {
   recurrence: text("recurrence"),
   postponedCount: integer("postponed_count").notNull().default(0),
   lastNudgedAt: timestamp("last_nudged_at", { withTimezone: true }),
-  procrastinationScore: real("procrastination_score").notNull().default(0),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+    procrastinationScore: real("procrastination_score").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  // Until the Workspace, every task read was "all tasks for this user" and the
+  // table had only its primary key — fine at 102 rows, a sequential scan per
+  // widget per poll from here on.
+  (t) => [
+    index("tasks_user_idx").on(t.userId),
+    index("tasks_user_status_idx").on(t.userId, t.status),
+    index("tasks_user_due_idx").on(t.userId, t.dueAt),
+  ]
+);
 
 export const events = pgTable("events", {
   id: text("id").primaryKey().$defaultFn(uuid),

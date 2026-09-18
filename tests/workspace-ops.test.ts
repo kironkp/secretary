@@ -3,7 +3,15 @@
 // this file can see whether a human can actually drag anything.
 import { describe, expect, it } from "vitest";
 import { addWidget, applyOps, boardRows, nextWidgetId, tidy } from "@/lib/workspace/ops";
-import { EMPTY_BOARD, GRID_COLS, MIN_H, MIN_W, type Board, type Widget } from "@/lib/workspace/types";
+import {
+  boardSchema,
+  EMPTY_BOARD,
+  GRID_COLS,
+  MIN_H,
+  MIN_W,
+  type Board,
+  type Widget,
+} from "@/lib/workspace/types";
 
 const w = (id: string, over: Partial<Widget> = {}): Widget => ({
   id,
@@ -18,12 +26,7 @@ const w = (id: string, over: Partial<Widget> = {}): Widget => ({
   ...over,
 });
 
-const board = (...widgets: Widget[]): Board => ({
-  widgets,
-  undo: [],
-  redo: [],
-  focusId: null,
-});
+const board = (...widgets: Widget[]): Board => ({ ...EMPTY_BOARD, widgets });
 
 describe("move", () => {
   it("clamps to the board instead of refusing", () => {
@@ -126,6 +129,21 @@ describe("collapse, raise, remove", () => {
   it("raises above everything else", () => {
     const next = applyOps(board(w("a", { z: 1 }), w("b", { z: 9 })), [{ op: "raise", id: "a" }]);
     expect(next.widgets[0].z).toBeGreaterThan(9);
+  });
+
+  it("never lets z escape the range the schema accepts", () => {
+    // A board that fails validation is REPLACED on the next read, so an
+    // unbounded z would quietly destroy an arrangement after enough raises.
+    let b = board(w("a", { z: 998 }), w("b", { z: 999 }));
+    for (let i = 0; i < 12; i++) {
+      b = applyOps(b, [{ op: "raise", id: i % 2 ? "a" : "b" }]);
+    }
+    for (const x of b.widgets) {
+      expect(x.z).toBeGreaterThanOrEqual(0);
+      expect(x.z).toBeLessThanOrEqual(999);
+    }
+    // And the whole board still parses, which is the thing that matters.
+    expect(boardSchema.safeParse(b).success).toBe(true);
   });
 
   it("removes only the named widget", () => {

@@ -148,6 +148,34 @@ export default async function globalSetup(config: FullConfig) {
     );
   }
 
+  // Seed known tasks so the Workspace specs can assert that real data reaches
+  // the right widget. Written straight to Postgres: this is fixture data, and
+  // routing it through the tool layer would test the tool layer instead.
+  await withDb(async (c) => {
+    await c.query('DELETE FROM tasks WHERE user_id = $1', [userId]);
+    await c.query('DELETE FROM projects WHERE user_id = $1', [userId]);
+    const proj = await c.query(
+      `INSERT INTO projects (id, user_id, name, status, created_at)
+       VALUES (gen_random_uuid()::text, $1, 'E2E Project', 'active', now()) RETURNING id`,
+      [userId]
+    );
+    const projectId = proj.rows[0].id as string;
+    const rows: Array<[string, string | null, string, string | null]> = [
+      // title, due_at, status, project
+      ["E2E overdue task", "now() - interval '3 days'", "todo", projectId],
+      ["E2E today task", "now()", "todo", projectId],
+      ["E2E undated task", null, "todo", null],
+      ["E2E finished task", "now() - interval '1 day'", "done", null],
+    ];
+    for (const [title, due, status, project] of rows) {
+      await c.query(
+        `INSERT INTO tasks (id, user_id, project_id, title, status, due_at, source, created_at, updated_at)
+         VALUES (gen_random_uuid()::text, $1, $2, $3, $4, ${due ?? "NULL"}, 'typed', now(), now())`,
+        [userId, project, title, status]
+      );
+    }
+  });
+
   mkdirSync(dirname(STORAGE_STATE), { recursive: true });
   writeFileSync(STORAGE_STATE, JSON.stringify({ cookies, origins: [] }, null, 2));
   console.log(

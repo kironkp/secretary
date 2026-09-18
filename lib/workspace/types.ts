@@ -4,9 +4,10 @@
 // never pixels: pixels do not survive both a phone and a 16-inch display. The
 // model owns what is inside a widget; it never owns where the widget sits.
 //
-// Phase 1 carries static bodies. The `query` field is declared here so the
-// storage shape does not change when bindings land in phase 2, but nothing
-// reads it yet.
+// A widget may carry a BindingQuery. The query lives HERE, on the widget, and
+// never inside the markup: that keeps the vocabulary closed, keeps the
+// sanitizer's job small, and makes every read trivially user-scoped. The model
+// chooses what to show and how to lay it out; it never writes a task title.
 import { z } from "zod";
 
 /** Columns across the board at desktop width. Narrow screens collapse to 1. */
@@ -23,6 +24,63 @@ export const MAX_WIDGETS = 48;
 
 const id = z.string().min(1).max(64).regex(/^[a-z0-9][a-z0-9-]*$/, "kebab-case id");
 
+// --------------------------------------------------------------------------
+// Bindings (docs/workspace/SPEC.md §3.2-§3.3)
+// --------------------------------------------------------------------------
+
+/**
+ * The FIELD VOCABULARY. Closed per source, on purpose: `data-field` names one
+ * of these, never a column. A widget can therefore never reach a column it was
+ * not meant to, and renaming a column does not break stored markup.
+ */
+export const FIELDS = {
+  tasks: ["title", "due", "status", "project", "stage", "stakes", "blocked", "notes", "created"],
+  events: ["title", "when", "location", "project", "notes"],
+  projects: ["name", "status", "deadline", "open"],
+  documents: ["title", "project", "updated"],
+  checkins: ["note", "task", "when"],
+} as const;
+
+export type BindingSource = keyof typeof FIELDS;
+export const SOURCES = Object.keys(FIELDS) as [BindingSource, ...BindingSource[]];
+
+export const TASK_STATUSES = [
+  "inbox",
+  "todo",
+  "in_progress",
+  "blocked",
+  "done",
+  "dropped",
+] as const;
+
+/** Relative windows, resolved against the user's own timezone at query time. */
+export const DUE_WINDOWS = ["overdue", "today", "week", "month", "none", "any"] as const;
+
+export const bindingQuerySchema = z.object({
+  source: z.enum(SOURCES),
+  where: z
+    .object({
+      /** Project id or the user's words for it; resolved server-side. */
+      project: z.string().max(120).optional(),
+      status: z.array(z.enum(TASK_STATUSES)).max(6).optional(),
+      /** "open" is the common case and means every not-done, not-dropped status. */
+      open: z.boolean().optional(),
+      due: z.enum(DUE_WINDOWS).optional(),
+      blocked: z.boolean().optional(),
+      stakes: z.boolean().optional(),
+      search: z.string().max(80).optional(),
+    })
+    .optional(),
+  sort: z.enum(["due", "created", "updated", "priority", "procrastination", "title"]).optional(),
+  limit: z.number().int().min(1).max(50).optional(),
+});
+
+export type BindingQuery = z.infer<typeof bindingQuerySchema>;
+
+/** One resolved row: a flat map of field name to display string, plus its id. */
+export type BoundRow = { id: string; fields: Record<string, string> };
+
+
 export const widgetSchema = z.object({
   id,
   title: z.string().min(1).max(80),
@@ -34,14 +92,18 @@ export const widgetSchema = z.object({
   collapsed: z.boolean(),
   /** Sanitized markup. Never rendered without passing the sanitizer again. */
   body: z.string().max(20_000),
-  /** Phase 2. Present in the type so the stored shape is stable. */
-  query: z.unknown().optional(),
+  query: bindingQuerySchema.optional(),
 });
 
 export type Widget = z.infer<typeof widgetSchema>;
 
 export const boardSchema = z.object({
   widgets: z.array(widgetSchema).max(MAX_WIDGETS),
+  /**
+   * Which starter set has been applied. Lets a later phase ADD widgets to an
+   * existing board without touching what the user has already arranged.
+   */
+  seedVersion: z.number().int().min(0).default(0),
   /** Newest first. Geometry only — bodies are never in the undo stack. */
   undo: z.array(z.array(widgetSchema)).max(20).default([]),
   redo: z.array(z.array(widgetSchema)).max(20).default([]),
@@ -51,7 +113,16 @@ export const boardSchema = z.object({
 
 export type Board = z.infer<typeof boardSchema>;
 
-export const EMPTY_BOARD: Board = { widgets: [], undo: [], redo: [], focusId: null };
+export const EMPTY_BOARD: Board = {
+  widgets: [],
+  seedVersion: 0,
+  undo: [],
+  redo: [],
+  focusId: null,
+};
+
+/** Bump when the starter set gains widgets. */
+export const CURRENT_SEED = 2;
 
 /**
  * Operations the shell applies with no model call.

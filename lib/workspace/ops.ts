@@ -23,17 +23,31 @@ function snapshot(widgets: Widget[]): Widget[] {
 }
 
 function withHistory(board: Board, next: Widget[]): Board {
+  // Spread, never re-list: a field added to Board later must not silently be
+  // dropped by every op that rebuilds one.
   return {
+    ...board,
     widgets: next,
     undo: [snapshot(board.widgets), ...board.undo].slice(0, 20),
     redo: [],
-    focusId: board.focusId,
   };
 }
+
+/** The schema's ceiling. A value past it fails validation on the next read,
+ *  and a board that fails validation is REPLACED — so raising a widget a
+ *  thousand times would silently destroy an arrangement. */
+const MAX_Z = 999;
 
 /** Highest z in use, so a raised widget always lands on top. */
 function topZ(widgets: Widget[]): number {
   return widgets.reduce((m, w) => Math.max(m, w.z), 0);
+}
+
+/** Renumber from 1 when the stack hits the ceiling, preserving order. */
+function normalizeZ(widgets: Widget[]): Widget[] {
+  if (widgets.every((w) => w.z <= MAX_Z)) return widgets;
+  const order = [...widgets].sort((a, b) => a.z - b.z).map((w) => w.id);
+  return widgets.map((w) => ({ ...w, z: order.indexOf(w.id) + 1 }));
 }
 
 /**
@@ -64,20 +78,20 @@ function applyOne(board: Board, op: Op): Board {
     const [prev, ...rest] = board.undo;
     if (!prev) return board;
     return {
+      ...board,
       widgets: prev,
       undo: rest,
       redo: [snapshot(board.widgets), ...board.redo].slice(0, 20),
-      focusId: board.focusId,
     };
   }
   if (op.op === "redo") {
     const [next, ...rest] = board.redo;
     if (!next) return board;
     return {
+      ...board,
       widgets: next,
       undo: [snapshot(board.widgets), ...board.undo].slice(0, 20),
       redo: rest,
-      focusId: board.focusId,
     };
   }
   if (op.op === "tidy") return withHistory(board, tidy(board.widgets));
@@ -107,8 +121,10 @@ function applyOne(board: Board, op: Op): Board {
       return edit((w) => ({ ...w, collapsed: true }));
     case "expand":
       return edit((w) => ({ ...w, collapsed: false }));
-    case "raise":
-      return edit((w) => ({ ...w, z: topZ(board.widgets) + 1 }));
+    case "raise": {
+      const raised = edit((w) => ({ ...w, z: Math.min(MAX_Z, topZ(board.widgets) + 1) }));
+      return { ...raised, widgets: normalizeZ(raised.widgets) };
+    }
     case "move": {
       const w = op.w ?? target.w;
       return edit((t) => ({

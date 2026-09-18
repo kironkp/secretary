@@ -24,8 +24,22 @@ const VOID_TAGS = new Set(["br", "hr", "stop"]);
 // Tags whose entire content must be discarded, not just the tags.
 const DROP_CONTENT_TAGS = new Set(["script", "style", "iframe", "object", "embed", "noscript"]);
 
+// Every field name any source can offer, and every action the shell knows how
+// to perform. Kept here rather than imported so the sanitizer stays free of
+// dependencies, and asserted against lib/workspace/types.ts in
+// tests/workspace-bindings.test.ts so the two can never drift apart.
+const BINDABLE_FIELDS = new Set([
+  "title", "due", "status", "project", "stage", "stakes", "blocked", "notes", "created",
+  "when", "location", "name", "deadline", "open", "updated", "task", "note",
+]);
+const BINDABLE_ACTIONS = new Set(["add-task"]);
+
 const ALLOWED_ATTRS = new Set([
   "class", "style", "data-expand", "data-link", "data-check", "colspan", "rowspan",
+  // Workspace bindings (docs/workspace/SPEC.md §3.3). These reach a CLOSED
+  // vocabulary — a field name, never a column; a flag, never an expression —
+  // and their values are validated below. Nothing here is ever evaluated.
+  "data-each", "data-field", "data-count", "data-empty", "data-action", "data-row-check",
   // SVG geometry + paint
   "viewbox", "xmlns", "width", "height", "x", "y", "x1", "y1", "x2", "y2",
   "cx", "cy", "r", "rx", "ry", "d", "points", "fill", "stroke", "stroke-width",
@@ -117,7 +131,25 @@ function sanitizeAttrs(rawAttrs: string, tag: string): string {
     }
     // id-shaped values only: data-check reaches the task API (SPEC §7.6), and
     // a bare/garbage value must never survive to the shell's click handler.
+    // A Workspace TEMPLATE marks a checkable row with `data-row-check` instead,
+    // and the shell writes the real id into data-check once it has one — so
+    // this rule stays absolute rather than growing an empty-value exception.
     if ((name === "id" || name === "data-check") && !/^[-a-zA-Z0-9_]+$/.test(value)) continue;
+    // A field name comes from the CLOSED vocabulary, not merely a safe shape:
+    // anything else is a typo or a probe, and rendering it would leak whatever
+    // the lookup happened to return.
+    if (name === "data-field" && !BINDABLE_FIELDS.has(value)) continue;
+    if (name === "data-action" && !BINDABLE_ACTIONS.has(value)) continue;
+    // Markers, not carriers: their presence is the whole meaning, so any value
+    // is discarded rather than trusted.
+    if (
+      name === "data-each" ||
+      name === "data-empty" ||
+      name === "data-count" ||
+      name === "data-row-check"
+    ) {
+      value = "";
+    }
     out += ` ${name}="${value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;")}"`;
   }
   return out;
