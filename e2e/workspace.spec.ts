@@ -40,10 +40,11 @@ test("the board renders its widgets", async ({ page }) => {
   await expect(widget(page, "notes")).toBeVisible();
 });
 
-test("every drag and resize target clears 44px", async ({ page }) => {
-  // The Canvas shipped an 18px checkbox on a row that navigated away on a near
-  // miss. That class of defect is only visible here, with a layout engine.
-  for (const sel of ["[data-drag-handle]", "[data-collapse]", "[data-resize-handle]"]) {
+/** Apple's minimum is 44pt. The Canvas shipped an 18px checkbox on a row that
+ *  navigated away on a near miss; that class of defect is only visible here,
+ *  with a layout engine. */
+async function assertTapTargets(page: Page, selectors: string[]) {
+  for (const sel of selectors) {
     const targets = page.locator(sel);
     const n = await targets.count();
     expect(n, `${sel} should exist`).toBeGreaterThan(0);
@@ -54,6 +55,13 @@ test("every drag and resize target clears 44px", async ({ page }) => {
       expect(b.height, `${sel} #${i} height`).toBeGreaterThanOrEqual(44);
     }
   }
+}
+
+test("on a phone, the handles you get are big enough", async ({ page }) => {
+  // No resize grip here on purpose: the board stacks at phone width, so a
+  // corner drag would fight the page scroll for no gain.
+  await assertTapTargets(page, ["[data-drag-handle]", "[data-collapse]"]);
+  await expect(page.locator("[data-resize-handle]")).toHaveCount(0);
 });
 
 test("nothing is clipped: every body fits inside its widget", async ({ page }) => {
@@ -102,6 +110,14 @@ test.describe("wide screen", () => {
     await expect
       .poll(async () => (await boxOf(page, "today")).y, { timeout: 5000 })
       .toBeLessThanOrEqual(before.y + 2);
+  });
+
+  test("every handle clears 44px, resize grip included", async ({ page }) => {
+    await assertTapTargets(page, [
+      "[data-drag-handle]",
+      "[data-collapse]",
+      "[data-resize-handle]",
+    ]);
   });
 
   test("collapsing hides the body and keeps the header reachable", async ({ page }) => {
