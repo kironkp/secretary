@@ -49,10 +49,13 @@ export default defineConfig({
       testMatch: /smoke\.spec\.ts/,
       use: { ...devices["iPhone 15"] },
     },
-    // Workspace interaction tests (drag, resize, tap) land with phase 1 of
-    // docs/workspace/SPEC.md. They are the reason this harness exists: that
-    // surface gets a real browser from its first commit, not after four
-    // rebuilds.
+    {
+      // The reason this harness exists. The Workspace gets a real browser from
+      // its first commit rather than after four rebuilds.
+      name: "workspace",
+      testMatch: /workspace\.spec\.ts/,
+      use: { ...devices["iPhone 15"] },
+    },
   ],
 
   webServer: {

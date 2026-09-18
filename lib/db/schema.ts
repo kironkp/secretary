@@ -572,6 +572,32 @@ export const canvasSnapshots = pgTable("canvas_snapshots", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// The Workspace (docs/workspace/SPEC.md): a board of independent widgets the
+// SHELL positions, bound to live data from phase 2 on. Widgets live as jsonb
+// because the whole board is read and written as a unit and order matters —
+// the same call `canvas_snapshots.composition` makes. One default board per
+// user today; the `name`/`is_default` pair is here so named boards need no
+// migration.
+export const workspaces = pgTable(
+  "workspaces",
+  {
+    id: text("id").primaryKey().$defaultFn(uuid),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    name: text("name").notNull().default("Workspace"),
+    // { widgets, undo, redo, focusId } — see lib/workspace/types.ts
+    board: jsonb("board").notNull().default({ widgets: [], undo: [], redo: [], focusId: null }),
+    // Optimistic concurrency: a write that names a stale version is refused
+    // rather than silently clobbering a change made on another device.
+    version: integer("version").notNull().default(0),
+    isDefault: boolean("is_default").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("workspaces_user_idx").on(t.userId)]
+);
+
 // Durable layout constraints from chat/Settings (SPEC §7.5 tier 1): one row
 // per preference, e.g. {kind:"ban_component", component:"people_index"}.
 // Injected into every planner call and enforced by the validator; listed and

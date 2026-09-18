@@ -12,6 +12,9 @@ import { useEffect, useRef, useState } from "react";
 
 const TABS = [
   { href: "/dashboard", label: "Dashboard" },
+  { href: "/workspace", label: "Workspace" },
+  // Kept as the backup surface until the Workspace is better (see
+  // docs/workspace/SPEC.md §9 phase 7). Do not remove it before then.
   { href: "/canvas", label: "Canvas" },
   { href: "/spreadsheet", label: "Spreadsheet" },
   { href: "/soundtest", label: "Sound test" },
