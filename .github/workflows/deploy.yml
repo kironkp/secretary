@@ -97,8 +97,12 @@ jobs:
       # Everything above it passed green through four Canvas rebuilds that a
       # human could not use. Runs here and not on the dev Mac because Playwright
       # refuses to install Chromium on macOS 12.
-      - name: Install Chromium for browser tests
-        run: npx playwright install --with-deps chromium
+      # WebKit, because the iPhone device profile runs on it and iOS-shaped
+      # defects (the tap delay that hid the Canvas checkbox bug for four
+      # rebuilds) do not reproduce in Chromium. Chromium is here only because
+      # global setup signs in with it.
+      - name: Install browsers
+        run: npx playwright install --with-deps webkit chromium
 
       - name: Browser tests (iPhone profile)
         run: npx playwright test

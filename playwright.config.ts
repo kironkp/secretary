@@ -9,7 +9,9 @@
 // the only harness in the repo that does.
 //
 // The device profile is an iPhone, not a desktop, because every defect that
-// reached the user was a touch defect.
+// reached the user was a touch defect. That profile runs on WebKit, which is
+// the point: the iOS tap delay and Safari's hit-testing do not reproduce in
+// Chromium, and that is precisely why four rounds of Canvas fixes missed them.
 import { defineConfig, devices } from "@playwright/test";
 
 const PORT = Number(process.env.E2E_PORT ?? 3000);
