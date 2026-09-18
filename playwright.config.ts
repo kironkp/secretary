@@ -59,6 +59,15 @@ export default defineConfig({
     // Uses the build the verify job already produced; does not rebuild.
     command: `npx next start -p ${PORT}`,
     url: BASE_URL,
+    env: {
+      // `next start` runs in production mode, and without an explicit base URL
+      // Better Auth falls through its protocol checks to "is production" and
+      // issues a __Secure- prefixed session cookie. No browser accepts one of
+      // those over plain http, so every spec ran signed out (CI run 8). Naming
+      // the real http origin makes the decision deterministic and truthful.
+      BETTER_AUTH_URL: BASE_URL,
+      NEXT_PUBLIC_APP_URL: BASE_URL,
+    },
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
     stdout: "pipe",

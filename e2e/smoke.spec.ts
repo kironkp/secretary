@@ -8,9 +8,12 @@ test.describe("signed in, on a phone", () => {
   // below fails as a redirect and reads like an app bug. Say so once, here.
   test.beforeEach(async ({ context }) => {
     const jar = await context.cookies();
+    // Match the suffix: Better Auth prefixes the name with __Secure- when it
+    // believes the origin is https, and the prefix itself is what browsers
+    // reject over http.
     expect(
-      jar.map((c) => c.name),
-      "the browser context carries no cookies: global setup's storage state did not load"
+      jar.map((c) => c.name).join(","),
+      "the browser context carries no session cookie: global setup's storage state did not load"
     ).toContain("better-auth.session_token");
   });
 
