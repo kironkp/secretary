@@ -1,16 +1,18 @@
-// Signs a test user in once and saves the cookie jar for every spec.
+// Prepares a signed-in session for every spec, without driving a browser.
 //
 // The app requires a verified email (lib/auth.ts, requireEmailVerification:
-// true), so a user created through the API cannot sign in until the flag is
-// flipped. There is no test-only bypass in the app and there should not be one:
-// the sign-in the tests exercise is the real sign-in.
+// true) and there is no test-only bypass in the app — there should not be one,
+// because the sign-in the specs rely on is the real sign-in.
 //
-// Order: create the user through better-auth's own HTTP route so the password
-// is hashed the way the app hashes it, flip email_verified in Postgres, then
-// sign in through the actual form so the saved state came from the real path.
-import { webkit, type FullConfig } from "@playwright/test";
+// Why HTTP and not a browser: signing in through the form and saving the jar
+// worked in Chromium and produced ZERO cookies in WebKit (CI run 5), which is
+// the engine the iPhone profile runs on. Rather than keep guessing at engine
+// cookie policy on http://localhost, take the Set-Cookie the server actually
+// issues and write the storage state directly. Deterministic, engine-neutral,
+// and several seconds faster per run.
+import type { FullConfig } from "@playwright/test";
 import { Client } from "pg";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
 export const TEST_USER = {
@@ -20,6 +22,17 @@ export const TEST_USER = {
 };
 
 const STATE_PATH = "e2e/.auth/user.json";
+
+type StateCookie = {
+  name: string;
+  value: string;
+  domain: string;
+  path: string;
+  expires: number;
+  httpOnly: boolean;
+  secure: boolean;
+  sameSite: "Strict" | "Lax" | "None";
+};
 
 async function withDb<T>(fn: (c: Client) => Promise<T>): Promise<T> {
   const url = process.env.DATABASE_URL;
@@ -38,60 +51,105 @@ async function withDb<T>(fn: (c: Client) => Promise<T>): Promise<T> {
   }
 }
 
+/** One raw Set-Cookie line into the shape Playwright's storageState wants. */
+function parseSetCookie(raw: string, host: string, overHttp: boolean): StateCookie | null {
+  const [pair, ...attrParts] = raw.split(";");
+  const eq = pair.indexOf("=");
+  if (eq === -1) return null;
+  const name = pair.slice(0, eq).trim();
+  const value = pair.slice(eq + 1).trim();
+  if (!name || !value) return null;
+
+  const attrs = new Map<string, string>();
+  for (const part of attrParts) {
+    const i = part.indexOf("=");
+    const k = (i === -1 ? part : part.slice(0, i)).trim().toLowerCase();
+    attrs.set(k, i === -1 ? "" : part.slice(i + 1).trim());
+  }
+
+  const maxAge = attrs.has("max-age") ? Number(attrs.get("max-age")) : undefined;
+  const expiresAttr = attrs.get("expires");
+  const expires =
+    maxAge !== undefined && Number.isFinite(maxAge)
+      ? Math.floor(Date.now() / 1000) + maxAge
+      : expiresAttr
+        ? Math.floor(new Date(expiresAttr).getTime() / 1000)
+        : -1;
+
+  const sameSiteRaw = (attrs.get("samesite") ?? "lax").toLowerCase();
+  const sameSite = sameSiteRaw === "strict" ? "Strict" : sameSiteRaw === "none" ? "None" : "Lax";
+
+  return {
+    name,
+    value,
+    domain: host,
+    path: attrs.get("path") || "/",
+    expires: Number.isFinite(expires) ? expires : -1,
+    httpOnly: attrs.has("httponly"),
+    // A Secure cookie is never sent over http, so the specs would silently run
+    // signed out. The test origin is plain http on loopback; keep the flag off
+    // there. This relaxes nothing in the app — only in the saved jar.
+    secure: overHttp ? false : attrs.has("secure"),
+    sameSite,
+  };
+}
+
 export default async function globalSetup(config: FullConfig) {
   const baseURL = config.projects[0]?.use?.baseURL ?? "http://localhost:3000";
+  const url = new URL(baseURL);
+  const overHttp = url.protocol === "http:";
 
   // Idempotent: a re-run must not trip the unique email constraint. The cascade
-  // takes the user's sessions, accounts and any rows a previous run created.
+  // takes the user's sessions and accounts with it.
   await withDb(async (c) => {
     await c.query('DELETE FROM "user" WHERE email = $1', [TEST_USER.email]);
   });
 
-  // Better Auth rejects a state-changing POST with no Origin
-  // (MISSING_OR_NULL_ORIGIN) — a browser always sends one, Node's fetch does
-  // not. Send the app's own origin so the CSRF check passes without weakening
-  // it. Found by the first CI run of this harness, 2026-09-17.
+  // Better Auth refuses a state-changing POST with no Origin
+  // (MISSING_OR_NULL_ORIGIN): a browser always sends one, Node's fetch does
+  // not. Sending the app's own origin satisfies the check without weakening it.
+  const headers = { "Content-Type": "application/json", Origin: baseURL };
+
   const signUp = await fetch(`${baseURL}/api/auth/sign-up/email`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Origin: baseURL },
+    headers,
     body: JSON.stringify(TEST_USER),
   });
   if (!signUp.ok && signUp.status !== 422) {
     throw new Error(`sign-up failed: ${signUp.status} ${await signUp.text()}`);
   }
 
-  const verified = await withDb(async (c) => {
+  const userId = await withDb(async (c) => {
     const r = await c.query(
       'UPDATE "user" SET email_verified = true WHERE email = $1 RETURNING id',
       [TEST_USER.email]
     );
     return r.rows[0]?.id as string | undefined;
   });
-  if (!verified) throw new Error("test user was not created; sign-up route did not persist a row");
+  if (!userId) throw new Error("test user was not created; the sign-up route persisted no row");
 
-  // Sign in through the form, not the API, so the saved cookies come from the
-  // path a person takes — and in WebKit, the same engine the specs run in.
-  // Cookies saved from Chromium did not authenticate the WebKit contexts
-  // (every signed-in spec bounced to /sign-in); keeping one engine end to end
-  // removes the whole class of problem. Found by CI run 4, 2026-09-17.
-  const browser = await webkit.launch();
-  const page = await browser.newPage({ baseURL });
-  try {
-    await page.goto("/sign-in");
-    await page.getByLabel(/email/i).fill(TEST_USER.email);
-    await page.getByLabel(/password/i).fill(TEST_USER.password);
-    // Exact: the page also carries "Sign in with a passkey", and a loose
-    // regex matches both.
-    await page.getByRole("button", { name: "Sign in", exact: true }).click();
-    await page.waitForURL((url) => !url.pathname.startsWith("/sign-in"), { timeout: 20_000 });
-    mkdirSync(dirname(STATE_PATH), { recursive: true });
-    const state = await page.context().storageState({ path: STATE_PATH });
-    // Fail here, loudly, rather than letting every signed-in spec bounce to
-    // /sign-in and look like an app bug.
-    if (state.cookies.length === 0) {
-      throw new Error("signed in but captured no cookies; storage state would be useless");
-    }
-  } finally {
-    await browser.close();
+  const signIn = await fetch(`${baseURL}/api/auth/sign-in/email`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ email: TEST_USER.email, password: TEST_USER.password }),
+  });
+  if (!signIn.ok) {
+    throw new Error(`sign-in failed: ${signIn.status} ${await signIn.text()}`);
   }
+
+  const raw = signIn.headers.getSetCookie();
+  const cookies = raw
+    .map((line) => parseSetCookie(line, url.hostname, overHttp))
+    .filter((c): c is StateCookie => c !== null);
+
+  if (cookies.length === 0) {
+    throw new Error(
+      `sign-in returned 200 but set no cookies (${raw.length} Set-Cookie headers). ` +
+        "Every signed-in spec would run signed out."
+    );
+  }
+
+  mkdirSync(dirname(STATE_PATH), { recursive: true });
+  writeFileSync(STATE_PATH, JSON.stringify({ cookies, origins: [] }, null, 2));
+  console.log(`[e2e] signed in as ${TEST_USER.email} (${cookies.length} cookie(s) saved)`);
 }
