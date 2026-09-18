@@ -10,6 +10,21 @@ const board = (page: Page) => page.getByTestId("workspace-board");
 const widget = (page: Page, id: string) => page.locator(`[data-widget="${id}"]`);
 
 /**
+ * The widget's PERSISTED grid position, straight from the API.
+ *
+ * Asserting this first separates the two things a failing drag could mean: the
+ * gesture never produced an operation, or it did and the board did not re-render.
+ * Pixels alone cannot tell those apart, and two CI rounds were spent guessing.
+ */
+async function storedPos(page: Page, id: string): Promise<{ x: number; y: number }> {
+  const res = await page.request.get("/api/workspace");
+  const body = await res.json();
+  const w = (body.widgets as Array<{ id: string; x: number; y: number }>).find((n) => n.id === id);
+  if (!w) throw new Error(`widget ${id} is not on the board`);
+  return { x: w.x, y: w.y };
+}
+
+/**
  * Position in DOCUMENT coordinates, not viewport coordinates.
  *
  * boundingBox() is relative to the viewport, so any scroll between two
@@ -153,13 +168,20 @@ test.describe("wide screen", () => {
   test.use({ viewport: { width: 1280, height: 900 }, isMobile: false, hasTouch: false });
 
   test("dragging a widget moves it, and it stays moved after a reload", async ({ page }) => {
+    const startRow = (await storedPos(page, "overdue")).y;
     const before = await boxOf(page, "overdue");
-    await dragBy(page, "overdue", 0, 200);
+    await dragBy(page, "overdue", 0, 300);
+
+    // Did the gesture become an operation at all?
+    await expect
+      .poll(async () => (await storedPos(page, "overdue")).y, { timeout: 8000 })
+      .toBeGreaterThan(startRow);
+
+    // And did the board show it?
     await expect
       .poll(async () => (await boxOf(page, "overdue")).y, { timeout: 5000 })
       .toBeGreaterThan(before.y + 80);
 
-    // The real assertion: it persisted, not just animated.
     await page.reload();
     await expect(board(page)).toBeVisible();
     expect((await boxOf(page, "overdue")).y).toBeGreaterThan(before.y + 80);
@@ -176,15 +198,16 @@ test.describe("wide screen", () => {
   });
 
   test("undo puts it back", async ({ page }) => {
-    const before = await boxOf(page, "overdue");
-    await dragBy(page, "overdue", 0, 200);
+    const startRow = (await storedPos(page, "overdue")).y;
+    await dragBy(page, "overdue", 0, 300);
     await expect
-      .poll(async () => (await boxOf(page, "overdue")).y, { timeout: 5000 })
-      .toBeGreaterThan(before.y + 80);
+      .poll(async () => (await storedPos(page, "overdue")).y, { timeout: 8000 })
+      .toBeGreaterThan(startRow);
+
     await page.getByRole("button", { name: "Undo" }).click();
     await expect
-      .poll(async () => (await boxOf(page, "overdue")).y, { timeout: 5000 })
-      .toBeLessThanOrEqual(before.y + 2);
+      .poll(async () => (await storedPos(page, "overdue")).y, { timeout: 8000 })
+      .toBe(startRow);
   });
 
   test("every handle clears 44px, resize grip included", async ({ page }) => {
