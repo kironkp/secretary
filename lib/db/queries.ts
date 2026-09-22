@@ -82,7 +82,11 @@ export function getMessages(userId: string, conversationId: string) {
 /** Data for the always-visible header strip: next event · #overdue · #due today. */
 export async function getTodayStrip(userId: string, timezone: string) {
   const now = new Date();
-  const { end } = dayRangeInTz(timezone, now);
+  // "Today" is the user's whole local day, not the part of it still ahead.
+  // Today (lib/understanding/today.ts) and the Workspace count the same way;
+  // counting from this instant made the header say "0 due today" beside a
+  // page saying "1 due today" whenever a task was due earlier in the day.
+  const { start, end } = dayRangeInTz(timezone, now);
 
   const [overdue] = await db
     .select({ n: count() })
@@ -93,7 +97,7 @@ export async function getTodayStrip(userId: string, timezone: string) {
         inArray(tasks.status, [...OPEN_STATUSES]),
         notPendingSuggestion,
         isNotNull(tasks.dueAt),
-        lt(tasks.dueAt, now)
+        lt(tasks.dueAt, start)
       )
     );
 
@@ -105,7 +109,7 @@ export async function getTodayStrip(userId: string, timezone: string) {
         eq(tasks.userId, userId),
         inArray(tasks.status, [...OPEN_STATUSES]),
         notPendingSuggestion,
-        gte(tasks.dueAt, now),
+        gte(tasks.dueAt, start),
         lt(tasks.dueAt, end)
       )
     );

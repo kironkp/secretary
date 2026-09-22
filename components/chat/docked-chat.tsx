@@ -7,6 +7,7 @@
 // link from push receipts opens the dock fully on that conversation. While a
 // voice call is live the dock slides away — the call pill owns the bottom.
 import { useEffect, useState } from "react";
+import { DockHeight } from "./dock-height";
 import { useSearchParams } from "next/navigation";
 import type { BriefingCard } from "@/lib/secretary/briefing";
 import { ChatThread, type DockState } from "./chat-thread";
@@ -73,6 +74,7 @@ export function DockedChat() {
         call.active ? "pointer-events-none translate-y-full opacity-0" : ""
       }`}
     >
+      <DockHeight />
       <div className="mx-auto w-full max-w-2xl px-3 pb-[max(env(safe-area-inset-bottom),0.75rem)]">
         {bootstrap ? (
           <ChatThread

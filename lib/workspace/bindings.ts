@@ -17,12 +17,19 @@ import type { BindingQuery, BoundRow } from "./types";
 const OPEN_STATUSES = ["inbox", "todo", "in_progress", "blocked"] as const;
 const DEFAULT_LIMIT = 12;
 
-/** Short, scannable, and in the user's own day. "Fri", "Tue 3", "overdue 2d". */
+/** Short, scannable, and in the user's own day: "Fri", "Sep 3", "2 days late".
+ *  Days as digits and words, never "2d" (docs/understanding/SPEC.md §7).
+ *  floor, not round: a task due at 5 PM today is 0.7 days from the day's
+ *  start and is "today", and one due at 11:59 PM yesterday is "1 day late",
+ *  not "today". */
 function formatDue(due: Date | null, tz: string, now: Date): string {
   if (!due) return "";
   const { start } = dayRangeInTz(tz, now);
-  const days = Math.round((due.getTime() - start.getTime()) / 86_400_000);
-  if (days < 0) return `${Math.abs(days)}d overdue`;
+  const days = Math.floor((due.getTime() - start.getTime()) / 86_400_000);
+  if (days < 0) {
+    const late = Math.abs(days);
+    return `${late} ${late === 1 ? "day" : "days"} late`;
+  }
   if (days === 0) return "today";
   if (days === 1) return "tomorrow";
   if (days < 7) {

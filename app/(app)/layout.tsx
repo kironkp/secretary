@@ -61,8 +61,12 @@ export default async function AppLayout({
         </div>
       </header>
       <main className="min-h-0 flex-1 overflow-y-auto">
-        {/* pb clears the docked chat bar so page bottoms stay reachable */}
-        <div className="mx-auto h-full w-full max-w-7xl px-4 pb-24">{children}</div>
+        {/* pb clears the docked chat so page bottoms stay reachable: its real
+            height, published by components/chat/dock-height.tsx, plus a
+            breath; 6rem until the dock has measured itself. */}
+        <div className="mx-auto h-full w-full max-w-7xl px-4 pb-[calc(var(--dock-h,6rem)+1.5rem)]">
+          {children}
+        </div>
       </main>
       <DetailDialog />
       {/* Chat is not a tab (SPEC §7.7): the dock rides every page. Suspense

@@ -168,9 +168,13 @@ export function TodayView({
         </section>
       )}
 
-      <Section title="Questions" count={counts.questions}>
+      {/* The hero is the only question: no section saying "nothing else",
+          which read as a contradiction under a count of 1. The empty state
+          with no hero at all is the hero slot's own, above. */}
+      {hero && questions.length === 0 ? null : (
+      <Section title="Questions" count={questions.length}>
         {questions.length === 0 ? (
-          <Empty>{hero ? "Nothing else right now." : "No questions right now."}</Empty>
+          <Empty>No questions right now.</Empty>
         ) : (
           <ul className="divide-y divide-edge">
             {questions.map((q) => (
@@ -191,6 +195,7 @@ export function TodayView({
           </ul>
         )}
       </Section>
+      )}
 
       <Section title="Past due" count={counts.pastDue}>
         {ownPastDue.length === 0 && counts.pastDueSuggested === 0 ? (

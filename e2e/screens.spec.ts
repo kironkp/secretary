@@ -22,13 +22,26 @@ test.beforeAll(() => {
   mkdirSync(DIR, { recursive: true });
 });
 
+/** The iPhone 15 viewport Playwright gives the "screens" project. */
+const PHONE = { width: 393, height: 659 };
+/** Tall enough to show a whole screen's content; the shell scrolls inside a
+ *  fixed-height column, so fullPage cannot reach below the first fold. */
+const TALL = { width: 393, height: 1800 };
+
 async function shoot(page: Page, path: string, name: string) {
+  await page.setViewportSize(PHONE);
   await page.goto(path);
   // Fonts and the first data refresh settle within a beat; a picture of a
   // half-painted page tells the reviewer nothing.
   await page.waitForLoadState("networkidle");
   await page.waitForTimeout(400);
-  await page.screenshot({ path: `${DIR}/${name}.png`, fullPage: true });
+  // What the user sees first.
+  await page.screenshot({ path: `${DIR}/${name}.png` });
+  // Everything on the screen, for reading the parts under the fold and the
+  // docked composer.
+  await page.setViewportSize(TALL);
+  await page.waitForTimeout(250);
+  await page.screenshot({ path: `${DIR}/${name}-full.png` });
 }
 
 test("Today", async ({ page }) => {

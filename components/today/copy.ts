@@ -128,7 +128,11 @@ export function failedInWords(failed: { op: string; error: string }[]): string |
  * "3 days late". Anything else comes back null and the caller shows the field.
  */
 export function lateInWords(due: string): string | null {
-  const m = /^(\d+)d overdue$/.exec(due.trim());
+  const s = due.trim();
+  // The binding layer already says "2 days late"; pass it through. The older
+  // "2d overdue" form is still accepted so nothing cached mid-deploy breaks.
+  if (/^\d+ days? late$/.test(s)) return s;
+  const m = /^(\d+)d overdue$/.exec(s);
   if (!m) return null;
   const n = Number(m[1]);
   return `${plural(n, "day", "days")} late`;
