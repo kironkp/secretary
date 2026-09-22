@@ -7,10 +7,15 @@ import {
   numeric,
   pgEnum,
   pgTable,
+  primaryKey,
   real,
   text,
   timestamp,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
+// Type-only, so drizzle-kit (which loads this file outside Next's resolver)
+// never has to follow it. The shapes live with the loop that produces them.
+import type { Answer, ProjectRecord, Source } from "../understanding/types";
 
 // Binary column for attachment payloads (drizzle has no built-in bytea).
 const bytea = customType<{ data: Buffer }>({
@@ -337,16 +342,23 @@ export const checkins = pgTable("checkins", {
   at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-export const memories = pgTable("memories", {
-  id: text("id").primaryKey().$defaultFn(uuid),
-  userId: text("user_id")
-    .notNull()
-    .references(() => user.id, { onDelete: "cascade" }),
-  fact: text("fact").notNull(),
-  tags: jsonb("tags").$type<string[]>().notNull().default([]),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const memories = pgTable(
+  "memories",
+  {
+    id: text("id").primaryKey().$defaultFn(uuid),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    fact: text("fact").notNull(),
+    tags: jsonb("tags").$type<string[]>().notNull().default([]),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  // The understanding loop reads a user's memories newest first on every
+  // sweep (docs/understanding/SPEC.md §3); without this it is a sequential
+  // scan of every user's memories, once per sweep.
+  (t) => [index("memories_user_updated_idx").on(t.userId, t.updatedAt)]
+);
 
 export const layoutSpecs = pgTable("layout_specs", {
   id: text("id").primaryKey().$defaultFn(uuid),
@@ -388,25 +400,55 @@ export const entities = pgTable("entities", {
 // Clarification queue (SPEC §11): extraction ambiguities accumulate here and
 // are asked ONE at a time at natural pauses — never mid-flow, never a barrage,
 // never silently guessed.
-export const clarifications = pgTable("clarifications", {
-  id: text("id").primaryKey().$defaultFn(uuid),
-  userId: text("user_id")
-    .notNull()
-    .references(() => user.id, { onDelete: "cascade" }),
-  kind: text("kind")
-    .$type<"referent" | "asr_span" | "new_name" | "entity_conflict">()
-    .notNull(),
-  // the heard name / span the question is about (resolution mechanics use it)
-  subject: text("subject"),
-  question: text("question").notNull(),
-  // the verbatim source snippet (for asr_span: kept with audio offsets)
-  context: text("context"),
-  entityId: text("entity_id").references(() => entities.id, { onDelete: "set null" }),
-  status: text("status").$type<"open" | "asked" | "resolved" | "dismissed">().notNull().default("open"),
-  resolution: text("resolution"),
-  askedAt: timestamp("asked_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+//
+// The understanding loop (docs/understanding/SPEC.md §5) adds three kinds that
+// are surfaced on Today rather than asked on a call, and the columns a
+// question needs to be answerable with one tap: the evidence it rests on and
+// the closed list of writes each answer performs. The four ASR kinds and every
+// existing column are untouched; the voice tool enum in
+// lib/secretary/tool-schemas.ts still names only those four.
+export const clarifications = pgTable(
+  "clarifications",
+  {
+    id: text("id").primaryKey().$defaultFn(uuid),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    kind: text("kind")
+      .$type<
+        | "referent"
+        | "asr_span"
+        | "new_name"
+        | "entity_conflict"
+        | "need_to_know"
+        | "doesnt_add_up"
+        | "done_yet"
+      >()
+      .notNull(),
+    // the heard name / span the question is about (resolution mechanics use it)
+    subject: text("subject"),
+    question: text("question").notNull(),
+    // the verbatim source snippet (for asr_span: kept with audio offsets)
+    context: text("context"),
+    entityId: text("entity_id").references(() => entities.id, { onDelete: "set null" }),
+    status: text("status").$type<"open" | "asked" | "resolved" | "dismissed">().notNull().default("open"),
+    resolution: text("resolution"),
+    askedAt: timestamp("asked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    // --- understanding-loop columns (SPEC §5); null/empty on the ASR kinds ---
+    projectId: text("project_id").references(() => projects.id, { onDelete: "set null" }),
+    // What the question rests on. An answer may only write to ids named here.
+    evidence: jsonb("evidence").$type<Source[]>().notNull().default([]),
+    answers: jsonb("answers").$type<Answer[]>().notNull().default([]),
+    // Mechanical rank from lib/understanding/questions.ts; Today reads in this order.
+    rank: integer("rank").notNull().default(0),
+    // hash(kind, sorted evidence ids). A resolved or dismissed identity is
+    // never re-created, which is how "asked once" is kept across runs.
+    identity: text("identity"),
+    surfacedAt: timestamp("surfaced_at", { withTimezone: true }),
+  },
+  (t) => [index("clarifications_user_identity_idx").on(t.userId, t.identity)]
+);
 
 // Expectations / nag engine (SPEC §11): every promised follow-up ("I'll be
 // asking either way") becomes a ROW, never a rhetorical promise. A user report
@@ -425,6 +467,54 @@ export const expectations = pgTable("expectations", {
   clearedAt: timestamp("cleared_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// The understanding loop's record (docs/understanding/SPEC.md §2): one row per
+// project holding what the app currently understands about it — things,
+// rules, blockers, contradictions, unknowns — every line pointing at the rows
+// it was read from. Written only by the run; Today and the Workspace read it
+// and never wait for one.
+export const records = pgTable(
+  "records",
+  {
+    id: text("id").primaryKey().$defaultFn(uuid),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    body: jsonb("body").$type<ProjectRecord>().notNull(),
+    // Hash of the gathered inputs the body was written from (gather.ts
+    // hashBundle): ids, updated_ats and the local calendar date, never text.
+    // Same hash, no run — this is the loop's whole change detection.
+    inputsHash: text("inputs_hash").notNull(),
+    version: integer("version").notNull().default(1),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("records_project_idx").on(t.userId, t.projectId)]
+);
+
+// The loop's trigger (docs/understanding/SPEC.md §8): a server-side write to a
+// project's rows marks the project dirty here; the minute tick gathers the
+// dirty projects, compares the bundle hash against records.inputs_hash, runs
+// only when it differs, and clears the flag. One row per (user, project) —
+// the pair is the key, so marking an already-dirty project is an upsert, not
+// a second row — and `since` is the first unacknowledged write, so the tick
+// can take the longest-waiting project first. Exactly the three columns §8
+// names; there is nothing else to say about a flag.
+export const recordDirty = pgTable(
+  "record_dirty",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    since: timestamp("since", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.projectId] })]
+);
 
 // Pipeline templates (SPEC §11): reusable ordered step lists with blocked_by
 // dependencies, instantiable per task (e.g. CPO: update → sign → pay →

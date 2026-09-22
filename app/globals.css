@@ -131,6 +131,34 @@ body {
 }
 .animate-task-in { animation: task-in 0.8s ease-out; }
 
+/* The Workspace's "nothing is cut off" rule (docs/understanding/SPEC.md §9).
+   A widget body is model-authored markup rendered INLINE, and the shared
+   sanitizer (lib/canvas/sanitize.ts safeStyle) lets `white-space: nowrap`,
+   `text-overflow: ellipsis`, `-webkit-line-clamp` and a fixed row height
+   through, because they are harmless inside the Canvas iframe. The shell owns
+   the frame, so the shell states the rule once, here, and wins on !important:
+   a title, lede or row wraps and is read in full. The body itself scrolls
+   (overflow-auto in components/workspace/workspace-board.tsx); that is the one
+   overflow the rule permits. `anywhere` rather than `break-word` so a long
+   token cannot widen a table or flex row past the body either. */
+.wk-body,
+.wk-body * {
+  white-space: normal !important;
+  text-overflow: clip !important;
+  -webkit-line-clamp: none !important;
+  overflow-wrap: anywhere;
+}
+.wk-body pre,
+.wk-body code {
+  white-space: pre-wrap !important;
+}
+/* A repeated row keeps its natural height; fixing it is how a line gets cut. */
+.wk-body [data-each] > * {
+  height: auto !important;
+  max-height: none !important;
+  overflow: visible !important;
+}
+
 /* Reduced motion (SPEC §7.6/§7.7). Motion in this app carries meaning —
    continuity and causality — so the setting calms it rather than removing the
    information: animations collapse to a single instantaneous frame and

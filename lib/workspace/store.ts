@@ -130,13 +130,21 @@ function applySeed(board: Board): Board {
  * scroll and selection: the exact continuity failure this surface exists to
  * avoid. Sanitizing is idempotent, so a canonical body survives a round trip
  * unchanged.
+ *
+ * The Workspace surface: bodies render inline and bound to the user's rows, so
+ * the sanitizer also drops the inline styles that would cut a title off
+ * (docs/understanding/SPEC.md §9) — the stylesheet's rule cannot beat an
+ * inline `!important` on its own.
  */
 function readBoard(raw: unknown): Board {
   const parsed = boardSchema.safeParse(raw);
   if (!parsed.success) return EMPTY_BOARD;
   return {
     ...parsed.data,
-    widgets: parsed.data.widgets.map((w) => ({ ...w, body: sanitizeCanvasMarkup(w.body) })),
+    widgets: parsed.data.widgets.map((w) => ({
+      ...w,
+      body: sanitizeCanvasMarkup(w.body, { surface: "workspace" }),
+    })),
   };
 }
 

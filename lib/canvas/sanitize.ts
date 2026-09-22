@@ -49,6 +49,57 @@ const ALLOWED_ATTRS = new Set([
   "gradientunits", "id",
 ]);
 
+/**
+ * Where the markup will render. The Canvas is a sandboxed iframe with no app
+ * stylesheet, where a painted `white-space:nowrap` is a design choice inside
+ * the model's own picture. A Workspace widget body renders inline and is
+ * bound to the user's rows, where the same declaration hides the end of a
+ * task title — the "nothing is cut off" rule (docs/understanding/SPEC.md §9).
+ */
+export type SanitizeSurface = "canvas" | "workspace";
+
+/** Declarations whose only effect on a widget body is to hide text. */
+const WORKSPACE_DROPPED_PROPS = new Set([
+  "text-overflow",
+  "-webkit-line-clamp",
+  "line-clamp",
+  "max-height",
+]);
+
+/**
+ * The Workspace's style rule, applied declaration by declaration. Two things
+ * happen here that the Canvas never needs:
+ *
+ *   - `!important` is stripped from every declaration. app/globals.css states
+ *     the "nothing is cut off" rule on `.wk-body` with `!important`, and an
+ *     inline `!important` is the one thing in CSS that beats it. Without this
+ *     the stylesheet is a suggestion; with it the shell wins every time.
+ *   - The declarations that clip text are dropped at the gate: ellipsis, line
+ *     clamps, a max-height, `overflow: hidden|clip`, and `white-space` values
+ *     that refuse to wrap. `height` stays (an empty bar with a height is an
+ *     ordinary way to draw a meter); a row's height is forced to auto by the
+ *     stylesheet, which now wins.
+ */
+function workspaceStyle(value: string): string | null {
+  const kept: string[] = [];
+  for (const decl of value.split(";")) {
+    const i = decl.indexOf(":");
+    if (i === -1) continue;
+    const prop = decl.slice(0, i).trim().toLowerCase();
+    const val = decl
+      .slice(i + 1)
+      .replace(/!\s*important/gi, "")
+      .trim();
+    if (!prop || !val) continue;
+    if (WORKSPACE_DROPPED_PROPS.has(prop)) continue;
+    if (prop.startsWith("overflow") && /\b(?:hidden|clip)\b/i.test(val)) continue;
+    // Exact, not a word match: `pre-wrap` and `pre-line` wrap and are fine.
+    if (prop === "white-space" && /^(?:nowrap|pre)$/i.test(val)) continue;
+    kept.push(`${prop}:${val}`);
+  }
+  return kept.length ? kept.join(";") : null;
+}
+
 /** style values may not smuggle loads, behavior, or an escape from their own box.
  *
  *  The escape clause matters because this sanitizer also guards the one path
@@ -56,7 +107,7 @@ const ALLOWED_ATTRS = new Set([
  *  templates): there, `position:fixed;inset:0` is an app-covering overlay.
  *  A CSS backslash can spell any function name (`\75 rl(`), so a raw backslash
  *  is rejected outright — neither painter prompt ever emits one. */
-function safeStyle(value: string): string | null {
+function safeStyle(value: string, surface: SanitizeSurface): string | null {
   if (value.includes("\\")) return null;
   const lower = value.toLowerCase();
   if (lower.includes("url(") || lower.includes("expression") || lower.includes("@import"))
@@ -65,7 +116,7 @@ function safeStyle(value: string): string | null {
   // Comments can hide the keyword from a naive scan: position:/*x*/fixed.
   const flat = lower.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\s+/g, "");
   if (/position:(fixed|sticky|absolute)/.test(flat)) return null;
-  return value;
+  return surface === "workspace" ? workspaceStyle(value) : value;
 }
 
 /** Class names the SHELL owns: it injects .cv-box, and toggles .cv-done /
@@ -108,7 +159,7 @@ const SVG_TAGS = new Set([
   "text", "tspan", "defs", "lineargradient", "stop",
 ]);
 
-function sanitizeAttrs(rawAttrs: string, tag: string): string {
+function sanitizeAttrs(rawAttrs: string, tag: string, surface: SanitizeSurface): string {
   let out = "";
   // attr="v" | attr='v' | attr=v | bare attr
   const re = /([a-zA-Z_:][-a-zA-Z0-9_:.]*)(?:\s*=\s*("([^"]*)"|'([^']*)'|[^\s"'>]+))?/g;
@@ -120,7 +171,7 @@ function sanitizeAttrs(rawAttrs: string, tag: string): string {
     if (name === "data-check" && SVG_TAGS.has(tag)) continue;
     let value = m[3] ?? m[4] ?? (m[2] && !m[2].startsWith('"') && !m[2].startsWith("'") ? m[2] : "");
     if (name === "style") {
-      const safe = safeStyle(value);
+      const safe = safeStyle(value, surface);
       if (safe === null) continue;
       value = safe;
     }
@@ -158,8 +209,15 @@ function sanitizeAttrs(rawAttrs: string, tag: string): string {
 /**
  * Sanitize a model-painted fragment. Pure; tolerant of truncated input
  * (streaming): an unterminated trailing tag is dropped.
+ *
+ * `surface` defaults to the Canvas, whose output this must keep byte-identical;
+ * the Workspace names itself and gets the stricter style rule above.
  */
-export function sanitizeCanvasMarkup(input: string): string {
+export function sanitizeCanvasMarkup(
+  input: string,
+  opts: { surface?: SanitizeSurface } = {}
+): string {
+  const surface = opts.surface ?? "canvas";
   let html = input;
   // Model wrappers: strip markdown fences if the whole thing arrived fenced.
   html = html.replace(/^\s*```(?:html)?\s*/i, "").replace(/\s*```\s*$/, "");
@@ -181,7 +239,7 @@ export function sanitizeCanvasMarkup(input: string): string {
       if (!ALLOWED_TAGS.has(tag)) return "";
       if (whole.startsWith("</")) return `</${tag}>`;
       const selfClose = VOID_TAGS.has(tag) || /\/\s*$/.test(attrs);
-      return `<${tag}${sanitizeAttrs(attrs, tag)}${selfClose ? " /" : ""}>`;
+      return `<${tag}${sanitizeAttrs(attrs, tag, surface)}${selfClose ? " /" : ""}>`;
     }
   );
 }

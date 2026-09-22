@@ -134,10 +134,14 @@ Worked example, the CPO part of the Caltrans record as the data stands today:
 | previous record | `records.body` | continuity; the model edits, it does not start over |
 | clock | now in the user's timezone, plus "tomorrow" and "this week" boundaries | so "on the 22nd" resolves |
 
-Mentions are matched with the same alias machinery `resolveProject` uses
-(`lib/secretary/tools.ts`), plus every `things[].ids` from the previous
-record, so "0394" finds the CPO 2073 thread once the record knows they are
-the same thing.
+Mentions are matched by `lib/understanding/terms.ts`, which applies the
+normalization `resolveProject` uses (`lib/secretary/tools.ts`: case-blind,
+punctuation-blind, whole words) to prose rather than to a spoken name. The
+terms are the project's name, every `things[].name`, alias and id from the
+previous record, and the numbers and proper nouns in the project's task
+titles (numbers from task notes too, because on a first run the notes are
+the only place a new number lives), so "0394" finds the CPO 2073 thread once
+the record knows they are the same thing.
 
 Bundle size is bounded: 60 tasks, 60 memories, 80 messages, 20 events, 20
 documents. Over the bound, the newest win and the run logs the drop. The hash
@@ -172,9 +176,15 @@ Validation, in order, all mechanical:
 4. Plain-language rules on every `text`, `todayLine`, lede and question:
    no word from the banned list (`slipped`, `stale`, `agenda`, `leverage`,
    `bandwidth`, `circle back`), days as digits, ≤ 3 sentences per lede,
-   ≤ 2 sentences per question `why`. A failure regenerates that field only.
+   ≤ 2 sentences for the Today line, ≤ 2 sentences per question `why`, and
+   a `why` names at least one evidence item by its title or a quote from it
+   (§7). A failure regenerates that field only.
 5. A lede may only name titles that are rows of that widget's current
-   binding (the same check the third pass proposed).
+   binding (the same check the third pass proposed). A name is a number of
+   three or more digits or a capitalized word; a capitalized word that opens
+   a sentence is prose unless written in all caps; month and weekday names,
+   today/tomorrow/yesterday, the project name and the widget title are never
+   names; a plural and its singular are the same name.
 
 ## 5. Questions
 

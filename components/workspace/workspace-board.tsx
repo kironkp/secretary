@@ -10,9 +10,14 @@
 //   1. DOM ORDER NEVER CHANGES. Widgets render sorted by id, forever, and every
 //      visual position comes from style alone. Reordering React children is
 //      what made a canvas reorder reload the whole board.
-//   2. NOTHING IS CLIPPED. A widget's height is its grid height; content that
-//      wants more scrolls inside its own body, and the board grows to fit the
-//      tallest widget. No measuring loop, no feedback, no staircase.
+//   2. NOTHING IS CLIPPED. A widget's grid height is its MINIMUM height; content
+//      that wants more scrolls inside its own body, and the board grows to fit
+//      the tallest widget. No measuring loop, no feedback, no staircase. The
+//      same rule holds for TEXT (docs/understanding/SPEC.md §9): a title or a
+//      row wraps and is read in full; nothing here truncates, elides or clamps.
+//      The one thing that can push a widget past its grid height is its own
+//      header: a long title is read in full, and the widget grows by the
+//      extra lines rather than cutting them off.
 //
 // Widgets render INLINE, not in an iframe. That is the decision the whole
 // surface rests on: the host can see pointer events, so drag and resize are
@@ -62,6 +67,13 @@ type Gesture =
     };
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
+
+// What a widget's frame takes before the body: the section's own borders
+// (1px top and bottom), the 44px header row, and the header's bottom border.
+// The body is capped at the grid height minus this, so the body scrolls and
+// the widget stays its grid height — unless the header wraps, in which case
+// the header is the thing that grows and nothing is cut off.
+const FRAME_PX = 2 + 44 + 1;
 
 export function WorkspaceBoard({ initial }: { initial: BoardState }) {
   const [state, setState] = useState<BoardState>(initial);
@@ -289,13 +301,16 @@ export function WorkspaceBoard({ initial }: { initial: BoardState }) {
                 left: rect.left,
                 top: rect.top,
                 width: rect.width,
-                height: rect.height,
+                // A minimum, not a height (docs/workspace/SPEC.md §3.1): the
+                // body is capped below so the widget normally sits exactly on
+                // its grid height, and only a wrapped header can push it past.
+                minHeight: rect.height,
                 zIndex: active ? 999 : w.z,
                 transform: active
                   ? `translate3d(${gesture.dx}px, ${gesture.dy}px, 0)`
                   : undefined,
                 // The finger is the animation during a gesture.
-                transition: active ? "none" : `left ${DURATION} ${EASE}, top ${DURATION} ${EASE}, width ${DURATION} ${EASE}, height ${DURATION} ${EASE}`,
+                transition: active ? "none" : `left ${DURATION} ${EASE}, top ${DURATION} ${EASE}, width ${DURATION} ${EASE}, min-height ${DURATION} ${EASE}`,
               };
 
           return (
@@ -328,7 +343,14 @@ export function WorkspaceBoard({ initial }: { initial: BoardState }) {
                 >
                   <span aria-hidden className="text-base leading-none">⠿</span>
                 </button>
-                <h2 className="min-w-0 flex-1 truncate text-sm font-semibold text-ink">{w.title}</h2>
+                {/* Wraps, never truncates (docs/understanding/SPEC.md §9). A
+                    title the user cannot read in full is a title cut off. The
+                    header grows and the body gives up the height: the body is
+                    what scrolls, the title is never elided. min-w-0 lets the
+                    flex item shrink so the wrap happens at all. */}
+                <h2 className="min-w-0 flex-1 wrap-break-word py-2 text-sm font-semibold text-ink">
+                  {w.title}
+                </h2>
                 <button
                   type="button"
                   data-collapse={w.id}
@@ -343,7 +365,13 @@ export function WorkspaceBoard({ initial }: { initial: BoardState }) {
                 </button>
               </header>
 
-              {!w.collapsed && <WidgetBody widget={w} rows={state.rows[w.id]} />}
+              {!w.collapsed && (
+                <WidgetBody
+                  widget={w}
+                  rows={state.rows[w.id]}
+                  maxHeight={narrow ? undefined : Math.max(0, rect.height - FRAME_PX)}
+                />
+              )}
 
               {!narrow && !w.collapsed && (
                 <button
@@ -372,7 +400,16 @@ export function WorkspaceBoard({ initial }: { initial: BoardState }) {
  * a widget alive across a data refresh, instead of the blank-then-rebuild the
  * Canvas does.
  */
-function WidgetBody({ widget, rows }: { widget: Widget; rows?: BoundRow[] }) {
+function WidgetBody({
+  widget,
+  rows,
+  maxHeight,
+}: {
+  widget: Widget;
+  rows?: BoundRow[];
+  /** The grid height less the frame; undefined when stacked, where a body grows to its content. */
+  maxHeight?: number;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const written = useRef<string | null>(null);
 
@@ -397,6 +434,7 @@ function WidgetBody({ widget, rows }: { widget: Widget; rows?: BoundRow[] }) {
     <div
       ref={ref}
       data-body={widget.id}
+      style={maxHeight === undefined ? undefined : { maxHeight }}
       className="wk-body min-h-0 flex-1 overflow-auto px-4 py-3 text-sm text-ink"
     />
   );

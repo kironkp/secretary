@@ -20,9 +20,11 @@ export default async function WorkspacePage() {
   if (!session) redirect("/sign-in");
 
   const stored = await getBoard(session.user.id);
+  // The Workspace surface (docs/understanding/SPEC.md §9): the same allowlist
+  // as the Canvas, minus the inline styles that would cut a row off.
   const widgets = stored.board.widgets.map((w) => ({
     ...w,
-    body: sanitizeCanvasMarkup(w.body),
+    body: sanitizeCanvasMarkup(w.body, { surface: "workspace" }),
   }));
 
   // Resolve on the server so the first paint already carries real data. The

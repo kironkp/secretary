@@ -164,8 +164,158 @@ test("nothing is clipped: every body fits inside its widget", async ({ page }) =
   }
 });
 
+/**
+ * "Nothing is cut off" (docs/understanding/SPEC.md §9). A title the user cannot
+ * read in full is a title cut off, and no prompt can enforce that: only the
+ * shell's styles can, and only a layout engine can check them. The title is 140
+ * characters — three lines or more at phone width, two on the desktop grid —
+ * and it goes in through the same tool the voice path uses rather than straight
+ * into Postgres, so the row arrives the way a real one does.
+ *
+ * Shared by the phone profile and the "wide screen" describe: on the desktop
+ * grid a widget sits on its grid height and its body scrolls, which is a
+ * second way to lose the end of a title, so both profiles assert it.
+ */
+// Exactly 140 characters; asserted below so the number in the spec stays true.
+const LONG_TITLE =
+  "Reconcile the production monitor purchase order against the September bank " +
+  "statement, then send the signed copy to Marissa and Walter today.";
+let longTitleTaskId: string | null = null;
+
+/** There is no DELETE route for a task. Dropping it through the task API takes
+ *  it out of every open-task widget, and global setup wipes the user's tasks at
+ *  the start of the next run. */
+async function dropLongTitleTask(page: Page) {
+  if (!longTitleTaskId) return;
+  await page.request.patch(`/api/tasks/${longTitleTaskId}`, { data: { status: "dropped" } });
+  longTitleTaskId = null;
+}
+
+async function expectLongTitleShownInFull(page: Page) {
+  expect(LONG_TITLE).toHaveLength(140);
+
+  // Three days past due, so the Overdue binding (due_at before today) takes it.
+  const dueAt = new Date(Date.now() - 3 * 86_400_000).toISOString();
+  const created = await page.request.post("/api/secretary/tools", {
+    data: { name: "create_task", args: { title: LONG_TITLE, due_at: dueAt } },
+  });
+  expect(created.ok()).toBeTruthy();
+  const outcome = (await created.json()) as {
+    result?: { task_id?: string; error?: string };
+  };
+  expect(outcome.result?.error, "create_task refused the task").toBeUndefined();
+  longTitleTaskId = outcome.result?.task_id ?? null;
+  expect(longTitleTaskId ?? "").toMatch(/^[0-9a-f-]{36}$/);
+
+  await page.reload();
+  await expect(board(page)).toBeVisible();
+
+  const row = widget(page, "overdue").locator(`[data-row-id="${longTitleTaskId}"]`);
+  await expect(row).toBeVisible();
+  const title = row.locator('[data-field="title"]');
+  await expect(title).toHaveText(LONG_TITLE);
+  await row.scrollIntoViewIfNeeded();
+
+  const m = await row.evaluate((el) => {
+    const rowEl = el as HTMLElement;
+    const titleEl = rowEl.querySelector<HTMLElement>('[data-field="title"]');
+    const body = rowEl.closest<HTMLElement>(".wk-body");
+    if (!titleEl || !body) throw new Error("the row has no title element or no body");
+    const rowStyle = getComputedStyle(rowEl);
+    const titleStyle = getComputedStyle(titleEl);
+    const bodyRect = body.getBoundingClientRect();
+    const rowRect = rowEl.getBoundingClientRect();
+    // One rect per line box: the geometry of every line, clipped or not.
+    const lines = Array.from(titleEl.getClientRects());
+    const inside = (r: DOMRect, box: DOMRect) =>
+      r.left >= box.left - 1 &&
+      r.right <= box.right + 1 &&
+      r.top >= box.top - 1 &&
+      r.bottom <= box.bottom + 1;
+    return {
+      innerText: titleEl.innerText,
+      title: { scrollWidth: titleEl.scrollWidth, clientWidth: titleEl.clientWidth },
+      row: {
+        scrollWidth: rowEl.scrollWidth,
+        clientWidth: rowEl.clientWidth,
+        scrollHeight: rowEl.scrollHeight,
+        clientHeight: rowEl.clientHeight,
+      },
+      textOverflow: [rowStyle.textOverflow, titleStyle.textOverflow],
+      whiteSpace: [rowStyle.whiteSpace, titleStyle.whiteSpace],
+      lineClamp: [rowStyle.webkitLineClamp, titleStyle.webkitLineClamp],
+      lineCount: lines.length,
+      linesInsideRow: lines.every((r) => inside(r, rowRect)),
+      rowInsideBody: inside(rowRect, bodyRect),
+    };
+  });
+
+  // The whole title: not a prefix, not an ellipsis, not a clamp.
+  expect(m.innerText).toBe(LONG_TITLE);
+  for (const v of m.textOverflow) expect(v).not.toBe("ellipsis");
+  for (const v of m.whiteSpace) expect(v).not.toMatch(/nowrap|^pre$/);
+  for (const v of m.lineClamp) expect(v).not.toMatch(/^\d+$/);
+  // Nothing spills past its box. The row is the block, so its numbers are the
+  // ones with teeth; an inline span reports 0 for both and is checked anyway
+  // because the rule is stated on the title.
+  expect(m.title.scrollWidth).toBeLessThanOrEqual(m.title.clientWidth + 1);
+  expect(m.row.scrollWidth).toBeLessThanOrEqual(m.row.clientWidth + 1);
+  expect(m.row.scrollHeight).toBeLessThanOrEqual(m.row.clientHeight + 1);
+  // It wrapped — 140 characters do not fit one line in a 6-column widget at
+  // any profile — and every line sits inside its row, and the row inside the
+  // body's visible area.
+  expect(m.lineCount).toBeGreaterThanOrEqual(2);
+  expect(m.linesInsideRow).toBe(true);
+  expect(m.rowInsideBody).toBe(true);
+}
+
+test.describe("nothing is cut off", () => {
+  test.afterEach(async ({ page }) => {
+    await dropLongTitleTask(page);
+  });
+
+  test("a 140-character title in the Overdue widget is shown in full", async ({ page }) => {
+    await expectLongTitleShownInFull(page);
+  });
+
+  test("a widget header can wrap: no ellipsis, no nowrap, no overflow", async ({ page }) => {
+    // There is no rename operation yet (lib/workspace/types.ts opSchema), so a
+    // long stored title cannot be produced through the API. Until there is,
+    // this checks the rule on every header the board has; the wrap itself is
+    // verified once a rename exists.
+    const headers = page.locator("[data-widget] > header > h2");
+    expect(await headers.count()).toBeGreaterThan(0);
+    const styles = await headers.evaluateAll((els) =>
+      els.map((el) => {
+        const s = getComputedStyle(el);
+        return {
+          textOverflow: s.textOverflow,
+          whiteSpace: s.whiteSpace,
+          overflowing: el.scrollWidth - el.clientWidth,
+        };
+      })
+    );
+    for (const s of styles) {
+      expect(s.textOverflow).not.toBe("ellipsis");
+      expect(s.whiteSpace).not.toMatch(/nowrap|^pre$/);
+      expect(s.overflowing).toBeLessThanOrEqual(1);
+    }
+  });
+});
+
 test.describe("wide screen", () => {
   test.use({ viewport: { width: 1280, height: 900 }, isMobile: false, hasTouch: false });
+
+  test.afterEach(async ({ page }) => {
+    await dropLongTitleTask(page);
+  });
+
+  test("a 140-character title is shown in full on the desktop grid too", async ({ page }) => {
+    // Here a widget sits on its grid height and the body scrolls inside it
+    // (components/workspace/workspace-board.tsx invariant 2); the phone profile
+    // never exercises that path, so the same assertions run at this width.
+    await expectLongTitleShownInFull(page);
+  });
 
   test("dragging a widget moves it, and it stays moved after a reload", async ({ page }) => {
     const startRow = (await storedPos(page, "overdue")).y;
