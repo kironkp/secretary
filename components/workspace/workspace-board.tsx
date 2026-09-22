@@ -180,35 +180,56 @@ export function WorkspaceBoard({ initial }: { initial: BoardState }) {
     [state.widgets]
   );
 
+  // Writes go out one at a time, each with the version the LAST one left
+  // behind. Two requests in flight with the same version — the move at the end
+  // of a drag and the focus from the click that follows the drop — reach the
+  // server in whichever order the engine fires them, and the second is
+  // refused as stale; in WebKit that was the move, and the desktop drag test
+  // read the widget back at its start row. A queue and a ref for the current
+  // version make the order irrelevant.
+  const stateRef = useRef(state);
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
+  const queueRef = useRef<Promise<void>>(Promise.resolve());
+
   const send = useCallback(
-    async (operations: unknown[], optimistic?: Widget[]) => {
-      const before = state;
-      if (optimistic) setState((s) => ({ ...s, widgets: optimistic }));
-      try {
-        const res = await fetch("/api/workspace", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ operations, version: before.version }),
-        });
-        const data = await res.json();
-        if (!res.ok && res.status !== 409) throw new Error(data?.error ?? `HTTP ${res.status}`);
-        // 409 carries the winning state: adopt it rather than keep a guess.
-        setState({
-          version: data.version,
-          widgets: data.widgets,
-          rows: data.rows ?? {},
-          ledes: data.ledes ?? {},
-          focusId: data.focusId ?? null,
-          canUndo: !!data.canUndo,
-          canRedo: !!data.canRedo,
-        });
-        setError(res.status === 409 ? "Reloaded: the board changed elsewhere." : null);
-      } catch (e) {
-        setState(before); // exact rollback, the Canvas's discipline
-        setError(e instanceof Error ? e.message : "Could not save that move.");
-      }
+    (operations: unknown[], optimistic?: Widget[]) => {
+      const run = async () => {
+        const before = stateRef.current;
+        if (optimistic) setState((s) => ({ ...s, widgets: optimistic }));
+        try {
+          const res = await fetch("/api/workspace", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ operations, version: before.version }),
+          });
+          const data = await res.json();
+          if (!res.ok && res.status !== 409) throw new Error(data?.error ?? `HTTP ${res.status}`);
+          // 409 carries the winning state: adopt it rather than keep a guess.
+          const next: BoardState = {
+            version: data.version,
+            widgets: data.widgets,
+            rows: data.rows ?? {},
+            ledes: data.ledes ?? {},
+            focusId: data.focusId ?? null,
+            canUndo: !!data.canUndo,
+            canRedo: !!data.canRedo,
+          };
+          stateRef.current = next;
+          setState(next);
+          setError(res.status === 409 ? "Reloaded: the board changed elsewhere." : null);
+        } catch (e) {
+          stateRef.current = before;
+          setState(before); // exact rollback, the Canvas's discipline
+          setError(e instanceof Error ? e.message : "Could not save that move.");
+        }
+      };
+      const queued = queueRef.current.then(run, run);
+      queueRef.current = queued;
+      return queued;
     },
-    [state]
+    []
   );
 
   const pxRect = (w: Widget) => {
@@ -221,8 +242,12 @@ export function WorkspaceBoard({ initial }: { initial: BoardState }) {
     };
   };
 
+  /** The widget whose drag just ended, until the click it produces arrives. */
+  const justDraggedRef = useRef<string | null>(null);
+
   const onPointerDown = (e: React.PointerEvent, w: Widget, kind: "drag" | "resize") => {
     if (narrow) return;
+    justDraggedRef.current = null;
     e.preventDefault();
     e.stopPropagation();
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -268,6 +293,9 @@ export function WorkspaceBoard({ initial }: { initial: BoardState }) {
     if (g.kind === "drag") {
       const x = clamp(g.origin.x + dCols, 0, GRID_COLS - g.origin.w);
       const y = Math.max(0, g.origin.y + dRows);
+      // The click that lands after the drop must not send a second focus:
+      // the batch below already carries it.
+      justDraggedRef.current = g.id;
       // One batch, so one request and one undo step for one gesture.
       void send(
         [
@@ -365,6 +393,11 @@ export function WorkspaceBoard({ initial }: { initial: BoardState }) {
                 narrow ? "" : "motion-reduce:transition-none",
               ].join(" ")}
               onClick={() => {
+                if (justDraggedRef.current === w.id) {
+                  // The drop's own batch focused it; this click is its echo.
+                  justDraggedRef.current = null;
+                  return;
+                }
                 if (state.focusId !== w.id) void send([{ op: "focus", id: w.id }]);
               }}
             >
