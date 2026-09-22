@@ -118,3 +118,36 @@ export async function checkTranscribeQuota(userId: string): Promise<
   }
   return { ok: true };
 }
+
+// --------------------------------------------------------------------------
+// "Understand now" (app/api/understanding POST)
+// --------------------------------------------------------------------------
+
+const UNDERSTAND_NOW_WINDOW_MS = 60 * 1000;
+/** userId -> when their last POST was accepted. */
+const understandNowLast = new Map<string, number>();
+
+/**
+ * One "Understand now" per user per minute. In memory rather than over a
+ * table, unlike the two above: a run over unchanged data writes no row
+ * (docs/understanding/SPEC.md §8, the hash match is not logged), so there is
+ * nothing durable to count, and the limit is on the request, not on the
+ * model calls it may or may not make. One process, one map; a restart
+ * forgives, which is fine for a button.
+ */
+export function checkUnderstandNowQuota(
+  userId: string,
+  now: number = Date.now()
+): { ok: true } | { ok: false; status: number; message: string } {
+  const last = understandNowLast.get(userId);
+  if (last !== undefined && now - last < UNDERSTAND_NOW_WINDOW_MS) {
+    const wait = Math.ceil((UNDERSTAND_NOW_WINDOW_MS - (now - last)) / 1000);
+    return {
+      ok: false,
+      status: 429,
+      message: `Just ran. Try again in ${wait} seconds.`,
+    };
+  }
+  understandNowLast.set(userId, now);
+  return { ok: true };
+}

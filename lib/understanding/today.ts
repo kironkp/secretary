@@ -382,8 +382,16 @@ export function mechanicalTodayLine(dueToday: number): string {
  * so the next run knows what the user has seen. The UPDATE filters on
  * surfaced_at IS NULL and only the rows it actually flipped are logged, so
  * two requests racing on a fresh question log it once, not twice.
+ *
+ * Exported because the voice briefing (lib/secretary/briefing.ts) surfaces
+ * the same queue and must mark it the same way; there is one meaning of
+ * "asked", not one per surface.
  */
-async function markSurfaced(userId: string, rows: QuestionRow[], now: Date): Promise<Set<string>> {
+export async function markSurfaced(
+  userId: string,
+  rows: QuestionRow[],
+  now: Date
+): Promise<Set<string>> {
   const fresh = rows.filter((r) => r.surfacedAt === null).map((r) => r.id);
   if (fresh.length === 0) return new Set();
   const flipped = await db

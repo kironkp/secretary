@@ -4,9 +4,10 @@
 // fixture). Unknown → created; low-confidence spellings arrive unconfirmed
 // with a new_name clarification, and must not be used in documents until
 // confirmed. Pure DB mechanics — the model only supplies mentions.
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { clarifications, entities } from "@/lib/db/schema";
+import { ASR_KINDS } from "@/lib/understanding/questions";
 
 export type Mention = {
   name: string;
@@ -133,12 +134,25 @@ export async function crossReferenceMentions(
   return outcomes;
 }
 
-/** The ONE clarification to surface next (oldest open), marked as asked. */
+/**
+ * The ONE clarification to surface next (oldest open), marked as asked.
+ * Only the four voice-flow kinds: the understanding loop's questions
+ * (docs/understanding/SPEC.md §5, §6) share this table but have their own
+ * block in the briefing, their own answer ids and their own tool
+ * (answer_question), so a need_to_know row must never come through here to
+ * be "resolved" as if it were a misheard name.
+ */
 export async function nextClarification(userId: string) {
   const [row] = await db
     .select()
     .from(clarifications)
-    .where(and(eq(clarifications.userId, userId), eq(clarifications.status, "open")))
+    .where(
+      and(
+        eq(clarifications.userId, userId),
+        eq(clarifications.status, "open"),
+        inArray(clarifications.kind, [...ASR_KINDS])
+      )
+    )
     .orderBy(clarifications.createdAt)
     .limit(1);
   if (!row) return null;
@@ -149,10 +163,17 @@ export async function nextClarification(userId: string) {
   return row;
 }
 
+/** Open rows of the four voice-flow kinds; the same filter as nextClarification. */
 export async function openClarificationCount(userId: string): Promise<number> {
   const rows = await db
     .select({ id: clarifications.id })
     .from(clarifications)
-    .where(and(eq(clarifications.userId, userId), eq(clarifications.status, "open")));
+    .where(
+      and(
+        eq(clarifications.userId, userId),
+        eq(clarifications.status, "open"),
+        inArray(clarifications.kind, [...ASR_KINDS])
+      )
+    );
   return rows.length;
 }

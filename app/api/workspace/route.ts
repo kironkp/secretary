@@ -8,6 +8,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { isErrorResponse, parseBody, requireSession } from "@/lib/api";
+import { ledesFor } from "@/lib/understanding/words";
 import { resolveBinding } from "@/lib/workspace/bindings";
 import { applyOps } from "@/lib/workspace/ops";
 import { getBoard, saveBoard } from "@/lib/workspace/store";
@@ -49,13 +50,20 @@ type Session = { id: string; timezone: string };
 
 async function payload(user: Session) {
   const stored = await getBoard(user.id);
-  const rows = await resolveAll(user.id, user.timezone, stored.board.widgets);
+  // The ledes (docs/understanding/SPEC.md §9: `ledes[widgetId]` in the
+  // payload) come from the records, not the board, so they resolve alongside
+  // the rows rather than after them.
+  const [rows, ledes] = await Promise.all([
+    resolveAll(user.id, user.timezone, stored.board.widgets),
+    ledesFor(user.id),
+  ]);
   return {
     id: stored.id,
     name: stored.name,
     version: stored.version,
     widgets: stored.board.widgets,
     rows,
+    ledes,
     focusId: stored.board.focusId,
     canUndo: stored.board.undo.length > 0,
     canRedo: stored.board.redo.length > 0,
@@ -91,13 +99,17 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "stale", ...(await payload(user)) }, { status: 409 });
   }
 
-  const rows = await resolveAll(user.id, user.timezone, saved.board.widgets);
+  const [rows, ledes] = await Promise.all([
+    resolveAll(user.id, user.timezone, saved.board.widgets),
+    ledesFor(user.id),
+  ]);
   return NextResponse.json({
     id: saved.id,
     name: saved.name,
     version: saved.version,
     widgets: saved.board.widgets,
     rows,
+    ledes,
     focusId: saved.board.focusId,
     canUndo: saved.board.undo.length > 0,
     canRedo: saved.board.redo.length > 0,

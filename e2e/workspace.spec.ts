@@ -5,6 +5,7 @@
 // the widget it grabbed and nothing else, whether the move survives a reload.
 // Four Canvas rebuilds shipped green without a test like this.
 import { test, expect, type Page } from "@playwright/test";
+import { E2E_LEDE } from "./global-setup";
 
 const board = (page: Page) => page.getByTestId("workspace-board");
 const widget = (page: Page, id: string) => page.locator(`[data-widget="${id}"]`);
@@ -303,6 +304,36 @@ test.describe("nothing is cut off", () => {
       expect(s.whiteSpace).not.toMatch(/nowrap|^pre$/);
       expect(s.overflowing).toBeLessThanOrEqual(1);
     }
+  });
+});
+
+test.describe("ledes", () => {
+  test("the Overdue widget shows its lede in full, above the rows", async ({ page }) => {
+    // Seeded on the E2E Project's record in global setup (docs/understanding/
+    // SPEC.md §7, §9): the board ships `ledes[widgetId]` from the last record
+    // and the shell renders it as text above the rows. The same rule as a
+    // title: read in full, never an ellipsis.
+    const lede = widget(page, E2E_LEDE.widgetId).locator(`[data-lede="${E2E_LEDE.widgetId}"]`);
+    await expect(lede).toBeVisible();
+    await expect(lede).toHaveText(E2E_LEDE.text);
+    const m = await lede.evaluate((el) => {
+      const s = getComputedStyle(el);
+      // Above the rows: the lede precedes the body in the DOM, whatever the
+      // stacking or the position of the widget.
+      const body = el.parentElement?.querySelector(".wk-body");
+      return {
+        textOverflow: s.textOverflow,
+        whiteSpace: s.whiteSpace,
+        lineClamp: s.webkitLineClamp,
+        overflowing: el.scrollWidth - el.clientWidth,
+        beforeBody: !!body && !!(el.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING),
+      };
+    });
+    expect(m.textOverflow).not.toBe("ellipsis");
+    expect(m.whiteSpace).not.toMatch(/nowrap|^pre$/);
+    expect(m.lineClamp).not.toMatch(/^\d+$/);
+    expect(m.overflowing).toBeLessThanOrEqual(1);
+    expect(m.beforeBody).toBe(true);
   });
 });
 

@@ -34,7 +34,8 @@ export type ModelCall = (input: {
   previousErrors: string[];
 }) => Promise<{ output: unknown; model: string; inputTokens: number; outputTokens: number }>;
 
-const DEFAULT_MODEL = "claude-sonnet-5";
+/** Exported so Settings (lib/understanding/sweep.ts describeProvider) names the same model a run would use. */
+export const DEFAULT_MODEL = "claude-sonnet-5";
 const DEFAULT_EFFORT: BrainEffort = "medium";
 const MAX_TOKENS = 16000;
 
@@ -123,7 +124,8 @@ export async function anthropicModelCall(userId: string): Promise<ModelCall | nu
 // The OpenAI model, and choosing between the two
 // --------------------------------------------------------------------------
 
-const DEFAULT_OPENAI_MODEL = "gpt-5.5";
+/** Exported for the same reason as DEFAULT_MODEL. */
+export const DEFAULT_OPENAI_MODEL = "gpt-5.5";
 /** The Responses API's ladder for gpt-5.5 (lib/anthropic.ts CHAT_EFFORTS). */
 const OPENAI_EFFORTS = ["none", "low", "medium", "high", "xhigh"] as const;
 type OpenAIEffort = (typeof OPENAI_EFFORTS)[number];

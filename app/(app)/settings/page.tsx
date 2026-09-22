@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
@@ -18,6 +19,7 @@ import { layoutPreferences } from "@/lib/db/schema";
 import { PasskeySection } from "@/components/settings/passkey-section";
 import { ShopRequests } from "@/components/settings/shop-requests";
 import { TimezoneForm } from "@/components/settings/timezone-form";
+import { UnderstandingSettings } from "@/components/settings/understanding";
 import { SignOutButton } from "@/components/settings/sign-out-button";
 import { AppearancePicker } from "@/components/shell/theme";
 
@@ -52,6 +54,26 @@ export default async function SettingsPage() {
         <h2 className="mb-1 text-sm font-bold">Appearance</h2>
         <p className="mb-4 text-xs text-muted">Light is the default; dark is one tap away.</p>
         <AppearancePicker />
+      </section>
+
+      {/* The tab bar carries four screens (the mockup's). These still exist
+          and are reached from here rather than from a tab. */}
+      <section className="rounded-xl border border-edge bg-surface p-5">
+        <h2 className="mb-1 text-sm font-bold">More screens</h2>
+        <p className="mb-3 text-xs text-muted">Not on the tab bar, still here.</p>
+        <ul className="flex flex-col divide-y divide-sep">
+          {[
+            { href: "/dashboard", label: "Dashboard" },
+            { href: "/spreadsheet", label: "Spreadsheet" },
+            { href: "/soundtest", label: "Sound test" },
+          ].map((l) => (
+            <li key={l.href}>
+              <Link href={l.href} className="flex min-h-11 items-center text-[16px] text-accent">
+                {l.label}
+              </Link>
+            </li>
+          ))}
+        </ul>
       </section>
 
       <section className="rounded-xl border border-edge bg-surface p-5">
@@ -136,6 +158,16 @@ export default async function SettingsPage() {
           initialModel={userRow?.persona?.brainModel ?? "claude-opus-5"}
           initialEffort={userRow?.persona?.brainEffort ?? "high"}
         />
+      </section>
+
+      <section className="rounded-xl border border-edge bg-surface p-5">
+        <h2 className="mb-1 text-sm font-bold">Understanding</h2>
+        <p className="mb-4 text-xs text-muted">
+          The secretary reads each project&rsquo;s tasks, notes and conversations and
+          writes down what it knows, what does not add up, and what it needs to ask.
+          The questions land on Today and in calls.
+        </p>
+        <UnderstandingSettings />
       </section>
 
       <SpendSummary initial={spend} allTime={allTime} />

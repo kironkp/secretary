@@ -40,6 +40,17 @@ export const E2E_QUESTION = {
   finishedTask: "E2E finished task",
 };
 
+/**
+ * The one lede seeded for the Workspace specs (docs/understanding/SPEC.md §7,
+ * §9): stored on the E2E Project's record keyed by widget id, and shipped in
+ * the workspace payload as `ledes.overdue`. The board renders the last
+ * record and never waits for a run, so a stored lede is all a spec needs.
+ */
+export const E2E_LEDE = {
+  widgetId: "overdue",
+  text: "E2E lede: two of these are one job.",
+};
+
 type StateCookie = {
   name: string;
   value: string;
@@ -233,6 +244,34 @@ export default async function globalSetup(config: FullConfig) {
         JSON.stringify(answers),
         E2E_QUESTION.identity,
         projectId,
+      ]
+    );
+
+    // One record for the project, carrying one lede (docs/understanding/
+    // SPEC.md §7): the smallest body the record schema accepts, and a hash
+    // that no real run would write, so the first sweep re-runs the project
+    // instead of trusting this. Deleting the project above cascaded any
+    // earlier copy, so this insert never conflicts.
+    const body = {
+      things: [],
+      rules: [],
+      decisions: [],
+      currentWork: [],
+      blockers: [],
+      attempts: [],
+      contradictions: [],
+      unknowns: [],
+      asked: [],
+      lastActivityAt: new Date().toISOString(),
+    };
+    await c.query(
+      `INSERT INTO records (id, user_id, project_id, body, inputs_hash, words, version, updated_at)
+       VALUES (gen_random_uuid()::text, $1, $2, $3::jsonb, 'e2e', $4::jsonb, 1, now())`,
+      [
+        userId,
+        projectId,
+        JSON.stringify(body),
+        JSON.stringify({ ledes: { [E2E_LEDE.widgetId]: E2E_LEDE.text } }),
       ]
     );
   });

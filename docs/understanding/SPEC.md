@@ -1,6 +1,6 @@
 # The understanding loop
 
-**Status: designed 2026-09-22, not built.** This is the design behind the
+**Status: designed 2026-09-22; phases 1–6 built 2026-09-22 (§11).** This is the design behind the
 fourth mockup pass (the "Secretary on iPhone" artifact). It replaces the
 "narrator" sketched in the third pass. Kiron's verdict on the third pass was
 the brief: *"this thing needs to be smart. It can't just be a database."* And
@@ -271,7 +271,10 @@ The briefing already injects one open clarification per pause
 `resolve_clarification`. It keeps doing that, but reads the new kinds first,
 in rank order, and offers `answer_question` with the answer labels spoken as
 choices. "The beacon glue one" maps to an answer label; the voice model does
-the mapping, the API does the writes.
+the mapping, the API does the writes. Still one question a session: while
+an understanding question is open the ASR clarification queue waits, its row
+left open rather than marked asked, and is reached again in a session with
+none open.
 
 ## 7. Words
 
@@ -316,6 +319,24 @@ write site to say the same thing less reliably.
   changed, then retire ASR clarifications confirmed by use (§5). One sweep
   per user at a time; a second that starts while one is running returns at
   once and does nothing.
+
+  Built: `lib/understanding/sweep.ts` `sweepUnderstanding`, started from the
+  boot hook (`instrumentation.ts`) two minutes after the server starts and
+  then every `UNDERSTANDING_SWEEP_MINUTES` minutes (default 10, never under
+  2, never over a day), with a process-wide latch on top of the per-user
+  one. A user with no model available is skipped whole rather than logging
+  a `no-model` row per project per sweep; the ASR retire, which needs no
+  model, still runs for them. Environment: `UNDERSTANDING_SWEEP_MINUTES`
+  (the cadence), `UNDERSTANDING_DISABLED=true` (the sweep, every run and
+  the "Understand now" route return at once, nothing is read),
+  `UNDERSTANDING_PROVIDER` (`anthropic`,
+  `openai`, or `auto`, the default: Claude with OpenAI behind it),
+  `UNDERSTANDING_MODEL` and `UNDERSTANDING_EFFORT` (the Claude model and
+  effort; defaults `claude-sonnet-5`, `medium`), `UNDERSTANDING_OPENAI_MODEL`
+  and `UNDERSTANDING_OPENAI_EFFORT` (the OpenAI model and reasoning effort;
+  defaults `gpt-5.5`, `medium`). Settings shows the provider, the model, the
+  cadence and the last run per project, and its "Understand now" button runs
+  `runAll` for the signed-in user (one per minute).
 - **Once a day regardless.** The local calendar date is part of the hash,
   so the first sweep after midnight in the user's timezone re-runs every
   active project even when no row moved, because a day passing changes what
@@ -386,6 +407,7 @@ board's row styles; add the Playwright assertion. Add `records`; add the four
 columns and three kinds to `clarifications`. Gather and hash, no model call
 yet. Judged by: the CI fixture (which seeds "E2E overdue task" and friends)
 produces a bundle with the expected ids.
+Built 2026-09-22, commit "Understanding phase 1".
 
 **Phase 2 — the run, offline.** `run.ts` with validation and the retry;
 `questions.ts` with identity, rank and storage; `records.words` and
@@ -395,22 +417,31 @@ writing nothing. Judged by: on today's data, the Caltrans run produces the
 two duplicate-CPO contradictions, the next-payment unknown and the
 Lenses/Antenna/beacon-glue states with correct sources, and zero claims
 without sources. This is the gate; nothing ships until this is true.
+Built 2026-09-22, commit "Understanding phase 2".
 
 **Phase 3 — questions on Today.** The route, the page, the answer endpoint,
 the writes, and the immediate re-run of the answered project. Judged by:
 answering "Close all three" on the fixture marks three tasks done and the
 question disappears on the next run without being dismissed.
+Built 2026-09-22, commit "Understanding phase 3".
 
 **Phase 4 — ledes on the board, the Today line.** Payload field, slot,
 stale dimming.
+Built 2026-09-22 (the Today line in phase 3; the ledes with phase 6).
 
 **Phase 5 — voice.** `answer_question`, briefing order, the ASR-kind retire
 on the sweep.
+Built 2026-09-22: `answer_question` on the voice tool list, the OPEN
+QUESTIONS block ahead of the clarification queue in the briefing, the
+clarification queue narrowed to the four voice-flow kinds, the ASR retire
+in `runAll`.
 
 **Phase 6 — the sweep.** `runAll` every `UNDERSTANDING_SWEEP_MINUTES`
 (default 10) for every user. Until then, runs are triggered manually from a
 settings button and from the script, so cost and quality are watched before
 they are automatic.
+Built 2026-09-22: `lib/understanding/sweep.ts` from the boot hook, the
+Settings section with "Understand now", `GET/POST /api/understanding`.
 
 ## 12. Open questions
 

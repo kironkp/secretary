@@ -13,16 +13,20 @@
 //   2. NOTHING IS CLIPPED. A widget's grid height is its MINIMUM height; content
 //      that wants more scrolls inside its own body, and the board grows to fit
 //      the tallest widget. No measuring loop, no feedback, no staircase. The
-//      same rule holds for TEXT (docs/understanding/SPEC.md §9): a title or a
-//      row wraps and is read in full; nothing here truncates, elides or clamps.
-//      The one thing that can push a widget past its grid height is its own
-//      header: a long title is read in full, and the widget grows by the
-//      extra lines rather than cutting them off.
+//      same rule holds for TEXT (docs/understanding/SPEC.md §9): a title, a
+//      lede or a row wraps and is read in full; nothing here truncates, elides
+//      or clamps. The header and the lede take the height they need and the
+//      body gives it up (it scrolls); only when the body would be left with
+//      less than one row does the widget grow past its grid height, and then
+//      it grows by the lines rather than cutting them off.
 //
 // Widgets render INLINE, not in an iframe. That is the decision the whole
 // surface rests on: the host can see pointer events, so drag and resize are
 // possible at all, and heights are real DOM heights.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+// Type only: lib/understanding/words.ts reads Postgres and must never be
+// bundled for the client. `import type` is erased at compile time.
+import type { Lede } from "@/lib/understanding/words";
 import { applyBindings } from "@/lib/workspace/apply-bindings";
 import { boardRows } from "@/lib/workspace/ops";
 import {
@@ -49,6 +53,12 @@ type BoardState = {
   widgets: Widget[];
   /** Resolved rows per widget id. Live data; the template never changes. */
   rows: Record<string, BoundRow[]>;
+  /**
+   * One lede per widget id, from the understanding loop's records
+   * (docs/understanding/SPEC.md §7, §9). Absent for a widget no run has
+   * written about yet; stale when its project moved after it was written.
+   */
+  ledes: Record<string, Lede>;
   focusId: string | null;
   canUndo: boolean;
   canRedo: boolean;
@@ -71,9 +81,19 @@ const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n
 // What a widget's frame takes before the body: the section's own borders
 // (1px top and bottom), the 44px header row, and the header's bottom border.
 // The body is capped at the grid height minus this, so the body scrolls and
-// the widget stays its grid height — unless the header wraps, in which case
-// the header is the thing that grows and nothing is cut off.
+// the widget stays its grid height. On the desktop grid the body also carries
+// `contain: size`, so its rows add nothing to the widget's own height: the
+// header and the lede take what they need and the body is the flex item that
+// gives it up, which is how the cap subtracts a lede without measuring one.
+// The maxHeight stays as the fallback for an engine without size containment,
+// where the widget grows by the lede instead, and nothing is cut off either way.
 const FRAME_PX = 2 + 44 + 1;
+// The least a body keeps on the desktop grid: one row of text and its
+// padding. A lede taller than the whole body area (a tiny widget, a long
+// lede) pushes the widget past its grid height rather than leaving no rows
+// visible; below this the grid height is 100px at MIN_H, so a widget without
+// a lede never grows.
+const BODY_MIN_PX = 44;
 
 export function WorkspaceBoard({ initial }: { initial: BoardState }) {
   const [state, setState] = useState<BoardState>(initial);
@@ -115,6 +135,7 @@ export function WorkspaceBoard({ initial }: { initial: BoardState }) {
         // A gesture in flight owns geometry; a refresh must not yank it back.
         widgets: gestureRef.current.kind !== "idle" ? s.widgets : data.widgets,
         rows: data.rows ?? {},
+        ledes: data.ledes ?? {},
         focusId: data.focusId ?? null,
         canUndo: !!data.canUndo,
         canRedo: !!data.canRedo,
@@ -176,6 +197,7 @@ export function WorkspaceBoard({ initial }: { initial: BoardState }) {
           version: data.version,
           widgets: data.widgets,
           rows: data.rows ?? {},
+          ledes: data.ledes ?? {},
           focusId: data.focusId ?? null,
           canUndo: !!data.canUndo,
           canRedo: !!data.canRedo,
@@ -294,6 +316,7 @@ export function WorkspaceBoard({ initial }: { initial: BoardState }) {
         {ordered.map((w) => {
           const active = gesture.kind !== "idle" && gesture.id === w.id;
           const rect = pxRect(w);
+          const lede: Lede | undefined = state.ledes[w.id];
           const style: React.CSSProperties = narrow
             ? { order: w.y * GRID_COLS + w.x }
             : {
@@ -302,8 +325,10 @@ export function WorkspaceBoard({ initial }: { initial: BoardState }) {
                 top: rect.top,
                 width: rect.width,
                 // A minimum, not a height (docs/workspace/SPEC.md §3.1): the
-                // body is capped below so the widget normally sits exactly on
-                // its grid height, and only a wrapped header can push it past.
+                // body is capped and size-contained below, so a wrapped header
+                // or a lede takes its lines from the body and the widget sits
+                // exactly on its grid height; only a lede that would leave the
+                // body under BODY_MIN_PX pushes it past (see FRAME_PX).
                 minHeight: rect.height,
                 zIndex: active ? 999 : w.z,
                 transform: active
@@ -364,6 +389,25 @@ export function WorkspaceBoard({ initial }: { initial: BoardState }) {
                   <span aria-hidden>{w.collapsed ? "▸" : "▾"}</span>
                 </button>
               </header>
+
+              {/* The lede slot (docs/understanding/SPEC.md §7, §9): up to
+                  three sentences above the rows, from the record, never from
+                  the template. A React text child, so nothing here reaches
+                  innerHTML. It wraps in full and shrinks never; the body
+                  below is what gives up the height. A stale lede is dimmed
+                  until the next run replaces it. */}
+              {!w.collapsed && lede && (
+                <p
+                  data-lede={w.id}
+                  title={lede.stale ? "Being re-read" : undefined}
+                  className={[
+                    "wk-lede shrink-0 wrap-break-word px-4 pt-3 text-sm leading-snug text-ink",
+                    lede.stale ? "opacity-60" : "",
+                  ].join(" ")}
+                >
+                  {lede.text}
+                </p>
+              )}
 
               {!w.collapsed && (
                 <WidgetBody
@@ -434,7 +478,16 @@ function WidgetBody({
     <div
       ref={ref}
       data-body={widget.id}
-      style={maxHeight === undefined ? undefined : { maxHeight }}
+      // Stacked (narrow): the body grows to its content. On the grid: size
+      // containment keeps the rows out of the widget's own height, so a lede
+      // or a wrapped header takes its lines from the body, which scrolls;
+      // the floor keeps one row visible when a lede would take them all
+      // (see FRAME_PX and BODY_MIN_PX above).
+      style={
+        maxHeight === undefined
+          ? undefined
+          : { maxHeight, minHeight: BODY_MIN_PX, contain: "size" }
+      }
       className="wk-body min-h-0 flex-1 overflow-auto px-4 py-3 text-sm text-ink"
     />
   );

@@ -1514,6 +1514,45 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     return { result: { resolved: true, action: a.action } };
   },
 
+  // docs/understanding/SPEC.md §6: the spoken answer to an OPEN QUESTIONS
+  // row. The writes are the stored answer's, applied by answerQuestion through
+  // these same handlers, so a voice answer and a tap are one operation. The
+  // import is lazy because lib/understanding/answer.ts imports executeTool
+  // from this module: a static import would be a cycle at load time.
+  async answer_question(ctx, args) {
+    const a = toolSchemas.answer_question.parse(args);
+    const { answerQuestion, rerunAfterAnswer } = await import("@/lib/understanding/answer");
+    const outcome = await answerQuestion(ctx.userId, ctx.timezone, a.question_id, a.answer_id, a.note);
+    if (outcome.status === "not-found") {
+      return { result: { error: `No question with id ${a.question_id} in the briefing's OPEN QUESTIONS` } };
+    }
+    if (outcome.status === "not-open") {
+      return { result: { error: "That question was already answered" } };
+    }
+    if (outcome.status === "bad-answer") {
+      return {
+        result: {
+          error: `No answer with id ${a.answer_id} on that question; use one of the ids printed after "answers:"`,
+        },
+      };
+    }
+    // SPEC §6 step 4: the project re-runs at once so the next screen reflects
+    // the answer, but the call never waits on a model. rerunAfterAnswer
+    // swallows its own errors; the catch is for the import path.
+    if (outcome.projectId) {
+      void rerunAfterAnswer(ctx.userId, outcome.projectId, ctx.timezone).catch((e: unknown) =>
+        console.error(
+          "understanding: re-run after a spoken answer failed:",
+          e instanceof Error ? e.message : e
+        )
+      );
+    }
+    return {
+      result: { status: outcome.status, applied: outcome.applied, failed: outcome.failed },
+      toast: { icon: "check", text: "Answered" },
+    };
+  },
+
   async create_expectation(ctx, args) {
     const a = toolSchemas.create_expectation.parse(args);
     const when = parseWhen(a.expected_update_by);

@@ -299,6 +299,28 @@ export const toolSchemas = {
       ),
     corrected_name: z.string().optional().describe("For spelling_corrected: the right spelling"),
   }),
+  // docs/understanding/SPEC.md §6: the voice answer to an OPEN QUESTIONS row
+  // in the briefing. Flat and bounded on purpose — the Realtime API rejects
+  // unions and refs, and the ids are the short kebab-case ids the briefing
+  // printed, never free text. The writes live on the stored answer; the
+  // model only names which one the user picked.
+  answer_question: z.object({
+    question_id: z
+      .string()
+      .min(1)
+      .max(80)
+      .describe("The question_id printed on the OPEN QUESTIONS line in your briefing"),
+    answer_id: z
+      .string()
+      .min(1)
+      .max(40)
+      .describe("The answer id (before the =) whose label matches what the user said"),
+    note: z
+      .string()
+      .max(500)
+      .optional()
+      .describe("Anything extra the user said with the answer, in their words"),
+  }),
   create_expectation: z.object({
     commitment: z
       .string()
@@ -562,6 +584,8 @@ const toolDescriptions: Record<ToolName, string> = {
     "Something in the conversation is ambiguous and you can NOT resolve it — an unclear referent ('this one is finished' about a screen you can't see), a garbled name, a possible person mix-up. NEVER guess and never interrogate mid-flow: queue it here; your briefing surfaces ONE at a natural pause.",
   resolve_clarification:
     "The user just answered a queued clarification — record the resolution. For entity questions the action fixes the store: same_entity adds an alias, different_person creates the new person, spelling_confirmed/corrected fix the name.",
+  answer_question:
+    "The user answered one of the OPEN QUESTIONS in your briefing (the ones with question_id and answer ids). Call this with the question_id and the answer_id whose label matches what they said; put anything extra they said in note. Never use resolve_clarification for these.",
   create_expectation:
     "NEVER make a rhetorical promise: the moment you say \"I'll be asking\" / \"check back in with me\" / \"I'll follow up\", call this in the SAME turn. The user reporting progress clears it silently; a miss makes you open the next session with it (per on_miss). This is what makes your follow-through real.",
   save_pipeline_template:
@@ -635,6 +659,11 @@ export const VOICE_TOOL_NAMES = [
   "get_current_datetime",
   "queue_clarification",
   "resolve_clarification",
+  // the answer to an OPEN QUESTIONS row (docs/understanding/SPEC.md §6): the
+  // briefing prints the question_id and the answer ids, the user picks one
+  // out loud, and the stored writes go through the same tools a tap uses.
+  // resolve_clarification is for the four voice-flow kinds only.
+  "answer_question",
   // stated facts are fast-path capture (one insert, no entity resolution);
   // the extractor stays the safety net for inferred ones
   "remember_fact",

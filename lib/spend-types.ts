@@ -73,6 +73,7 @@ export const KIND_LABEL: Record<string, string> = {
   consult: "Deep thinking",
   paint: "Canvas painting",
   slow_loop: "Building components",
+  understanding: "Understanding",
   email: "Email intake",
   speech: "Speech",
   other: "Other",

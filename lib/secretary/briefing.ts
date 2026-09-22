@@ -7,6 +7,8 @@ import { documents, events, expectations, memories, projects, tasks, user } from
 import { dayRangeInTz } from "@/lib/time";
 import { getRecentConversationTails } from "@/lib/db/queries";
 import { getPlanHead } from "@/lib/layout/plan-store";
+import { listQuestions } from "@/lib/understanding/questions";
+import { KIND_LABELS, markSurfaced } from "@/lib/understanding/today";
 import { nextClarification, openClarificationCount } from "./entities";
 import { isQuietHours } from "./persona";
 import { refreshProcrastinationScores } from "./procrastination";
@@ -21,6 +23,11 @@ const PRIOR_SESSION_COUNT = 3;
 const PRIOR_SESSION_TAIL = 10;
 const PRIOR_SESSIONS_CHAR_CAP = 3000;
 const PRIOR_LINE_CHAR_CAP = 200;
+// OPEN QUESTIONS (docs/understanding/SPEC.md §6, §9): the top of the ranked
+// queue rides along so the model can ask the first at a pause and has the
+// next two if the user asks for more. Three, not the whole queue: the
+// briefing is rebuilt per session and the answers carry their own text.
+const OPEN_QUESTION_COUNT = 3;
 
 // Pending suggestions live as source='suggested' + status='inbox' until the
 // user accepts them — they must not masquerade as real tasks anywhere.
@@ -553,19 +560,49 @@ export async function buildBriefing(
     );
   }
 
-  // Clarification queue (SPEC §11): ONE question per session, at a natural
-  // pause — never mid-flow, never a barrage. Surfacing marks it asked.
-  const clarification = await nextClarification(userId);
-  if (clarification) {
-    const remaining = await openClarificationCount(userId);
+  // ONE question per session, whichever queue it comes from. The understanding
+  // loop's questions (docs/understanding/SPEC.md §6: the briefing "reads the
+  // new kinds first, in rank order") are read before the ASR clarification
+  // queue, with the answer ids spoken as choices: the model maps what the
+  // user says to an answer id and answer_question does the writes. Injecting
+  // one is asking it (SPEC §5), so the rows are marked surfaced the same way
+  // Today marks them. While one of these is open the clarification queue
+  // below waits, untouched (nextClarification is not called, so its row is
+  // not marked asked): one question a session is the persona's discipline,
+  // and two blocks each saying "ask one" would be two questions.
+  const openQuestions = await listQuestions(userId, { limit: OPEN_QUESTION_COUNT });
+  if (openQuestions.length) {
     lines.push(
       "",
-      `CLARIFICATION QUEUE — exactly ONE this session, asked at a natural pause (never mid-flow, never as an interrogation)${
-        remaining > 0 ? ` (${remaining} more queued for later sessions)` : ""
-      }:`,
-      `- ${clarification.question}${clarification.context ? ` (about: "${clarification.context}")` : ""}`,
-      "When answered, call resolve_clarification."
+      "OPEN QUESTIONS — from your reading of the user's projects. Ask the FIRST one at a natural pause, in your own words, offering its answers; one per session unless the user asks for more. When they answer, call answer_question with the question_id and the answer_id (note for anything extra). Never resolve_clarification for these."
     );
+    for (const q of openQuestions) {
+      // Labels can carry commas ("Yes, that is the last step"), so the
+      // answers are separated by semicolons and the line's fields by " · ".
+      const answers = q.answers.map((a) => `${a.id}=${a.label}`).join("; ");
+      lines.push(
+        `- question_id: ${q.id} · ${KIND_LABELS[q.kind]} · ${q.question} · why: ${q.why} · answers: ${answers}`
+      );
+    }
+    await markSurfaced(userId, openQuestions, now);
+  } else {
+    // Clarification queue (SPEC §11): ONE question per session, at a natural
+    // pause — never mid-flow, never a barrage. Surfacing marks it asked. Only
+    // the four voice-flow kinds come through here (lib/secretary/entities.ts);
+    // the understanding kinds are the block above, and this one is reached
+    // only in a session with none of those open.
+    const clarification = await nextClarification(userId);
+    if (clarification) {
+      const remaining = await openClarificationCount(userId);
+      lines.push(
+        "",
+        `CLARIFICATION QUEUE — exactly ONE this session, asked at a natural pause (never mid-flow, never as an interrogation)${
+          remaining > 0 ? ` (${remaining} more queued for later sessions)` : ""
+        }:`,
+        `- ${clarification.question}${clarification.context ? ` (about: "${clarification.context}")` : ""}`,
+        "When answered, call resolve_clarification."
+      );
+    }
   }
 
   // The Shop (self-improvement loop): plans awaiting the user's sign-off, and
