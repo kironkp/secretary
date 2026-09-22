@@ -256,6 +256,35 @@ function referencesEvidence(why: string, evidence: Source[], texts: Map<string, 
   return false;
 }
 
+/** Every text the record itself carries: thing names, aliases and ids, and
+ *  the text of every claim. All of it is sourced, so a lede may use it. */
+function recordWords(record: RunOutput["record"]): string[] {
+  const out: string[] = [];
+  const claim = (c: { text: string } | undefined) => {
+    if (c) out.push(c.text);
+  };
+  for (const t of record.things) {
+    out.push(t.name, ...t.aliases, ...t.ids);
+    claim(t.state);
+    claim(t.waitingOn);
+  }
+  for (const c of [
+    ...record.rules,
+    ...record.decisions,
+    ...record.currentWork,
+    ...record.blockers,
+    ...record.attempts,
+  ]) {
+    claim(c);
+  }
+  claim(record.objective);
+  claim(record.nextAction);
+  claim(record.resumePointer);
+  for (const c of record.contradictions) out.push(c.text);
+  for (const u of record.unknowns) out.push(u.text, u.why);
+  return out;
+}
+
 /** What the retry is told when a why names nothing: the items it could name. */
 function evidenceHint(evidence: Source[], texts: Map<string, string>): string {
   const shown = evidence
@@ -416,9 +445,15 @@ export function validateRunOutput(output: unknown, bundle: Bundle): ValidationRe
     const exempt = new Set([...CALENDAR_WORDS, ...projectWords, ...wordsOf(widget.title)]);
     // Every word of every row title and of the project name, so a name is
     // looked up as a token (the same boundary rule terms.ts uses) and its
-    // plural or singular counts as the same name.
+    // plural or singular counts as the same name. The record's own words are
+    // allowed too: its things, rules and claims all carry sources (steps 1
+    // and 2), so a lede that says "which means you can reconcile the CPO"
+    // above a statement task is context, not invention. What this still
+    // rejects is a name that appears nowhere the model was given.
     const haystack = new Set(
-      [...widget.rows.map((row) => row.title), bundle.project.name].flatMap(wordsOf)
+      [...widget.rows.map((row) => row.title), bundle.project.name, ...recordWords(value.record)].flatMap(
+        wordsOf
+      )
     );
     const reported = new Set<string>();
     for (const name of ledeNames(lede)) {
