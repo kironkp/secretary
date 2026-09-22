@@ -371,3 +371,15 @@ rebuilds.
 5. **Cross-device conflict.** `version` is in the model for optimistic
    concurrency, but the resolution policy (last write wins, or refuse and
    reload) is undecided.
+
+## 12. Where the words come from
+
+The ledes above each widget, the line under Today's title, and the questions
+Today opens with are not produced by the Workspace. They come from the
+understanding loop in `docs/understanding/SPEC.md`: one record per project,
+every line with a source, rewritten on change and every morning, and three
+kinds of question (need to know, doesn't add up, done yet) that the user
+answers by tap or by voice. The Workspace's part is small: ship
+`ledes[widgetId]` in the payload next to `rows`, render it into a slot with
+`textContent`, dim it while stale, and never clip a title, a lede or a
+question (that rule and its test are in the understanding spec, §9).

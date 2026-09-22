@@ -214,6 +214,11 @@ from `tasks.stages`, `checkins`, `memories`, and prior-session tails. That is
 why the same ability was filed four times (`a4892ac`) and why a returning user
 is re-briefed from scratch.
 
+The store, the writer and the reader for this record are designed in
+`docs/understanding/SPEC.md` (2026-09-22), which also adds the three sections
+this contract lacks: contradictions, unknowns, and the questions they
+produce. Until that lands, 4.4 below still applies.
+
 The contract below is what Secretary must maintain for every project. It is
 durable: it is updated as work happens, by the tools that do the work, and it
 is never merely regenerated from conversation. Until a first-class store
