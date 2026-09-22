@@ -19,7 +19,7 @@ import {
   user,
   workspaces,
 } from "@/lib/db/schema";
-import { gatherAll, gatherProject, hashBundle } from "@/lib/understanding/gather";
+import { gatherAll, gatherProject, hashBundle, nearDated } from "@/lib/understanding/gather";
 import { recordSchema, type ProjectRecord } from "@/lib/understanding/types";
 import { getBoard } from "@/lib/workspace/store";
 
@@ -473,7 +473,7 @@ describe("hashBundle", () => {
     expect(hashBundle(shuffled)).toBe(hashBundle(a!));
   });
 
-  it("changes when the local date changes and nothing else does", async () => {
+  it("changes when the local date changes for a project with something dated near now", async () => {
     const today = await gather();
     const tomorrow = await gather(ids.caltrans, daysFromNow(1));
     expect(tomorrow!.clock.localDate).toBe("2026-09-22");
@@ -481,7 +481,40 @@ describe("hashBundle", () => {
     expect(tomorrow!.tasksOpen.map((t) => t.id).sort()).toEqual(
       today!.tasksOpen.map((t) => t.id).sort()
     );
-    expect(hashBundle(tomorrow!)).not.toBe(hashBundle(today!));
+    // A task due in two days makes the project near-dated on both days.
+    type B = NonNullable<Awaited<ReturnType<typeof gather>>>;
+    const near = (b: B): B => ({
+      ...b,
+      tasksOpen: [
+        { ...b.tasksOpen[0], dueAt: daysFromNow(2).toISOString() },
+        ...b.tasksOpen.slice(1),
+      ],
+    });
+    expect(nearDated(near(today!))).toBe(true);
+    expect(hashBundle(near(tomorrow!))).not.toBe(hashBundle(near(today!)));
+  });
+
+  it("ignores the local date for a project with nothing dated near now (SPEC §8: no daily re-run)", async () => {
+    const today = await gather();
+    const tomorrow = await gather(ids.caltrans, daysFromNow(1));
+    type B = NonNullable<Awaited<ReturnType<typeof gather>>>;
+    // Every due date a month out, no events: a day passing changes nothing
+    // the record says, so it must not cost a model call.
+    const far = (b: B): B => ({
+      ...b,
+      tasksOpen: b.tasksOpen.map((t) => ({ ...t, dueAt: daysFromNow(30).toISOString() })),
+      events: [],
+    });
+    expect(nearDated(far(today!))).toBe(false);
+    expect(hashBundle(far(tomorrow!))).toBe(hashBundle(far(today!)));
+    // An event within three days is enough on its own.
+    const soon = (b: B): B => ({
+      ...far(b),
+      events: b.events.length
+        ? [{ ...b.events[0], startsAt: daysFromNow(2).toISOString() }]
+        : b.events,
+    });
+    if (today!.events.length) expect(nearDated(soon(today!))).toBe(true);
   });
 
   it("changes when a task's updated_at changes", async () => {

@@ -521,15 +521,42 @@ export async function gatherProject(
 const byId = <T extends { id: string }>(xs: T[]): T[] =>
   [...xs].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
+/** A day passing changes what "today" and "tomorrow" mean only this close. */
+const NEAR_BEFORE_MS = 1 * DAY_MS;
+const NEAR_AFTER_MS = 3 * DAY_MS;
+
+/**
+ * Whether the project holds anything dated within a day behind or three days
+ * ahead of now. Only then does the calendar date belong in the hash: the
+ * Today line and "due tomorrow" wording turn over at midnight for such a
+ * project, so it re-runs daily; a project whose nearest date is weeks away,
+ * or that only has old overdue items, would burn a model call a day to
+ * rewrite the same record with a day count one higher. (SPEC §8.) The lede's
+ * "N days late" can drift by the days between real changes; that is the
+ * trade, and it is cents versus dollars a day.
+ */
+export function nearDated(bundle: Bundle): boolean {
+  const now = new Date(bundle.clock.nowIso).getTime();
+  const lo = now - NEAR_BEFORE_MS;
+  const hi = now + NEAR_AFTER_MS;
+  const within = (iso: string | null | undefined) => {
+    if (!iso) return false;
+    const t = new Date(iso).getTime();
+    return !Number.isNaN(t) && t >= lo && t <= hi;
+  };
+  return bundle.tasksOpen.some((t) => within(t.dueAt)) || bundle.events.some((e) => within(e.startsAt));
+}
+
 /**
  * sha256 of the bundle's identity: which rows are in it, when they last
- * changed, and the local date. Never the text, never the previous record, and
- * never the terms — so a re-run on unchanged data is a hash compare and
- * nothing else, and the order rows came back in cannot cause a run.
+ * changed, and, for a project with something dated near now, the local date.
+ * Never the text, never the previous record, and never the terms — so a
+ * re-run on unchanged data is a hash compare and nothing else, and the order
+ * rows came back in cannot cause a run.
  */
 export function hashBundle(bundle: Bundle): string {
   const canonical = {
-    localDate: bundle.clock.localDate,
+    localDate: nearDated(bundle) ? bundle.clock.localDate : null,
     tasks: byId([...bundle.tasksOpen, ...bundle.tasksDone]).map((t) => [
       t.id,
       t.status,
