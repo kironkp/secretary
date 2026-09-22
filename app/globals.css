@@ -3,40 +3,48 @@
 /* Semantic palette: light is the default, [data-theme="dark"] overrides.
    Components only ever use the Tailwind tokens (bg-card, text-ink, …) mapped
    below — never raw hexes. */
+/* The palette is iOS's grouped-list palette (the "Secretary on iPhone"
+   mockup the user signed off on 2026-09-22): a grey ground, white cells,
+   hairline separators, one blue tint, red for late, and the system font.
+   Dark is the same set from the dark iOS palette, not an inversion. */
 :root {
   color-scheme: light;
-  --bg: #f6f7f9;
+  --bg: #f2f2f7;
   --surface: #ffffff;
-  --surface-2: #eef0f4;
+  --surface-2: #e5e5ea;
   --card: #ffffff;
-  --edge: #e4e7ee;
-  --ink: #171a21;
-  --muted: #5a6375;
-  --faint: #8b93a5;
+  --edge: #d8d8dc;
+  --ink: #1c1c1e;
+  --muted: #6e6e73;
+  --faint: #8e8e93;
   --accent: #4a6fe8;
-  --ok: #15803d;
-  --warn: #b45309;
-  --danger: #dc2626;
-  --grape: #7e22ce;
-  --bubble: #e6ecfc;
+  --ok: #34c759;
+  --warn: #e0850a;
+  --danger: #ff3b30;
+  --grape: #9a4fd1;
+  --bubble: #e8edfd;
+  --sep: rgba(60, 60, 67, 0.22);
+  --bar: rgba(249, 249, 249, 0.94);
 }
 
 [data-theme="dark"] {
   color-scheme: dark;
-  --bg: #0f1115;
-  --surface: #171a21;
-  --surface-2: #1e222b;
-  --card: #232834;
-  --edge: #2e3442;
-  --ink: #e8eaf0;
-  --muted: #9aa3b5;
-  --faint: #6b7386;
-  --accent: #7aa2ff;
-  --ok: #4ade80;
-  --warn: #fbbf24;
-  --danger: #f87171;
-  --grape: #c084fc;
-  --bubble: #26304a;
+  --bg: #000000;
+  --surface: #1c1c1e;
+  --surface-2: #2c2c2e;
+  --card: #1c1c1e;
+  --edge: #3a3a3c;
+  --ink: #ffffff;
+  --muted: #9a9aa2;
+  --faint: #8e8e93;
+  --accent: #7a9bff;
+  --ok: #30d158;
+  --warn: #ff9f0a;
+  --danger: #ff453a;
+  --grape: #bf5af2;
+  --bubble: #1d2540;
+  --sep: rgba(84, 84, 88, 0.6);
+  --bar: rgba(22, 22, 24, 0.94);
 }
 
 @theme inline {
@@ -54,7 +62,10 @@
   --color-danger: var(--danger);
   --color-grape: var(--grape);
   --color-bubble: var(--bubble);
-  --font-sans: var(--font-geist-sans);
+  --color-sep: var(--sep);
+  --color-bar: var(--bar);
+  /* The system face: SF on Apple devices, which is where this app is used. */
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", Helvetica, Arial, sans-serif;
   --font-mono: var(--font-geist-mono);
 }
 
@@ -130,6 +141,80 @@ body {
   to { opacity: 1; transform: translateY(0); box-shadow: 0 0 0 2px transparent; }
 }
 .animate-task-in { animation: task-in 0.8s ease-out; }
+
+/* An iOS inset grouped list: white cells on the grey ground, and a hairline
+   between rows that starts at the text edge, not the card edge. */
+.ios-group > * + * {
+  position: relative;
+}
+.ios-group > * + *::before {
+  content: "";
+  position: absolute;
+  left: 16px;
+  right: 0;
+  top: 0;
+  height: 0.5px;
+  background: var(--sep);
+}
+
+/* Widget rows, styled the way the mockup draws them: a list with a hairline
+   between rows, the title taking the width, the meta (a due label, a project,
+   a count) small and grey at the right edge, and a circle in front of a row
+   that is a task. The markup is the seed template's `cv-list` (and any body
+   the model writes with the same classes); the style is the shell's. */
+.wk-body .cv-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.wk-body .cv-list > li {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 0;
+  font-size: 15px;
+  line-height: 1.3;
+}
+.wk-body .cv-list > li + li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 0.5px;
+  background: var(--sep);
+}
+.wk-body .cv-list > li[data-check]::after {
+  content: "";
+  order: -1;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-top: 0;
+  border-radius: 50%;
+  border: 1.5px solid var(--faint);
+}
+.wk-body .cv-list > li > [data-field="title"],
+.wk-body .cv-list > li > [data-field="name"] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.wk-body .cv-list em,
+.wk-body .cv-muted {
+  font-style: normal;
+  font-size: 13px;
+  color: var(--faint);
+}
+.wk-body .cv-list > li > em {
+  flex: none;
+  max-width: 42%;
+  padding-top: 2px;
+  text-align: right;
+}
+.wk-body .cv-list > li > em:empty {
+  display: none;
+}
 
 /* The Workspace's "nothing is cut off" rule (docs/understanding/SPEC.md §9).
    A widget body is model-authored markup rendered INLINE, and the shared

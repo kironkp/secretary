@@ -8,6 +8,7 @@
 // voice call is live the dock slides away — the call pill owns the bottom.
 import { useEffect, useState } from "react";
 import { DockHeight } from "./dock-height";
+import { TabBar } from "@/components/shell/tab-bar";
 import { useSearchParams } from "next/navigation";
 import type { BriefingCard } from "@/lib/secretary/briefing";
 import { ChatThread, type DockState } from "./chat-thread";
@@ -75,7 +76,17 @@ export function DockedChat() {
       }`}
     >
       <DockHeight />
-      <div className="mx-auto w-full max-w-2xl px-3 pb-[max(env(safe-area-inset-bottom),0.75rem)]">
+      {/* Collapsed, this is the mockup's bottom block: the ask bar over the
+          tab bar on one translucent slab with a hairline on top. Expanded, the
+          conversation panel rises above the composer and the tabs step aside. */}
+      <div
+        className={
+          state === "bar"
+            ? "border-t border-sep bg-bar backdrop-blur-xl"
+            : "pb-[max(env(safe-area-inset-bottom),0.75rem)]"
+        }
+      >
+      <div className="mx-auto w-full max-w-2xl px-3">
         {bootstrap ? (
           <ChatThread
             key={bootstrap.conversationId ?? "fresh"}
@@ -105,10 +116,12 @@ export function DockedChat() {
                 Chat couldn&rsquo;t load — tap to retry
               </button>
             ) : (
-              <p className="animate-pulse text-[15px] text-faint">Message your secretary…</p>
+              <p className="animate-pulse text-[15px] text-faint">Ask your secretary</p>
             )}
           </div>
         )}
+      </div>
+      {state === "bar" && <TabBar />}
       </div>
     </div>
   );

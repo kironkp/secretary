@@ -23,6 +23,7 @@ import {
   Flame,
   Mic,
   Paperclip,
+  Plus,
   Sparkles,
   Sun,
   TriangleAlert,
@@ -710,6 +711,63 @@ export function ChatThread({
                 setMode("idle");
               }}
             />
+          ) : dock && dockState === "bar" ? (
+            // The ask bar from the "Secretary on iPhone" mockup: a plus, the
+            // field, the mic. The plus opens the native picker, which on iOS
+            // is the Photo Library / Take Photo / Choose File sheet the mockup
+            // drew; a chosen file opens the full composer so it can be seen
+            // and sent. The field opens the full composer with the cursor in
+            // it; the model chip lives there. The mic is Talk.
+            <div className="flex items-center gap-2.5 py-2.5" data-testid="ask-bar">
+              <input
+                ref={fileRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  void addFiles(e.target.files);
+                  e.target.value = "";
+                  dock.setState("full");
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                disabled={pending.length >= MAX_ATTACHMENTS}
+                title="Add a photo or file"
+                aria-label="Add a photo or file"
+                className="flex h-9 w-9 flex-none items-center justify-center rounded-full bg-surface-2 text-ink disabled:opacity-40"
+              >
+                <Plus size={18} strokeWidth={2} />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  dock.setState("full");
+                  setTimeout(() => inputRef.current?.focus(), 60);
+                }}
+                className="flex h-11 min-w-0 flex-1 items-center rounded-full bg-surface-2 px-4 text-left text-[17px] text-faint"
+              >
+                Ask your secretary
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  unlockRemoteAudio();
+                  call.begin({
+                    voice: defaultVoice,
+                    effort: defaultVoiceEffort,
+                    minimized: true,
+                  });
+                }}
+                disabled={call.active}
+                title="Start a live voice conversation"
+                aria-label="Start a live voice conversation"
+                className="flex h-11 w-11 flex-none items-center justify-center rounded-full bg-accent text-white disabled:opacity-50"
+              >
+                <Mic size={22} strokeWidth={2} />
+              </button>
+            </div>
           ) : (
             <div className="rounded-2xl border border-edge bg-surface px-2.5 py-2 shadow-sm transition-shadow focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/20">
               {pending.length > 0 && (
