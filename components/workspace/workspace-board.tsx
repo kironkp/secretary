@@ -255,7 +255,11 @@ export function WorkspaceBoard({ initial }: { initial: BoardState }) {
     if (g.kind === "idle") return;
     const unit = colPx;
     const rowUnit = GRID_ROW_PX + GRID_GAP_PX;
-    const dCols = Math.round(g.dx / unit);
+    // A column width of 0 (the board measured before layout, or a gesture that
+    // begins before the ResizeObserver's first tick) made 0 / 0 = NaN here, and
+    // a NaN x failed validation, rolled the move back, and left the widget
+    // where it was: the desktop drag test's occasional "Received: 0".
+    const dCols = unit > 0 ? Math.round(g.dx / unit) : 0;
     const dRows = Math.round(g.dy / rowUnit);
     gestureRef.current = { kind: "idle" };
     setGesture({ kind: "idle" });
