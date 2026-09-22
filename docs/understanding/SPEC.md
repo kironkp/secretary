@@ -257,8 +257,8 @@ open after that.
    implementations (`complete_task`, `update_task`, `remember_fact`, …) so the
    honesty rule, the recurrence spawner and the audit path all apply.
 3. Append `resolve`; store `note` as `resolution`.
-4. Mark the project dirty (§8). Return the writes that succeeded. The client
-   says "Closed" only for those.
+4. Run that project immediately (§8). Return the writes that succeeded. The
+   client says "Closed" only for those.
 
 Voice: one new tool, `answer_question`, flat schema, bounded strings:
 
@@ -298,22 +298,40 @@ their own titles or messages; no banned words.
 
 ## 8. Triggers
 
-- **Dirty marking.** Every server-side write to `tasks`, `memories`,
-  `events`, `documents`, `expectations`, `clarifications` and every stored
-  user `messages` row marks the affected project(s) dirty in a small table
-  `record_dirty (user_id, project_id, since)`. A memory or message with no
-  project resolves through the alias matcher; no match → the user's default
-  "Personal" project.
-- **The minute tick** the app already runs picks up dirty projects, gathers,
-  compares `inputs_hash`, runs only if changed, clears the flag.
-- **The morning run.** At 06:00 in the user's timezone every `active`
-  project runs once, because a day passing changes what "today" and
-  "tomorrow" mean even when no row did.
+There is no dirty table. The design is a **sweep**: every
+`UNDERSTANDING_SWEEP_MINUTES` (default 10) the app gathers every `active`
+project of every user, hashes each bundle (`records.inputs_hash` is over the
+bundle's ids, `updated_at`s and the local date, never its text — §3), and
+calls the model only for a project whose hash differs from the stored one.
+A project nothing touched costs a handful of indexed reads and a hash
+compare, and nothing else. The earlier draft of this section had every write
+mark its project dirty in a `record_dirty` table; that table has no writer
+and never will, because the hash compare already answers "did anything this
+run would read change" and a flag would have to be kept honest at every
+write site to say the same thing less reliably.
+
+- **The sweep.** Every `UNDERSTANDING_SWEEP_MINUTES`, `runAll` for each user:
+  gather every active project once (the board, the memories and the 30-day
+  messages are read once and shared), compare hashes, run the ones that
+  changed, then retire ASR clarifications confirmed by use (§5). One sweep
+  per user at a time; a second that starts while one is running returns at
+  once and does nothing.
+- **Once a day regardless.** The local calendar date is part of the hash,
+  so the first sweep after midnight in the user's timezone re-runs every
+  active project even when no row moved, because a day passing changes what
+  "today" and "tomorrow" mean.
+- **Answering a question** (§6) runs that project immediately, so the next
+  screen reflects the answer; it does not wait for the sweep.
 - **Never on read.** Today and the Workspace render the last record. They
   never wait for a run.
+- **Every run is logged** in `understanding_runs`: which project, when, the
+  hash it read, the model, the tokens, and how it ended (`ok`, `failed` with
+  the validator's errors, or `skipped` with the reason). The one exception
+  is a hash match, which is the sweep's normal state and would drown the
+  rows that matter.
 
 Cost on today's data: 8 projects, 45 open tasks, 85 memories, 212 user
-messages. A bundle is 5–15k tokens; the morning run is 8 calls; a busy day
+messages. A bundle is 5–15k tokens; the daily re-run is 8 calls; a busy day
 adds 20–40 change runs. On a fast model with a cached prefix this is cents a
 day and under a second a run.
 
@@ -348,8 +366,8 @@ clip; that is the first change in phase 1 below.
 ## 10. Safety
 
 - The loop **reads** everything and **writes** only `records`,
-  `record_dirty`, and `clarifications`. Every other write happens only when
-  the user answers, through the existing tools.
+  `understanding_runs`, `usage` and `clarifications`. Every other write
+  happens only when the user answers, through the existing tools.
 - A run can never complete, drop, move or reschedule a task by itself.
   "I'd close all three" is a proposal on a question, not an action.
 - Suggested tasks (`source = suggested`) are labelled as the app's own in
@@ -364,31 +382,35 @@ clip; that is the first change in phase 1 below.
 ## 11. Build order
 
 **Phase 1 — nothing cut off + the record store.** Remove clipping from the
-board's row styles; add the Playwright assertion. Add `records` and
-`record_dirty`; add the four columns and three kinds to `clarifications`.
-Gather and hash, no model call yet. Judged by: the CI fixture (which seeds
-"E2E overdue task" and friends) produces a bundle with the expected ids.
+board's row styles; add the Playwright assertion. Add `records`; add the four
+columns and three kinds to `clarifications`. Gather and hash, no model call
+yet. Judged by: the CI fixture (which seeds "E2E overdue task" and friends)
+produces a bundle with the expected ids.
 
-**Phase 2 — the run, offline.** `run.ts` with validation, run from a script
-against a copy of production data (the `copy-db.ts` path exists), output to
-stdout, no writes. Judged by: on today's data, the Caltrans run produces
-the two duplicate-CPO contradictions, the next-payment unknown and the
+**Phase 2 — the run, offline.** `run.ts` with validation and the retry;
+`questions.ts` with identity, rank and storage; `records.words` and
+`understanding_runs`; `scripts/understand.ts` run against a copy of
+production data (the `copy-db.ts` path exists), output to stdout, `--dry`
+writing nothing. Judged by: on today's data, the Caltrans run produces the
+two duplicate-CPO contradictions, the next-payment unknown and the
 Lenses/Antenna/beacon-glue states with correct sources, and zero claims
 without sources. This is the gate; nothing ships until this is true.
 
 **Phase 3 — questions on Today.** The route, the page, the answer endpoint,
-the writes. Judged by: answering "Close all three" on the fixture marks
-three tasks done and the question disappears on the next run without being
-dismissed.
+the writes, and the immediate re-run of the answered project. Judged by:
+answering "Close all three" on the fixture marks three tasks done and the
+question disappears on the next run without being dismissed.
 
 **Phase 4 — ledes on the board, the Today line.** Payload field, slot,
 stale dimming.
 
-**Phase 5 — voice.** `answer_question`, briefing order, the ASR-kind retire.
+**Phase 5 — voice.** `answer_question`, briefing order, the ASR-kind retire
+on the sweep.
 
-**Phase 6 — the morning run and the dirty tick.** Until then, runs are
-triggered manually from a settings button, so cost and quality are watched
-before they are automatic.
+**Phase 6 — the sweep.** `runAll` every `UNDERSTANDING_SWEEP_MINUTES`
+(default 10) for every user. Until then, runs are triggered manually from a
+settings button and from the script, so cost and quality are watched before
+they are automatic.
 
 ## 12. Open questions
 

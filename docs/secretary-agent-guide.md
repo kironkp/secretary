@@ -600,9 +600,12 @@ What Secretary is built on today, and the lines it must not cross.
 **Runtime.** Next.js App Router on Heroku (`secretary-kiron`, one web dyno,
 `heroku-24`), Postgres 18 (`essential-0`), Better Auth (email, Google;
 passkeys bound to localhost), Drizzle with `drizzle-kit push` and no
-migration files. The release phase runs `drizzle-kit push --force` with a
-`tablesFilter` that keeps it off Heroku's `pg_stat_statements` views
-(`drizzle.config.ts`; without it the schema never applied, `cf23263`).
+migration files. The release phase runs `scripts/release.mjs`: any one-off
+statement a push cannot make non-interactively (a table drop in the same
+release as a create would prompt, apply nothing and exit 0), then
+`drizzle-kit push --force` with a `tablesFilter` that keeps it off Heroku's
+`pg_stat_statements` views (`drizzle.config.ts`; without it the schema never
+applied, `cf23263`), failing the release on any error in the push's output.
 
 **Voice.** OpenAI Realtime over WebRTC, browser to OpenAI directly; the token
 route bakes instructions, briefing, persona, lexicon, and the voice tool

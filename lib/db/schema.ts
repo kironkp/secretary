@@ -7,12 +7,12 @@ import {
   numeric,
   pgEnum,
   pgTable,
-  primaryKey,
   real,
   text,
   timestamp,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 // Type-only, so drizzle-kit (which loads this file outside Next's resolver)
 // never has to follow it. The shapes live with the loop that produces them.
 import type { Answer, ProjectRecord, Source } from "../understanding/types";
@@ -156,6 +156,9 @@ export const usageKind = pgEnum("usage_kind", [
   "email",
   // Speech synthesis (ElevenLabs), billed per character rather than per token.
   "speech",
+  // The understanding loop (docs/understanding/SPEC.md §4): one structured
+  // call per project per changed bundle, priced per token by model.
+  "understanding",
   // Anything not yet categorised — better an "other" bucket than a silent gap.
   "other",
 ]);
@@ -486,34 +489,56 @@ export const records = pgTable(
     body: jsonb("body").$type<ProjectRecord>().notNull(),
     // Hash of the gathered inputs the body was written from (gather.ts
     // hashBundle): ids, updated_ats and the local calendar date, never text.
-    // Same hash, no run — this is the loop's whole change detection.
+    // Same hash, no run — this is the loop's whole change detection, and the
+    // sweep in SPEC §8 is nothing but this compare on every active project.
     inputsHash: text("inputs_hash").notNull(),
+    // The words the same run wrote (SPEC §7): the Today line for this project
+    // and one lede per board widget it owns, keyed by widget id. Stored beside
+    // the body rather than inside it so a reader of the record's claims never
+    // has to know about widgets, and the workspace payload can ship
+    // `ledes[widgetId]` with the hash it was written from.
+    // The default satisfies the declared type, so a row that predates a run
+    // (or the column) reads as `ledes: {}` rather than `ledes: undefined`.
+    // Spelled the way Postgres prints jsonb (space after the colon); drizzle-
+    // kit still re-issues every jsonb default on every push (workspaces.board
+    // too), which is a harmless ALTER, not a change.
+    words: jsonb("words")
+      .$type<{ todayLine?: string; ledes: Record<string, string> }>()
+      .notNull()
+      .default(sql`'{"ledes": {}}'::jsonb`),
     version: integer("version").notNull().default(1),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("records_project_idx").on(t.userId, t.projectId)]
 );
 
-// The loop's trigger (docs/understanding/SPEC.md §8): a server-side write to a
-// project's rows marks the project dirty here; the minute tick gathers the
-// dirty projects, compares the bundle hash against records.inputs_hash, runs
-// only when it differs, and clears the flag. One row per (user, project) —
-// the pair is the key, so marking an already-dirty project is an upsert, not
-// a second row — and `since` is the first unacknowledged write, so the tick
-// can take the longest-waiting project first. Exactly the three columns §8
-// names; there is nothing else to say about a flag.
-export const recordDirty = pgTable(
-  "record_dirty",
+// One row per attempt to run the loop on a project (docs/understanding/SPEC.md
+// §8): what it read (the hash), what it cost, and how it ended. "ok" wrote a
+// record; "failed" left the previous record untouched and keeps the validator's
+// errors; "skipped" says why in `reason` (no model, disabled, no project). A
+// run that was skipped because the hash matched writes nothing here — that is
+// the sweep's normal state, and logging it would drown the rows that matter.
+// project_id is nullable and set-null on delete so a run's cost survives its
+// project.
+export const understandingRuns = pgTable(
+  "understanding_runs",
   {
+    id: text("id").primaryKey().$defaultFn(uuid),
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    projectId: text("project_id")
-      .notNull()
-      .references(() => projects.id, { onDelete: "cascade" }),
-    since: timestamp("since", { withTimezone: true }).notNull().defaultNow(),
+    projectId: text("project_id").references(() => projects.id, { onDelete: "set null" }),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }).notNull().defaultNow(),
+    status: text("status").$type<"ok" | "failed" | "skipped">().notNull(),
+    reason: text("reason"),
+    inputsHash: text("inputs_hash"),
+    model: text("model"),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    errors: jsonb("errors").$type<string[]>().notNull().default([]),
   },
-  (t) => [primaryKey({ columns: [t.userId, t.projectId] })]
+  (t) => [index("understanding_runs_user_started_idx").on(t.userId, t.startedAt)]
 );
 
 // Pipeline templates (SPEC §11): reusable ordered step lists with blocked_by

@@ -1,2 +1,2 @@
-release: npx drizzle-kit push --force
+release: node scripts/release.mjs
 web: npm start -- -p $PORT

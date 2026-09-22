@@ -14,7 +14,6 @@ import {
   memories,
   messages,
   projects,
-  recordDirty,
   records,
   tasks,
   user,
@@ -571,42 +570,5 @@ describe("the previous record widens the terms", () => {
     // The board and the record both cascade from the user (afterAll relies on it).
     const [board] = await db.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.userId, U.id));
     expect(board).toBeDefined();
-  });
-});
-
-describe("record_dirty: the trigger table (SPEC §8)", () => {
-  it("is one row per (user, project), marked again is an upsert, and goes with the project", async () => {
-    const [scratch] = await db
-      .insert(projects)
-      .values({ userId: U.id, name: "Scratch", status: "active" })
-      .returning();
-    try {
-      const since = daysFromNow(-1);
-      await db.insert(recordDirty).values({ userId: U.id, projectId: scratch.id, since });
-      // The pair is the key: a second bare insert is refused...
-      await expect(
-        db.insert(recordDirty).values({ userId: U.id, projectId: scratch.id })
-      ).rejects.toThrow();
-      // ...and marking is written as an upsert that keeps the FIRST write's
-      // `since`, which is what "longest waiting first" needs.
-      await db
-        .insert(recordDirty)
-        .values({ userId: U.id, projectId: scratch.id })
-        .onConflictDoNothing();
-      const rows = await db
-        .select({ since: recordDirty.since })
-        .from(recordDirty)
-        .where(and(eq(recordDirty.userId, U.id), eq(recordDirty.projectId, scratch.id)));
-      expect(rows).toHaveLength(1);
-      expect(rows[0].since.toISOString()).toBe(since.toISOString());
-    } finally {
-      await db.delete(projects).where(and(eq(projects.userId, U.id), eq(projects.id, scratch.id)));
-    }
-    // Cascaded away with the project; nothing to clean up by hand.
-    const left = await db
-      .select({ projectId: recordDirty.projectId })
-      .from(recordDirty)
-      .where(eq(recordDirty.userId, U.id));
-    expect(left).toEqual([]);
   });
 });

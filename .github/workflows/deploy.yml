@@ -75,9 +75,12 @@ jobs:
           ' >> "$GITHUB_ENV"
 
       # The repo has no migration files (drizzle-kit push only), so the test
-      # database is built from the schema exactly as local and Heroku are.
+      # database is built from the schema the way the release phase builds
+      # Heroku's: through scripts/release.mjs, so the script itself is
+      # exercised here. A fresh database cannot reproduce a drop-and-create
+      # prompt, though; that is what the script's pre-push statements are for.
       - name: Create the schema
-        run: npx drizzle-kit push --force
+        run: node scripts/release.mjs
 
       - name: Typecheck
         run: npx tsc --noEmit

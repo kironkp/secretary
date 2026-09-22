@@ -1,10 +1,10 @@
 // Gather: one bundle per project — docs/understanding/SPEC.md §3.
 //
-// The bundle is everything a run may read. Two things decide whether the model
-// is called (SPEC §8): the `record_dirty` table says WHICH projects a tick
-// looks at, and the bundle's hash against records.inputs_hash says WHETHER
-// anything it would read has changed. The local calendar date is part of the
-// hash, so the morning run re-runs every active project even when no row
+// The bundle is everything a run may read. One thing decides whether the model
+// is called (SPEC §8): the bundle's hash against records.inputs_hash. The sweep
+// gathers every active project and compares; there is no dirty table, because
+// a hash compare is cheaper than keeping one honest. The local calendar date
+// is part of the hash, so every project re-runs once a day even when no row
 // moved, because a day passing changes what "today" and "tomorrow" mean.
 //
 // Every query filters on userId in SQL, the contract lib/db/queries.ts states.

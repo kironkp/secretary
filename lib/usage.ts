@@ -24,6 +24,10 @@ export type UsageKind =
   | "slow_loop"
   | "email"
   | "speech"
+  // The understanding loop (docs/understanding/SPEC.md §4): per-token, priced
+  // by model like every other structured call. lib/pricing.ts keys rates on
+  // the model id, so the kind needs no rate of its own.
+  | "understanding"
   | "other";
 
 export type UsageRecord = {
