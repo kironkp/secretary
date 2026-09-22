@@ -29,7 +29,7 @@ const DROP_CONTENT_TAGS = new Set(["script", "style", "iframe", "object", "embed
 // dependencies, and asserted against lib/workspace/types.ts in
 // tests/workspace-bindings.test.ts so the two can never drift apart.
 const BINDABLE_FIELDS = new Set([
-  "title", "due", "status", "project", "stage", "stakes", "blocked", "notes", "created",
+  "title", "due", "status", "project", "stage", "stakes", "blocked", "notes", "created", "source",
   "when", "location", "name", "deadline", "open", "updated", "task", "note",
 ]);
 const BINDABLE_ACTIONS = new Set(["add-task"]);

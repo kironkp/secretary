@@ -4,10 +4,12 @@
 // varies: gather, hash, compare, call, validate (retry once with the errors
 // quoted), store. The model is an injected function so every test passes a
 // fake and nothing here can reach a live model under vitest; the real one is
-// anthropicModelCall. Storage is the only side effect, and it happens only
-// after validation has passed: a failed run leaves the previous record, its
+// whatever modelCallFor resolves — Claude, OpenAI, or Claude with OpenAI as
+// the fallback. Storage is the only side effect, and it happens only after
+// validation has passed: a failed run leaves the previous record, its
 // questions and its words exactly as they were.
 import { and, eq, sql } from "drizzle-orm";
+import { z } from "zod";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { db } from "@/lib/db";
 import { records, understandingRuns } from "@/lib/db/schema";
@@ -115,6 +117,143 @@ export async function anthropicModelCall(userId: string): Promise<ModelCall | nu
       outputTokens: response.usage.output_tokens,
     };
   };
+}
+
+// --------------------------------------------------------------------------
+// The OpenAI model, and choosing between the two
+// --------------------------------------------------------------------------
+
+const DEFAULT_OPENAI_MODEL = "gpt-5.5";
+/** The Responses API's ladder for gpt-5.5 (lib/anthropic.ts CHAT_EFFORTS). */
+const OPENAI_EFFORTS = ["none", "low", "medium", "high", "xhigh"] as const;
+type OpenAIEffort = (typeof OPENAI_EFFORTS)[number];
+const DEFAULT_OPENAI_EFFORT: OpenAIEffort = "medium";
+
+const isOpenAIEffort = (v: string | undefined): v is OpenAIEffort =>
+  v !== undefined && (OPENAI_EFFORTS as readonly string[]).includes(v);
+
+/**
+ * The same model-facing schema as the Anthropic call, in the Responses API's
+ * shape. strict is off on purpose: strict mode demands every property be
+ * required and additionalProperties false at every level, which the optional
+ * fields (objective, nextAction, todayLine, quote) do not satisfy, and the
+ * output is validated by validateRunOutput either way.
+ */
+const OPENAI_OUTPUT_SCHEMA = z.toJSONSchema(modelOutputSchema) as Record<string, unknown>;
+
+/**
+ * The OpenAI model on the house key. Null under the same guards as the
+ * Anthropic call, and when there is no OPENAI_API_KEY. The same rules as
+ * anthropicModelCall: raw text back, JSON-parsed here, validated by the run.
+ */
+export async function openaiModelCall(userId: string): Promise<ModelCall | null> {
+  if (process.env.UNDERSTANDING_DISABLED === "true") return null;
+  if (process.env.VITEST) return null;
+  if (!process.env.OPENAI_API_KEY) return null;
+  // The OpenAI path has no per-user key today; the parameter is the same
+  // shape as anthropicModelCall so the two are interchangeable.
+  void userId;
+  // Lazy so this module stays importable with no key at all (lib/openai.ts
+  // builds its client at import time).
+  const { openai } = await import("@/lib/openai");
+
+  const model = process.env.UNDERSTANDING_OPENAI_MODEL ?? DEFAULT_OPENAI_MODEL;
+  const envEffort = process.env.UNDERSTANDING_OPENAI_EFFORT;
+  const effort = isOpenAIEffort(envEffort) ? envEffort : DEFAULT_OPENAI_EFFORT;
+
+  return async ({ system, user, attempt, previousErrors }) => {
+    const input = attempt > 0 ? user + rejectionAddendum(previousErrors) : user;
+    const response = await openai.responses.create({
+      model,
+      instructions: system,
+      input,
+      reasoning: { effort },
+      text: {
+        format: {
+          type: "json_schema",
+          name: "understanding",
+          strict: false,
+          schema: OPENAI_OUTPUT_SCHEMA,
+        },
+      },
+    });
+    const text = response.output_text ?? "";
+    if (!text.trim()) throw new Error("openai returned no text");
+    let json: unknown;
+    try {
+      json = JSON.parse(text);
+    } catch (e) {
+      throw new Error(
+        `openai output is not JSON: ${e instanceof Error ? e.message : String(e)}`
+      );
+    }
+    return {
+      output: toRunOutput(json),
+      model,
+      inputTokens: response.usage?.input_tokens ?? 0,
+      outputTokens: response.usage?.output_tokens ?? 0,
+    };
+  };
+}
+
+/**
+ * A ModelCall that tries `primary` and, when it THROWS — any error: an API
+ * rejection, a refusal, output that is not JSON — calls `secondary` with the
+ * same input. `onFallback` sees the error once per fallback. A primary that
+ * returns is never second-guessed: an output that fails validation is the
+ * run's retry to handle, not a reason to switch providers.
+ */
+export function withFallback(
+  primary: ModelCall,
+  secondary: ModelCall,
+  onFallback?: (error: unknown) => void
+): ModelCall {
+  return async (input) => {
+    try {
+      return await primary(input);
+    } catch (e) {
+      onFallback?.(e);
+      return secondary(input);
+    }
+  };
+}
+
+const PROVIDERS = ["anthropic", "openai", "auto"] as const;
+type Provider = (typeof PROVIDERS)[number];
+/** After a Claude failure, every run in this window goes to OpenAI first. */
+const PREFER_OPENAI_MS = 60 * 60_000;
+/** Module-level on purpose: one process, one memory of the last failure. */
+let preferOpenaiUntil = 0;
+
+/**
+ * The production model for one user, by UNDERSTANDING_PROVIDER:
+ *   anthropic  Claude or nothing.
+ *   openai     OpenAI or nothing.
+ *   auto       Claude with OpenAI behind it (the default). A Claude call that
+ *              throws — the house key over its usage limit is a 400 — is
+ *              answered by OpenAI on the same input, one console.warn is
+ *              written, and OpenAI goes first for the next 60 minutes so a
+ *              sweep over eight projects does not pay for eight rejections.
+ *              With only one provider available, that one; null with neither.
+ */
+export async function modelCallFor(userId: string): Promise<ModelCall | null> {
+  const env = process.env.UNDERSTANDING_PROVIDER;
+  const provider: Provider = (PROVIDERS as readonly string[]).includes(env ?? "")
+    ? (env as Provider)
+    : "auto";
+  if (provider === "anthropic") return anthropicModelCall(userId);
+  if (provider === "openai") return openaiModelCall(userId);
+
+  const [claude, gpt] = await Promise.all([anthropicModelCall(userId), openaiModelCall(userId)]);
+  if (!claude) return gpt;
+  if (!gpt) return claude;
+  if (Date.now() < preferOpenaiUntil) return gpt;
+  return withFallback(claude, gpt, (e) => {
+    preferOpenaiUntil = Date.now() + PREFER_OPENAI_MS;
+    console.warn(
+      `understanding: claude call failed (${e instanceof Error ? e.message : String(e)}); using openai for the next 60 minutes`
+    );
+  });
 }
 
 // --------------------------------------------------------------------------
@@ -265,7 +404,7 @@ async function runOnce(
   }
 
   // --- the model -----------------------------------------------------------
-  const model = opts.model ?? (await anthropicModelCall(userId));
+  const model = opts.model ?? (await modelCallFor(userId));
   if (!model) {
     const reason = process.env.UNDERSTANDING_DISABLED === "true" ? "disabled" : "no-model";
     if (!opts.dryRun) {
@@ -410,7 +549,7 @@ export async function runAll(
     // gatherAll reads the board, the memories and the messages once for every
     // project; the model is resolved once for the same reason.
     const bundles = await gatherAll(userId, { now, timezone: opts.timezone });
-    const model = opts.model ?? (await anthropicModelCall(userId)) ?? undefined;
+    const model = opts.model ?? (await modelCallFor(userId)) ?? undefined;
 
     const results: Record<string, RunResult> = {};
     for (const bundle of bundles) {

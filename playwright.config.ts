@@ -56,6 +56,13 @@ export default defineConfig({
       testMatch: /workspace\.spec\.ts/,
       use: { ...devices["iPhone 15"] },
     },
+    {
+      // Today and an opened question (docs/understanding/SPEC.md §9): the hero
+      // is read in full, an answer writes through the API, nothing is cut off.
+      name: "today",
+      testMatch: /today\.spec\.ts/,
+      use: { ...devices["iPhone 15"] },
+    },
   ],
 
   webServer: {
@@ -70,6 +77,11 @@ export default defineConfig({
       // the real http origin makes the decision deterministic and truthful.
       BETTER_AUTH_URL: BASE_URL,
       NEXT_PUBLIC_APP_URL: BASE_URL,
+      // Answering a question schedules that project's understanding run
+      // (docs/understanding/SPEC.md §6 step 4). CI carries placeholder model
+      // keys, so without this the run would try a real call and fail in the
+      // log after every answer; the specs assert on the writes, not the run.
+      UNDERSTANDING_DISABLED: "true",
     },
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

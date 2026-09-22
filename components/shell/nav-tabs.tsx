@@ -11,6 +11,8 @@ import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 const TABS = [
+  // First, because it is the front door (docs/understanding/SPEC.md §9).
+  { href: "/today", label: "Today" },
   { href: "/dashboard", label: "Dashboard" },
   { href: "/workspace", label: "Workspace" },
   // Kept as the backup surface until the Workspace is better (see

@@ -112,10 +112,13 @@ test.describe("live data", () => {
     await expect(box).toContainText("E2E undated task");
     const before = await box.locator("[data-row-check]").count();
 
-    // Mark it done through the same API the rest of the app uses.
+    // Mark it done through the same API the rest of the app uses. The row is
+    // picked by title, not position: the first row by due date is another
+    // spec's fixture (the Today question rests on an overdue task), and every
+    // project in the run shares this one seed.
     const id = await box
       .locator("[data-row-check]")
-      .first()
+      .filter({ hasText: "E2E undated task" })
       .getAttribute("data-check");
     const res = await page.request.patch(`/api/tasks/${id}`, {
       data: { status: "done", source: "dashboard" },

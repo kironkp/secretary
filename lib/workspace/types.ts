@@ -34,7 +34,11 @@ const id = z.string().min(1).max(64).regex(/^[a-z0-9][a-z0-9-]*$/, "kebab-case i
  * not meant to, and renaming a column does not break stored markup.
  */
 export const FIELDS = {
-  tasks: ["title", "due", "status", "project", "stage", "stakes", "blocked", "notes", "created"],
+  // "source" is the raw item_source value ("spoken", "typed", "inferred",
+  // "suggested"): a suggestion is the app's own, labelled as such on every
+  // surface and never counted as the user's past-due work (docs/understanding/
+  // SPEC.md §10). Today reads it to keep suggestions out of that number.
+  tasks: ["title", "due", "status", "project", "stage", "stakes", "blocked", "notes", "created", "source"],
   events: ["title", "when", "location", "project", "notes"],
   projects: ["name", "status", "deadline", "open"],
   documents: ["title", "project", "updated"],

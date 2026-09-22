@@ -149,6 +149,7 @@ async function resolveTasks(
       blockedReason: tasks.blockedReason,
       stages: tasks.stages,
       createdAt: tasks.createdAt,
+      source: tasks.source,
       projectName: projects.name,
     })
     .from(tasks)
@@ -169,6 +170,9 @@ async function resolveTasks(
       blocked: r.blockedReason ?? "",
       notes: r.notes ?? "",
       created: formatDue(r.createdAt, tz, now),
+      // The enum value as stored; "suggested" is the one readers act on
+      // (docs/understanding/SPEC.md §10).
+      source: r.source,
     },
   }));
 }

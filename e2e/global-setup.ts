@@ -22,6 +22,24 @@ export const TEST_USER = {
   name: "E2E Tester",
 };
 
+/**
+ * The one understanding question seeded for the Today specs (docs/
+ * understanding/SPEC.md §5). A fixed id, so e2e/today.spec.ts can open
+ * /today/<id> and post to /api/questions/<id>/answer without a lookup; the
+ * identity is fixed too, so a re-run never trips the asked-once rule.
+ */
+export const E2E_QUESTION = {
+  id: "e2e-question-1",
+  identity: "e2e-question-1",
+  kind: "doesnt_add_up",
+  question: "E2E: are these two the same task?",
+  context: "E2E question task and E2E finished task look like one job.",
+  /** The open task the question rests on and its "Close it" answer completes. */
+  openTask: "E2E question task",
+  /** The finished copy it is compared against. */
+  finishedTask: "E2E finished task",
+};
+
 type StateCookie = {
   name: string;
   value: string;
@@ -166,14 +184,57 @@ export default async function globalSetup(config: FullConfig) {
       ["E2E today task", "now()", "todo", projectId],
       ["E2E undated task", null, "todo", null],
       ["E2E finished task", "now() - interval '1 day'", "done", null],
+      // The Today specs' own open task: nothing else may write to it. The
+      // Workspace spec marks a task done through the API, and every project
+      // runs against this one seed, so a question resting on a shared row
+      // would find it already closed by the time Today is tested.
+      [E2E_QUESTION.openTask, "now() - interval '2 days'", "todo", projectId],
     ];
+    const taskIds = new Map<string, string>();
     for (const [title, due, status, project] of rows) {
-      await c.query(
+      const inserted = await c.query(
         `INSERT INTO tasks (id, user_id, project_id, title, status, due_at, source, created_at, updated_at)
-         VALUES (gen_random_uuid()::text, $1, $2, $3, $4, ${due ?? "NULL"}, 'typed', now(), now())`,
+         VALUES (gen_random_uuid()::text, $1, $2, $3, $4, ${due ?? "NULL"}, 'typed', now(), now())
+         RETURNING id`,
         [userId, project, title, status]
       );
+      taskIds.set(title, inserted.rows[0].id as string);
     }
+
+    // One question of the understanding kinds, resting on two of the tasks
+    // above, so the Today specs have a hero to read and an answer to give.
+    // Its "Close it" answer completes the question task; the API refuses a
+    // write naming an id outside `evidence`, so both ids are listed there.
+    const openId = taskIds.get(E2E_QUESTION.openTask)!;
+    const finishedId = taskIds.get(E2E_QUESTION.finishedTask)!;
+    const evidence = [
+      { type: "task", id: openId },
+      { type: "task", id: finishedId },
+    ];
+    const answers = [
+      {
+        id: "close",
+        label: "Close it",
+        writes: [{ op: "complete_task", taskId: openId }, { op: "resolve" }],
+      },
+      { id: "keep", label: "Keep it", writes: [{ op: "resolve" }] },
+    ];
+    await c.query(
+      `INSERT INTO clarifications
+         (id, user_id, kind, question, context, evidence, answers, rank, status, identity, project_id, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, 0, 'open', $8, $9, now())`,
+      [
+        E2E_QUESTION.id,
+        userId,
+        E2E_QUESTION.kind,
+        E2E_QUESTION.question,
+        E2E_QUESTION.context,
+        JSON.stringify(evidence),
+        JSON.stringify(answers),
+        E2E_QUESTION.identity,
+        projectId,
+      ]
+    );
   });
 
   mkdirSync(dirname(STORAGE_STATE), { recursive: true });
