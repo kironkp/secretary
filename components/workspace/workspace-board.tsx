@@ -87,7 +87,7 @@ const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n
 // gives it up, which is how the cap subtracts a lede without measuring one.
 // The maxHeight stays as the fallback for an engine without size containment,
 // where the widget grows by the lede instead, and nothing is cut off either way.
-const FRAME_PX = 2 + 44 + 1;
+const FRAME_PX = 2 + 44;
 // The least a body keeps on the desktop grid: one row of text and its
 // padding. A lede taller than the whole body area (a tiny widget, a long
 // lede) pushes the widget past its grid height rather than leaving no rows
@@ -287,22 +287,29 @@ export function WorkspaceBoard({ initial }: { initial: BoardState }) {
   const boardHeight = narrow ? undefined : Math.max(rows, 6) * (GRID_ROW_PX + GRID_GAP_PX);
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <Toolbutton onClick={() => void send([{ op: "tidy" }])} label="Tidy" />
-        <Toolbutton
-          onClick={() => void send([{ op: "undo" }])}
-          label="Undo"
-          disabled={!state.canUndo}
-        />
-        <Toolbutton
-          onClick={() => void send([{ op: "redo" }])}
-          label="Redo"
-          disabled={!state.canRedo}
-        />
-        {narrow && <span className="text-xs text-muted">Stacked on narrow screens</span>}
-        {error && <span className="text-xs text-danger">{error}</span>}
+    <div className="contents">
+      {/* The mockup's nav row: a quiet line at the left, the actions as plain
+          text at the right, the title under it (the page renders the title
+          with order-2, so this row sits above it). */}
+      <div className="order-1 flex items-baseline justify-between gap-3">
+        <span className="text-[13px] font-semibold text-faint">
+          {error ? <span className="text-danger">{error}</span> : "Drag to arrange"}
+        </span>
+        <span className="flex items-baseline gap-4">
+          <Toolbutton
+            onClick={() => void send([{ op: "undo" }])}
+            label="Undo"
+            disabled={!state.canUndo}
+          />
+          <Toolbutton
+            onClick={() => void send([{ op: "redo" }])}
+            label="Redo"
+            disabled={!state.canRedo}
+          />
+          <Toolbutton onClick={() => void send([{ op: "tidy" }])} label="Tidy" />
+        </span>
       </div>
+      <div className="order-3 flex flex-col gap-3">
 
       <div
         ref={boardRef}
@@ -346,8 +353,10 @@ export function WorkspaceBoard({ initial }: { initial: BoardState }) {
               aria-label={w.title}
               style={style}
               className={[
-                "flex flex-col overflow-hidden rounded-2xl border bg-card",
-                state.focusId === w.id ? "border-accent" : "border-edge",
+                // The mockup's card: no border; the tint ring marks the
+                // focused widget, which voice and tap both set.
+                "flex flex-col overflow-hidden rounded-[14px] border bg-card",
+                state.focusId === w.id ? "border-accent" : "border-transparent",
                 active ? "shadow-lg" : "",
                 narrow ? "" : "motion-reduce:transition-none",
               ].join(" ")}
@@ -355,7 +364,7 @@ export function WorkspaceBoard({ initial }: { initial: BoardState }) {
                 if (state.focusId !== w.id) void send([{ op: "focus", id: w.id }]);
               }}
             >
-              <header className="flex shrink-0 items-center gap-1 border-b border-edge">
+              <header className="flex shrink-0 items-center gap-1">
                 {/* 44px minimum. The Canvas shipped an 18px target on a row that
                     navigated away on a near miss; nothing here goes below 44. */}
                 <button
@@ -373,7 +382,7 @@ export function WorkspaceBoard({ initial }: { initial: BoardState }) {
                     header grows and the body gives up the height: the body is
                     what scrolls, the title is never elided. min-w-0 lets the
                     flex item shrink so the wrap happens at all. */}
-                <h2 className="min-w-0 flex-1 wrap-break-word py-2 text-sm font-semibold text-ink">
+                <h2 className="min-w-0 flex-1 wrap-break-word py-2 text-[15px] font-semibold text-faint">
                   {w.title}
                 </h2>
                 <button
@@ -401,7 +410,7 @@ export function WorkspaceBoard({ initial }: { initial: BoardState }) {
                   data-lede={w.id}
                   title={lede.stale ? "Being re-read" : undefined}
                   className={[
-                    "wk-lede shrink-0 wrap-break-word px-4 pt-3 text-sm leading-snug text-ink",
+                    "wk-lede shrink-0 wrap-break-word px-4 pb-1 text-[16px] leading-[1.38] text-ink",
                     lede.stale ? "opacity-60" : "",
                   ].join(" ")}
                 >
@@ -432,6 +441,7 @@ export function WorkspaceBoard({ initial }: { initial: BoardState }) {
             </section>
           );
         })}
+      </div>
       </div>
     </div>
   );
@@ -507,7 +517,7 @@ function Toolbutton({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="h-11 rounded-lg border border-edge bg-card px-4 text-sm text-ink transition-colors hover:border-faint disabled:opacity-40"
+      className="min-h-11 text-[17px] text-accent disabled:text-faint"
     >
       {label}
     </button>

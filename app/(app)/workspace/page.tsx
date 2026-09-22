@@ -50,8 +50,10 @@ export default async function WorkspacePage() {
   ]);
 
   return (
-    <div className="py-2">
-      <h1 className="mb-3 text-lg font-bold">Workspace</h1>
+    <div className="mx-auto flex max-w-2xl flex-col gap-4 pt-1.5">
+      {/* The mockup's title: the same 34px as Today. The toolbar row above it
+          is the board's (Tidy, Undo, Redo). */}
+      <h1 className="order-2 text-[34px] font-bold leading-[1.2] tracking-[-0.01em]">Workspace</h1>
       <WorkspaceBoard
         initial={{
           version: stored.version,
