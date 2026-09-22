@@ -131,6 +131,11 @@ export const writeSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("set_due"), taskId, dueAt: isoDateOrDateTime }),
   z.object({ op: z.literal("set_recurrence"), taskId, recurrence: z.enum(RECURRENCES) }),
   z.object({ op: z.literal("set_blocked_reason"), taskId, reason: z.string().min(1).max(300) }),
+  // A project NAME, not an id: the bundle names one project, and the task
+  // tools already resolve a name the way a spoken "file it under Caltrans"
+  // is resolved (lib/secretary/tools.ts update_task), so an answer and a
+  // voice command land the task in the same place.
+  z.object({ op: z.literal("set_project"), taskId, project: z.string().trim().min(1).max(80) }),
   z.object({
     op: z.literal("remember_fact"),
     fact: z.string().min(1).max(400),
@@ -261,6 +266,12 @@ export type Bundle = {
   documents: BundleDocument[];
   previousRecord: ProjectRecord | null;
   widgets: BundleWidget[];
+  /**
+   * Every project of the user's that is not archived, by name, this one
+   * included: the only names a set_project write may use, because the apply
+   * path resolves the name against the same list and never creates one.
+   */
+  projectNames: string[];
   /** Inputs that fell over a bound, so a run can say what it did not see. */
   dropped: { field: string; count: number }[];
   /** The mention terms memories and messages were matched on; visible for tests. */

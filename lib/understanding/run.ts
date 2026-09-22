@@ -8,7 +8,7 @@
 // the fallback. Storage is the only side effect, and it happens only after
 // validation has passed: a failed run leaves the previous record, its
 // questions and its words exactly as they were.
-import { and, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { db } from "@/lib/db";
@@ -16,7 +16,13 @@ import { records, understandingRuns } from "@/lib/db/schema";
 import { anthropicFor, BRAIN_EFFORTS, type BrainEffort } from "@/lib/anthropic";
 import { recordUsage } from "@/lib/usage";
 import { gatherAll, gatherProject, hashBundle } from "./gather";
-import { modelOutputSchema, renderBundle, toRunOutput, UNDERSTANDING_SYSTEM } from "./prompt";
+import {
+  modelOutputSchema,
+  renderBundle,
+  toRunOutput,
+  UNDERSTANDING_SYSTEM,
+  type RunMode,
+} from "./prompt";
 import { questionIdentity, rankDraft, retireAsrClarifications, syncQuestions } from "./questions";
 import type { Bundle, ProjectRecord, RunOutput } from "./types";
 import { validateRunOutput } from "./validate";
@@ -283,7 +289,7 @@ export type RunResult =
       inputTokens: number;
       outputTokens: number;
     }
-  | { status: "skipped"; reason: "unchanged" | "no-model" | "disabled" | "no-project" }
+  | { status: "skipped"; reason: "unchanged" | "no-model" | "disabled" | "no-project" | "backoff" }
   | { status: "failed"; errors: string[] }
   | {
       /** opts.dryRun: the validated output, nothing written anywhere. */
@@ -309,7 +315,21 @@ export type RunOptions = {
   bundle?: Bundle;
   /** Call and validate, then return without writing (scripts/understand.ts --dry). */
   dryRun?: boolean;
+  /** "interview": the user is on the Interview tab asking to be asked; the
+   *  prompt gains one paragraph (prompt.ts INTERVIEW_ADDENDUM). Nothing else
+   *  in the run changes: same gather, same validation, same storage. */
+  mode?: RunMode;
+  /** The sweep sets this: after a failed run on these same inputs, wait
+   *  FAILED_BACKOFF_MS before calling the model again. A person pressing
+   *  "Understand now" or answering a question is asking to try now. */
+  backoffAfterFailure?: boolean;
 };
+
+/** A failed run stores no record, so without this the hash compare would call
+ *  the model again every sweep for a project whose output keeps failing
+ *  validation: six calls an hour, about a dollar each, for the same rejection.
+ *  The first production sweep did exactly that on the Jazz project. */
+const FAILED_BACKOFF_MS = 6 * 60 * 60_000;
 
 type RunLog = {
   userId: string;
@@ -415,6 +435,28 @@ async function runOnce(
     return { status: "skipped", reason: "unchanged" };
   }
 
+  if (opts.backoffAfterFailure && !opts.force) {
+    const [last] = await db
+      .select({
+        status: understandingRuns.status,
+        inputsHash: understandingRuns.inputsHash,
+        finishedAt: understandingRuns.finishedAt,
+      })
+      .from(understandingRuns)
+      .where(and(eq(understandingRuns.userId, userId), eq(understandingRuns.projectId, projectId)))
+      .orderBy(desc(understandingRuns.startedAt))
+      .limit(1);
+    if (
+      last?.status === "failed" &&
+      last.inputsHash === inputsHash &&
+      last.finishedAt &&
+      Date.now() - last.finishedAt.getTime() < FAILED_BACKOFF_MS
+    ) {
+      // Same inputs, same rejection expected; a change in the data tries at once.
+      return { status: "skipped", reason: "backoff" };
+    }
+  }
+
   // --- the model -----------------------------------------------------------
   const model = opts.model ?? (await modelCallFor(userId));
   if (!model) {
@@ -425,7 +467,7 @@ async function runOnce(
     return { status: "skipped", reason };
   }
 
-  const user = renderBundle(bundle);
+  const user = renderBundle(bundle, { mode: opts.mode });
   let output: RunOutput | null = null;
   let errors: string[] = [];
   let modelId = "";
@@ -540,7 +582,12 @@ async function runOnce(
 // Every active project: the sweep (SPEC §8)
 // --------------------------------------------------------------------------
 
-export type RunAllResult = { results: Record<string, RunResult>; retiredAsr: number };
+export type RunAllResult = {
+  results: Record<string, RunResult>;
+  retiredAsr: number;
+  /** True when a sweep for this user was already running and this call did nothing. */
+  busy?: true;
+};
 
 /**
  * One sweep per user at a time. A second runAll for the same user while one
@@ -550,11 +597,24 @@ export type RunAllResult = { results: Record<string, RunResult>; retiredAsr: num
  */
 const inFlight = new Map<string, Promise<RunAllResult>>();
 
+/** Whether a sweep is running for this user right now (a route can say so before spending a quota). */
+export function runInFlight(userId: string): boolean {
+  return inFlight.has(userId);
+}
+
 export async function runAll(
   userId: string,
-  opts: { timezone: string; now?: Date; model?: ModelCall; force?: boolean; dryRun?: boolean }
+  opts: {
+    timezone: string;
+    now?: Date;
+    model?: ModelCall;
+    force?: boolean;
+    dryRun?: boolean;
+    mode?: RunMode;
+    backoffAfterFailure?: boolean;
+  }
 ): Promise<RunAllResult> {
-  if (inFlight.has(userId)) return { results: {}, retiredAsr: 0 };
+  if (inFlight.has(userId)) return { results: {}, retiredAsr: 0, busy: true };
 
   const sweep = (async (): Promise<RunAllResult> => {
     const now = opts.now ?? new Date();
@@ -572,6 +632,8 @@ export async function runAll(
         force: opts.force,
         bundle,
         dryRun: opts.dryRun,
+        mode: opts.mode,
+        backoffAfterFailure: opts.backoffAfterFailure,
       });
     }
     const retiredAsr = opts.dryRun ? 0 : await retireAsrClarifications(userId, { now });

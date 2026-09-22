@@ -74,7 +74,7 @@ export function QuestionView({ initial }: { initial: QuestionData }) {
       const res = await fetch(`/api/questions/${question.id}/answer`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(trimmed ? { answerId, note: trimmed } : { answerId }),
+        body: JSON.stringify(trimmed ? { answerId, note: trimmed, source: "today" } : { answerId }),
       });
       const body = (await res.json().catch(() => null)) as AnswerResult | { error?: string } | null;
       if (res.ok && body && "status" in body && body.status === "resolved") {

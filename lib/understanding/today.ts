@@ -9,7 +9,7 @@
 //   - Showing a question is what "asked" means (SPEC §5): the first time a row
 //     is returned its surfacedAt is set and the project's record logs it, so
 //     the next run can reason from what the user has already been asked.
-import { and, count, eq, gte, inArray, isNotNull, lt, sql } from "drizzle-orm";
+import { and, count, eq, gte, inArray, isNotNull, lt, max, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   clarifications,
@@ -20,6 +20,7 @@ import {
   messages,
   records,
   tasks,
+  understandingRuns,
 } from "@/lib/db/schema";
 import { dayRangeInTz } from "@/lib/time";
 import { resolveBinding } from "@/lib/workspace/bindings";
@@ -522,5 +523,92 @@ export async function buildToday(
     pastDue,
     comingUp,
     updatedAt: updatedAt ? updatedAt.toISOString() : null,
+  };
+}
+
+// --------------------------------------------------------------------------
+// The Interview (app/(app)/interview): every open question, one at a time
+// --------------------------------------------------------------------------
+
+export type InterviewData = {
+  /** Every open or asked question of the three kinds across all projects, rank first, then oldest. */
+  queue: QuestionView[];
+  total: number;
+  /** Questions of the three kinds answered today, on the user's own calendar. */
+  answeredToday: number;
+  /** When a run last finished, ISO; null before the first. */
+  lastRunAt: string | null;
+};
+
+/**
+ * Questions of the three kinds answered between two instants. There is no
+ * resolved_at on clarifications; the time an answer landed is kept on the
+ * project's record, in asked[].answeredAt (SPEC §5, written by answer.ts),
+ * so that is what is counted: one asked entry per resolved question of the
+ * three kinds whose answeredAt falls in the window. A question whose project
+ * has no record is not counted; every question comes from a run, and a run
+ * writes the record before the questions, so that is a row seeded by hand.
+ */
+async function countAnswered(userId: string, start: Date, end: Date): Promise<number> {
+  const kinds = sql.join(
+    QUESTION_KINDS.map((k) => sql`${k}`),
+    sql`, `
+  );
+  const [row] = await db
+    .select({ n: sql<number>`count(*)`.mapWith(Number) })
+    .from(
+      sql`${records} r
+        cross join lateral jsonb_array_elements(coalesce(r.body->'asked', '[]'::jsonb)) as asked(entry)
+        join ${clarifications} c on c.id = asked.entry->>'questionId' and c.user_id = r.user_id`
+    )
+    .where(
+      and(
+        sql`r.user_id = ${userId}`,
+        sql`c.status = 'resolved'`,
+        sql`c.kind in (${kinds})`,
+        sql`(asked.entry->>'answeredAt')::timestamptz >= ${start.toISOString()}::timestamptz`,
+        sql`(asked.entry->>'answeredAt')::timestamptz < ${end.toISOString()}::timestamptz`
+      )
+    );
+  return row?.n ?? 0;
+}
+
+/**
+ * What the Interview reads: the whole open queue in Today's order, with the
+ * evidence of every question resolved, so the screen can move from one to
+ * the next without a round trip. Only the question the screen shows is
+ * marked surfaced (SPEC §5: showing a question is asking it), because the
+ * Interview shows one at a time: the front of the queue, or, after "Skip for
+ * now" moved that one to the back on the screen, the one the client names
+ * as `front`. The rest are marked as they reach the front on a later read,
+ * or by the answer path when answered first.
+ */
+export async function buildInterview(
+  userId: string,
+  timezone: string,
+  now: Date = new Date(),
+  opts: { front?: string } = {}
+): Promise<InterviewData> {
+  const { start, end } = dayRangeInTz(timezone, now);
+  const [queue, answeredToday, [last]] = await Promise.all([
+    listQuestions(userId),
+    countAnswered(userId, start, end),
+    db
+      .select({ at: max(understandingRuns.finishedAt) })
+      .from(understandingRuns)
+      .where(eq(understandingRuns.userId, userId)),
+  ]);
+  const views = await viewQuestions(userId, queue, timezone);
+  // A `front` that is no longer in the queue (answered elsewhere) falls back
+  // to the real front, which is what the client shows once it has this.
+  const front = queue.find((q) => q.id === opts.front) ?? queue[0];
+  const surfaced = await markSurfaced(userId, front ? [front] : [], now);
+  const shown = views.map((v) => (surfaced.has(v.id) ? { ...v, surfacedAt: now } : v));
+  const lastAt = last?.at ? new Date(last.at) : null;
+  return {
+    queue: shown,
+    total: shown.length,
+    answeredToday,
+    lastRunAt: lastAt && !Number.isNaN(lastAt.getTime()) ? lastAt.toISOString() : null,
   };
 }

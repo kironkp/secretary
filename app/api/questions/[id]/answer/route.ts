@@ -6,11 +6,18 @@
 import { NextResponse, after } from "next/server";
 import { z } from "zod";
 import { isErrorResponse, parseBody, requireSession } from "@/lib/api";
-import { answerQuestion, rerunAfterAnswer, type AnswerResult } from "@/lib/understanding/answer";
+import {
+  ANSWER_SOURCES,
+  answerQuestion,
+  rerunAfterAnswer,
+  type AnswerResult,
+} from "@/lib/understanding/answer";
 
 const bodySchema = z.object({
   answerId: z.string().min(1).max(40),
   note: z.string().max(500).optional(),
+  /** Which screen is answering; a note kept as a memory is tagged with it. */
+  source: z.enum(ANSWER_SOURCES).optional(),
 });
 
 const STATUS: Record<AnswerResult["status"], number> = {
@@ -28,7 +35,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const parsed = parseBody(bodySchema, await req.json().catch(() => ({})));
   if (isErrorResponse(parsed)) return parsed;
 
-  const result = await answerQuestion(user.id, user.timezone, id, parsed.answerId, parsed.note);
+  const result = await answerQuestion(user.id, user.timezone, id, parsed.answerId, parsed.note, parsed.source);
   if (result.status === "resolved" && result.projectId) {
     const projectId = result.projectId;
     after(() => rerunAfterAnswer(user.id, projectId, user.timezone));

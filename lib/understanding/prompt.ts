@@ -31,7 +31,7 @@ Rules that a machine checks; output that breaks them is rejected:
    doesnt_add_up: a finished copy and an open copy of the same job; a task marked blocked after the user said it is not; a weekly thing filed as one-offs; tasks Secretary suggested that sit past their date and were never taken up; an open task whose notes say it is done.
    done_yet: an open item where a later message, a finished sibling, a passed milestone or a missed follow-up says it probably happened.
 
-4. A question is one sentence in plain words ending with a question mark. Its why is at most two sentences and names at least one piece of evidence by its real title or a quote from it. evidence lists the source ids it rests on. answers: one to four; each has a label of at most 40 characters and the writes it makes, using only ids from the input and only these ops: complete_task, drop_task, set_due, set_recurrence, set_blocked_reason, remember_fact, clear_expectation, resolve. The first answer is the one you recommend. The last answer is always a way out with no writes except resolve ("Keep them", "Something else", "Not yet"). At most eight questions per project; when there are more, keep the ones whose answer changes what happens next.
+4. A question is one sentence in plain words ending with a question mark. Its why is at most two sentences and names at least one piece of evidence by its real title or a quote from it. evidence lists the source ids it rests on. answers: one to four; each has a label of at most 40 characters and the writes it makes, using only ids from the input and only these ops: complete_task, drop_task, set_due, set_recurrence, set_blocked_reason, set_project, remember_fact, clear_expectation, resolve. set_project files a task under a project by its name (taskId and project), for a task that sits in the wrong project or in none; the name must be one listed under PROJECTS in the input, never a new one. The first answer is the one you recommend. The last answer is always a way out with no writes except resolve ("Keep them", "Something else", "Not yet"). At most eight questions per project; when there are more, keep the ones whose answer changes what happens next.
 
 5. Do not ask what the previous record's asked list shows was already asked and answered, and never ask twice about the same evidence.
 
@@ -52,6 +52,7 @@ export const WRITE_OPS = [
   "set_due",
   "set_recurrence",
   "set_blocked_reason",
+  "set_project",
   "remember_fact",
   "clear_expectation",
   "resolve",
@@ -114,9 +115,10 @@ const recordOut = z.object({
 
 /**
  * One flat object for every op. Which fields matter depends on op: taskId for
- * the five task ops, dueAt (YYYY-MM-DD) for set_due, recurrence for
- * set_recurrence, reason for set_blocked_reason, fact and tags for
- * remember_fact, expectationId for clear_expectation, nothing for resolve.
+ * the six task ops, dueAt (YYYY-MM-DD) for set_due, recurrence for
+ * set_recurrence, reason for set_blocked_reason, project for set_project,
+ * fact and tags for remember_fact, expectationId for clear_expectation,
+ * nothing for resolve.
  */
 const writeOut = z.object({
   op: z.enum(WRITE_OPS),
@@ -124,6 +126,7 @@ const writeOut = z.object({
   dueAt: z.string().optional().describe("set_due only: YYYY-MM-DD in the user's timezone"),
   recurrence: z.enum(RECURRENCES).optional().describe("set_recurrence only"),
   reason: z.string().optional().describe("set_blocked_reason only"),
+  project: z.string().optional().describe("set_project only: the name of the project to file the task under"),
   fact: z.string().optional().describe("remember_fact only"),
   tags: z.array(z.string()).optional().describe("remember_fact only"),
   expectationId: z.string().optional().describe("clear_expectation only"),
@@ -200,6 +203,8 @@ function flatToWrite(w: unknown): unknown {
       return { op: w.op, taskId: w.taskId, recurrence: w.recurrence };
     case "set_blocked_reason":
       return { op: w.op, taskId: w.taskId, reason: w.reason };
+    case "set_project":
+      return { op: w.op, taskId: w.taskId, project: w.project };
     case "remember_fact":
       return { op: w.op, fact: w.fact, tags: w.tags ?? [] };
     case "clear_expectation":
@@ -307,7 +312,22 @@ function dueLabel(dueAt: string | null, clock: Bundle["clock"]): string {
 const sourceLabel = (source: string): string =>
   source === "suggested" ? "suggested by Secretary" : source;
 
-export function renderBundle(bundle: Bundle): string {
+/**
+ * How a run is being read. "sweep" is the ordinary run: a change or a new
+ * morning. "interview" is the user sitting on the Interview tab asking to be
+ * asked (app/api/interview/more): the same bundle, the same rules, one
+ * paragraph more at the end of the user message. It is appended there rather
+ * than to the system prompt so the cached prefix is the same for both.
+ */
+export type RunMode = "sweep" | "interview";
+
+const INTERVIEW_ADDENDUM =
+  "The user is sitting down right now to organize their data with you, one question at a time. " +
+  "Beyond the usual questions, ask about: tasks with no project; two tasks that look like the same job; " +
+  "a task with no date that clearly needs one; suggestions the user never took up; anything you cannot place. " +
+  "Up to 12 questions for this project, the most useful first.";
+
+export function renderBundle(bundle: Bundle, opts: { mode?: RunMode } = {}): string {
   const tz = bundle.clock.timezone;
   const date = (iso: string) => localDateInTz(tz, new Date(iso));
   const lines: string[] = [];
@@ -328,6 +348,10 @@ export function renderBundle(bundle: Bundle): string {
     `tomorrow: ${bundle.clock.tomorrowLocalDate}`,
     `timezone: ${tz}`
   );
+
+  // The names a set_project may use (validate.ts refuses any other), the
+  // project being read among them, so the model can move a task in or out.
+  section("PROJECTS", bundle.projectNames.map((name) => oneLine(name)));
 
   section(
     "OPEN TASKS",
@@ -425,5 +449,6 @@ export function renderBundle(bundle: Bundle): string {
   ]);
 
   lines.push("", "Write the record, the questions and the words for this project now.");
+  if (opts.mode === "interview") lines.push("", INTERVIEW_ADDENDUM);
   return lines.join("\n");
 }

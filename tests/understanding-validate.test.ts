@@ -135,6 +135,7 @@ function makeBundle(): Bundle {
         ],
       },
     ],
+    projectNames: ["Album", "Caltrans", "Find It app"],
     dropped: [],
     terms: ["Caltrans", "CPO", "2073"],
   };
@@ -333,6 +334,23 @@ describe("step 3: writes", () => {
       { op: "resolve" },
     ];
     expect(errorsOf(out)[0]).toContain('unknown expectation id "not-in-bundle"');
+  });
+
+  it("a set_project must name one of the user's projects, matched the way a spoken name is", () => {
+    const withProject = (project: string) => {
+      const out = validOutput();
+      out.questions[0].answers[0].writes = [{ op: "set_project", taskId: T_CHECK, project }, { op: "resolve" }];
+      return out;
+    };
+    // Exact, case-blind, punctuation-blind and contained names all land,
+    // because the apply path (resolveProject) would land them the same way.
+    for (const name of ["Album", "caltrans", "find-it app", "Find It"]) {
+      expect(errorsOf(withProject(name)), name).toEqual([]);
+    }
+    const errors = errorsOf(withProject("Nowhere Land"));
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('no project named "Nowhere Land"');
+    expect(errors[0]).toContain("Album, Caltrans, Find It app");
   });
 
   it("one answer may not carry the same (op, id) twice", () => {

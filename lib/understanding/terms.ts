@@ -66,7 +66,7 @@ export function uniqueTerms(terms: string[]): string[] {
 /**
  * A term as a pattern: its alphanumeric runs, in order, with any punctuation
  * or whitespace between them. This is resolveProject's "normalized" match
- * (lib/secretary/tools.ts normalizeProjectName: lowercase, punctuation to
+ * (lib/project-names.ts normalizeProjectName: lowercase, punctuation to
  * space) applied to prose, so "Find It app" finds "find-it app" and
  * "Prod. monitor" finds "prod monitor" (SPEC §3). A term with no
  * alphanumeric run at all matches nothing.

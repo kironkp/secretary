@@ -111,6 +111,8 @@ function writeLine(w: Write): string {
       return `set_recurrence ${w.taskId} -> ${w.recurrence}`;
     case "set_blocked_reason":
       return `set_blocked_reason ${w.taskId} -> "${w.reason}"`;
+    case "set_project":
+      return `set_project ${w.taskId} -> "${w.project}"`;
     case "remember_fact":
       return `remember_fact "${w.fact}"${w.tags.length ? ` [${w.tags.join(", ")}]` : ""}`;
     case "clear_expectation":

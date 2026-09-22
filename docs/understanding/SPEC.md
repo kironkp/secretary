@@ -208,6 +208,7 @@ type Write =
   | { op: "set_due"; taskId: string; dueAt: string }
   | { op: "set_recurrence"; taskId: string; recurrence: "daily" | "weekly" | "monthly" | "yearly" }
   | { op: "set_blocked_reason"; taskId: string; reason: string }
+  | { op: "set_project"; taskId: string; project: string }  // a project NAME, never a new one
   | { op: "remember_fact"; fact: string; tags: string[] }
   | { op: "clear_expectation"; expectationId: string }
   | { op: "resolve"; }; // this question only; always appended
@@ -216,6 +217,15 @@ type Write =
 That list is closed. A question cannot propose creating a task, moving money,
 sending anything, or touching another user's data. Answering a question with
 an answer whose writes name an id not in `evidence` is refused by the API.
+
+`set_project` files a task under a project by its name, for a task that sits
+in the wrong project or in none. The bundle carries every non-archived
+project name of the user's (`projectNames`, rendered as PROJECTS in the
+input); the validator refuses a name that lands on none of them, matched the
+way a spoken "file it under Caltrans" is matched (`lib/project-names.ts`:
+exact, then punctuation-blind, then contained), and the apply path resolves
+the name with the same matcher and creation off, so an answer can never mint
+a project. The receipt names the project as it is really called.
 
 What each kind is for, with the detection the prompt asks for and the example
 from today's data:
@@ -250,13 +260,18 @@ open after that.
 
 ## 6. Answering
 
-`POST /api/questions/:id/answer { answerId, note? }`:
+`POST /api/questions/:id/answer { answerId, note?, source? }`:
 
 1. Load the clarification; refuse unless `status in (open, asked)`.
 2. Find the answer; apply its `writes` in order through the existing tool
    implementations (`complete_task`, `update_task`, `remember_fact`, …) so the
    honesty rule, the recurrence spawner and the audit path all apply.
-3. Append `resolve`; store `note` as `resolution`.
+3. Append `resolve`; store `note` as `resolution`. A note on an answer whose
+   only write is `resolve` ("Keep them", with a line saying why) is also
+   kept as a memory, prefixed with the question and the label so it names
+   what it is about, tagged with the project's name (how §3 finds a memory
+   for a project) and with `source` (`today`, `interview` or `voice`) when
+   the caller gave one. Nothing else reads the resolution column.
 4. Run that project immediately (§8). Return the writes that succeeded. The
    client says "Closed" only for those.
 
@@ -343,6 +358,19 @@ write site to say the same thing less reliably.
   "today" and "tomorrow" mean.
 - **Answering a question** (§6) runs that project immediately, so the next
   screen reflects the answer; it does not wait for the sweep.
+- **The interview run** (`mode: "interview"`, `POST /api/interview/more`,
+  the Interview tab's "Ask me more"): `runAll` forced past the hash for
+  every active project, with one paragraph appended to the rendered bundle
+  after the closing line, never to the system prompt, so the cached prefix
+  is the same in both modes. The paragraph says the user is sitting down to
+  organize their data one question at a time, asks beyond the usual kinds
+  (tasks with no project, two tasks that look like one job, a task with no
+  date that needs one, suggestions never taken up, anything the model cannot
+  place) and allows up to twelve questions for the project. Same
+  one-per-minute quota as "Understand now"; while a sweep for the user is
+  already running the route answers 409 "Already reading your projects"
+  without spending the quota, and the tab polls the queue for that run to
+  finish.
 - **Never on read.** Today and the Workspace render the last record. They
   never wait for a run.
 - **Every run is logged** in `understanding_runs`: which project, when, the
@@ -369,6 +397,16 @@ day and under a second a run.
   bound to `tasks where project = Caltrans and search = CPO`, with rows
   templated as `name / number / state`.
 - **Voice**: `answer_question`; the briefing reads the ranked queue.
+- **Interview** (`app/(app)/interview`, the second tab): the whole open
+  queue across projects in rank order, one question at a time as Today's
+  hero card, with the evidence behind a disclosure and a note field, then
+  "Skip for now". Showing a question is asking it (§5): the server marks the
+  question at the front surfaced on every read, and a skip, which reorders
+  only the screen and writes nothing about the skipped question, refetches
+  with `?front=<id>` naming the question it brought forward so that one is
+  marked instead. Answers go through §6 with `source: "interview"`. When
+  the queue is empty, "Ask me more" runs the interview mode (§8) and "Done
+  for now" goes to Today.
 
 ### Nothing is cut off
 

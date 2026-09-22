@@ -5,9 +5,88 @@
 // → addTrack → ontrack attaches e.streams[0] to a VISIBLE <audio controls>
 // element → data channel → SDP POST → answer. No app plumbing, no hidden
 // singleton element, no React state gates in the audio path.
-import { useEffect, useRef, useState } from "react";
+//
+// ?preview=talk (or ?preview=pill) renders the call screen itself with a stub
+// session instead: a look at VoiceMode with no microphone, no token and no
+// model call, for screenshots and for checking the Talk frame against the
+// mockup. Nothing on it talks to OpenAI; picking a voice there still posts
+// the persona preference, as the real screen does.
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { VoiceMode } from "@/components/chat/voice-mode";
+import type { useVoiceSession } from "@/components/chat/use-voice-session";
 
 const CALLS_URL = "https://api.openai.com/v1/realtime/calls";
+
+// The mockup's Talk frame, word for word: what you said, and her reply.
+const PREVIEW_LINES: ReturnType<typeof useVoiceSession>["transcript"] = [
+  { id: "user:1", role: "user", text: "The beacon glue one.", final: true },
+  {
+    id: "assistant:1",
+    role: "assistant",
+    text: "Beacon glue, then. So tomorrow is the statement, reconciling 0394, and paying beacon glue. It doesn't have a CPO number yet. Is that still to do, or did it happen?",
+    final: true,
+  },
+];
+
+// &state=connecting shows the grey slot before the call is up; &state=error
+// the dropped-call view with its two pills.
+type PreviewState = "connected" | "connecting" | "error";
+
+function TalkPreview({ minimized, state }: { minimized: boolean; state: PreviewState }) {
+  // Mute is real state so the button's pressed look can be checked by hand.
+  const [muted, setMuted] = useState(false);
+  const session = useMemo<ReturnType<typeof useVoiceSession>>(
+    () => ({
+      status: state,
+      error:
+        state === "error"
+          ? { kind: "network", message: "The connection dropped. Your conversation is saved." }
+          : null,
+      transcript: state === "connected" ? PREVIEW_LINES : [],
+      toasts: [],
+      canvasSeq: 0,
+      muted,
+      assistantSpeaking: state === "connected",
+      model: "gpt-realtime-2.1",
+      start: async () => {},
+      end: async () => null,
+      switchModel: async () => {},
+      switchVoice: async () => {},
+      switchEffort: async () => {},
+      toggleMute: () => setMuted((m) => !m),
+      getMicStream: () => null,
+      getRemoteStream: () => null,
+      getLevels: () =>
+        Promise.resolve({ mic: null, remote: null, micBytesSent: 0, remoteBytesReceived: 0 }),
+      getDebugInfo: () => null,
+    }),
+    [muted, state]
+  );
+  return <VoiceMode session={session} onClose={() => {}} startMinimized={minimized} />;
+}
+
+export default function VoiceTestPage() {
+  return (
+    <Suspense fallback={null}>
+      <VoiceTestSwitch />
+    </Suspense>
+  );
+}
+
+function VoiceTestSwitch() {
+  const params = useSearchParams();
+  const preview = params.get("preview");
+  const state = params.get("state");
+  if (preview === "talk" || preview === "pill")
+    return (
+      <TalkPreview
+        minimized={preview === "pill"}
+        state={state === "connecting" || state === "error" ? state : "connected"}
+      />
+    );
+  return <RealtimeBaseline />;
+}
 
 // short beep WAV for the same-element sanity check
 function makeBeep(): string {
@@ -41,7 +120,7 @@ function makeBeep(): string {
   return "data:audio/wav;base64," + btoa(bin);
 }
 
-export default function VoiceTestPage() {
+function RealtimeBaseline() {
   const [log, setLog] = useState<string[]>([]);
   const [stats, setStats] = useState("no call");
   const [connected, setConnected] = useState(false);

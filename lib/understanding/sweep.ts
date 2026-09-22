@@ -194,6 +194,9 @@ async function sweepOnce(opts: SweepOptions): Promise<SweepResult> {
       timezone: owner.timezone || "UTC",
       now,
       model,
+      // The sweep is the only caller that would otherwise retry a failing
+      // project every ten minutes (run.ts FAILED_BACKOFF_MS).
+      backoffAfterFailure: true,
     });
     const tally = tallyResults(results);
     total.ran += tally.ran;

@@ -72,7 +72,10 @@
 body {
   background-color: var(--color-bg);
   color: var(--color-ink);
-  font-family: var(--font-geist-sans), -apple-system, sans-serif;
+  /* The system face (the @theme token above): the mockup and the user's
+     phone are set in SF, and a webfont first in the stack changed every
+     line break the mockup was judged on. */
+  font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
 }
 

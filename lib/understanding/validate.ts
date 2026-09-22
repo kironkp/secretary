@@ -6,6 +6,7 @@
 // say "this id is real". Every error is collected, not just the first, so a
 // retry can quote all of them at once.
 import { z } from "zod";
+import { matchProjectName } from "@/lib/project-names";
 import { STOPLIST, digitTokens, escapeRegExp } from "./terms";
 import {
   runOutputSchema,
@@ -303,6 +304,7 @@ function writeKey(w: Write): string {
     case "set_due":
     case "set_recurrence":
     case "set_blocked_reason":
+    case "set_project":
       return `${w.op}:${w.taskId}`;
     case "clear_expectation":
       return `${w.op}:${w.expectationId}`;
@@ -412,6 +414,14 @@ export function validateRunOutput(output: unknown, bundle: Bundle): ValidationRe
         }
         if ("expectationId" in w && !ids.expectation.has(w.expectationId)) {
           errors.push(`${wpath}: unknown expectation id "${w.expectationId}"`);
+        }
+        // A set_project names a project; the apply path resolves the name
+        // with the same matcher and never creates one, so a name that lands
+        // nowhere here would be a write guaranteed to fail when answered.
+        if (w.op === "set_project" && !matchProjectName(w.project, bundle.projectNames)) {
+          errors.push(
+            `${wpath}: no project named "${w.project}"; use one listed under PROJECTS: ${bundle.projectNames.join(", ") || "(none)"}`
+          );
         }
         const key = writeKey(w);
         if (seen.has(key)) errors.push(`${wpath}: duplicate write ${key}`);

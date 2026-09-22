@@ -4,8 +4,8 @@
 // bar; the conversation lives in a panel that rises above it. Three states —
 // bar (composer only), peek (the exchange since the dock last opened), full
 // (whole history + briefing). The caret expands and minimizes.
-import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowUp,
   Calendar,
@@ -33,8 +33,9 @@ import type { BriefingCard } from "@/lib/secretary/briefing";
 import { INLINE_MIME } from "@/lib/attachments";
 import { requestCanvasRefresh } from "@/lib/canvas/refresh";
 import { unlockRemoteAudio } from "@/lib/realtime/remote-audio";
+import { AttachSheet } from "./attach-sheet";
 import { DictationBar } from "./dictation-bar";
-import { ModelChip } from "./model-chip";
+import { ModelChip, useChatModel } from "./model-chip";
 import { useVoiceCall } from "./voice-call-provider";
 
 export type DockState = "bar" | "peek" | "full";
@@ -217,7 +218,19 @@ export function ChatThread({
   dock?: { state: DockState; setState: (s: DockState) => void };
 }) {
   const router = useRouter();
+  const params = useSearchParams();
   const [conversationId, setConversationId] = useState(initialConversationId);
+  // The model and effort, shared by the composer's chip and the Attach
+  // sheet's Model row so a pick in either is what the other shows.
+  const chatModel = useChatModel(initialChatModel, initialChatEffort);
+  // The Attach sheet (the ask bar's plus). `?attach=open` opens it on load in
+  // development only: the sheet is state inside the client, and a screenshot
+  // harness cannot tap the plus. Harmless elsewhere: the param is ignored.
+  const [attachOpen, setAttachOpen] = useState(
+    () => process.env.NODE_ENV === "development" && params.get("attach") === "open"
+  );
+  const closeAttach = useCallback(() => setAttachOpen(false), []);
+  const plusRef = useRef<HTMLButtonElement>(null);
   const [msgs, setMsgs] = useState<Message[]>(initialMessages);
   const [input, setInput] = useState("");
   const [mode, setMode] = useState<"idle" | "dictation">("idle");
@@ -713,27 +726,29 @@ export function ChatThread({
             />
           ) : dock && dockState === "bar" ? (
             // The ask bar from the "Secretary on iPhone" mockup: a plus, the
-            // field, the mic. The plus opens the native picker, which on iOS
-            // is the Photo Library / Take Photo / Choose File sheet the mockup
-            // drew; a chosen file opens the full composer so it can be seen
-            // and sent. The field opens the full composer with the cursor in
-            // it; the model chip lives there. The mic is Talk.
+            // field, the mic. The plus opens the mockup's Attach sheet
+            // (attach-sheet.tsx): Photo Library, Take Photo, Choose File, the
+            // Model row, Cancel. A chosen file opens the full composer so it
+            // can be seen and sent. The field opens the full composer with
+            // the cursor in it; the model chip lives there. The mic is Talk.
             <div className="flex items-center gap-2.5 py-2.5" data-testid="ask-bar">
-              <input
-                ref={fileRef}
-                type="file"
-                multiple
-                className="hidden"
-                onChange={(e) => {
-                  void addFiles(e.target.files);
-                  e.target.value = "";
+              <AttachSheet
+                open={attachOpen}
+                onClose={closeAttach}
+                onFiles={(files) => {
+                  void addFiles(files);
                   dock.setState("full");
                 }}
+                selection={chatModel}
+                restoreFocusTo={plusRef}
               />
               <button
+                ref={plusRef}
                 type="button"
-                onClick={() => fileRef.current?.click()}
+                onClick={() => setAttachOpen(true)}
                 disabled={pending.length >= MAX_ATTACHMENTS}
+                aria-haspopup="dialog"
+                aria-expanded={attachOpen}
                 title="Add a photo or file"
                 aria-label="Add a photo or file"
                 className="flex h-9 w-9 flex-none items-center justify-center rounded-full bg-surface-2 text-ink disabled:opacity-40"
@@ -862,7 +877,7 @@ export function ChatThread({
               >
                 <Paperclip size={18} strokeWidth={1.75} />
               </button>
-              <ModelChip initialModel={initialChatModel} initialEffort={initialChatEffort} />
+              <ModelChip selection={chatModel} />
               <div className="min-w-0 flex-1" />
               {dock && (
                 <button

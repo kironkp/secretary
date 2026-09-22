@@ -52,6 +52,10 @@ test("A question, opened", async ({ page }) => {
   await shoot(page, `/today/${E2E_QUESTION.id}`, "question");
 });
 
+test("Interview", async ({ page }) => {
+  await shoot(page, "/interview", "interview");
+});
+
 test("Workspace", async ({ page }) => {
   await shoot(page, "/workspace", "workspace");
 });

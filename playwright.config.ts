@@ -65,6 +65,13 @@ export default defineConfig({
       use: { ...devices["iPhone 15"] },
     },
     {
+      // The Interview: the seeded question read in full and skipped, never
+      // answered. Before "today", which answers it.
+      name: "interview",
+      testMatch: /interview\.spec\.ts/,
+      use: { ...devices["iPhone 15"] },
+    },
+    {
       // Today and an opened question (docs/understanding/SPEC.md §9): the hero
       // is read in full, an answer writes through the API, nothing is cut off.
       name: "today",

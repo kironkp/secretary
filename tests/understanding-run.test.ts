@@ -490,7 +490,7 @@ describe("runProject on the duplicate-CPO scenario", () => {
     // The latch: a second sweep for the same user while one is running does
     // nothing and says so.
     const second = await runAll(U.id, { timezone: TZ, now: NOW, model: slow, force: true });
-    expect(second).toEqual({ results: {}, retiredAsr: 0 });
+    expect(second).toEqual({ results: {}, retiredAsr: 0, busy: true });
     expect(slow.calls).toHaveLength(1);
 
     release();

@@ -3,6 +3,7 @@
 // executeTool directly inside /api/chat.
 import { and, count, desc, eq, gte, ilike, inArray, isNotNull, lt, ne } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { matchProjectName } from "@/lib/project-names";
 import {
   checkins,
   clarifications,
@@ -163,13 +164,6 @@ async function findTask(userId: string, ref: string) {
   return any[0] ?? null;
 }
 
-function normalizeProjectName(s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
 
 export type ProjectResolution = {
   project: typeof projects.$inferSelect | null;
@@ -201,28 +195,10 @@ export async function resolveProject(
     .from(projects)
     .where(and(eq(projects.userId, userId), ne(projects.status, "archived")));
 
-  const exact = all.find((p) => p.name.toLowerCase() === name.toLowerCase());
-  if (exact) return { project: exact, matched: "exact" };
-
-  const norm = normalizeProjectName(name);
-  if (norm.length >= 3) {
-    const normalized = all.find((p) => normalizeProjectName(p.name) === norm);
-    if (normalized) return { project: normalized, matched: "normalized" };
-
-    const candidates = all.filter((p) => {
-      const pn = normalizeProjectName(p.name);
-      return pn.length >= 3 && (pn.includes(norm) || norm.includes(pn));
-    });
-    if (candidates.length) {
-      // several containment hits → the one closest in length wins
-      candidates.sort(
-        (a, b) =>
-          Math.abs(normalizeProjectName(a.name).length - norm.length) -
-          Math.abs(normalizeProjectName(b.name).length - norm.length)
-      );
-      return { project: candidates[0], matched: "fuzzy" };
-    }
-  }
+  // The matching itself is shared with the understanding validator
+  // (lib/project-names.ts), so a set_project name it accepts lands here.
+  const hit = matchProjectName(name, all.map((p) => p.name));
+  if (hit) return { project: all[hit.index], matched: hit.matched };
 
   if (!create) return { project: null, matched: null };
   const [created] = await db.insert(projects).values({ userId, name }).returning();
@@ -1522,7 +1498,7 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
   async answer_question(ctx, args) {
     const a = toolSchemas.answer_question.parse(args);
     const { answerQuestion, rerunAfterAnswer } = await import("@/lib/understanding/answer");
-    const outcome = await answerQuestion(ctx.userId, ctx.timezone, a.question_id, a.answer_id, a.note);
+    const outcome = await answerQuestion(ctx.userId, ctx.timezone, a.question_id, a.answer_id, a.note, "voice");
     if (outcome.status === "not-found") {
       return { result: { error: `No question with id ${a.question_id} in the briefing's OPEN QUESTIONS` } };
     }

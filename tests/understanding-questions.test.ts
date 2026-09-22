@@ -89,6 +89,7 @@ function bundle(over: Partial<Bundle> = {}): Bundle {
     documents: [],
     previousRecord: null,
     widgets: [],
+    projectNames: ["Caltrans"],
     dropped: [],
     terms: [],
     ...over,

@@ -40,7 +40,10 @@ function joinWords(parts: string[]): string {
 
 type OpCounts = Partial<Record<Write["op"], number>>;
 
-function countOps(writes: { op: string }[]): OpCounts {
+/** The least a write has to carry to be put into words: its op, and for set_project the project's name. */
+type WordedWrite = { op: string; project?: string };
+
+function countOps(writes: WordedWrite[]): OpCounts {
   const counts: OpCounts = {};
   for (const w of writes) {
     const op = w.op as Write["op"];
@@ -50,12 +53,24 @@ function countOps(writes: { op: string }[]): OpCounts {
 }
 
 /**
+ * " under Caltrans" when every set_project in the list names the same
+ * project, nothing when they differ: "files 2 tasks" is true either way, and
+ * a sentence naming two projects for two tasks would need to say which.
+ */
+function underProject(writes: WordedWrite[]): string {
+  const names = new Set(
+    writes.filter((w) => w.op === "set_project" && w.project).map((w) => w.project as string)
+  );
+  return names.size === 1 ? ` under ${[...names][0]}` : "";
+}
+
+/**
  * What an answer WILL write, said before the user gives it (SPEC §9: "one
  * sentence per answer saying what it will write"). `resolve` is the question
  * closing itself and is never a change, so an answer that only resolves
  * "leaves everything as it is".
  */
-export function writesInWords(writes: { op: string }[]): string {
+export function writesInWords(writes: WordedWrite[]): string {
   const c = countOps(writes);
   const parts: string[] = [];
   if (c.complete_task) parts.push(`marks ${plural(c.complete_task, "task", "tasks")} done`);
@@ -70,6 +85,10 @@ export function writesInWords(writes: { op: string }[]): string {
         ? "records why it is stuck"
         : `records why ${c.set_blocked_reason} tasks are stuck`
     );
+  }
+  if (c.set_project) {
+    const under = underProject(writes);
+    parts.push(c.set_project === 1 ? `files it${under}` : `files ${c.set_project} tasks${under}`);
   }
   if (c.remember_fact) {
     parts.push(c.remember_fact === 1 ? "remembers a fact" : `remembers ${c.remember_fact} facts`);
@@ -86,7 +105,7 @@ export function writesInWords(writes: { op: string }[]): string {
  * What an answer DID write, from the ops the API reports as applied (SPEC §6:
  * "The client says 'Closed' only for those"). Nothing applied is said plainly.
  */
-export function appliedInWords(applied: { op: string }[]): string {
+export function appliedInWords(applied: WordedWrite[]): string {
   const c = countOps(applied);
   const parts: string[] = [];
   if (c.complete_task) parts.push(`closed ${plural(c.complete_task, "task", "tasks")}`);
@@ -101,6 +120,10 @@ export function appliedInWords(applied: { op: string }[]): string {
         ? "recorded why it is stuck"
         : `recorded why ${c.set_blocked_reason} tasks are stuck`
     );
+  }
+  if (c.set_project) {
+    const under = underProject(applied);
+    parts.push(c.set_project === 1 ? `filed it${under}` : `filed ${c.set_project} tasks${under}`);
   }
   if (c.remember_fact) {
     parts.push(c.remember_fact === 1 ? "remembered a fact" : `remembered ${c.remember_fact} facts`);

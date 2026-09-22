@@ -9,7 +9,7 @@
 //
 // Every query filters on userId in SQL, the contract lib/db/queries.ts states.
 import { createHash } from "node:crypto";
-import { and, asc, desc, eq, gte, inArray, lte, notInArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lte, ne, notInArray, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   documents,
@@ -81,9 +81,25 @@ export type GatherOptions = {
    */
   memories?: MemoryRow[];
   messages?: MessageRow[];
+  /** The user's project names (loadProjectNames), read once by gatherAll. */
+  projectNames?: string[];
 };
 
 const iso = (d: Date | null | undefined): string | null => (d ? d.toISOString() : null);
+
+/**
+ * The names a set_project write may name: every project of the user's that is
+ * not archived, the same set resolveProject (lib/secretary/tools.ts) matches
+ * against, in name order so the prompt reads the same from run to run.
+ */
+export async function loadProjectNames(userId: string): Promise<string[]> {
+  const rows = await db
+    .select({ name: projects.name })
+    .from(projects)
+    .where(and(eq(projects.userId, userId), ne(projects.status, "archived")))
+    .orderBy(asc(projects.name));
+  return rows.map((r) => r.name);
+}
 
 /** YYYY-MM-DD for `date` as the user's wall calendar reads it. */
 export function localDateInTz(tz: string, date: Date): string {
@@ -489,6 +505,7 @@ export async function gatherProject(
   // --- widgets -----------------------------------------------------------
   const owned = opts.widgets ?? (await widgetsByOwner(userId, tz, now));
   const widgets = owned.get(project.id) ?? [];
+  const projectNames = opts.projectNames ?? (await loadProjectNames(userId));
 
   const localDate = localDateInTz(tz, now);
   return {
@@ -509,6 +526,7 @@ export async function gatherProject(
     documents: documentList,
     previousRecord,
     widgets,
+    projectNames,
     dropped,
     terms,
   };
@@ -590,6 +608,7 @@ export async function gatherAll(userId: string, opts: GatherOptions): Promise<Bu
     widgets: opts.widgets ?? (await widgetsByOwner(userId, opts.timezone, now)),
     memories: opts.memories ?? (await loadMemories(userId)),
     messages: opts.messages ?? (await loadMessages(userId, now)),
+    projectNames: opts.projectNames ?? (await loadProjectNames(userId)),
   };
   const active = await db
     .select({ id: projects.id })

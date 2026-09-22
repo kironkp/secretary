@@ -1,7 +1,12 @@
 "use client";
 
-// Full-screen live voice mode (W3): orb driven by real audio levels, model
-// dropdown, mute / transcript / end controls, card toasts, W7 error states.
+// The live voice call: the "Talk" frame of the "Secretary on iPhone" mockup.
+// A black surface with the tint's inset glow; bottom-aligned, the user's last
+// words (right, grey), the secretary's last reply (large, white), a six-bar
+// waveform that bobs while she speaks and holds still while she listens, and
+// three round controls: Mute, Show me (the transcript), End. The call is dark
+// in both themes. Voice, thinking depth and model keep their dropdowns behind
+// the "⋯" at the top right. The minimized pill rides above every page.
 //
 // IMPORTANT (iOS): never attach a Web Audio AnalyserNode to the mic stream
 // while the WebRTC call is live — on iOS Safari that re-routes the audio
@@ -10,20 +15,17 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  AlignLeft,
   ArrowRight,
   Bookmark,
   Calendar,
   Check,
   ChevronDown,
+  Ellipsis,
   FolderPlus,
   Hourglass,
   Maximize2,
   Mic,
-  MicOff,
-  Paintbrush,
   Pencil,
-  PhoneOff,
   TriangleAlert,
   Wrench,
 } from "lucide-react";
@@ -34,7 +36,6 @@ import {
 } from "@/lib/realtime/remote-audio";
 import { requestCanvasRefresh } from "@/lib/canvas/refresh";
 import { useVoiceSession, type TranscriptLine } from "./use-voice-session";
-import { Button } from "@/components/ui";
 
 // Tool toasts arrive from the server with a legacy glyph string — map it to
 // the icon set here so no emoji reaches the chrome.
@@ -57,6 +58,90 @@ function ToastIcon({ glyph }: { glyph: string }) {
     default:
       return <Check size={size} strokeWidth={2.5} className={cls} />;
   }
+}
+
+// The mockup's control glyphs, drawn as it drew them (24px, 1.8 stroke) so the
+// buttons read the same on the phone as on the design page.
+function MicGlyph({ off, size = 24 }: { off: boolean; size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      aria-hidden
+    >
+      <rect x="8.5" y="3" width="7" height="12" rx="3.5" />
+      <path d="M6 11.5a6 6 0 0 0 12 0M12 17.5V21" />
+      {off && <path d="M4 4l16 16" strokeWidth="2" />}
+    </svg>
+  );
+}
+
+function CardGlyph({ size = 24 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      aria-hidden
+    >
+      <rect x="4" y="6" width="16" height="13" rx="3" />
+      <path d="M8 11h8M8 15h5" />
+    </svg>
+  );
+}
+
+function XGlyph({ size = 24 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      aria-hidden
+    >
+      <path d="M5 5l14 14M19 5L5 19" />
+    </svg>
+  );
+}
+
+// The mockup's waveform: six 5px bars in the tint at fixed heights. While the
+// secretary speaks each bar bobs between 55% and full height, 1.1s alternate,
+// staggered 0.12s; while she listens it holds still. The keyframes live here
+// with the only element that uses them. Reduced motion: app/globals.css
+// collapses every animation to one frame, and with no fill mode the bars
+// settle at their full heights, so the mark is still there, just still.
+const WAVE_HEIGHTS = [10, 22, 16, 26, 14, 20];
+
+function Waveform({ active, className = "" }: { active: boolean; className?: string }) {
+  return (
+    <div className={`flex h-7 items-center gap-[5px] ${className}`} aria-hidden>
+      <style>{"@keyframes talk-bob{from{transform:scaleY(.55)}to{transform:scaleY(1)}}"}</style>
+      {WAVE_HEIGHTS.map((h, i) => (
+        <i
+          key={i}
+          className="block w-[5px] rounded-[3px] bg-accent"
+          style={{
+            height: h,
+            animation: active
+              ? `talk-bob 1.1s ease-in-out ${(i * 0.12).toFixed(2)}s infinite alternate`
+              : undefined,
+          }}
+        />
+      ))}
+    </div>
+  );
 }
 
 const VOICES = [
@@ -83,6 +168,19 @@ const VOICE_EFFORTS = [
   { id: "medium", label: "thoughtful" },
   { id: "high", label: "deep (slower)" },
 ];
+
+// The mockup's inset glow: the tint at 38%, 90px deep, on the black surface.
+const GLOW = "inset 0 0 90px 10px color-mix(in srgb, var(--accent) 38%, transparent)";
+
+// The reply's type, the mockup's .her: 24px semibold, 1.27 leading, tight
+// tracking, balanced wrap, at most 94% wide.
+const REPLY_TYPE = "max-w-[94%] text-balance text-[24px] font-semibold leading-[1.27] tracking-[-0.01em]";
+// A row of the "⋯" card: the 17px label, then the select on its own line,
+// 44px tall and the card's full width, so no option label is ever cut.
+const SELECT_ROW = "flex flex-col gap-0.5 px-4 pb-2.5 pt-2 text-[17px]";
+const SELECT = "min-h-11 w-full min-w-0 bg-transparent text-[17px] text-accent outline-none";
+// The user's words: 17px in the secondary grey, right-aligned, under 78% wide.
+const YOU_TYPE = "max-w-[78%] self-end text-right text-[17px] text-faint";
 
 export function VoiceMode({
   session,
@@ -112,6 +210,7 @@ export function VoiceMode({
   useEffect(() => {
     onTranscript?.(session.transcript);
   }, [session.transcript, onTranscript]);
+  // "Show me": the whole transcript in place of the latest exchange.
   const [showTranscript, setShowTranscript] = useState(false);
   // Live transcript follows the conversation — but only when already pinned
   // near the bottom, so scrolling up to reread isn't fought.
@@ -125,6 +224,8 @@ export function VoiceMode({
   // Mobile lifeline: shrink the overlay to a floating pill — the page behind
   // becomes usable while the call (owned by the app shell) keeps running.
   const [minimized, setMinimized] = useState(startMinimized);
+  // The "⋯" menu: voice, thinking depth, model, and the canvas.
+  const [menuOpen, setMenuOpen] = useState(false);
 
   // Auto-open (SPEC §7.6): a paint during the call goes to the Canvas TAB —
   // the call shrinks to its pill and the app navigates. There is no in-call
@@ -163,32 +264,24 @@ export function VoiceMode({
 
   const connected = session.status === "connected";
 
-  // Poll WebRTC stats for levels; run the dead-mic watchdog off the same data.
-  // The mic warning only arms when the browser actually reports an outbound
-  // audio level — no false alarms where stats are unsupported.
-  const [levels, setLevels] = useState({ mic: 0, remote: 0 });
+  // Poll WebRTC stats for the dead-mic watchdog. The mic warning only arms
+  // when the browser actually reports an outbound audio level — no false
+  // alarms where stats are unsupported. (The waveform follows speech events,
+  // not levels, so the mockup's bars keep their shape.)
   const [micSilent, setMicSilent] = useState(false);
-  const watchRef = useRef({ muted: false, transcriptLen: 0, speaking: false });
+  const watchRef = useRef({ muted: false, transcriptLen: 0 });
   useEffect(() => {
     watchRef.current = {
       muted: session.muted,
       transcriptLen: session.transcript.length,
-      speaking: session.assistantSpeaking,
     };
-  }, [session.muted, session.transcript.length, session.assistantSpeaking]);
+  }, [session.muted, session.transcript.length]);
   useEffect(() => {
     if (!connected) return;
     let silentSince: number | null = null;
     const iv = setInterval(async () => {
       const l = await session.getLevels();
       const w = watchRef.current;
-      // if the browser doesn't report a remote level, breathe with speech events
-      const remote =
-        l.remote ?? (w.speaking ? 0.14 + 0.1 * Math.abs(Math.sin(Date.now() / 160)) : 0);
-      setLevels((prev) => ({
-        mic: prev.mic * 0.6 + (l.mic ?? 0) * 0.4,
-        remote: prev.remote * 0.6 + remote * 0.4,
-      }));
       if (l.mic === null || w.muted || w.transcriptLen > 0) {
         silentSince = null;
         setMicSilent(false);
@@ -204,8 +297,6 @@ export function VoiceMode({
     }, 150);
     return () => clearInterval(iv);
   }, [connected, session]);
-  const micLevel = levels.mic;
-  const remoteLevel = levels.remote;
 
   // Debug overlay (?voicedebug=1) — the iPhone has no console. Ugly on purpose.
   const [debugOn, setDebugOn] = useState(false);
@@ -321,10 +412,14 @@ export function VoiceMode({
     onClose(conversationId);
   };
 
-  const orbScale = 1 + Math.min(remoteLevel * 1.4, 0.35);
-  const rippleScale = 1 + Math.min(micLevel * 2.2, 0.6);
+  const retry = () => {
+    unlockRemoteAudio();
+    session.start(model, voice, effort);
+  };
 
-  const statusHint =
+  // Before the call is up, the reply's slot carries the state in grey. Once
+  // connected the slot is the reply itself, or nothing until there is one.
+  const pendingHint =
     session.status === "requesting-mic"
       ? "Allow microphone access…"
       : session.status === "connecting"
@@ -333,135 +428,103 @@ export function VoiceMode({
           ? switching
             ? "Switching model…"
             : "Reconnecting — hold on, your conversation is safe."
-          : session.assistantSpeaking
-            ? "Speaking…"
-            : connected
-              ? "Listening…"
-              : "";
+          : "";
+  // The pill's one line: the state, or what the call is doing right now.
+  const statusHint =
+    pendingHint ||
+    (session.assistantSpeaking ? "Speaking…" : connected ? "Listening…" : "");
+
+  // The latest exchange: what you last said, and her last reply.
+  const lastUser = [...session.transcript].reverse().find((l) => l.role === "user");
+  const lastReply = [...session.transcript].reverse().find((l) => l.role === "assistant");
 
   const lastToast = session.toasts[session.toasts.length - 1];
+  const pillButton =
+    "flex h-11 w-11 flex-none items-center justify-center rounded-full transition-colors";
   const dockBar = (
-    <div className="rounded-2xl border border-accent/40 bg-surface shadow-sm">
-        {debugOn && (
-          <pre
-            onClick={() => void navigator.clipboard?.writeText(debugJson).catch(() => {})}
-            className="max-h-32 overflow-y-auto border-b border-warn/40 bg-black/70 px-2 py-1 text-[9px] leading-tight text-warn"
-            title="Tap to copy"
-          >
-            {debugJson || "collecting…"}
-          </pre>
-        )}
-        <div className="flex items-center gap-3 px-3 py-2.5">
-          {session.status === "error" && session.error ? (
-            <>
-              <TriangleAlert size={18} strokeWidth={1.75} className="flex-none text-warn" />
-              <p className="min-w-0 flex-1 truncate text-sm text-muted">{session.error.message}</p>
-              {session.error.kind === "network" && (
-                <button
-                  onClick={() => {
-                    unlockRemoteAudio();
-                    session.start(model, voice);
-                  }}
-                  className="rounded-full bg-accent px-3 py-1.5 text-xs font-bold text-bg"
-                >
-                  Try again
-                </button>
-              )}
+    <div className="rounded-2xl border border-sep bg-surface shadow-sm">
+      {debugOn && (
+        <pre
+          onClick={() => void navigator.clipboard?.writeText(debugJson).catch(() => {})}
+          className="max-h-32 overflow-y-auto border-b border-warn/40 bg-black/70 px-2 py-1 text-[9px] leading-tight text-warn"
+          title="Tap to copy"
+        >
+          {debugJson || "collecting…"}
+        </pre>
+      )}
+      <div className="flex items-center gap-2 px-3 py-2">
+        {session.status === "error" && session.error ? (
+          <>
+            <TriangleAlert size={18} strokeWidth={1.75} className="flex-none text-warn" />
+            <p className="min-w-0 flex-1 text-[15px] leading-[1.33] text-muted">
+              {session.error.message}
+            </p>
+            {session.error.kind === "network" && (
               <button
-                onClick={() => onClose(null)}
-                className="rounded-full border border-edge px-3 py-1.5 text-xs text-muted hover:text-ink"
+                onClick={retry}
+                className="min-h-11 flex-none rounded-full bg-accent px-4 text-[15px] font-semibold text-white"
               >
-                Close
+                Try again
               </button>
-            </>
-          ) : (
-            <>
-              <div className="relative h-12 w-12 flex-none">
-                <div
-                  className="absolute inset-0 rounded-full border-2 border-accent/30 transition-transform duration-75"
-                  style={{ transform: `scale(${1 + Math.min(micLevel * 2.2, 0.35)})` }}
-                />
-                <div
-                  className="absolute inset-1 rounded-full transition-transform duration-75"
-                  style={{
-                    transform: `scale(${1 + Math.min(remoteLevel * 1.4, 0.25)})`,
-                    background:
-                      "radial-gradient(circle at 35% 35%, #8fb0ff, #3d5bd9 60%, #22307a)",
-                    boxShadow: `0 0 ${10 + remoteLevel * 40}px rgba(122,162,255,${0.3 + remoteLevel * 0.4})`,
-                    animation:
-                      connected && !session.assistantSpeaking
-                        ? "breathe 3s ease-in-out infinite"
-                        : undefined,
-                  }}
-                />
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold">{statusHint || "On a call"}</p>
-                {lastToast ? (
-                  <p className="flex items-center gap-1.5 truncate text-xs text-faint">
+            )}
+            <button
+              onClick={() => onClose(null)}
+              className="min-h-11 flex-none rounded-full bg-surface-2 px-4 text-[15px] font-semibold text-ink"
+            >
+              Close
+            </button>
+          </>
+        ) : (
+          <>
+            <Waveform active={session.assistantSpeaking} className="flex-none" />
+            <div className="min-w-0 flex-1">
+              <p className="text-[15px] font-semibold leading-[1.33]">
+                {statusHint || "On a call"}
+              </p>
+              {lastToast ? (
+                <p className="flex items-start gap-1.5 text-[13px] leading-[1.3] text-faint">
+                  <span className="mt-[2px] flex-none">
                     <ToastIcon glyph={lastToast.icon} />
-                    <span className="truncate">{lastToast.text}</span>
-                  </p>
-                ) : micSilent ? (
-                  <p className="truncate text-xs text-warn">
-                    Can&apos;t hear you — try ending and restarting the call.
-                  </p>
-                ) : (
-                  <p className="truncate text-xs text-faint">
-                    Watch tasks land on the dashboard as you talk →
-                  </p>
-                )}
-              </div>
-              <select
-                value={voice}
-                onChange={(e) => pickVoice(e.target.value)}
-                title="Voice"
-                aria-label="Voice"
-                className="w-20 flex-none rounded-full border border-edge bg-card px-2 py-1.5 text-xs text-muted outline-none focus:border-accent"
-              >
-                {VOICES.map((v) => (
-                  <option key={v} value={v}>
-                    {v}
-                  </option>
-                ))}
-                {elAvailable && <option value="elevenlabs">sassy (EL)</option>}
-              </select>
-              <button
-                onClick={() => setMinimized(false)}
-                title="Back to full screen"
-                aria-label="Back to full screen"
-                className="flex h-9 w-9 flex-none items-center justify-center rounded-full border border-edge bg-card text-ink hover:border-faint"
-              >
-                <Maximize2 size={15} strokeWidth={1.75} />
-              </button>
-              <button
-                onClick={session.toggleMute}
-                title={session.muted ? "Unmute" : "Mute"}
-                aria-label={session.muted ? "Unmute" : "Mute"}
-                className={`flex h-9 w-9 flex-none items-center justify-center rounded-full border transition-colors ${
-                  session.muted
-                    ? "border-warn bg-warn/20 text-warn"
-                    : "border-edge bg-card text-ink hover:border-faint"
-                }`}
-              >
-                {session.muted ? (
-                  <MicOff size={15} strokeWidth={1.75} />
-                ) : (
-                  <Mic size={15} strokeWidth={1.75} />
-                )}
-              </button>
-              <button
-                onClick={endCall}
-                title="End call"
-                aria-label="End call"
-                className="flex h-9 w-9 flex-none items-center justify-center rounded-full border border-danger/50 bg-danger/15 text-danger transition-colors hover:bg-danger/25"
-              >
-                <PhoneOff size={15} strokeWidth={1.75} />
-              </button>
-            </>
-          )}
-        </div>
+                  </span>
+                  <span>{lastToast.text}</span>
+                </p>
+              ) : micSilent ? (
+                <p className="text-[13px] leading-[1.3] text-warn">
+                  Can&apos;t hear you — try ending and restarting the call.
+                </p>
+              ) : null}
+            </div>
+            <button
+              onClick={() => setMinimized(false)}
+              title="Back to full screen"
+              aria-label="Back to full screen"
+              className={`${pillButton} bg-surface-2 text-ink`}
+            >
+              <Maximize2 size={18} strokeWidth={1.75} />
+            </button>
+            <button
+              onClick={session.toggleMute}
+              title={session.muted ? "Unmute" : "Mute"}
+              aria-label={session.muted ? "Unmute" : "Mute"}
+              aria-pressed={session.muted}
+              className={`${pillButton} ${
+                session.muted ? "bg-ink text-bg" : "bg-surface-2 text-ink"
+              }`}
+            >
+              <MicGlyph off={!session.muted} size={20} />
+            </button>
+            <button
+              onClick={endCall}
+              title="End call"
+              aria-label="End call"
+              className={`${pillButton} bg-danger text-white`}
+            >
+              <XGlyph size={20} />
+            </button>
+          </>
+        )}
       </div>
+    </div>
   );
 
   // Minimized: floating pill above EVERY page — the session lives in the app
@@ -469,77 +532,154 @@ export function VoiceMode({
   if (minimized)
     return <div className="fixed inset-x-2 bottom-3 z-50 mx-auto max-w-md">{dockBar}</div>;
 
+  // A control: the 58px circle with its 12px label; the whole column is the
+  // target, so the label taps too.
+  const control =
+    "flex flex-col items-center gap-1.5 text-[12px] text-faint";
+  const circle = "grid h-[58px] w-[58px] place-items-center rounded-full transition-colors";
+
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-bg">
-      {/* min-w-0 + shrinking selects: this row must NEVER exceed the viewport —
-          overflow here widens the mobile layout viewport and pushes the call
-          controls off-screen (the 3:24 iPhone screenshot). */}
-      <div className="flex items-center justify-between gap-2 p-4">
-        <span className="flex-none text-sm font-bold text-accent">Secretary</span>
-        <div className="flex min-w-0 items-center gap-2">
-          <select
-            value={voice}
-            onChange={(e) => pickVoice(e.target.value)}
-            title="Voice"
-            className="min-w-0 max-w-[6.5rem] shrink rounded-full border border-edge bg-card px-3 py-1.5 text-xs text-muted outline-none focus:border-accent"
+    // data-theme="dark" re-tokens this subtree: the call is the dark palette
+    // in both themes, so bg-surface-2, text-faint, bg-danger and bg-accent
+    // here are the dark iOS values whatever the page behind is. font-sans is
+    // the system face the mockup is set in.
+    <div
+      data-theme="dark"
+      className="fixed inset-0 z-50 flex flex-col bg-black font-sans text-ink"
+    >
+      <div aria-hidden className="pointer-events-none absolute inset-0" style={{ boxShadow: GLOW }} />
+
+      {/* The top: minimize at the left, "⋯" at the right, both 44px, both
+          quiet. The mockup's frame has nothing else up here. */}
+      <div
+        className="relative flex items-center justify-between px-2"
+        style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}
+      >
+        <button
+          onClick={() => setMinimized(true)}
+          title="Minimize call"
+          aria-label="Minimize call"
+          className="flex h-11 w-11 items-center justify-center rounded-full text-faint transition-colors hover:text-ink"
+        >
+          <ChevronDown size={24} strokeWidth={1.8} />
+        </button>
+        <button
+          onClick={() => setMenuOpen((o) => !o)}
+          title="Voice, thinking depth and model"
+          aria-label="Voice, thinking depth and model"
+          aria-expanded={menuOpen}
+          className={`flex h-11 w-11 items-center justify-center rounded-full transition-colors ${
+            menuOpen ? "bg-surface-2 text-ink" : "text-faint hover:text-ink"
+          }`}
+        >
+          <Ellipsis size={24} strokeWidth={1.8} />
+        </button>
+      </div>
+
+      {menuOpen && (
+        <>
+          <div aria-hidden className="absolute inset-0 z-10" onClick={() => setMenuOpen(false)} />
+          <div
+            role="group"
+            aria-label="Call settings"
+            className="ios-group absolute right-3 z-20 w-72 max-w-[calc(100%-1.5rem)] overflow-hidden rounded-2xl bg-surface shadow-lg"
+            style={{ top: "calc(env(safe-area-inset-top, 0px) + 3.25rem)" }}
           >
-            {VOICES.map((v) => (
-              <option key={v} value={v}>
-                {v}
-              </option>
-            ))}
-            {elAvailable && <option value="elevenlabs">sassy (ElevenLabs beta)</option>}
-          </select>
-          <select
-            value={effort}
-            onChange={(e) => pickEffort(e.target.value)}
-            title="Thinking depth — deeper pauses longer before speaking"
-            aria-label="Thinking depth"
-            className="min-w-0 max-w-[7rem] shrink rounded-full border border-edge bg-card px-3 py-1.5 text-xs text-muted outline-none focus:border-accent"
+            {/* Each row stacks its label over a full-width select: a native
+                select never wraps its chosen option, so beside the label at
+                17px "GPT Realtime Mini (faster/cheaper)" would be cut. */}
+            <label className={SELECT_ROW}>
+              Voice
+              <select
+                value={voice}
+                onChange={(e) => pickVoice(e.target.value)}
+                className={SELECT}
+              >
+                {VOICES.map((v) => (
+                  <option key={v} value={v}>
+                    {v}
+                  </option>
+                ))}
+                {elAvailable && <option value="elevenlabs">sassy (ElevenLabs beta)</option>}
+              </select>
+            </label>
+            <label className={SELECT_ROW} title="Thinking depth — deeper pauses longer before speaking">
+              Thinking
+              <select
+                value={effort}
+                onChange={(e) => pickEffort(e.target.value)}
+                aria-label="Thinking depth"
+                className={SELECT}
+              >
+                {VOICE_EFFORTS.map((ef) => (
+                  <option key={ef.id} value={ef.id}>
+                    {ef.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className={SELECT_ROW}>
+              Model
+              <select
+                value={model}
+                onChange={(e) => pickModel(e.target.value)}
+                className={SELECT}
+              >
+                {MODELS.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              onClick={() => {
+                // Canvas tab + pill: same destination as auto-open, by hand.
+                setMenuOpen(false);
+                setMinimized(true);
+                router.push("/canvas");
+              }}
+              className="flex min-h-11 w-full items-center px-4 text-left text-[17px] text-accent"
+            >
+              Open the canvas
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* Card toasts: what she just logged, top of the screen, out of the way */}
+      <div
+        className="pointer-events-none absolute inset-x-6 z-[5] flex flex-col gap-2"
+        style={{ top: "calc(env(safe-area-inset-top, 0px) + 3.5rem)" }}
+      >
+        {session.toasts.map((t) => (
+          <div
+            key={t.key}
+            className="animate-toast-in flex items-start gap-1.5 rounded-xl bg-surface px-3 py-2 text-[13px] leading-[1.3] shadow-lg"
           >
-            {VOICE_EFFORTS.map((ef) => (
-              <option key={ef.id} value={ef.id}>
-                {ef.label}
-              </option>
-            ))}
-          </select>
-          <select
-            value={model}
-            onChange={(e) => pickModel(e.target.value)}
-            className="min-w-0 max-w-[9rem] shrink rounded-full border border-edge bg-card px-3 py-1.5 text-xs text-muted outline-none focus:border-accent"
-          >
-            {MODELS.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label}
-              </option>
-            ))}
-          </select>
-          <button
-            onClick={() => setMinimized(true)}
-            title="Minimize call"
-            aria-label="Minimize call"
-            className="flex h-8 w-8 flex-none items-center justify-center rounded-full border border-edge bg-card text-muted transition-colors hover:text-ink"
-          >
-            <ChevronDown size={16} strokeWidth={2} />
-          </button>
-        </div>
+            <span className="mt-[1px] flex-none">
+              <ToastIcon glyph={t.icon} />
+            </span>
+            {t.text}
+          </div>
+        ))}
       </div>
 
       {/* Error states (W7) */}
       {session.status === "error" && session.error ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
-          <span className="flex h-16 w-16 items-center justify-center rounded-full bg-surface-2 text-muted">
+        <div className="relative flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
+          <span className={`${circle} bg-surface-2 text-ink`}>
             {session.error.kind === "mic-denied" ? (
-              <Mic size={28} strokeWidth={1.75} />
+              <Mic size={26} strokeWidth={1.8} />
             ) : session.error.kind === "quota" ? (
-              <Hourglass size={28} strokeWidth={1.75} />
+              <Hourglass size={26} strokeWidth={1.8} />
             ) : session.error.kind === "disabled" ? (
-              <Wrench size={28} strokeWidth={1.75} />
+              <Wrench size={26} strokeWidth={1.8} />
             ) : (
-              <TriangleAlert size={28} strokeWidth={1.75} className="text-warn" />
+              <TriangleAlert size={26} strokeWidth={1.8} className="text-warn" />
             )}
           </span>
-          <h2 className="text-lg font-bold">
+          <h2 className="text-balance text-[22px] font-bold leading-[1.25] tracking-[-0.005em]">
             {session.error.kind === "mic-denied"
               ? "Mic access needed"
               : session.error.kind === "quota"
@@ -548,63 +688,105 @@ export function VoiceMode({
                   ? "Voice is taking a break"
                   : "Call dropped"}
           </h2>
-          <p className="max-w-sm text-sm text-muted">{session.error.message}</p>
-          <div className="flex gap-2">
+          <p className="max-w-sm text-[17px] leading-[1.4] text-faint">{session.error.message}</p>
+          <div className="flex gap-2 pt-1">
             {session.error.kind === "network" && (
-              <Button
-                onClick={() => {
-                  unlockRemoteAudio();
-                  session.start(model, voice);
-                }}
+              <button
+                onClick={retry}
+                className="min-h-11 rounded-full bg-accent px-5 text-[16px] font-semibold text-white"
               >
                 Try again
-              </Button>
+              </button>
             )}
-            <Button variant="secondary" onClick={() => onClose(null)}>
+            <button
+              onClick={() => onClose(null)}
+              className="min-h-11 rounded-full bg-surface-2 px-5 text-[16px] font-semibold text-ink"
+            >
               Continue in text
-            </Button>
+            </button>
           </div>
         </div>
       ) : (
-        <div className="relative flex flex-1 flex-col items-center justify-center gap-6">
-          {/* Orb: ripple ring = your voice; core = assistant */}
-          <div className="relative flex items-center justify-center">
+        // The talk screen: everything sits at the bottom, 24px in from the
+        // sides, 22px apart, the way the mockup draws it.
+        <div
+          className="relative flex min-h-0 flex-1 flex-col justify-end gap-[22px] px-6"
+          style={{ paddingBottom: "max(env(safe-area-inset-bottom, 0px), 24px)" }}
+        >
+          {showTranscript ? (
+            // "Show me": the whole conversation, same voices, scrolling.
             <div
-              className="absolute h-44 w-44 rounded-full border-2 border-accent/30 transition-transform duration-75"
-              style={{ transform: `scale(${rippleScale})` }}
-            />
-            <div
-              className="h-36 w-36 rounded-full transition-transform duration-75"
-              style={{
-                transform: `scale(${orbScale})`,
-                background:
-                  "radial-gradient(circle at 35% 35%, #8fb0ff, #3d5bd9 60%, #22307a)",
-                boxShadow: `0 0 ${40 + remoteLevel * 120}px rgba(122,162,255,${0.35 + remoteLevel * 0.4})`,
-                animation: connected && !session.assistantSpeaking ? "breathe 3s ease-in-out infinite" : undefined,
-              }}
-            />
-          </div>
-          <p className="text-sm text-muted">{statusHint}</p>
+              ref={transcriptRef}
+              className="flex min-h-0 flex-col gap-3 overflow-y-auto"
+              aria-label="Transcript"
+            >
+              {session.transcript.length === 0 && (
+                <p className="text-[15px] text-faint">Transcript will appear here.</p>
+              )}
+              {session.transcript.map((line) =>
+                line.role === "user" ? (
+                  <p key={line.id} className={`${YOU_TYPE} leading-[1.35]`}>
+                    {line.text}
+                  </p>
+                ) : (
+                  <p key={line.id} className="max-w-[92%] text-[17px] leading-[1.35]">
+                    {line.text}
+                  </p>
+                )
+              )}
+            </div>
+          ) : (
+            <>
+              {lastUser && <p className={YOU_TYPE}>{lastUser.text}</p>}
+              {pendingHint ? (
+                <p className={`${REPLY_TYPE} text-faint`} aria-live="polite">
+                  {pendingHint}
+                </p>
+              ) : lastReply ? (
+                <p className={REPLY_TYPE}>{lastReply.text}</p>
+              ) : null}
+            </>
+          )}
           {micSilent && (
-            <p className="max-w-xs rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-center text-xs text-warn">
-              I can&apos;t hear anything from your mic. Try speaking louder — or end the call and
+            <p className="text-[13px] leading-[1.4] text-warn">
+              I can&apos;t hear anything from your mic. Try speaking louder, or end the call and
               start it again; iPhones sometimes hand over a dead microphone.
             </p>
           )}
 
-          {/* Card toasts */}
-          <div className="pointer-events-none absolute right-4 top-4 flex w-64 flex-col gap-2">
-            {session.toasts.map((t) => (
-              <div
-                key={t.key}
-                className="animate-toast-in flex items-start gap-1.5 rounded-lg border border-edge bg-card px-3 py-2 text-xs shadow-lg"
-              >
-                <span className="translate-y-[1px] flex-none">
-                  <ToastIcon glyph={t.icon} />
-                </span>
-                {t.text}
-              </div>
-            ))}
+          <Waveform active={session.assistantSpeaking} className="mx-auto" />
+
+          <div className="flex justify-center gap-11 pt-1.5">
+            <button
+              onClick={session.toggleMute}
+              title={session.muted ? "Unmute" : "Mute"}
+              aria-label={session.muted ? "Unmute" : "Mute"}
+              aria-pressed={session.muted}
+              className={control}
+            >
+              <span className={`${circle} ${session.muted ? "bg-ink text-bg" : "bg-surface-2 text-ink"}`}>
+                <MicGlyph off={!session.muted} />
+              </span>
+              {session.muted ? "Unmute" : "Mute"}
+            </button>
+            <button
+              onClick={() => setShowTranscript((s) => !s)}
+              title="Show the transcript"
+              aria-label="Show the transcript"
+              aria-pressed={showTranscript}
+              className={control}
+            >
+              <span className={`${circle} ${showTranscript ? "bg-ink text-bg" : "bg-surface-2 text-ink"}`}>
+                <CardGlyph />
+              </span>
+              Show me
+            </button>
+            <button onClick={endCall} title="End call" aria-label="End call" className={control}>
+              <span className={`${circle} bg-danger text-white`}>
+                <XGlyph />
+              </span>
+              End
+            </button>
           </div>
         </div>
       )}
@@ -612,79 +794,12 @@ export function VoiceMode({
       {debugOn && (
         <pre
           onClick={() => void navigator.clipboard?.writeText(debugJson).catch(() => {})}
-          className="max-h-48 overflow-y-auto border-t border-warn/40 bg-black/70 px-2 py-1 text-[9px] leading-tight text-warn"
+          className="relative max-h-48 overflow-y-auto border-t border-warn/40 bg-black/70 px-2 py-1 text-[9px] leading-tight text-warn"
           title="Tap to copy"
         >
           {debugJson || "collecting…"}
         </pre>
       )}
-
-      {/* Transcript panel */}
-      {showTranscript && (
-        <div
-          ref={transcriptRef}
-          className="max-h-56 overflow-y-auto border-t border-edge bg-surface px-4 py-3 text-sm"
-        >
-          {session.transcript.length === 0 && (
-            <p className="text-xs text-faint">Transcript will appear here.</p>
-          )}
-          {session.transcript.map((line, i) => (
-            <p key={i} className={`mb-1.5 ${line.role === "user" ? "text-ink" : "text-muted"}`}>
-              <span className="mr-2 text-[10px] uppercase text-faint">
-                {line.role === "user" ? "You" : "Sec"}
-              </span>
-              {line.text}
-            </p>
-          ))}
-        </div>
-      )}
-
-      <div className="flex items-center justify-center gap-6 p-6">
-        <button
-          onClick={session.toggleMute}
-          title={session.muted ? "Unmute" : "Mute"}
-          aria-label={session.muted ? "Unmute" : "Mute"}
-          className={`flex h-12 w-12 items-center justify-center rounded-full border transition-colors ${
-            session.muted
-              ? "border-warn bg-warn/20 text-warn"
-              : "border-edge bg-card text-ink hover:border-faint"
-          }`}
-        >
-          {session.muted ? <MicOff size={18} strokeWidth={1.75} /> : <Mic size={18} strokeWidth={1.75} />}
-        </button>
-        <button
-          onClick={() => setShowTranscript((s) => !s)}
-          title="Live transcript"
-          aria-label="Live transcript"
-          className={`flex h-12 w-12 items-center justify-center rounded-full border transition-colors ${
-            showTranscript
-              ? "border-accent bg-accent/20 text-accent"
-              : "border-edge bg-card text-ink hover:border-faint"
-          }`}
-        >
-          <AlignLeft size={18} strokeWidth={1.75} />
-        </button>
-        <button
-          onClick={() => {
-            // Canvas tab + pill: same destination as auto-open, by hand.
-            setMinimized(true);
-            router.push("/canvas");
-          }}
-          title="Open the canvas (call keeps going)"
-          aria-label="Open the canvas"
-          className="flex h-12 w-12 items-center justify-center rounded-full border border-edge bg-card text-ink transition-colors hover:border-faint"
-        >
-          <Paintbrush size={18} strokeWidth={1.75} />
-        </button>
-        <button
-          onClick={endCall}
-          title="End call"
-          aria-label="End call"
-          className="flex h-12 w-12 items-center justify-center rounded-full border border-danger/50 bg-danger/15 text-danger transition-colors hover:bg-danger/25"
-        >
-          <PhoneOff size={18} strokeWidth={1.75} />
-        </button>
-      </div>
     </div>
   );
 }

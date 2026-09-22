@@ -445,13 +445,25 @@ describe("answerQuestion", () => {
 
   it("(8) the note is kept with the label as the resolution, and a project with no record is fine", async () => {
     const result = await answer(q.note, "keep", "  it is still on  ");
-    expect(result).toEqual({ status: "resolved", projectId: ids.album, applied: [], failed: [] });
+    // The answer itself writes nothing, so the note is also kept as a memory
+    // (tests/understanding-interview.test.ts (7)); that is the one applied write.
+    expect(result).toEqual({
+      status: "resolved",
+      projectId: ids.album,
+      applied: [{ op: "remember_fact" }],
+      failed: [],
+    });
     const [stored] = await db
       .select({ status: clarifications.status, resolution: clarifications.resolution })
       .from(clarifications)
       .where(eq(clarifications.id, q.note));
     expect(stored).toEqual({ status: "resolved", resolution: "Keep: it is still on" });
     expect(await recordFor(ids.album)).toBeUndefined();
+    // No source was given, so the memory is tagged with the project alone:
+    // the "interview" tag belongs to answers the Interview sends.
+    const rows = await db.select({ fact: memories.fact, tags: memories.tags }).from(memories).where(eq(memories.userId, U.id));
+    const kept = rows.find((m) => m.fact.endsWith(": it is still on"));
+    expect(kept?.tags).toEqual(["Album"]);
   });
 
   it("(9) another user's question is not-found, never not-open, and stays open", async () => {

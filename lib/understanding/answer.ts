@@ -15,14 +15,23 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { clarifications, expectations, records } from "@/lib/db/schema";
-import { executeTool, type ToolContext } from "@/lib/secretary/tools";
+import { executeTool, resolveProject, type ToolContext } from "@/lib/secretary/tools";
 import { tzOffsetMs } from "@/lib/time";
 import { localDateInTz } from "./gather";
 import { getQuestion } from "./questions";
 import { upsertAsked } from "./record";
 import { writeSchema, type Asked, type Write } from "./types";
 
-export type AppliedWrite = { op: string; id?: string };
+/**
+ * Where an answer was given. A note kept as a memory is tagged with it, so
+ * the next run can tell a line typed in the Interview from one on Today or
+ * spoken on a call; the answer itself is the same whatever the source.
+ */
+export const ANSWER_SOURCES = ["today", "interview", "voice"] as const;
+export type AnswerSource = (typeof ANSWER_SOURCES)[number];
+
+/** `project` is the name a set_project landed on, as the project is really called, for the receipt. */
+export type AppliedWrite = { op: string; id?: string; project?: string };
 export type FailedWrite = { op: string; id?: string; error: string };
 
 export type AnswerResult =
@@ -47,6 +56,7 @@ function targetOf(w: Write): { type: "task" | "expectation"; id: string } | null
     case "set_due":
     case "set_recurrence":
     case "set_blocked_reason":
+    case "set_project":
       return { type: "task", id: w.taskId };
     case "clear_expectation":
       return { type: "expectation", id: w.expectationId };
@@ -104,7 +114,7 @@ export function dueInstantInTz(tz: string, dueAt: string): Date | null {
 // One write, through the tool that already knows how to do it (SPEC §6 step 2)
 // --------------------------------------------------------------------------
 
-type WriteOutcome = { ok: true } | { ok: false; error: string };
+type WriteOutcome = { ok: true; project?: string } | { ok: false; error: string };
 
 /**
  * A tool result carrying { error } is a failed write; anything else
@@ -145,6 +155,18 @@ async function applyWrite(ctx: ToolContext, w: Write, now: Date): Promise<WriteO
         status: "blocked",
         blocked_reason: w.reason,
       });
+    case "set_project": {
+      // update_task resolves a project name the way a spoken "file it under
+      // Caltrans" is resolved, and when nothing matches it CREATES one
+      // (resolveProject's default). A typo in a stored answer must not mint a
+      // project, so the name is resolved here first with creation off, the
+      // write fails when nothing matches, and the tool is handed the exact
+      // name that did match so its own fuzzy pass cannot land elsewhere.
+      const res = await resolveProject(ctx.userId, w.project, { create: false });
+      if (!res.project) return { ok: false, error: `No project named "${w.project}"` };
+      const outcome = await viaTool(ctx, "update_task", { task: w.taskId, project: res.project.name });
+      return outcome.ok ? { ok: true, project: res.project.name } : outcome;
+    }
     case "remember_fact":
       return viaTool(ctx, "remember_fact", { fact: w.fact, tags: w.tags });
     case "clear_expectation": {
@@ -177,7 +199,8 @@ export async function answerQuestion(
   timezone: string,
   questionId: string,
   answerId: string,
-  note?: string
+  note?: string,
+  source?: AnswerSource
 ): Promise<AnswerResult> {
   const question = await getQuestion(userId, questionId);
   if (!question) return { status: "not-found" };
@@ -226,8 +249,32 @@ export async function answerQuestion(
       if (w.op === "resolve") continue;
       const id = targetOf(w)?.id;
       const outcome = await applyWrite(ctx, w, now);
-      if (outcome.ok) applied.push({ op: w.op, ...(id ? { id } : {}) });
-      else failed.push({ op: w.op, ...(id ? { id } : {}), error: outcome.error });
+      if (outcome.ok) {
+        applied.push({
+          op: w.op,
+          ...(id ? { id } : {}),
+          ...(outcome.project ? { project: outcome.project } : {}),
+        });
+      } else {
+        failed.push({ op: w.op, ...(id ? { id } : {}), error: outcome.error });
+      }
+    }
+
+    // A note on an answer that writes nothing ("Keep them", with a line
+    // saying why) would otherwise live only in the resolution column, which
+    // no run reads. It is kept as a memory tagged with the project's name,
+    // which is how gather.ts finds a memory for a project, so the next run
+    // reasons from what the user typed. The question and the label go in
+    // front of the note: a memory reading "they are different jobs" on its
+    // own names nothing. The second tag is where the answer was given
+    // (Today, the Interview, a call), when the caller said; every surface
+    // that takes a note comes through here.
+    if (trimmedNote && writes.every((w) => w.op === "resolve")) {
+      const tags = [question.projectName, source].filter((t): t is string => !!t);
+      const fact = `Asked "${question.question}", you answered "${answer.label}": ${trimmedNote}`;
+      const outcome = await viaTool(ctx, "remember_fact", { fact, tags });
+      if (outcome.ok) applied.push({ op: "remember_fact" });
+      else failed.push({ op: "remember_fact", error: outcome.error });
     }
 
     await tx
