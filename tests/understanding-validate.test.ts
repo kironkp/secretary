@@ -476,9 +476,11 @@ describe("step 4: a why names its evidence (SPEC §7)", () => {
   it("a why that names nothing from the evidence fails", () => {
     const out = validOutput();
     out.questions[0].why = "Something happened and it does not add up.";
-    expect(errorsOf(out)).toEqual([
-      "questions[0].why: does not name any evidence item by its title or a quote from it",
-    ]);
+    const errors = errorsOf(out);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatch(/^questions\[0\]\.why: does not name any of its evidence items\./);
+    // The retry is told what it could have named.
+    expect(errors[0]).toContain("Its evidence: [task:");
   });
 
   it("the full title of any evidence row satisfies it, whatever the case", () => {
@@ -496,11 +498,31 @@ describe("step 4: a why names its evidence (SPEC §7)", () => {
     out.questions[0].why = "Something is still blocking CPO 2073 after the done copy closed on Sep 1.";
     expect(errorsOf(out)).toEqual([]);
 
-    // The same words, attributed to a row that never said them.
-    out.questions[0].evidence = [{ type: "task", id: T_DONE, quote: "blocking CPO 2073" }];
-    expect(errorsOf(out)).toEqual([
-      "questions[0].why: does not name any evidence item by its title or a quote from it",
-    ]);
+    // Words attributed to a row that never said them, in a why that names
+    // nothing else about that row either (no number, no name, no run of its
+    // words): the quote alone cannot carry it.
+    out.questions[0].evidence = [{ type: "task", id: T_DONE, quote: "blocking it still" }];
+    out.questions[0].why = "Something is blocking it still, after the other copy closed on Sep 1.";
+    const errors = errorsOf(out);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatch(/does not name any of its evidence items/);
+  });
+
+  it("a why can name a task the way a person does: its number, a name in it, or a run of its words", () => {
+    const out = validOutput();
+    out.questions[0].evidence = [task(T_DONE)];
+    out.questions[0].why = "The 2073 copy you finished on Sep 1 is still on the list.";
+    expect(errorsOf(out)).toEqual([]);
+
+    out.questions[0].why = "It still needs a signature from Marissa according to the finished copy.";
+    expect(errorsOf(out)).toEqual([]);
+
+    out.questions[0].why = "You already did convert to FY2027, create new CPO and the rest of it.";
+    expect(errorsOf(out)).toEqual([]);
+
+    // Three words in a row is not a quotation.
+    out.questions[0].why = "You already did create new CPO paperwork of some kind.";
+    expect(errorsOf(out)).toHaveLength(1);
   });
 
   it("a message quote works the same way — the user's own words", () => {

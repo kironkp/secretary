@@ -45,3 +45,6 @@ backups/
 /playwright-report/
 /blob-report/
 /e2e/.auth/
+
+# Browser screenshots (e2e/screens.spec.ts); CI uploads them as an artifact.
+screenshots/

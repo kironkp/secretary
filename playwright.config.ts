@@ -57,6 +57,14 @@ export default defineConfig({
       use: { ...devices["iPhone 15"] },
     },
     {
+      // Pictures, not assertions: every screen on the phone profile, uploaded
+      // from CI as the "screenshots" artifact. Runs before "today" so the
+      // seeded question is still open in the frame.
+      name: "screens",
+      testMatch: /screens\.spec\.ts/,
+      use: { ...devices["iPhone 15"] },
+    },
+    {
       // Today and an opened question (docs/understanding/SPEC.md §9): the hero
       // is read in full, an answer writes through the API, nothing is cut off.
       name: "today",

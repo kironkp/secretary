@@ -206,9 +206,15 @@ export async function openaiModelCall(userId: string): Promise<ModelCall | null>
 export function withFallback(
   primary: ModelCall,
   secondary: ModelCall,
-  onFallback?: (error: unknown) => void
+  onFallback?: (error: unknown) => void,
+  /** Asked before every call: true sends it straight to `secondary`. The
+   *  run's own retry reuses one ModelCall, so a preference set by the first
+   *  attempt's failure has to be read here, per call, not once when the
+   *  wrapper is built — otherwise the retry pays for the same rejection. */
+  preferSecondary?: () => boolean
 ): ModelCall {
   return async (input) => {
+    if (preferSecondary?.()) return secondary(input);
     try {
       return await primary(input);
     } catch (e) {
@@ -247,13 +253,17 @@ export async function modelCallFor(userId: string): Promise<ModelCall | null> {
   const [claude, gpt] = await Promise.all([anthropicModelCall(userId), openaiModelCall(userId)]);
   if (!claude) return gpt;
   if (!gpt) return claude;
-  if (Date.now() < preferOpenaiUntil) return gpt;
-  return withFallback(claude, gpt, (e) => {
-    preferOpenaiUntil = Date.now() + PREFER_OPENAI_MS;
-    console.warn(
-      `understanding: claude call failed (${e instanceof Error ? e.message : String(e)}); using openai for the next 60 minutes`
-    );
-  });
+  return withFallback(
+    claude,
+    gpt,
+    (e) => {
+      preferOpenaiUntil = Date.now() + PREFER_OPENAI_MS;
+      console.warn(
+        `understanding: claude call failed (${e instanceof Error ? e.message : String(e)}); using openai for the next 60 minutes`
+      );
+    },
+    () => Date.now() < preferOpenaiUntil
+  );
 }
 
 // --------------------------------------------------------------------------

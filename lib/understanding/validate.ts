@@ -183,15 +183,63 @@ const fold = (s: string): string => s.toLowerCase().replace(/\s+/g, " ").trim();
 /** A quote shorter than this could be "the"; it names nothing on its own. */
 const MIN_QUOTE_CHARS = 4;
 
+/** Four words in a row is a quotation; three is a phrase anyone could write. */
+const MIN_RUN_WORDS = 4;
+
+/** Two texts share a run of `n` consecutive words. */
+function sharesRun(a: string[], b: string[], n: number): boolean {
+  if (a.length < n || b.length < n) return false;
+  const grams = new Set<string>();
+  for (let i = 0; i + n <= a.length; i++) grams.add(a.slice(i, i + n).join(" "));
+  for (let i = 0; i + n <= b.length; i++) {
+    if (grams.has(b.slice(i, i + n).join(" "))) return true;
+  }
+  return false;
+}
+
+/** A number of three or more digits is an id (a CPO number, a form number). */
+function sharesNumber(why: string, text: string): boolean {
+  const own = new Set(text.match(/\b\d{3,}\b/g) ?? []);
+  return (why.match(/\b\d{3,}\b/g) ?? []).some((n) => own.has(n));
+}
+
+/** Capitalized words that are prose, not names, when they appear mid-sentence. */
+const NOT_NAMES = new Set([
+  "the", "this", "that", "these", "those", "and", "for", "with", "from", "after", "before",
+  "secretary", "suggested", "suggestion", "january", "february", "march", "april", "may", "june",
+  "july", "august", "september", "october", "november", "december", "monday", "tuesday",
+  "wednesday", "thursday", "friday", "saturday", "sunday", "today", "tomorrow", "yesterday",
+]);
+
 /**
- * SPEC §7: a question's `why` must reference at least one evidence item by
- * its real title or by a quote. The full title counts; a quote counts only
- * when it is really in the source it is attached to, so the model cannot
- * satisfy the rule by attaching a quote it wrote itself. Evidence whose id
- * is not in the bundle is skipped here — step 1 already reported it.
+ * A capitalized word inside the item's text (never its first word, which is
+ * capitalized for being first) that the why also uses: a person, a place, a
+ * product. "Marissa" in a why about a task that names Marissa is a reference.
+ */
+function sharesName(why: string, text: string): boolean {
+  const names = new Set(
+    (text.match(/(?<=\S\s+)[A-Z][a-z]{2,}/g) ?? [])
+      .map((n) => n.toLowerCase())
+      .filter((n) => !NOT_NAMES.has(n))
+  );
+  if (names.size === 0) return false;
+  return wordsOf(why).some((w) => names.has(w));
+}
+
+/**
+ * SPEC §7: a question's `why` must name at least one evidence item. It does
+ * so with the item's full title, with a quote that is really in the source
+ * it is attached to (so the model cannot satisfy the rule with a quote it
+ * wrote itself), with four or more words in a row from the item, with a
+ * number the item carries, or with a name the item carries. Anything looser
+ * is a why about nothing in particular; anything stricter rejects "the open
+ * 2073 copy", which is how a person refers to a task with a long title.
+ * Evidence whose id is not in the bundle is skipped here — step 1 already
+ * reported it.
  */
 function referencesEvidence(why: string, evidence: Source[], texts: Map<string, string>): boolean {
   const w = fold(why);
+  const whyWords = wordsOf(why);
   for (const s of evidence) {
     const text = texts.get(`${s.type}:${s.id}`);
     if (text === undefined) continue;
@@ -201,8 +249,21 @@ function referencesEvidence(why: string, evidence: Source[], texts: Map<string, 
       const q = fold(s.quote);
       if (q.length >= MIN_QUOTE_CHARS && t.includes(q) && w.includes(q)) return true;
     }
+    if (sharesRun(whyWords, wordsOf(text), MIN_RUN_WORDS)) return true;
+    if (sharesNumber(why, text)) return true;
+    if (sharesName(why, text)) return true;
   }
   return false;
+}
+
+/** What the retry is told when a why names nothing: the items it could name. */
+function evidenceHint(evidence: Source[], texts: Map<string, string>): string {
+  const shown = evidence
+    .map((s) => ({ key: `${s.type}:${s.id}`, text: texts.get(`${s.type}:${s.id}`) }))
+    .filter((e): e is { key: string; text: string } => typeof e.text === "string")
+    .slice(0, 3)
+    .map((e) => `[${e.key}] "${e.text.length > 90 ? `${e.text.slice(0, 90)}…` : e.text}"`);
+  return shown.length ? ` Its evidence: ${shown.join("; ")}` : "";
 }
 
 /** The (op, id) identity of a write, for the one-write-per-pair rule. */
@@ -307,7 +368,9 @@ export function validateRunOutput(output: unknown, bundle: Bundle): ValidationRe
     }
     if (countSentences(q.why) > 2) errors.push(`${path}.why: more than 2 sentences`);
     if (!referencesEvidence(q.why, q.evidence, texts)) {
-      errors.push(`${path}.why: does not name any evidence item by its title or a quote from it`);
+      errors.push(
+        `${path}.why: does not name any of its evidence items. Name one: its title, four or more of its words in a row, a number it carries, or a name it carries.${evidenceHint(q.evidence, texts)}`
+      );
     }
 
     q.answers.forEach((a, ai) => {

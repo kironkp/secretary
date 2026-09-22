@@ -118,6 +118,18 @@ jobs:
           path: playwright-report/
           retention-days: 7
 
+      # Every screen on the phone profile, from e2e/screens.spec.ts. The dev
+      # Mac cannot run a browser, so this is where a person looks at the app
+      # before it ships: `gh run download <run id> -n screenshots`.
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: screenshots/
+          retention-days: 14
+          if-no-files-found: ignore
+
   deploy:
     needs: verify
     runs-on: ubuntu-latest
