@@ -304,7 +304,7 @@ function TaskRow({ row, suggested = false }: { row: BoundRow; suggested?: boolea
         {under && <span className="block text-[13px] text-faint">{under}</span>}
       </span>
       <span className="flex-none text-[15px] font-semibold text-danger" data-field="late">
-        {late ? late.replace(/ late$/, "") : row.fields.due}
+        {late ?? row.fields.due}
       </span>
     </button>
   );

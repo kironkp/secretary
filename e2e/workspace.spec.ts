@@ -229,8 +229,12 @@ async function expectLongTitleShownInFull(page: Page) {
     const titleStyle = getComputedStyle(titleEl);
     const bodyRect = body.getBoundingClientRect();
     const rowRect = rowEl.getBoundingClientRect();
-    // One rect per line box: the geometry of every line, clipped or not.
-    const lines = Array.from(titleEl.getClientRects());
+    // One rect per line box: the geometry of every line, clipped or not. A
+    // Range over the text, not the element: a flex item is a block and would
+    // report one rect however many lines it wraps to.
+    const range = document.createRange();
+    range.selectNodeContents(titleEl);
+    const lines = Array.from(range.getClientRects()).filter((r) => r.width > 0 && r.height > 0);
     const inside = (r: DOMRect, box: DOMRect) =>
       r.left >= box.left - 1 &&
       r.right <= box.right + 1 &&

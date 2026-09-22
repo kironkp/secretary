@@ -139,8 +139,9 @@ test.describe("before answering", () => {
     await expectShownInFull(page, "[data-evidence-text]", E2E_QUESTION.openTask);
 
     // One line per answer saying what it will write (components/today/copy.ts).
-    await expect(page.locator('[data-answer-effect="close"]')).toHaveText("Close it: marks 1 task done");
-    await expect(page.locator('[data-answer-effect="keep"]')).toHaveText("Keep it: leaves everything as it is");
+    // The mockup's form: the label in bold, then what it does, no colon.
+    await expect(page.locator('[data-answer-effect="close"]')).toHaveText("Close it marks 1 task done");
+    await expect(page.locator('[data-answer-effect="keep"]')).toHaveText("Keep it leaves everything as it is");
 
     await assertTapTargets(page, ["[data-answer]"]);
     // The way back is a real target too. Not getByRole("link", "Today"): the

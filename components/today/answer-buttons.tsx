@@ -16,11 +16,13 @@ export function AnswerButtons({
   answers: Answer[];
   disabled: boolean;
   onAnswer: (answerId: string) => void;
-  /** hero: 40px pills in a card. page: 44px pills across the screen. */
+  /** hero: 15px pills in a card. page: 16px pills across the screen. Both
+   *  44px tall: the mockup drew 40, Apple's minimum target is 44, and the
+   *  Canvas post-mortem is why nothing tappable here goes under it. */
   size?: "hero" | "page";
 }) {
   const last = answers.length - 1;
-  const height = size === "hero" ? "min-h-10 text-[15px]" : "min-h-11 text-[16px]";
+  const height = size === "hero" ? "min-h-11 text-[15px]" : "min-h-11 text-[16px]";
   return (
     <div className="flex flex-wrap gap-2" data-answers>
       {answers.map((a, i) => (
