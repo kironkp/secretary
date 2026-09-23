@@ -391,6 +391,33 @@ export function validateRunOutput(output: unknown, bundle: Bundle): ValidationRe
   // --- step 3: questions, evidence and the writes their answers carry ------
   value.questions.forEach((q, qi) => {
     const path = `questions[${qi}]`;
+    // An answer may only write to what the question shows (SPEC §6: "ids come
+    // from the evidence"), and answer.ts refuses anything else. The model
+    // names a task in a write without listing it as evidence often enough
+    // that two answers on production came back "bad-answer"; a write's
+    // target is evidence by definition, so it is added here rather than
+    // rejected. Step 1 below still checks the id is real.
+    const listed = new Set(q.evidence.map((s) => `${s.type}:${s.id}`));
+    for (const a of q.answers) {
+      for (const w of a.writes) {
+        const target: Source | null =
+          "taskId" in w
+            ? { type: "task", id: w.taskId }
+            : "expectationId" in w
+              ? { type: "expectation", id: w.expectationId }
+              : null;
+        // Only an id the bundle has: an invented one is the write's own
+        // error (step 3), reported once, not twice.
+        if (
+          target &&
+          ids[target.type].has(target.id) &&
+          !listed.has(`${target.type}:${target.id}`)
+        ) {
+          q.evidence.push(target);
+          listed.add(`${target.type}:${target.id}`);
+        }
+      }
+    }
     checkSources(q.evidence, path);
     checkText(q.question, `${path}.question`);
     checkText(q.why, `${path}.why`);

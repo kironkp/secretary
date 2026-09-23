@@ -28,7 +28,15 @@ export default async function AppLayout({
         {/* pb clears the docked chat so page bottoms stay reachable: its real
             height, published by components/chat/dock-height.tsx, plus a
             breath; 6rem until the dock has measured itself. */}
-        <div className="mx-auto h-full w-full max-w-7xl px-4 pb-[calc(var(--dock-h,6rem)+1.5rem)]">
+        {/* min-h-full, not h-full: with a fixed height the padding sat inside
+            a box the content overflowed, so the scroll never reached past the
+            dock and the answer pills at the bottom of an opened question were
+            under the ask bar on the phone. The padding is an inline style so
+            it cannot depend on a utility class being generated. */}
+        <div
+          className="mx-auto min-h-full w-full max-w-7xl px-4"
+          style={{ paddingBottom: "calc(var(--dock-h, 6rem) + 1.5rem)" }}
+        >
           {children}
         </div>
       </main>

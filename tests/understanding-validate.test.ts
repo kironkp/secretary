@@ -626,3 +626,29 @@ describe("terms: mentions are matched the way resolveProject normalizes", () => 
     expect(termMatcher(["..."])("...")).toBe(false);
   });
 });
+
+describe("an answer's targets are evidence by definition (SPEC §6)", () => {
+  it("adds a task a write names to the question's evidence instead of leaving the answer unusable", () => {
+    const out = validOutput();
+    out.questions[0].evidence = [{ type: "task", id: T_DONE }];
+    out.questions[0].why = `The finished copy "${out.questions[0].why}"`;
+    out.questions[0].answers = [
+      { id: "close", label: "Close it", writes: [{ op: "complete_task", taskId: T_CHECK }, { op: "resolve" }] },
+      { id: "keep", label: "Keep it", writes: [{ op: "resolve" }] },
+    ];
+    const res = validateRunOutput(out, makeBundle());
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.value.questions[0].evidence).toContainEqual({ type: "task", id: T_CHECK });
+      // Listed once, whatever the number of writes that name it.
+      expect(res.value.questions[0].evidence.filter((s) => s.id === T_CHECK)).toHaveLength(1);
+    }
+  });
+
+  it("still refuses a write naming a task the bundle does not have", () => {
+    const out = validOutput();
+    out.questions[0].answers[0].writes = [{ op: "complete_task", taskId: "task-nowhere" }, { op: "resolve" }];
+    const errors = errorsOf(out);
+    expect(errors.some((e) => e.includes("task-nowhere"))).toBe(true);
+  });
+});
