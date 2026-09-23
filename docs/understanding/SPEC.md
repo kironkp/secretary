@@ -167,9 +167,13 @@ type RunOutput = {
 
 Validation, in order, all mechanical:
 
-1. Every `Source.id` in the output exists in the bundle. Unknown id → the
-   whole output is rejected and the run retried once with the error quoted.
-   Second failure → keep the previous record, log, move on.
+1. Every `Source.id` in the output exists in the bundle. An id one or two
+   characters off the one known id it resembles is mended first
+   (`lib/understanding/repair.ts`, logged). Otherwise the whole output is
+   rejected and the run retried, up to three attempts in all, each quoting
+   the errors of the attempt before it. An answer that is not JSON at all
+   is the same kind of rejection, retried with the same model. Last
+   failure → keep the previous record, log, move on.
 2. Every `Claim.sources` is non-empty.
 3. Every `QuestionDraft.answers[].writes[]` uses an op from the closed list in
    §5 and ids from the bundle.
@@ -417,8 +421,10 @@ write site to say the same thing less reliably.
   failed at the provider (a 429, a usage cap, a timeout — logged with the
   prefix `model: `) says nothing about the inputs and is tried again on the
   next sweep. A 429 on the first attempt followed by a rejection on the
-  second is a rejection. "Understand now" and an answer's re-run ignore the
-  backoff.
+  second is a rejection. A failure logged before this process started (an
+  older build, an older dyno) does not back off: a deploy that changes what
+  the validator accepts gets one fresh try per project. "Understand now"
+  and an answer's re-run ignore the backoff.
 
   Built: `lib/understanding/sweep.ts` `sweepUnderstanding`, started from the
   boot hook (`instrumentation.ts`) two minutes after the server starts and
@@ -470,8 +476,8 @@ write site to say the same thing less reliably.
   phase to an in-process channel keyed by user and project — `queued`
   ("Waiting to read Caltrans", a follow-up behind a run in flight),
   `gathering` ("Reading Caltrans" — "4 tasks, 4 messages, 2 memories"),
-  `reading` ("Thinking with Claude Sonnet 5" — "attempt 2 of 2" on the
-  retry), `checking` ("Checking what it wrote"), `storing` ("Writing the
+  `reading` ("Thinking with Claude Sonnet 5" — the gather's counts, and
+  "attempt 2 of 3" first on a retry), `checking` ("Checking what it wrote"), `storing` ("Writing the
   record") — and finishes as `ok` ("Read Caltrans" — "2 new questions, 1
   updated", or "nothing new to ask") or `failed` ("Could not read Caltrans"
   — "the model has no credits", "the Claude limit resets on October 1",
@@ -500,8 +506,15 @@ write site to say the same thing less reliably.
   the user's connected Anthropic key when there is one, else the house key
   (`anthropicClientFor`), and the user's connected OpenAI key, else the
   house key (`openaiClientFor`; the voice token is minted the same way).
-  The hour-long preference for OpenAI after a Claude failure is per Claude
-  key for the same reason.
+  Settings' Connected accounts takes either key (`POST /api/connections`,
+  `provider: anthropic | openai`), so "connect your own key in Settings"
+  is a way out for both. The hour-long preference for OpenAI after a
+  Claude failure is per Claude key for the same reason. Settings' Model
+  row adds a line per model that is not ready while reading still can
+  happen on the other ("Voice runs on OpenAI: add credits to the OpenAI
+  key, or connect your own OpenAI key."), and its per-project list words a
+  provider's failure the same way as the progress line rather than
+  quoting the wire.
 
 Cost on today's data: 8 projects, 45 open tasks, 85 memories, 212 user
 messages. A bundle is 5–15k tokens; the daily re-run is 8 calls; a busy day

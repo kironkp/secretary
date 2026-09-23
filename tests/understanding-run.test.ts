@@ -22,7 +22,7 @@ import {
 } from "@/lib/db/schema";
 import { gatherProject, hashBundle } from "@/lib/understanding/gather";
 import { questionIdentity } from "@/lib/understanding/questions";
-import { runAll, runProject } from "@/lib/understanding/run";
+import { ModelOutputError, runAll, runProject } from "@/lib/understanding/run";
 import { QUESTION_KINDS, runOutputSchema, type RunOutput } from "@/lib/understanding/types";
 import {
   CPO_NOW,
@@ -762,6 +762,62 @@ describe("the backoff after a failed run is for the validator's failures only", 
       expect(mixed.calls).toHaveLength(3);
     } finally {
       errorSpy.mockRestore();
+    }
+  });
+
+  it("a bad answer (not JSON) goes back to the same model with the error quoted, and never counts against the provider", async () => {
+    await db.insert(tasks).values({
+      userId: U.id,
+      projectId,
+      title: "Backoff task three",
+      status: "todo",
+      createdAt: new Date(NOW.getTime() - 19 * 86_400_000),
+      updatedAt: new Date(NOW.getTime() - 19 * 86_400_000),
+    });
+    const stumbling = fakeModel((bundle, call) => {
+      if (call.attempt === 0) throw new ModelOutputError("claude output is not JSON (stop_reason end_turn): Expected ','");
+      return minimalOutputFor(bundle);
+    });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const result = await sweepRun(stumbling);
+      expect(result.status, JSON.stringify(result)).toBe("ok");
+      expect(stumbling.calls).toHaveLength(2);
+      expect(stumbling.calls[1].previousErrors).toEqual([
+        "claude output is not JSON (stop_reason end_turn): Expected ','",
+      ]);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("a bad answer on every attempt is a rejection, not a provider failure: the sweep backs off", async () => {
+    await db.insert(tasks).values({
+      userId: U.id,
+      projectId,
+      title: "Backoff task four",
+      status: "todo",
+      createdAt: new Date(NOW.getTime() - 18 * 86_400_000),
+      updatedAt: new Date(NOW.getTime() - 18 * 86_400_000),
+    });
+    const garbled = fakeModel(() => {
+      throw new ModelOutputError("claude output is not JSON (stop_reason max_tokens): Unexpected end");
+    });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const first = await sweepRun(garbled);
+      expect(first.status).toBe("failed");
+      if (first.status !== "failed") return;
+      expect(garbled.calls).toHaveLength(3);
+      expect(first.errors).toEqual(["claude output is not JSON (stop_reason max_tokens): Unexpected end"]);
+      expect(first.errors.some((e) => e.startsWith("model: "))).toBe(false);
+      const second = await sweepRun(garbled);
+      expect(second).toEqual({ status: "skipped", reason: "backoff" });
+      expect(garbled.calls).toHaveLength(3);
+    } finally {
+      errorSpy.mockRestore();
+      warnSpy.mockRestore();
     }
   });
 });

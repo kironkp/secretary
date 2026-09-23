@@ -3,7 +3,13 @@
 // answers a throwing primary with the secondary on the same input. The
 // wrapper is tested through its seam, withFallback, with two fakes.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { callByProvider, modelCallFor, withFallback, type ModelCall } from "@/lib/understanding/run";
+import {
+  callByProvider,
+  modelCallFor,
+  ModelOutputError,
+  withFallback,
+  type ModelCall,
+} from "@/lib/understanding/run";
 import type { Bundle } from "@/lib/understanding/types";
 
 const savedProvider = process.env.UNDERSTANDING_PROVIDER;
@@ -99,14 +105,55 @@ describe("withFallback", () => {
     expect((onRecovered.mock.calls[0][0] as Error).message).toBe("429 no credits");
   });
 
-  it("with the secondary preferred and both closed, the primary's error is the one thrown", async () => {
+  it("with the secondary preferred and both closed, the primary's error is the one thrown, and both are reported", async () => {
     const primary: ModelCall = async () => {
       throw new Error("claude down");
     };
     const secondary: ModelCall = async () => {
       throw new Error("openai down");
     };
-    await expect(withFallback(primary, secondary, undefined, () => true)(input)).rejects.toThrow("claude down");
+    const onBothClosed = vi.fn();
+    await expect(
+      withFallback(primary, secondary, undefined, () => true, undefined, onBothClosed)(input)
+    ).rejects.toThrow("claude down");
+    expect(onBothClosed).toHaveBeenCalledTimes(1);
+    expect((onBothClosed.mock.calls[0][0] as Error).message).toBe("claude down");
+    expect((onBothClosed.mock.calls[0][1] as Error).message).toBe("openai down");
+  });
+
+  it("with both closed the other way round, the secondary's error is thrown with the primary's beside it", async () => {
+    const primary: ModelCall = async () => {
+      throw new Error("claude down");
+    };
+    const secondary: ModelCall = async () => {
+      throw new Error("openai down");
+    };
+    const onBothClosed = vi.fn();
+    await expect(
+      withFallback(primary, secondary, undefined, undefined, undefined, onBothClosed)(input)
+    ).rejects.toThrow("openai down");
+    expect((onBothClosed.mock.calls[0][0] as Error).message).toBe("openai down");
+    expect((onBothClosed.mock.calls[0][1] as Error).message).toBe("claude down");
+  });
+
+  it("a bad answer (ModelOutputError) never falls back: it goes back to the same model", async () => {
+    const primary = vi.fn<ModelCall>(async () => {
+      throw new ModelOutputError("claude output is not JSON (stop_reason end_turn)");
+    });
+    const secondary = vi.fn<ModelCall>(async () => result("secondary"));
+    const onFallback = vi.fn();
+    await expect(withFallback(primary, secondary, onFallback)(input)).rejects.toBeInstanceOf(ModelOutputError);
+    expect(secondary).not.toHaveBeenCalled();
+    expect(onFallback).not.toHaveBeenCalled();
+    // And the preferred road's bad answer does not send the call to the other road either.
+    const badSecondary = vi.fn<ModelCall>(async () => {
+      throw new ModelOutputError("openai output is not JSON");
+    });
+    const goodPrimary = vi.fn<ModelCall>(async () => result("primary"));
+    await expect(withFallback(goodPrimary, badSecondary, undefined, () => true)(input)).rejects.toBeInstanceOf(
+      ModelOutputError
+    );
+    expect(goodPrimary).not.toHaveBeenCalled();
   });
 });
 

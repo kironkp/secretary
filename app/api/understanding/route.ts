@@ -15,6 +15,7 @@ import { runAll } from "@/lib/understanding/run";
 import {
   describeProvider,
   hasConnectedAnthropic,
+  hasConnectedOpenai,
   latestRunPerProject,
   openQuestionCount,
   sweepMinutes,
@@ -31,13 +32,14 @@ export async function GET() {
   const user = await requireSession();
   if (isErrorResponse(user)) return user;
 
-  const [projects, questionsOpen, connectedAnthropic, health] = await Promise.all([
+  const [projects, questionsOpen, connectedAnthropic, connectedOpenai, health] = await Promise.all([
     latestRunPerProject(user.id),
     openQuestionCount(user.id),
     hasConnectedAnthropic(user.id),
+    hasConnectedOpenai(user.id),
     providerHealth(user.id),
   ]);
-  const { provider, model } = describeProvider({ connectedAnthropic });
+  const { provider, model } = describeProvider({ connectedAnthropic, connectedOpenai });
   return NextResponse.json({
     // The contract's provider object (GET /api/understanding/progress): can
     // the models be used right now, and if not, why and what to do.

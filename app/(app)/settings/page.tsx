@@ -142,7 +142,7 @@ export default async function SettingsPage() {
         <p className="mb-4 text-xs text-muted">
           Your login here is your account. Connecting your own Claude API key makes the
           brain features — conversation parsing, canvas, Claude chat — run and bill on
-          your Anthropic account.
+          your Anthropic account; your own OpenAI key does the same for voice and GPT.
         </p>
         <ConnectedAccounts />
       </section>

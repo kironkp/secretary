@@ -203,7 +203,16 @@ function derive(progress: Progress | null, activity: StripActivity | null, watch
       tone: "warn",
     };
   }
-  const last = progress.lastRun;
+  // The run's own finish (`recent`, from the process that ran it) says what
+  // it updated and dismissed; the row (`lastRun`) can only count what it
+  // created. When the newest finish is the newest run, its words are the
+  // line; a row from another process, or an older process's memory, is
+  // not. Nothing older than the newest run is ever shown as the last.
+  const finished =
+    newest?.status === "ok" && (!progress.lastRun || newest.finishedAt >= progress.lastRun.finishedAt)
+      ? newest
+      : null;
+  const last = finished ?? progress.lastRun;
   if (!last) return { ...server, phase: "idle", line: "Nothing read yet", detail: null };
   const ago = agoInWords(last.finishedAt, now);
   return {
@@ -216,16 +225,20 @@ function derive(progress: Progress | null, activity: StripActivity | null, watch
 }
 
 /**
- * The poll. Every FAST_POLL_MS while `fast`, every SLOW_POLL_MS otherwise;
- * at once on focus and on "secretary:data-changed" (an answer just sent, a
- * voice answer landing); paused while the tab is hidden. When a run has
- * finished since the last look, the questions it wrote are on the server,
- * so the strip says "data changed" and every screen listening refreshes.
+ * The poll. Every FAST_POLL_MS while `fast` or while the last payload showed
+ * a run under way (a re-read can outlast the answer's window, and its
+ * finishing must not be seen SLOW_POLL_MS late), every SLOW_POLL_MS
+ * otherwise; at once on focus and on "secretary:data-changed" (an answer
+ * just sent, a voice answer landing); paused while the tab is hidden. When
+ * a run has finished since the last look, the questions it wrote are on the
+ * server, so the strip says "data changed" and every screen listening
+ * refreshes.
  */
 function useProgress(fast: boolean, enabled: boolean): Progress | null {
   const [progress, setProgress] = useState<Progress | null>(null);
   const seen = useRef<Progress | null>(null);
   const inflight = useRef(false);
+  const every = fast || (progress?.active.length ?? 0) > 0 ? FAST_POLL_MS : SLOW_POLL_MS;
 
   const fetchNow = useCallback(async () => {
     if (inflight.current) return;
@@ -256,7 +269,7 @@ function useProgress(fast: boolean, enabled: boolean): Progress | null {
     };
     const run = () => {
       pause();
-      timer = setInterval(() => void fetchNow(), fast ? FAST_POLL_MS : SLOW_POLL_MS);
+      timer = setInterval(() => void fetchNow(), every);
     };
     const resume = () => {
       if (document.hidden) return;
@@ -275,7 +288,7 @@ function useProgress(fast: boolean, enabled: boolean): Progress | null {
       window.removeEventListener("focus", resume);
       window.removeEventListener("secretary:data-changed", onChanged);
     };
-  }, [enabled, fast, fetchNow]);
+  }, [enabled, every, fetchNow]);
 
   return progress;
 }
@@ -553,16 +566,20 @@ export function ThinkingStrip({
         </p>
         {/* The detail line keeps its height when there is nothing to say, so
             the strip stays one size through "Applying your answer", the
-            receipt and the server's phases, and the card below stays put. */}
-        <p
-          key={`d-${shown.detail ?? ""}`}
-          data-detail={shown.detail ?? undefined}
-          className={`min-h-[1.3em] text-[13px] leading-[1.3] text-faint wrap-anywhere ${
-            swap.animate && shown.detail ? "strip-detail-enter" : ""
-          }`}
-        >
-          {shown.detail ?? "\u00a0"}
-        </p>
+            receipt and the server's phases, and the card below stays put.
+            When the way out follows with nothing to say first (paused), the
+            link takes the line instead of a blank one sitting between. */}
+        {(shown.detail || !shown.action) && (
+          <p
+            key={`d-${shown.detail ?? ""}`}
+            data-detail={shown.detail ?? undefined}
+            className={`min-h-[1.3em] text-[13px] leading-[1.3] text-faint wrap-anywhere ${
+              swap.animate && shown.detail ? "strip-detail-enter" : ""
+            }`}
+          >
+            {shown.detail ?? "\u00a0"}
+          </p>
+        )}
         {shown.action && (
           <Link
             href={SETTINGS_HREF}

@@ -28,8 +28,13 @@ const PROVIDER_OK = {
   anthropic: { state: "ok", until: null, connected: false },
   openai: { state: "ok", until: null, connected: false },
 };
-const FINISHED = new Date(Date.now() - 12 * 60_000).toISOString();
-const PROGRESS_IDLE = {
+/**
+ * Built per request, not once per file: the strip words the stamp as "12
+ * min ago" from the moment it polls, and a stamp fixed when the module
+ * loaded would read "13 min ago" once the tests before this one had taken
+ * a minute.
+ */
+const progressIdle = () => ({
   active: [],
   recent: [],
   lastRun: {
@@ -37,10 +42,10 @@ const PROGRESS_IDLE = {
     status: "ok",
     line: "Read E2E Project",
     detail: "nothing new to ask",
-    finishedAt: FINISHED,
+    finishedAt: new Date(Date.now() - 12 * 60_000).toISOString(),
   },
   provider: PROVIDER_OK,
-};
+});
 
 /** The task ids the question rests on, straight from the API: [open, finished]. */
 async function evidenceTaskIds(page: Page): Promise<string[]> {
@@ -175,13 +180,13 @@ test.describe("before answering", () => {
     // outage this build has to make visible and self-serviceable.
     let answeredAt = 0;
     await page.route("**/api/understanding/progress", async (route) => {
-      let body: unknown = PROGRESS_IDLE;
+      let body: unknown = progressIdle();
       if (answeredAt) {
         const since = Date.now() - answeredAt;
         body =
           since < 2_500
             ? {
-                ...PROGRESS_IDLE,
+                ...progressIdle(),
                 active: [
                   {
                     projectId: "e2e",

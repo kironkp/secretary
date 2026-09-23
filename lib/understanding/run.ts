@@ -37,7 +37,6 @@ import {
   failureLogLine,
   noteProviderFailure,
   noteProviderOk,
-  providerNote,
   recordProviderError,
   tagProviderFailure,
   type ProviderName,
@@ -57,6 +56,7 @@ import {
   type SyncResult,
 } from "./questions";
 import type { Bundle, ProjectRecord, RunOutput } from "./types";
+import { repairIds, repairLine } from "./repair";
 import { validateRunOutput } from "./validate";
 
 // --------------------------------------------------------------------------
@@ -83,7 +83,15 @@ export type ModelCall = ((input: {
   /** 0 on the first call; 1 on the retry, with previousErrors filled. */
   attempt: number;
   previousErrors: string[];
-}) => Promise<{ output: unknown; model: string; inputTokens: number; outputTokens: number }>) &
+}) => Promise<{
+  output: unknown;
+  model: string;
+  /** Every input token billed, the cached prefix included. */
+  inputTokens: number;
+  /** The part of inputTokens served from the cache, billed at a tenth (lib/pricing.ts). */
+  cachedInputTokens?: number;
+  outputTokens: number;
+}>) &
   CallMeta;
 
 /** Exported so Settings (lib/understanding/sweep.ts describeProvider) names the same model a run would use. */
@@ -143,6 +151,22 @@ const OUTPUT_FORMAT_TEXT =
   JSON.stringify(OUTPUT_FORMAT.schema);
 
 /**
+ * The model answered, and what it said was not the JSON asked for: text cut
+ * short by max_tokens, a sentence around the object, a refusal, no text at
+ * all. That is the validator's kind of failure, quoted back to the SAME
+ * model on the next attempt; never a reason to switch providers, to count
+ * against the provider's health, or to prefer the other road for an hour.
+ * On 2026-09-23 one such answer did all three and ended a run as "the
+ * model has no credits" while Claude was ready.
+ */
+export class ModelOutputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ModelOutputError";
+  }
+}
+
+/**
  * The JSON object in a model's text: the whole text when it is JSON, else
  * what lies between the first "{" and the last "}" (a code fence or a
  * sentence around the object is the usual noise). Throws like JSON.parse.
@@ -194,25 +218,32 @@ export async function anthropicModelCall(userId: string): Promise<ModelCall | nu
         output_config: { effort },
       })
       .finalMessage();
-    if (response.stop_reason === "refusal") throw new Error("claude refusal");
+    if (response.stop_reason === "refusal") throw new ModelOutputError("claude refusal");
     const text = response.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
     if (!text.trim()) {
-      throw new Error(`claude returned no text (stop_reason ${response.stop_reason})`);
+      throw new ModelOutputError(`claude returned no text (stop_reason ${response.stop_reason})`);
     }
     let json: unknown;
     try {
       json = jsonFromText(text);
     } catch (e) {
-      // Almost always max_tokens cutting the JSON short; the retry quotes this.
-      throw new Error(
+      // max_tokens cutting the JSON short, or a slip in it; the retry quotes this.
+      throw new ModelOutputError(
         `claude output is not JSON (stop_reason ${response.stop_reason}): ${e instanceof Error ? e.message : String(e)}`
       );
     }
+    // input_tokens is the uncached part only: the system prompt and schema
+    // this call marks cacheable are billed as cache_creation (the first
+    // call) or cache_read (the rest) and are most of the prompt, so a row
+    // counting input_tokens alone said a 30k-token call was 4k.
+    const usage = response.usage;
+    const cached = usage.cache_read_input_tokens ?? 0;
     return {
       output: toRunOutput(json),
       model,
-      inputTokens: response.usage.input_tokens,
-      outputTokens: response.usage.output_tokens,
+      inputTokens: usage.input_tokens + (usage.cache_creation_input_tokens ?? 0) + cached,
+      cachedInputTokens: cached,
+      outputTokens: usage.output_tokens,
     };
   }, meta);
 }
@@ -277,19 +308,21 @@ export async function openaiModelCall(userId: string): Promise<ModelCall | null>
       },
     });
     const text = response.output_text ?? "";
-    if (!text.trim()) throw new Error("openai returned no text");
+    if (!text.trim()) throw new ModelOutputError("openai returned no text");
     let json: unknown;
     try {
-      json = JSON.parse(text);
+      json = jsonFromText(text);
     } catch (e) {
-      throw new Error(
+      throw new ModelOutputError(
         `openai output is not JSON: ${e instanceof Error ? e.message : String(e)}`
       );
     }
     return {
       output: toRunOutput(json),
       model,
+      // OpenAI's input_tokens is the whole prompt; cached_tokens the part served from cache.
       inputTokens: response.usage?.input_tokens ?? 0,
+      cachedInputTokens: response.usage?.input_tokens_details?.cached_tokens ?? 0,
       outputTokens: response.usage?.output_tokens ?? 0,
     };
   }, meta);
@@ -317,7 +350,9 @@ export function withFallback<Input, Output>(
    *  wrapper is built — otherwise the retry pays for the same rejection. */
   preferSecondary?: () => boolean,
   /** The preferred secondary threw and the primary then answered: the preference was wrong. */
-  onRecovered?: (secondaryError: unknown) => void
+  onRecovered?: (secondaryError: unknown) => void,
+  /** Both roads closed: the error about to propagate, and the other road's, so the log can name both. */
+  onBothClosed?: (thrown: unknown, other: unknown) => void
 ): Call<Input, Output> {
   return async (input) => {
     if (preferSecondary?.()) {
@@ -329,16 +364,29 @@ export function withFallback<Input, Output>(
       try {
         return await secondary(input);
       } catch (e) {
-        const out = await primary(input);
-        onRecovered?.(e);
-        return out;
+        if (e instanceof ModelOutputError) throw e;
+        try {
+          const out = await primary(input);
+          onRecovered?.(e);
+          return out;
+        } catch (e2) {
+          if (!(e2 instanceof ModelOutputError)) onBothClosed?.(e2, e);
+          throw e2;
+        }
       }
     }
     try {
       return await primary(input);
     } catch (e) {
+      // A bad answer is not a closed road: it goes back to the same model.
+      if (e instanceof ModelOutputError) throw e;
       onFallback?.(e);
-      return secondary(input);
+      try {
+        return await secondary(input);
+      } catch (e2) {
+        if (!(e2 instanceof ModelOutputError)) onBothClosed?.(e2, e);
+        throw e2;
+      }
     }
   };
 }
@@ -425,20 +473,7 @@ export async function callByProvider<Input, Output>(
   const preferSecondary = () => Date.now() < (preferOpenaiUntil.get(source) ?? 0);
   const call = withFallback(
     primary,
-    async (input: Input) => {
-      try {
-        return await secondary(input);
-      } catch (e) {
-        // Both roads closed. The log should carry Claude's trouble too —
-        // just now, or the standing failure that sent this call to OpenAI
-        // first — so a run's row says "openai: … " and "anthropic: …".
-        const claude = providerNote("anthropic", source);
-        if (claude && claude.state !== "ok" && claude.message) {
-          tagProviderFailure(e, { provider: "anthropic", source, message: claude.message });
-        }
-        throw e;
-      }
-    },
+    secondary,
     (e) => {
       preferOpenaiUntil.set(source, Date.now() + PREFER_OPENAI_MS);
       console.warn(
@@ -453,6 +488,12 @@ export async function callByProvider<Input, Output>(
       console.warn(
         `understanding: openai ${what} failed (${e instanceof Error ? e.message : String(e)}); claude answered, so claude goes first again`
       );
+    },
+    (thrown, other) => {
+      // Both roads closed: the error that propagates carries the other
+      // road's failure too, so the run's row says "anthropic: …" and
+      // "openai: …", whichever was tried first.
+      for (const f of recordProviderError(other)) tagProviderFailure(thrown, f);
     }
   );
   // Which road the NEXT call takes decides what the progress line names.
@@ -527,6 +568,12 @@ export type RunOptions = {
  *  validation: six calls an hour, about a dollar each, for the same rejection.
  *  The first production sweep did exactly that on the Jazz project. */
 const FAILED_BACKOFF_MS = 6 * 60 * 60_000;
+/**
+ * When this process started. A failure logged before that came from an
+ * older build or an older process: a deploy that fixes what the validator
+ * refused must get one fresh try per project, not wait six hours for it.
+ */
+const BOOTED_AT = Date.now() - process.uptime() * 1000;
 
 /**
  * How a failure of the provider's own — the call threw: a 429, a 400 over
@@ -603,7 +650,9 @@ async function logRun(entry: RunLog): Promise<void> {
  * Three, not two, since the schema stopped being API-enforced (see
  * OUTPUT_FORMAT_TEXT): a text-JSON answer trips the validator on one rule
  * at a time (an empty reason, then a banned word), and the Caltrans dry run
- * of 2026-09-23 needed the third go. Each retry quotes every error so far.
+ * of 2026-09-23 needed the third go. Each retry quotes the errors of the
+ * attempt before it (rejectionAddendum), not every error so far: the ones
+ * an earlier retry fixed are no longer the model's to fix.
  */
 const MAX_ATTEMPTS = 3;
 
@@ -755,6 +804,7 @@ async function runOnce(
       last.inputsHash === inputsHash &&
       last.finishedAt &&
       Date.now() - last.finishedAt.getTime() < FAILED_BACKOFF_MS &&
+      last.finishedAt.getTime() > BOOTED_AT &&
       // Only a run the model answered and the validator refused is expected
       // to fail the same way again on the same inputs. A run whose last
       // attempt the provider failed (MODEL_ERROR_PREFIX) never got an answer
@@ -796,6 +846,7 @@ async function runOnce(
   const providerErrors: string[] = [];
   let modelId = "";
   let inputTokens = 0;
+  let cachedInputTokens = 0;
   let outputTokens = 0;
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS && !output; attempt++) {
@@ -816,6 +867,16 @@ async function runOnce(
         previousErrors: errors,
       });
     } catch (e) {
+      if (e instanceof ModelOutputError) {
+        // The model answered, badly: the validator's kind of rejection,
+        // quoted back on the next attempt, with no word to the provider
+        // memory (the provider was fine; the answer was not).
+        errors = [e.message];
+        if (attempt + 1 < MAX_ATTEMPTS) {
+          console.warn(`understanding: ${name}: attempt ${attempt + 1} of ${MAX_ATTEMPTS} refused: ${e.message}`);
+        }
+        continue;
+      }
       // A throw is a failed attempt like any other; the retry quotes it.
       // One line per provider that failed on this attempt, each saying
       // which ("openai: 429 …"), and the provider memory hears about any
@@ -828,10 +889,29 @@ async function runOnce(
     tell("checking", CHECKING_LINE);
     modelId = result.model;
     inputTokens += result.inputTokens;
+    cachedInputTokens += result.cachedInputTokens ?? 0;
     outputTokens += result.outputTokens;
-    const validated = validateRunOutput(result.output, bundle);
+    // A UUID copied with a slipped digit is mended to the one id it is that
+    // close to before the validator sees it (repair.ts); the log says so.
+    const { output: mended, repairs } = repairIds(result.output, bundle);
+    if (repairs.length > 0) {
+      console.warn(
+        `understanding: ${bundle.project.name}: ${repairs.length} id${repairs.length === 1 ? "" : "s"} mended: ${repairs.map(repairLine).join("; ")}`
+      );
+    }
+    const validated = validateRunOutput(mended, bundle);
     if (validated.ok) output = validated.value;
-    else errors = validated.errors;
+    else {
+      errors = validated.errors;
+      // The final refusal is logged with the failure below; the earlier
+      // ones would otherwise be nowhere, and they are what the next attempt
+      // was told.
+      if (attempt + 1 < MAX_ATTEMPTS) {
+        console.warn(
+          `understanding: ${name}: attempt ${attempt + 1} of ${MAX_ATTEMPTS} refused: ${errors.join("; ")}`
+        );
+      }
+    }
   }
 
   if (!output) {
@@ -854,6 +934,18 @@ async function runOnce(
         outputTokens,
         errors: logged,
       });
+      // The attempts that answered were billed whether or not the answer
+      // passed: three refused Sonnet answers are real spend.
+      if (modelId && inputTokens + outputTokens > 0) {
+        await recordUsage({
+          userId,
+          kind: "understanding",
+          model: modelId,
+          inputTokens,
+          outputTokens,
+          cachedInputTokens,
+        });
+      }
       const failed = failedLines(name, logged);
       finish(userId, projectId, name, "failed", failed.line, failed.detail, failed.reason);
     }
@@ -900,7 +992,14 @@ async function runOnce(
   const questions = await syncQuestions(userId, projectId, output.questions, bundle, {
     createdBy: runId,
   });
-  await recordUsage({ userId, kind: "understanding", model: modelId, inputTokens, outputTokens });
+  await recordUsage({
+    userId,
+    kind: "understanding",
+    model: modelId,
+    inputTokens,
+    outputTokens,
+    cachedInputTokens,
+  });
   await logRun({
     id: runId,
     userId,

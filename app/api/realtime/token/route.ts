@@ -181,18 +181,18 @@ export async function POST(req: Request) {
     console.error("client_secrets failed:", res.status, detail.slice(0, 500));
     // OpenAI refusing the key is the same fact for every surface: the
     // provider memory hears it (Settings and the progress line say so), and
-    // the user hears what to do rather than "try again".
-    if (res.status === 429 || res.status === 401 || res.status === 403) {
-      noteProviderFailure("openai", `${res.status} ${detail.slice(0, 500)}`, key.source);
-      return NextResponse.json(
-        { error: res.status === 429 ? VOICE_NEEDS_CREDITS : VOICE_NEEDS_KEY },
-        { status: 502 }
-      );
-    }
-    return NextResponse.json(
-      { error: "Couldn't start a voice session. Try again in a moment." },
-      { status: 502 }
-    );
+    // the user hears what to do rather than "try again". What the failure
+    // says about the key is read the one way every surface reads it
+    // (classifyProviderError): a 429 that is a rate limit, not an empty
+    // balance, says nothing about the key and gets the plain line.
+    const failure = noteProviderFailure("openai", `${res.status} ${detail.slice(0, 500)}`, key.source);
+    const line =
+      failure.state === "auth"
+        ? VOICE_NEEDS_KEY
+        : failure.state === "no-credits" || failure.state === "capped"
+          ? VOICE_NEEDS_CREDITS
+          : "Couldn't start a voice session. Try again in a moment.";
+    return NextResponse.json({ error: line }, { status: 502 });
   }
   noteProviderOk("openai", key.source);
   const secret = (await res.json()) as { value: string };

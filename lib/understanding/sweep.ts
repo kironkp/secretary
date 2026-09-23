@@ -23,6 +23,7 @@ import {
 } from "@/lib/db/schema";
 import { QUESTION_KINDS } from "./types";
 import { failedLines, okLines } from "./progress";
+import { parseLoggedFailure } from "./provider-health";
 import { healDuplicates, retireAsrClarifications } from "./questions";
 import {
   DEFAULT_MODEL,
@@ -68,10 +69,19 @@ export type UnderstandingProvider = "anthropic" | "openai" | "none";
  * One indexed read; no client is built and nothing is decrypted.
  */
 export async function hasConnectedAnthropic(userId: string): Promise<boolean> {
+  return hasConnectedKey(userId, "anthropic");
+}
+
+/** The same for an OpenAI key the user connected in Settings. */
+export async function hasConnectedOpenai(userId: string): Promise<boolean> {
+  return hasConnectedKey(userId, "openai");
+}
+
+async function hasConnectedKey(userId: string, provider: "anthropic" | "openai"): Promise<boolean> {
   const [row] = await db
     .select({ id: connectedAccounts.id })
     .from(connectedAccounts)
-    .where(and(eq(connectedAccounts.userId, userId), eq(connectedAccounts.provider, "anthropic")))
+    .where(and(eq(connectedAccounts.userId, userId), eq(connectedAccounts.provider, provider)))
     .limit(1);
   return row !== undefined;
 }
@@ -84,10 +94,10 @@ export async function hasConnectedAnthropic(userId: string): Promise<boolean> {
  * only a real call knows. Nothing is called.
  */
 export function describeProvider(
-  opts: { connectedAnthropic?: boolean } = {}
+  opts: { connectedAnthropic?: boolean; connectedOpenai?: boolean } = {}
 ): { provider: UnderstandingProvider; model: string | null } {
   const hasClaude = Boolean(process.env.ANTHROPIC_API_KEY) || opts.connectedAnthropic === true;
-  const hasOpenai = Boolean(process.env.OPENAI_API_KEY);
+  const hasOpenai = Boolean(process.env.OPENAI_API_KEY) || opts.connectedOpenai === true;
   const claude = {
     provider: "anthropic" as const,
     model: process.env.UNDERSTANDING_MODEL ?? DEFAULT_MODEL,
@@ -283,9 +293,25 @@ export async function latestRunPerProject(userId: string): Promise<ProjectRunSta
       lastModel: r.lastModel,
       lastInputTokens: r.lastInputTokens,
       lastOutputTokens: r.lastOutputTokens,
-      lastErrors: r.lastErrors,
+      lastErrors: errorsForScreen(r.projectName, r.lastErrors),
     }))
     .sort((a, b) => a.projectName.localeCompare(b.projectName));
+}
+
+/**
+ * A failed run's errors as Settings lists them: the validator's each in
+ * full (SPEC §9, nothing is cut off), and the provider's own in the app's
+ * words ("The model has no credits."; progress.ts failedLines), never what
+ * it said on the wire, which names another company's billing page.
+ */
+export function errorsForScreen(projectName: string, errors: string[]): string[] {
+  const provider = errors.filter((e) => parseLoggedFailure(e) !== null);
+  if (provider.length === 0) return errors;
+  const worded = failedLines(projectName, provider).detail;
+  return [
+    `${worded[0].toUpperCase()}${worded.slice(1)}.`,
+    ...errors.filter((e) => parseLoggedFailure(e) === null),
+  ];
 }
 
 /** The newest run of the user's that did something, worded as the progress channel words a finish. */

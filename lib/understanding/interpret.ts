@@ -39,7 +39,9 @@ export type Interpretation = {
 export type InterpretCall = ((input: { system: string; user: string }) => Promise<{
   output: unknown;
   model: string;
+  /** Every input token billed, the cached part included (run.ts ModelCall says the same). */
   inputTokens: number;
+  cachedInputTokens?: number;
   outputTokens: number;
 }>) &
   CallMeta;
@@ -192,11 +194,14 @@ async function claudeInterpretCall(userId: string): Promise<InterpretCall | null
     if (!response.parsed_output) {
       throw new Error(`claude structured output missing (stop_reason ${response.stop_reason})`);
     }
+    const usage = response.usage;
+    const cached = usage.cache_read_input_tokens ?? 0;
     return {
       output: response.parsed_output,
       model,
-      inputTokens: response.usage.input_tokens,
-      outputTokens: response.usage.output_tokens,
+      inputTokens: usage.input_tokens + (usage.cache_creation_input_tokens ?? 0) + cached,
+      cachedInputTokens: cached,
+      outputTokens: usage.output_tokens,
     };
   }, meta);
 }
@@ -250,6 +255,7 @@ async function openaiInterpretCall(userId: string): Promise<InterpretCall | null
       output,
       model,
       inputTokens: response.usage?.input_tokens ?? 0,
+      cachedInputTokens: response.usage?.input_tokens_details?.cached_tokens ?? 0,
       outputTokens: response.usage?.output_tokens ?? 0,
     };
   }, meta);
@@ -334,6 +340,7 @@ export async function interpretAnswer(
     model: result.model,
     inputTokens: result.inputTokens,
     outputTokens: result.outputTokens,
+    cachedInputTokens: result.cachedInputTokens ?? 0,
   });
 
   const parsed = interpretationOut.safeParse(result.output);

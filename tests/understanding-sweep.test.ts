@@ -12,6 +12,7 @@ import { clarifications, entities, records, understandingRuns, user } from "@/li
 import { checkUnderstandNowQuota } from "@/lib/rate-limit";
 import {
   describeProvider,
+  errorsForScreen,
   hasConnectedAnthropic,
   latestRunPerProject,
   openQuestionCount,
@@ -191,6 +192,25 @@ describe("sweepUnderstanding", () => {
 });
 
 describe("the configuration Settings shows", () => {
+  it("errorsForScreen: the validator's lines in full, a provider's in the app's words, never the wire", () => {
+    // The validator's alone: untouched, each in full (SPEC §9).
+    const validator = ["questions[0].answers[1].writes: at least one write", "record.things: banned word"];
+    expect(errorsForScreen("Caltrans", validator)).toEqual(validator);
+    expect(errorsForScreen("Caltrans", [])).toEqual([]);
+    // The provider's alone: one line, the app's words, the billing page not quoted.
+    const wire =
+      "model: openai: 429 You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.";
+    expect(errorsForScreen("Caltrans", [wire])).toEqual(["The model has no credits."]);
+    expect(
+      errorsForScreen("Caltrans", [
+        "model: anthropic: 400 usage limits; you will regain access on 2026-10-01 at 00:00 UTC.",
+        wire,
+      ])
+    ).toEqual(["The Claude limit resets on October 1 and OpenAI has no credits."]);
+    // Mixed: the provider's word first, then the validator's lines in full.
+    expect(errorsForScreen("Caltrans", [wire, ...validator])).toEqual(["The model has no credits.", ...validator]);
+  });
+
   it("sweepMinutes: default 10, never under 2, never over a day, junk ignored", async () => {
     expect(await withEnv("UNDERSTANDING_SWEEP_MINUTES", undefined, sweepMinutes)).toBe(10);
     expect(await withEnv("UNDERSTANDING_SWEEP_MINUTES", "30", sweepMinutes)).toBe(30);

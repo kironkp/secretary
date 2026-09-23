@@ -151,7 +151,8 @@ export function inflections(word: string): string[] {
 }
 
 /** Which bundle rows a Source of each type may point at. */
-function idIndex(bundle: Bundle): Record<SourceType, Set<string>> {
+/** Every id in the bundle, by source type; exported for repair.ts. */
+export function idIndex(bundle: Bundle): Record<SourceType, Set<string>> {
   return {
     task: new Set([...bundle.tasksOpen, ...bundle.tasksDone].map((t) => t.id)),
     memory: new Set(bundle.memories.map((m) => m.id)),

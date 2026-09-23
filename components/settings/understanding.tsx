@@ -97,6 +97,33 @@ export function modelLine(provider: Progress["provider"], tails: { anthropic: st
   ].join(" · ");
 }
 
+/**
+ * What to do about one model that is not ready while reading still can
+ * happen on the other (the server's action covers only reading being
+ * paused). Voice runs on OpenAI whatever the loop uses, so its trouble is
+ * named for what it stops. Null when there is nothing to do.
+ */
+export function sideAction(provider: "anthropic" | "openai", side: ProviderSide): string | null {
+  const name = provider === "anthropic" ? "Claude" : "OpenAI";
+  const own = side.connected ? `your ${name} key` : `the ${name} key`;
+  const orConnect = side.connected ? "" : `, or connect your own ${name} key`;
+  let fix: string;
+  switch (side.state) {
+    case "capped":
+      fix = `raise the limit on ${own}${orConnect}`;
+      break;
+    case "no-credits":
+      fix = `add credits to ${own}${orConnect}`;
+      break;
+    case "auth":
+      fix = `check ${own}, or connect another`;
+      break;
+    default:
+      return null;
+  }
+  return provider === "openai" ? `Voice runs on OpenAI: ${fix}.` : `${fix[0].toUpperCase()}${fix.slice(1)}.`;
+}
+
 type Connection = { provider: string; keyTail: string };
 
 function providerLine(status: Status): string {
@@ -191,10 +218,24 @@ export function UnderstandingSettings() {
                 {modelLine(progress.provider, tails)}
               </span>
             </p>
-            {progress.provider.action && (
+            {/* The way out: the server's when reading is paused; else one
+                line per model that is not ready, since voice still needs
+                OpenAI when the loop is fine on Claude. */}
+            {progress.provider.action ? (
               <p className="wrap-anywhere text-xs text-muted" data-model-action>
                 {progress.provider.action}
               </p>
+            ) : (
+              (["anthropic", "openai"] as const).map((p) => {
+                const action = sideAction(p, progress.provider[p]);
+                return (
+                  action && (
+                    <p key={p} className="wrap-anywhere text-xs text-muted" data-model-action={p}>
+                      {action}
+                    </p>
+                  )
+                );
+              })
             )}
           </>
         ) : (
