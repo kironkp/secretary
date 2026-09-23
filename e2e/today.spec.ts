@@ -16,6 +16,31 @@ import { E2E_QUESTION } from "./global-setup";
 
 const hero = (page: Page) => page.getByTestId("today-hero");
 const question = (page: Page) => page.getByTestId("question");
+/** The thinking strip above the card (components/today/thinking-strip.tsx) and its main line. */
+const strip = (page: Page) => page.locator("[data-thinking-strip]");
+const stripLine = (page: Page) => strip(page).locator("[data-line]");
+
+/** What GET /api/understanding/progress says when nothing is under way and the model is fine. */
+const PROVIDER_OK = {
+  ok: true,
+  line: null,
+  action: null,
+  anthropic: { state: "ok", until: null, connected: false },
+  openai: { state: "ok", until: null, connected: false },
+};
+const FINISHED = new Date(Date.now() - 12 * 60_000).toISOString();
+const PROGRESS_IDLE = {
+  active: [],
+  recent: [],
+  lastRun: {
+    projectName: "E2E Project",
+    status: "ok",
+    line: "Read E2E Project",
+    detail: "nothing new to ask",
+    finishedAt: FINISHED,
+  },
+  provider: PROVIDER_OK,
+};
 
 /** The task ids the question rests on, straight from the API: [open, finished]. */
 async function evidenceTaskIds(page: Page): Promise<string[]> {
@@ -117,6 +142,157 @@ test.describe("before answering", () => {
     await expect(answers.nth(0)).toHaveText("Close it");
     await expect(answers.nth(1)).toHaveText("Keep it");
     await assertTapTargets(page, ["[data-testid=today-hero] [data-answer]", "[data-past-due-row]"]);
+  });
+
+  test("the thinking strip sits above the hero and says where the reading stands", async ({ page }) => {
+    // The user's words: "an interface above the questions that shows what
+    // the agent is thinking". One quiet card, with a phase the tests and
+    // the walk script can read, and its main line the one live region.
+    await expect(strip(page)).toBeVisible();
+    await expect(strip(page)).toHaveAttribute("data-phase", /^(idle|active|failed|paused)$/);
+    await expect(stripLine(page)).toHaveAttribute("role", "status");
+    await expect(stripLine(page)).toHaveAttribute("aria-live", "polite");
+    const s = await strip(page).boundingBox();
+    const h = await hero(page).boundingBox();
+    expect(s).not.toBeNull();
+    expect(h).not.toBeNull();
+    expect(s!.y + s!.height).toBeLessThanOrEqual(h!.y);
+    // Idle, it is a slim card: two lines, never a second hero. (Paused or
+    // failed it carries the way out as a third line, so only idle is measured.)
+    if ((await strip(page).getAttribute("data-phase")) === "idle") {
+      expect(s!.height).toBeLessThanOrEqual(72);
+    }
+    // No text is cut off in it, whatever the line says.
+    const text = (await stripLine(page).getAttribute("data-line")) ?? "";
+    if (text) await expectShownInFull(page, "[data-thinking-strip] [data-line]", text);
+  });
+
+  test("the strip narrates the answer, then a reading that failed, with the way to fix it", async ({ page }) => {
+    // The route is answered here (nothing reaches the database, and the
+    // seeded question stays open for the tap test) and the progress
+    // endpoint is scripted: idle before the tap, the project being read
+    // after the reply, then a reading that failed for want of credits, the
+    // outage this build has to make visible and self-serviceable.
+    let answeredAt = 0;
+    await page.route("**/api/understanding/progress", async (route) => {
+      let body: unknown = PROGRESS_IDLE;
+      if (answeredAt) {
+        const since = Date.now() - answeredAt;
+        body =
+          since < 2_500
+            ? {
+                ...PROGRESS_IDLE,
+                active: [
+                  {
+                    projectId: "e2e",
+                    projectName: "E2E Project",
+                    phase: "gathering",
+                    line: "Reading E2E Project",
+                    detail: "43 tasks, 12 messages, 3 memories",
+                    startedAt: new Date(answeredAt).toISOString(),
+                    updatedAt: new Date().toISOString(),
+                  },
+                ],
+              }
+            : {
+                active: [],
+                recent: [
+                  {
+                    projectId: "e2e",
+                    projectName: "E2E Project",
+                    status: "failed",
+                    line: "Could not read E2E Project",
+                    detail: "the model has no credits",
+                    reason: "no-credits",
+                    finishedAt: new Date(answeredAt + 2_500).toISOString(),
+                  },
+                ],
+                lastRun: {
+                  projectName: "E2E Project",
+                  status: "failed",
+                  line: "Could not read E2E Project",
+                  detail: "the model has no credits",
+                  finishedAt: new Date(answeredAt + 2_500).toISOString(),
+                },
+                provider: {
+                  ok: false,
+                  line: "Reading is paused: the model has no credits.",
+                  action: "Add credits, raise the limit, or connect your own key in Settings.",
+                  anthropic: { state: "no-credits", until: null, connected: false },
+                  openai: { state: "no-credits", until: null, connected: false },
+                },
+              };
+      }
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+    });
+    await page.route(`**/api/questions/${E2E_QUESTION.id}/answer`, async (route) => {
+      answeredAt = Date.now();
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          status: "resolved",
+          projectId: null,
+          applied: [{ op: "complete_task" }, { op: "resolve" }],
+          failed: [],
+        }),
+      });
+    });
+    await page.goto("/today");
+
+    // Idle: the last run, and how long ago, in the faint detail line.
+    await expect(strip(page)).toHaveAttribute("data-phase", "idle");
+    await expect(stripLine(page)).toHaveAttribute("data-line", "Read E2E Project");
+    await expect(strip(page).locator("[data-detail]")).toHaveAttribute("data-detail", "nothing new to ask, 12 min ago");
+
+    // The tap: acknowledged in the strip at once, then the receipt's words,
+    // then what the server is doing, each for a beat.
+    await hero(page).locator('[data-answer="close"]').click();
+    await expect(stripLine(page)).toHaveAttribute("data-line", "Applying your answer");
+    await expect(strip(page)).toHaveAttribute("data-phase", "active");
+    await expect(stripLine(page)).toHaveAttribute("data-line", "Closed 1 task");
+    await expect(page.locator("[data-receipt]")).toHaveText("Closed 1 task");
+    await expect(stripLine(page)).toHaveAttribute("data-line", "Reading E2E Project");
+    await expect(strip(page).locator("[data-detail]")).toHaveAttribute("data-detail", "43 tasks, 12 messages, 3 memories");
+    // Never blocked: the pills are live under it.
+    await expect(hero(page).locator("[data-answer]").first()).toBeEnabled();
+
+    // The reading failed: the strip says so in the warn tone, why, and what
+    // to do about it, as a link to the Model row in Settings.
+    await expect(strip(page)).toHaveAttribute("data-phase", "failed");
+    await expect(stripLine(page)).toHaveAttribute("data-line", "Could not read E2E Project");
+    await expect(strip(page).locator("[data-detail]")).toHaveAttribute("data-detail", "the model has no credits");
+    const fix = strip(page).locator("[data-action]");
+    await expect(fix).toHaveText("Add credits, raise the limit, or connect your own key in Settings.");
+    await expect(fix).toHaveAttribute("href", "/settings#understanding");
+    expect((await fix.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+    await expectShownInFull(page, "[data-thinking-strip] [data-line]", "Could not read E2E Project");
+    // The bars are still: nothing is under way.
+    expect(await strip(page).locator(".thinking-live").count()).toBe(0);
+    // The answer never left the browser.
+    expect(await questionStatus(page)).toMatch(/^(open|asked)$/);
+  });
+
+  test("with reduced motion the strip's bars and lines do not animate", async ({ page }) => {
+    // Motion carries the meaning here, so the setting calms it rather than
+    // hiding it: the words stay, the bars stand still, the line simply changes.
+    await page.goto("/today?thinking=open");
+    await expect(strip(page)).toHaveAttribute("data-phase", "active");
+    const bar = strip(page).locator(".thinking-bar").first();
+    expect(await bar.evaluate((el) => getComputedStyle(el).animationName)).toBe("thinking-bob");
+
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/today?thinking=open");
+    await expect(strip(page)).toHaveAttribute("data-phase", "active");
+    await expect(stripLine(page)).toHaveAttribute("data-line", "Reading Caltrans");
+    expect(await strip(page).locator(".thinking-bar").first().evaluate((el) => getComputedStyle(el).animationName)).toBe("none");
+    const running = await strip(page).evaluate((el) =>
+      Array.from(el.querySelectorAll("*")).filter((n) => {
+        const s = getComputedStyle(n);
+        return s.animationName !== "none" && parseFloat(s.animationDuration) > 0.01;
+      }).length
+    );
+    expect(running).toBe(0);
   });
 
   test("on a phone Today does not scroll sideways", async ({ page }) => {
@@ -233,7 +409,7 @@ test.describe("before answering", () => {
     // The route is answered here, as above: CI has no model, and the one
     // seeded question must still be open for the tap test that follows. What
     // is real is the keyboard: focus lands on the pill, Enter presses it, the
-    // pill lights, the receipt and the thinking line follow.
+    // pill lights, the receipt and the strip's line follow.
     let posted: unknown = null;
     await page.route(`**/api/questions/${E2E_QUESTION.id}/answer`, async (route) => {
       posted = route.request().postDataJSON();
@@ -256,9 +432,10 @@ test.describe("before answering", () => {
     await expect(close).toHaveAttribute("data-selected", "true");
     await expect(page.locator("[data-receipt]")).toHaveText("Closed 1 task");
     expect(posted).toEqual({ answerId: "close" });
-    // The project is being re-read: the bars say so, by the project's name.
-    await expect(page.locator("[data-thinking]")).toBeVisible();
-    await expect(page.locator("[data-thinking]")).toContainText("Reading E2E Project…");
+    // The strip above is live with the receipt's words until the server
+    // says what it is doing with the answer.
+    await expect(strip(page)).toHaveAttribute("data-phase", "active");
+    await expect(stripLine(page)).toHaveAttribute("data-line", "Closed 1 task");
     // The answer never left the browser.
     expect(await questionStatus(page)).toMatch(/^(open|asked)$/);
   });
@@ -273,15 +450,16 @@ test.describe("answering", () => {
     await page.goto("/today");
     await expect(hero(page)).toHaveAttribute("data-question-id", E2E_QUESTION.id);
 
-    // The reply is held for a beat so "Applying…" is on screen long enough
-    // to be read; the request still reaches the server and writes.
+    // The reply is held for a beat so "Applying your answer" is on screen
+    // long enough to be read; the request still reaches the server and writes.
     await page.route(`**/api/questions/${E2E_QUESTION.id}/answer`, async (route) => {
       await new Promise((resolve) => setTimeout(resolve, 600));
       await route.continue();
     });
     // The clock for "acknowledged at once": the first press event to the
-    // first paint of the receipt, measured in the page so the harness's own
-    // round trips do not count. __stay proves the page was never navigated.
+    // first paint of the strip's "Applying your answer", measured in the
+    // page so the harness's own round trips do not count. __stay proves
+    // the page was never navigated.
     await page.evaluate(() => {
       const w = window as unknown as {
         __stay: number;
@@ -301,21 +479,21 @@ test.describe("answering", () => {
       }
       new MutationObserver(() => {
         if (w.__ack !== null) return;
-        const el = document.querySelector("[data-receipt]");
-        if (el) {
+        const line = document.querySelector("[data-thinking-strip] [data-line]")?.getAttribute("data-line") ?? "";
+        if (line.startsWith("Applying")) {
           w.__ack = performance.now();
-          w.__ackText = el.textContent;
+          w.__ackText = line;
         }
-      }).observe(document.body, { childList: true, subtree: true });
+      }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-line"] });
     });
 
     const close = hero(page).locator('[data-answer="close"]');
     await close.click();
 
-    // Acknowledged at once: the pill lit and "Applying…" under the card,
-    // within 200 ms of the press, before the server has said anything.
-    const receipt = page.locator("[data-receipt]");
-    await expect(receipt).toHaveText("Applying…");
+    // Acknowledged at once: the pill lit and the strip saying "Applying your
+    // answer", within 200 ms of the press, before the server has said anything.
+    await expect(stripLine(page)).toHaveAttribute("data-line", "Applying your answer");
+    await expect(strip(page)).toHaveAttribute("data-phase", "active");
     await expect(close).toHaveAttribute("data-selected", "true");
     const ack = await page.evaluate(() => {
       const w = window as unknown as { __tap: number | null; __ack: number | null; __ackText: string | null };
@@ -329,11 +507,12 @@ test.describe("answering", () => {
     await expect.poll(() => taskStatus(page, openId), { timeout: 10_000 }).toBe("done");
 
     // The receipt says only what was applied (SPEC §10, the honesty rule):
-    // the same line, its words changed.
-    await expect(page.getByText("Closed 1 task")).toBeVisible();
+    // under the card once the reply has landed, and on the strip for a beat.
+    const receipt = page.locator("[data-receipt]");
     await expect(receipt).toHaveText("Closed 1 task");
-    // The project is being re-read: the bars say so under the receipt.
-    await expect(page.locator("[data-thinking]")).toBeVisible();
+    await expect(stripLine(page)).toHaveAttribute("data-line", "Closed 1 task");
+    // The project is being re-read: the strip is live, whatever it says next.
+    await expect(strip(page)).toHaveAttribute("data-phase", "active");
 
     // The question is resolved, so it is no longer the hero and not in the list.
     await expect(page.locator(`[data-question-id="${E2E_QUESTION.id}"]`)).toHaveCount(0, {

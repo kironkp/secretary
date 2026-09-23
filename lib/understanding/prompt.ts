@@ -127,7 +127,10 @@ const writeOut = z.object({
   taskId: z.string().optional().describe("A task id from the input, for the task ops"),
   dueAt: z.string().optional().describe("set_due only: YYYY-MM-DD in the user's timezone"),
   recurrence: z.enum(RECURRENCES).optional().describe("set_recurrence only"),
-  reason: z.string().optional().describe("set_blocked_reason only"),
+  reason: z
+    .string()
+    .optional()
+    .describe("set_blocked_reason only: why the task is stuck, or an empty string to unblock it"),
   project: z.string().optional().describe("set_project only: the name of the project to file the task under"),
   fact: z.string().optional().describe("remember_fact only"),
   tags: z.array(z.string()).optional().describe("remember_fact only"),

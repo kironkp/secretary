@@ -10,6 +10,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { isErrorResponse, parseBody, requireSession } from "@/lib/api";
 import { checkUnderstandNowQuota } from "@/lib/rate-limit";
+import { providerHealth } from "@/lib/understanding/provider-health";
 import { runAll } from "@/lib/understanding/run";
 import {
   describeProvider,
@@ -30,14 +31,19 @@ export async function GET() {
   const user = await requireSession();
   if (isErrorResponse(user)) return user;
 
-  const [projects, questionsOpen, connectedAnthropic] = await Promise.all([
+  const [projects, questionsOpen, connectedAnthropic, health] = await Promise.all([
     latestRunPerProject(user.id),
     openQuestionCount(user.id),
     hasConnectedAnthropic(user.id),
+    providerHealth(user.id),
   ]);
   const { provider, model } = describeProvider({ connectedAnthropic });
   return NextResponse.json({
-    provider,
+    // The contract's provider object (GET /api/understanding/progress): can
+    // the models be used right now, and if not, why and what to do.
+    provider: health,
+    // Which provider and model a run would use, as describeProvider says.
+    providerId: provider,
     model,
     sweepMinutes: sweepMinutes(),
     disabled: understandingDisabled(),

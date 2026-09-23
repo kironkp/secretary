@@ -14,9 +14,34 @@ import { z } from "zod";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { db } from "@/lib/db";
 import { records, understandingRuns } from "@/lib/db/schema";
-import { anthropicFor, BRAIN_EFFORTS, type BrainEffort } from "@/lib/anthropic";
+import { anthropicClientFor, BRAIN_EFFORTS, type BrainEffort, type KeySource } from "@/lib/anthropic";
 import { recordUsage } from "@/lib/usage";
 import { gatherAll, gatherProject, hashBundle } from "./gather";
+import {
+  CHECKING_LINE,
+  STORING_LINE,
+  drop,
+  failedLines,
+  failedOtherLines,
+  finish,
+  gatheringLines,
+  nameOf,
+  okLines,
+  publish,
+  readingLines,
+  type Phase,
+} from "./progress";
+import {
+  MODEL_ERROR_PREFIX,
+  errorMessage,
+  failureLogLine,
+  noteProviderFailure,
+  noteProviderOk,
+  providerNote,
+  recordProviderError,
+  tagProviderFailure,
+  type ProviderName,
+} from "./provider-health";
 import {
   modelOutputSchema,
   renderBundle,
@@ -38,19 +63,39 @@ import { validateRunOutput } from "./validate";
 // The model
 // --------------------------------------------------------------------------
 
-export type ModelCall = (input: {
+/**
+ * What a call knows about itself before it is made, for the progress line
+ * ("Thinking with Claude Sonnet 5") and the provider memory (which key a
+ * failure belongs to). All optional: a test's fake carries none, and the
+ * run says "Thinking" and attributes a failure by its wording.
+ */
+export type CallMeta = {
+  /** The model id the call would send: "claude-sonnet-5", "gpt-5.5". */
+  modelName?: string;
+  provider?: ProviderName;
+  source?: KeySource;
+};
+
+export type ModelCall = ((input: {
   system: string;
   user: string;
   bundle: Bundle;
   /** 0 on the first call; 1 on the retry, with previousErrors filled. */
   attempt: number;
   previousErrors: string[];
-}) => Promise<{ output: unknown; model: string; inputTokens: number; outputTokens: number }>;
+}) => Promise<{ output: unknown; model: string; inputTokens: number; outputTokens: number }>) &
+  CallMeta;
 
 /** Exported so Settings (lib/understanding/sweep.ts describeProvider) names the same model a run would use. */
 export const DEFAULT_MODEL = "claude-sonnet-5";
 const DEFAULT_EFFORT: BrainEffort = "medium";
-const MAX_TOKENS = 16000;
+/**
+ * Thinking counts against max_tokens when output_config.effort is set, and
+ * a Sonnet 5 run at medium effort spent most of 16000 on it: the first
+ * Caltrans dry run on 2026-09-23 had its JSON cut at 2,900 characters
+ * (stop_reason max_tokens). Room for the thinking and a full record.
+ */
+const MAX_TOKENS = 32000;
 
 const isEffort = (v: string | undefined): v is BrainEffort =>
   v !== undefined && (BRAIN_EFFORTS as readonly string[]).includes(v);
@@ -84,6 +129,37 @@ const OUTPUT_FORMAT = {
 };
 
 /**
+ * The schema goes to Claude as text, not as an API-enforced format. The
+ * API compiles a `format` into a grammar, and this schema (a record, words,
+ * questions with a closed list of write ops) is over its size limit: on
+ * 2026-09-23 every call was refused with "The compiled grammar is too
+ * large". The schema in the cached system prompt costs its tokens once per
+ * sweep, and validateRunOutput is the enforcement either way.
+ */
+const OUTPUT_FORMAT_TEXT =
+  "\n\n## Output format\n" +
+  "Reply with one JSON object and nothing else: no prose before or after it, no code fence. " +
+  "It must match this JSON Schema:\n" +
+  JSON.stringify(OUTPUT_FORMAT.schema);
+
+/**
+ * The JSON object in a model's text: the whole text when it is JSON, else
+ * what lies between the first "{" and the last "}" (a code fence or a
+ * sentence around the object is the usual noise). Throws like JSON.parse.
+ */
+export function jsonFromText(text: string): unknown {
+  const trimmed = text.trim();
+  try {
+    return JSON.parse(trimmed);
+  } catch (first) {
+    const start = trimmed.indexOf("{");
+    const end = trimmed.lastIndexOf("}");
+    if (start === -1 || end <= start) throw first;
+    return JSON.parse(trimmed.slice(start, end + 1));
+  }
+}
+
+/**
  * The production model: the user's Claude client (connected account or house
  * key) with structured output enforced by the API. Null when there is no
  * client, when UNDERSTANDING_DISABLED is set, or under vitest — a test that
@@ -92,24 +168,32 @@ const OUTPUT_FORMAT = {
 export async function anthropicModelCall(userId: string): Promise<ModelCall | null> {
   if (process.env.UNDERSTANDING_DISABLED === "true") return null;
   if (process.env.VITEST) return null;
-  const client = await anthropicFor(userId);
-  if (!client) return null;
+  const resolved = await anthropicClientFor(userId);
+  if (!resolved) return null;
+  const { client, source } = resolved;
 
   const model = process.env.UNDERSTANDING_MODEL ?? DEFAULT_MODEL;
   const envEffort = process.env.UNDERSTANDING_EFFORT;
   const effort = isEffort(envEffort) ? envEffort : DEFAULT_EFFORT;
 
-  return async ({ system, user, attempt, previousErrors }) => {
+  const meta: CallMeta = { modelName: model, provider: "anthropic", source };
+  return Object.assign(async ({ system, user, attempt, previousErrors }: Parameters<ModelCall>[0]) => {
     const content = attempt > 0 ? user + rejectionAddendum(previousErrors) : user;
-    const response = await client.messages.create({
-      model,
-      max_tokens: MAX_TOKENS,
-      // The system prompt is identical for every project and every run; mark
-      // it cacheable so a sweep over N projects pays for it once (SPEC §4).
-      system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
-      messages: [{ role: "user", content }],
-      output_config: { effort, format: OUTPUT_FORMAT },
-    });
+    // Streamed, then read whole: the SDK refuses a plain create whose
+    // max_tokens could take over ten minutes, and this one can.
+    const response = await client.messages
+      .stream({
+        model,
+        max_tokens: MAX_TOKENS,
+        // The system prompt is identical for every project and every run; mark
+        // it cacheable so a sweep over N projects pays for it once (SPEC §4).
+        system: [
+          { type: "text", text: system + OUTPUT_FORMAT_TEXT, cache_control: { type: "ephemeral" } },
+        ],
+        messages: [{ role: "user", content }],
+        output_config: { effort },
+      })
+      .finalMessage();
     if (response.stop_reason === "refusal") throw new Error("claude refusal");
     const text = response.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
     if (!text.trim()) {
@@ -117,7 +201,7 @@ export async function anthropicModelCall(userId: string): Promise<ModelCall | nu
     }
     let json: unknown;
     try {
-      json = JSON.parse(text);
+      json = jsonFromText(text);
     } catch (e) {
       // Almost always max_tokens cutting the JSON short; the retry quotes this.
       throw new Error(
@@ -130,7 +214,7 @@ export async function anthropicModelCall(userId: string): Promise<ModelCall | nu
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,
     };
-  };
+  }, meta);
 }
 
 // --------------------------------------------------------------------------
@@ -157,26 +241,26 @@ const isOpenAIEffort = (v: string | undefined): v is OpenAIEffort =>
 const OPENAI_OUTPUT_SCHEMA = z.toJSONSchema(modelOutputSchema) as Record<string, unknown>;
 
 /**
- * The OpenAI model on the house key. Null under the same guards as the
- * Anthropic call, and when there is no OPENAI_API_KEY. The same rules as
+ * The OpenAI model on the user's key: their connected OpenAI account first,
+ * then the house key (lib/openai.ts openaiClientFor). Null under the same
+ * guards as the Anthropic call, and with neither key. The same rules as
  * anthropicModelCall: raw text back, JSON-parsed here, validated by the run.
  */
 export async function openaiModelCall(userId: string): Promise<ModelCall | null> {
   if (process.env.UNDERSTANDING_DISABLED === "true") return null;
   if (process.env.VITEST) return null;
-  if (!process.env.OPENAI_API_KEY) return null;
-  // The OpenAI path has no per-user key today; the parameter is the same
-  // shape as anthropicModelCall so the two are interchangeable.
-  void userId;
-  // Lazy so this module stays importable with no key at all (lib/openai.ts
-  // builds its client at import time).
-  const { openai } = await import("@/lib/openai");
+  // Lazy: lib/openai.ts builds the house client at import time.
+  const { openaiClientFor } = await import("@/lib/openai");
+  const resolved = await openaiClientFor(userId);
+  if (!resolved) return null;
+  const { client: openai, source } = resolved;
 
   const model = process.env.UNDERSTANDING_OPENAI_MODEL ?? DEFAULT_OPENAI_MODEL;
   const envEffort = process.env.UNDERSTANDING_OPENAI_EFFORT;
   const effort = isOpenAIEffort(envEffort) ? envEffort : DEFAULT_OPENAI_EFFORT;
 
-  return async ({ system, user, attempt, previousErrors }) => {
+  const meta: CallMeta = { modelName: model, provider: "openai", source };
+  return Object.assign(async ({ system, user, attempt, previousErrors }: Parameters<ModelCall>[0]) => {
     const input = attempt > 0 ? user + rejectionAddendum(previousErrors) : user;
     const response = await openai.responses.create({
       model,
@@ -208,7 +292,7 @@ export async function openaiModelCall(userId: string): Promise<ModelCall | null>
       inputTokens: response.usage?.input_tokens ?? 0,
       outputTokens: response.usage?.output_tokens ?? 0,
     };
-  };
+  }, meta);
 }
 
 /** Any call to a model: the run's ModelCall, or interpret.ts's InterpretCall. */
@@ -231,10 +315,25 @@ export function withFallback<Input, Output>(
    *  run's own retry reuses one ModelCall, so a preference set by the first
    *  attempt's failure has to be read here, per call, not once when the
    *  wrapper is built — otherwise the retry pays for the same rejection. */
-  preferSecondary?: () => boolean
+  preferSecondary?: () => boolean,
+  /** The preferred secondary threw and the primary then answered: the preference was wrong. */
+  onRecovered?: (secondaryError: unknown) => void
 ): Call<Input, Output> {
   return async (input) => {
-    if (preferSecondary?.()) return secondary(input);
+    if (preferSecondary?.()) {
+      // The preferred road first, and the other one when it is closed too.
+      // A window that sends every call to OpenAI must not strand the call
+      // when OpenAI is the one that is down: on 2026-09-23 production had
+      // Claude back and OpenAI at 429, and every sweep failed until the
+      // hour passed. The primary's own error is the one that propagates.
+      try {
+        return await secondary(input);
+      } catch (e) {
+        const out = await primary(input);
+        onRecovered?.(e);
+        return out;
+      }
+    }
     try {
       return await primary(input);
     } catch (e) {
@@ -248,8 +347,39 @@ const PROVIDERS = ["anthropic", "openai", "auto"] as const;
 type Provider = (typeof PROVIDERS)[number];
 /** After a Claude failure, every run in this window goes to OpenAI first. */
 const PREFER_OPENAI_MS = 60 * 60_000;
-/** Module-level on purpose: one process, one memory of the last failure. */
-let preferOpenaiUntil = 0;
+/**
+ * Module-level on purpose: one process, one memory of the last failure —
+ * per Claude key, so the house key over its cap sends nobody's connected
+ * key to OpenAI.
+ */
+const preferOpenaiUntil = new Map<KeySource, number>();
+
+/**
+ * A call that tells the provider memory how it went: every return is
+ * noted ok for its key, every throw noted as what it said and tagged with
+ * the provider (provider-health.ts), so the run can log "openai: 429 …" and
+ * the progress route can say why reading is paused. The call's own
+ * metadata rides along.
+ */
+function tracked<Input, Output>(
+  call: Call<Input, Output> & CallMeta,
+  provider: ProviderName
+): Call<Input, Output> & CallMeta {
+  const source = call.source ?? "house";
+  const fn = async (input: Input): Promise<Output> => {
+    try {
+      const out = await call(input);
+      noteProviderOk(provider, source);
+      return out;
+    } catch (e) {
+      const message = errorMessage(e);
+      noteProviderFailure(provider, message, source);
+      tagProviderFailure(e, { provider, source, message });
+      throw e;
+    }
+  };
+  return Object.assign(fn, { modelName: call.modelName, provider, source });
+}
 
 /**
  * The provider choice, by UNDERSTANDING_PROVIDER, for any call shape:
@@ -263,36 +393,74 @@ let preferOpenaiUntil = 0;
  *              With only one provider available, that one; null with neither.
  * The two builders are thunks so a provider the setting rules out is never
  * built (each costs a client lookup). `what` names the call in the warning.
- * The hour-long memory of a Claude failure is one per process, shared by
- * every caller: a read of one typed answer (interpret.ts) has no reason to
- * pay for a rejection the sweep just saw.
+ * The hour-long memory of a Claude failure is one per process and per
+ * Claude key, shared by every caller: a read of one typed answer
+ * (interpret.ts) has no reason to pay for a rejection the sweep just saw.
+ * Every call handed back is tracked (above), whichever road it takes.
  */
 export async function callByProvider<Input, Output>(
-  claude: () => Promise<Call<Input, Output> | null>,
-  gpt: () => Promise<Call<Input, Output> | null>,
+  claude: () => Promise<(Call<Input, Output> & CallMeta) | null>,
+  gpt: () => Promise<(Call<Input, Output> & CallMeta) | null>,
   what: string
-): Promise<Call<Input, Output> | null> {
+): Promise<(Call<Input, Output> & CallMeta) | null> {
   const env = process.env.UNDERSTANDING_PROVIDER;
   const provider: Provider = (PROVIDERS as readonly string[]).includes(env ?? "")
     ? (env as Provider)
     : "auto";
-  if (provider === "anthropic") return claude();
-  if (provider === "openai") return gpt();
+  if (provider === "anthropic") {
+    const call = await claude();
+    return call && tracked(call, "anthropic");
+  }
+  if (provider === "openai") {
+    const call = await gpt();
+    return call && tracked(call, "openai");
+  }
 
-  const [primary, secondary] = await Promise.all([claude(), gpt()]);
-  if (!primary) return secondary;
-  if (!secondary) return primary;
-  return withFallback(
+  const [claudeCall, gptCall] = await Promise.all([claude(), gpt()]);
+  if (!claudeCall) return gptCall && tracked(gptCall, "openai");
+  if (!gptCall) return tracked(claudeCall, "anthropic");
+  const primary = tracked(claudeCall, "anthropic");
+  const secondary = tracked(gptCall, "openai");
+  const source: KeySource = primary.source ?? "house";
+  const preferSecondary = () => Date.now() < (preferOpenaiUntil.get(source) ?? 0);
+  const call = withFallback(
     primary,
-    secondary,
+    async (input: Input) => {
+      try {
+        return await secondary(input);
+      } catch (e) {
+        // Both roads closed. The log should carry Claude's trouble too —
+        // just now, or the standing failure that sent this call to OpenAI
+        // first — so a run's row says "openai: … " and "anthropic: …".
+        const claude = providerNote("anthropic", source);
+        if (claude && claude.state !== "ok" && claude.message) {
+          tagProviderFailure(e, { provider: "anthropic", source, message: claude.message });
+        }
+        throw e;
+      }
+    },
     (e) => {
-      preferOpenaiUntil = Date.now() + PREFER_OPENAI_MS;
+      preferOpenaiUntil.set(source, Date.now() + PREFER_OPENAI_MS);
       console.warn(
         `understanding: claude ${what} failed (${e instanceof Error ? e.message : String(e)}); using openai for the next 60 minutes`
       );
     },
-    () => Date.now() < preferOpenaiUntil
+    preferSecondary,
+    (e) => {
+      // OpenAI was the road and it was closed; Claude answered. Back to
+      // Claude first, now, not when the hour runs out.
+      preferOpenaiUntil.delete(source);
+      console.warn(
+        `understanding: openai ${what} failed (${e instanceof Error ? e.message : String(e)}); claude answered, so claude goes first again`
+      );
+    }
   );
+  // Which road the NEXT call takes decides what the progress line names.
+  return Object.defineProperties(call, {
+    modelName: { get: () => (preferSecondary() ? secondary.modelName : primary.modelName) },
+    provider: { get: () => (preferSecondary() ? "openai" : "anthropic") },
+    source: { get: () => (preferSecondary() ? secondary.source : primary.source) },
+  }) as Call<Input, Output> & CallMeta;
 }
 
 /** The production model for one user: the run's two calls, chosen as callByProvider says. */
@@ -365,9 +533,12 @@ const FAILED_BACKOFF_MS = 6 * 60 * 60_000;
  * the usage cap, a timeout, a refusal, output that was not JSON — is marked
  * in a run's logged errors, apart from the validator's. The backoff above
  * reads it: such a run says nothing about the inputs, since the model never
- * answered on them, so it must not keep the next sweep from trying.
+ * answered on them, so it must not keep the next sweep from trying. After
+ * the prefix, the provider that failed and what it said ("openai: 429 …";
+ * provider-health.ts failureLogLine), so a restarted process can read the
+ * provider's state back from the rows.
  */
-export const MODEL_ERROR_PREFIX = "model: ";
+export { MODEL_ERROR_PREFIX };
 
 /**
  * Whether a failed run's logged errors say its LAST attempt failed at the
@@ -428,7 +599,13 @@ async function logRun(entry: RunLog): Promise<void> {
 // One project
 // --------------------------------------------------------------------------
 
-const MAX_ATTEMPTS = 2;
+/**
+ * Three, not two, since the schema stopped being API-enforced (see
+ * OUTPUT_FORMAT_TEXT): a text-JSON answer trips the validator on one rule
+ * at a time (an empty reason, then a banned word), and the Caltrans dry run
+ * of 2026-09-23 needed the third go. Each retry quotes every error so far.
+ */
+const MAX_ATTEMPTS = 3;
 
 /**
  * One run per project at a time, and never two on top of each other. Every
@@ -467,6 +644,12 @@ export async function runProject(
       projectRuns.delete(key);
       const again = entry.again;
       if (again) {
+        // The follow-up is on its way: say so until its gather is done and
+        // it publishes its own phase (or skips, and drops the entry). The
+        // name is the one the run that just finished published; with none
+        // (it skipped before saying anything) the follow-up speaks first.
+        const name = again.dryRun ? null : nameOf(userId, projectId);
+        if (name) publish(userId, projectId, name, "queued", `Waiting to read ${name}`);
         void runProject(userId, projectId, again).catch((e) =>
           console.error(`understanding: queued run for ${projectId} failed: ${e instanceof Error ? e.message : String(e)}`)
         );
@@ -503,8 +686,16 @@ async function runProjectNow(
     console.error(`understanding: ${projectId} failed: ${message}`);
     if (!opts.dryRun) {
       await logRun({ id: runId, userId, projectId, startedAt, status: "failed", errors: [message] });
+      // The screen hears about it too: a run that threw still ends its entry.
+      const name = nameOf(userId, projectId) ?? opts.bundle?.project.name ?? "this project";
+      const lines = failedOtherLines(name);
+      finish(userId, projectId, name, "failed", lines.line, lines.detail, lines.reason);
     }
     return { status: "failed", errors: [message] };
+  } finally {
+    // A run that skipped published nothing, or inherited a "queued" entry
+    // from the run before it: either way nothing is in flight now.
+    if (!opts.dryRun) drop(userId, projectId);
   }
 }
 
@@ -588,6 +779,16 @@ async function runOnce(
     return { status: "skipped", reason };
   }
 
+  // --- the screen ------------------------------------------------------------
+  // From here the run is really happening (it did not skip), so the
+  // progress channel hears each phase (SPEC §8). A dry run tells no one.
+  const name = bundle.project.name;
+  const tell = (phase: Phase, line: string, detail: string | null = null) => {
+    if (!opts.dryRun) publish(userId, projectId, name, phase, line, detail);
+  };
+  const gathering = gatheringLines(name, bundle);
+  tell("gathering", gathering.line, gathering.detail);
+
   const user = renderBundle(bundle, { mode: opts.mode });
   let output: RunOutput | null = null;
   let errors: string[] = [];
@@ -598,6 +799,13 @@ async function runOnce(
   let outputTokens = 0;
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS && !output; attempt++) {
+    {
+      // The gather is over in a blink, so the counts ride on the reading
+      // line, which is the one the screen actually sees for a minute or
+      // more: "Thinking with Claude Sonnet 5 · 43 tasks, 12 messages".
+      const reading = readingLines(model.modelName, attempt, MAX_ATTEMPTS);
+      tell("reading", reading.line, [reading.detail, gathering.detail].filter(Boolean).join(" · "));
+    }
     let result: Awaited<ReturnType<ModelCall>>;
     try {
       result = await model({
@@ -609,11 +817,15 @@ async function runOnce(
       });
     } catch (e) {
       // A throw is a failed attempt like any other; the retry quotes it.
-      const message = `${MODEL_ERROR_PREFIX}${e instanceof Error ? e.message : String(e)}`;
-      providerErrors.push(message);
-      errors = [message];
+      // One line per provider that failed on this attempt, each saying
+      // which ("openai: 429 …"), and the provider memory hears about any
+      // failure nothing tagged (recordProviderError).
+      const messages = recordProviderError(e).map((f) => `${MODEL_ERROR_PREFIX}${failureLogLine(f)}`);
+      providerErrors.push(...messages);
+      errors = messages;
       continue;
     }
+    tell("checking", CHECKING_LINE);
     modelId = result.model;
     inputTokens += result.inputTokens;
     outputTokens += result.outputTokens;
@@ -642,6 +854,8 @@ async function runOnce(
         outputTokens,
         errors: logged,
       });
+      const failed = failedLines(name, logged);
+      finish(userId, projectId, name, "failed", failed.line, failed.detail, failed.reason);
     }
     return { status: "failed", errors: logged };
   }
@@ -660,6 +874,7 @@ async function runOnce(
   }
 
   // --- store -----------------------------------------------------------------
+  tell("storing", STORING_LINE);
   // The code owns `asked` (SPEC §5): it is the log of what was asked and what
   // the user said, written by the answer path, never by the model. Whatever
   // the model returned there is replaced with the stored list.
@@ -697,6 +912,16 @@ async function runOnce(
     inputTokens,
     outputTokens,
   });
+  {
+    // A reopened question is a new card to the user (interview/more counts it the same way).
+    const ok = okLines(name, {
+      created: questions.created.length + questions.reopened.length,
+      updated: questions.updated.length,
+      dismissed: questions.dismissed.length,
+      skippedSettled: questions.skippedSettled.length,
+    });
+    finish(userId, projectId, name, "ok", ok.line, ok.detail, null);
+  }
 
   return {
     status: "ok",

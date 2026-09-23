@@ -23,8 +23,8 @@ import {
   useOwnWordsFromUrl,
   type AnswerReply,
 } from "./answer-buttons";
-import { kindClass, kindLabel, readingLabel, receiptInWords, writesInWords } from "./copy";
-import { Thinking, useReread } from "./thinking";
+import { kindClass, kindLabel, receiptInWords, writesInWords } from "./copy";
+import { ThinkingStrip, type StripActivity } from "./thinking-strip";
 
 /** What the route takes: a listed answer, with a note if there is one, or the user's own words. */
 type AnswerBody =
@@ -36,23 +36,6 @@ function labelClass(label: string): string {
   if (label.startsWith("You")) return "text-accent";
   if (label.startsWith("Still open") || label.startsWith("Expected")) return "text-warn";
   return "text-faint";
-}
-
-/**
- * When a re-read last finished, from /api/today: the stamp the thinking
- * bars watch after an answer, the same one Today and the Interview watch.
- * A run that failed finishes too, so the bars end when the reading ends,
- * not a minute later. This page has no stamp of its own, so it is read
- * alongside the answer, before the re-read can have finished.
- */
-async function runStamp(): Promise<string | null> {
-  try {
-    const res = await fetch("/api/today", { cache: "no-store" });
-    if (!res.ok) return null;
-    return ((await res.json()) as { lastRunAt: string | null }).lastRunAt;
-  } catch {
-    return null;
-  }
 }
 
 function EvidenceRow({ item }: { item: EvidenceView }) {
@@ -100,7 +83,8 @@ export function QuestionView({ initial }: { initial: QuestionData }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const reread = useReread();
+  /** What the strip says on this screen's own account: the answer in flight, then its receipt. */
+  const [activity, setActivity] = useState<StripActivity | null>(null);
 
   const open = question.status === "open" || question.status === "asked";
 
@@ -113,52 +97,59 @@ export function QuestionView({ initial }: { initial: QuestionData }) {
   /**
    * One request to the answer route: a tapped pill sends { answerId } with
    * the note if there is one, "Write your own" sends the note as { text }.
-   * The pill lights and "Applying…" shows before the request leaves. A 503
-   * is the model unable to read the words: nothing was written, so the words
-   * stay in the field for another try.
+   * The pill lights and the strip says "Applying your answer" before the
+   * request leaves. A 503 is the model unable to read the words: nothing was
+   * written, so the words stay in the field for another try.
    */
   const post = async (body: AnswerBody) => {
     setAnswering(true);
     setSelected("answerId" in body ? body.answerId : "own");
     setError(null);
-    setReceipt("Applying…");
+    setReceipt(null);
+    const started: StripActivity = {
+      line: "Applying your answer",
+      startedAt: Date.now(),
+      projectId: question.projectId,
+    };
+    setActivity(started);
     try {
-      const [res, since] = await Promise.all([
-        fetch(`/api/questions/${question.id}/answer`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        }),
-        runStamp(),
-      ]);
+      const res = await fetch(`/api/questions/${question.id}/answer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
       const reply = (await res.json().catch(() => null)) as AnswerReply | { error?: string } | null;
       if (res.ok && reply && "status" in reply && reply.status === "resolved") {
         // What was applied, or what Secretary read the words as; never more.
-        setReceipt(receiptInWords(reply));
+        // The same words on the strip, until the server says what it is
+        // doing with the answer (SPEC §6 step 4: the project is re-read).
+        const words = receiptInWords(reply);
+        setReceipt(words);
+        setActivity({ ...started, line: words });
         setQuestion((q) => ({ ...q, status: "resolved" }));
         // Any write elsewhere in the app can say so; the board updates at once.
         window.dispatchEvent(new Event("secretary:data-changed"));
-        // The project is being re-read (SPEC §6 step 4): the bars say so
-        // until a run finishes after `since`, or for a minute.
-        reread.start({ label: readingLabel(question.projectName), since, tick: runStamp });
       } else if (res.status === 409) {
         setReceipt("This question was already answered.");
+        setActivity({ ...started, status: "done" });
         setQuestion((q) => ({ ...q, status: "resolved" }));
       } else if (res.status === 404) {
-        setReceipt(null);
+        setActivity({ ...started, status: "done" });
         setSelected(null);
         setError("This question is gone.");
       } else if (res.status === 503) {
-        setReceipt(null);
+        // The server says why when it can (the model has no credits); the
+        // strip shows the same standing condition as the paused state.
+        setActivity({ ...started, status: "done" });
         setSelected(null);
-        setError("Could not read that right now, try again.");
+        setError((reply && "error" in reply && reply.error) || "Could not read that right now, try again.");
       } else {
-        setReceipt(null);
+        setActivity({ ...started, status: "done" });
         setSelected(null);
         setError("That answer could not be applied.");
       }
     } catch {
-      setReceipt(null);
+      setActivity({ ...started, status: "done" });
       setSelected(null);
       setError("Could not reach the server.");
     } finally {
@@ -197,6 +188,9 @@ export function QuestionView({ initial }: { initial: QuestionData }) {
         <ChevronLeft size={22} strokeWidth={2.2} className="-ml-1.5" />
         Today
       </Link>
+
+      {/* What Secretary is doing with the data, above the question it bears on. */}
+      <ThinkingStrip activity={activity} />
 
       <section
         data-testid="question"
@@ -274,20 +268,14 @@ export function QuestionView({ initial }: { initial: QuestionData }) {
           </Link>
         )}
 
-        {/* What the answer did, then the re-read under way: the mockup's
-            15px secondary line, 12px under the pills. One element from
-            "Applying…" on, so the announcement is one. */}
+        {/* What the answer did: the mockup's 15px secondary line, 12px under
+            the pills, once the reply has landed. The strip above announces
+            the phases, so this line is not a live region twice. */}
         {receipt && (
-          <p
-            role="status"
-            aria-live="polite"
-            data-receipt
-            className="px-1 text-[15px] leading-[1.4] text-faint wrap-anywhere"
-          >
+          <p data-receipt className="px-1 text-[15px] leading-[1.4] text-faint wrap-anywhere">
             {receipt}
           </p>
         )}
-        {reread.label && <Thinking label={reread.label} />}
         {error && <ErrorNote>{error}</ErrorNote>}
         {!open && !receipt && (
           <p className="px-1 text-[15px] text-faint" data-closed>

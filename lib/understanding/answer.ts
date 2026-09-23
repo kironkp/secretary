@@ -171,11 +171,15 @@ async function applyWrite(ctx: ToolContext, w: Write, now: Date): Promise<WriteO
     case "set_recurrence":
       return viaTool(ctx, "update_task", { task: w.taskId, recurrence: w.recurrence });
     case "set_blocked_reason":
-      return viaTool(ctx, "update_task", {
-        task: w.taskId,
-        status: "blocked",
-        blocked_reason: w.reason,
-      });
+      // An empty reason is the unblock: back to todo, and the tool clears
+      // the blocker for any status that is not "blocked".
+      return w.reason.trim()
+        ? viaTool(ctx, "update_task", {
+            task: w.taskId,
+            status: "blocked",
+            blocked_reason: w.reason,
+          })
+        : viaTool(ctx, "update_task", { task: w.taskId, status: "todo", blocked_reason: "" });
     case "set_project": {
       // update_task resolves a project name the way a spoken "file it under
       // Caltrans" is resolved, and when nothing matches it CREATES one

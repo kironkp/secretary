@@ -13,12 +13,13 @@
 // /api/questions only; every type it needs is imported as a type.
 //
 // Answering, as the user feels it (the same as Today): the tapped pill fills
-// and the others fade at once, a line under the card says "Applying…" and
-// then what was applied, and the next question takes the card as soon as
-// the queue no longer has the answered one, with the thinking bars under it
-// while the project is re-read. No fixed pause: the receipt stays under the
-// next card until the next answer, and the bars end when a run has finished
-// (lastRunAt moves) or after a minute.
+// and the others fade at once, the thinking strip above the card says
+// "Applying your answer", then what was applied, then what the server is
+// doing with it while the project is re-read; the next question takes the
+// card as soon as the queue no longer has the answered one, and a line under
+// it keeps the receipt until the next answer. "Ask me more" is the same
+// strip: the server publishes each project as it reads them, and the line
+// under the pills keeps the summary once the reading is done.
 //
 // The queue is the server's rank order. "Skip for now" is local: the skipped
 // question goes to the back of what is on this screen and nothing about it is
@@ -41,8 +42,8 @@ import {
   useOwnWordsFromUrl,
   type AnswerReply,
 } from "@/components/today/answer-buttons";
-import { kindClass, kindLabel, readingLabel, receiptInWords } from "@/components/today/copy";
-import { Thinking, useReread } from "@/components/today/thinking";
+import { kindClass, kindLabel, receiptInWords } from "@/components/today/copy";
+import { ThinkingStrip, type StripActivity } from "@/components/today/thinking-strip";
 import { ErrorNote } from "@/components/ui";
 import type { EvidenceView, InterviewData, QuestionView } from "@/lib/understanding/today";
 import { footerLine, progressLine } from "./words";
@@ -143,10 +144,8 @@ export function InterviewView({
   const [answered, setAnswered] = useState<{ questionId: string; answerId: string } | null>(null);
   const [reading, setReading] = useState(false);
   const [receipt, setReceipt] = useState<string | null>(null);
-  const reread = useReread();
-  // When a run last finished, as this screen last read it: the stamp the
-  // bars watch after an answer. A ref, so post() reads the current one.
-  const lastRunAt = useRef<string | null>(initial.lastRunAt);
+  /** What the strip says on this screen's own account: the answer or the reading asked for. */
+  const [activity, setActivity] = useState<StripActivity | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // A refresh that lands while an answer is in flight would swap the question
@@ -164,7 +163,6 @@ export function InterviewView({
       const res = await fetch(url, { cache: "no-store" });
       if (!res.ok) return null;
       const next = (await res.json()) as InterviewData;
-      lastRunAt.current = next.lastRunAt;
       setData(next);
       setFooter(footerLine(next.answeredToday, next.lastRunAt, new Date()));
       return next;
@@ -181,8 +179,10 @@ export function InterviewView({
   }, [load]);
 
   // Freshness: the poll, the window coming back, and any write the app
-  // announces (a voice answer lands as "secretary:data-changed"): a question
-  // answered elsewhere disappears on the next of any of them.
+  // announces (a voice answer lands as "secretary:data-changed", and so does
+  // a reading that has finished, from the strip): a question answered
+  // elsewhere disappears, and the questions a reading wrote arrive, on the
+  // next of any of them.
   useEffect(() => {
     const id = setInterval(() => void refresh(), POLL_MS);
     const onFocus = () => void refresh();
@@ -224,17 +224,23 @@ export function InterviewView({
   /**
    * One request to the answer route: a tapped pill sends { answerId } with
    * the note if there is one, "Write your own" sends the note as { text }.
-   * The pill lights and "Applying…" shows before the request leaves; the
-   * next question comes with the first refresh after the reply.
+   * The pill lights and the strip says "Applying your answer" before the
+   * request leaves; the next question comes with the first refresh after
+   * the reply.
    */
   const post = async (question: QuestionView, body: AnswerBody) => {
     busy.current = true;
     setAnswering(true);
     setAnswered({ questionId: question.id, answerId: "answerId" in body ? body.answerId : "own" });
     setError(null);
-    setReceipt("Applying…");
+    setReceipt(null);
     setStatus(null);
-    const since = lastRunAt.current;
+    const started: StripActivity = {
+      line: "Applying your answer",
+      startedAt: Date.now(),
+      projectId: question.projectId,
+    };
+    setActivity(started);
     try {
       const res = await fetch(`/api/questions/${question.id}/answer`, {
         method: "POST",
@@ -244,31 +250,31 @@ export function InterviewView({
       const reply = (await res.json().catch(() => null)) as AnswerReply | { error?: string } | null;
       if (res.ok && reply && "status" in reply && reply.status === "resolved") {
         // The receipt says only what was applied (SPEC §10, the honesty
-        // rule), or what Secretary read the words as.
-        setReceipt(receiptInWords(reply));
+        // rule), or what Secretary read the words as. The same words on the
+        // strip, until the server says what it is doing with the answer
+        // (SPEC §6 step 4: the project is re-read).
+        const words = receiptInWords(reply);
+        setReceipt(words);
+        setActivity({ ...started, line: words });
         // Any write elsewhere in the app can say so; the board updates at once.
         window.dispatchEvent(new Event("secretary:data-changed"));
         setDone((n) => n + 1);
-        // The project is being re-read (SPEC §6 step 4): the bars say so
-        // until a run finishes after `since`, or for a minute.
-        reread.start({
-          label: readingLabel(question.projectName),
-          since,
-          tick: async () => (busy.current ? null : ((await load())?.lastRunAt ?? null)),
-        });
       } else if (res.status === 409) {
         setReceipt("That question was already answered.");
+        setActivity({ ...started, status: "done" });
       } else if (res.status === 404) {
         setReceipt("That question is gone.");
+        setActivity({ ...started, status: "done" });
       } else if (res.status === 503) {
         // The model could not read the words. Nothing was written, and they
-        // stay in the field for another try.
-        setReceipt(null);
+        // stay in the field for another try. The server says why when it
+        // can (the model has no credits).
+        setActivity({ ...started, status: "done" });
         setAnswered(null);
-        setError("Could not read that right now, try again.");
+        setError((reply && "error" in reply && reply.error) || "Could not read that right now, try again.");
         return;
       } else {
-        setReceipt(null);
+        setActivity({ ...started, status: "done" });
         setAnswered(null);
         setError("That answer could not be applied.");
         return;
@@ -281,7 +287,7 @@ export function InterviewView({
       setEvidenceOpen(false);
       setSkipped((s) => s.filter((id) => id !== question.id));
     } catch {
-      setReceipt(null);
+      setActivity({ ...started, status: "done" });
       setAnswered(null);
       setError("Could not reach the server.");
     } finally {
@@ -327,11 +333,19 @@ export function InterviewView({
     if (next && !busy.current) void load(next.id);
   };
 
+  /**
+   * "Ask me more": the strip is the progress (the server publishes each
+   * project as the reading goes), and the line under the pills is the
+   * summary once it is done. A reading the server refused (the model has no
+   * credits) is said in the strip's failed state and in the error line.
+   */
   const askMore = async () => {
     busy.current = true;
     setReading(true);
     setError(null);
     setStatus(null);
+    const started: StripActivity = { line: "Reading your projects", startedAt: Date.now() };
+    setActivity(started);
     const before = data.lastRunAt;
     let answered = false;
     try {
@@ -339,11 +353,20 @@ export function InterviewView({
       const body = (await res.json().catch(() => null)) as
         | { ran?: number; failed?: number; questionsCreated?: number; error?: string }
         | null;
-      if (res.ok && body) {
+      if (res.ok && body && !body.error) {
         answered = true;
         setStatus(readInWords(body));
+        setActivity({ ...started, status: "done" });
       } else {
-        setError(body?.error ?? "The reading did not finish.");
+        // Refused (409, the quota), or every project failed and the models
+        // are the reason: the route then answers 200 with the numbers and
+        // `error` set to the provider's line ("Reading is paused: the model
+        // has no credits."). Either way the reading is over, the line says
+        // why, and the strip shows it in the failed state with the way out.
+        answered = Boolean(res.ok && body);
+        const why = body?.error ?? "The reading did not finish.";
+        setError(why);
+        setActivity({ ...started, line: why, status: "failed" });
       }
     } catch {
       // No response at all: the request was cut while the run went on (see
@@ -358,6 +381,7 @@ export function InterviewView({
       if (!answered && next && next.lastRunAt !== before) {
         setError(null);
         setStatus(next.total > 0 ? null : "Read your projects; nothing new to ask.");
+        setActivity({ ...started, status: "done" });
       }
     } finally {
       busy.current = false;
@@ -378,6 +402,10 @@ export function InterviewView({
       </p>
 
       {error && <ErrorNote>{error}</ErrorNote>}
+
+      {/* What Secretary is doing with the data, above the question it bears
+          on, and the progress of "Ask me more" when there is none. */}
+      <ThinkingStrip activity={activity} />
 
       {current ? (
         <>
@@ -464,22 +492,13 @@ export function InterviewView({
               ))}
           </section>
 
-          {/* What the answer did, then the re-read under way: the 15px
-              secondary line under the card, 12px apart, as on Today. */}
-          {(receipt || reread.label) && (
-            <div className="-mt-1 flex flex-col gap-3">
-              {receipt && (
-                <p
-                  role="status"
-                  aria-live="polite"
-                  data-receipt
-                  className="px-1 text-[15px] leading-[1.4] text-faint wrap-anywhere"
-                >
-                  {receipt}
-                </p>
-              )}
-              {reread.label && <Thinking label={reread.label} />}
-            </div>
+          {/* What the answer did: the 15px secondary line under the card,
+              12px apart, as on Today, once the reply has landed. The strip
+              above announces the phases, so this is not a live region twice. */}
+          {receipt && (
+            <p data-receipt className="-mt-1 px-1 text-[15px] leading-[1.4] text-faint wrap-anywhere">
+              {receipt}
+            </p>
           )}
 
           <button
@@ -494,9 +513,10 @@ export function InterviewView({
         </>
       ) : (
         <section data-testid="interview-empty" className="flex flex-col gap-3">
-          {(reading || status) && (
-            <p className="px-1 text-[15px] leading-[1.4] text-faint wrap-anywhere" data-reading aria-live="polite">
-              {reading ? "Reading your projects…" : status}
+          {/* The summary once a reading is done; while it runs, the strip is the progress. */}
+          {status && (
+            <p className="px-1 text-[15px] leading-[1.4] text-faint wrap-anywhere" data-reading>
+              {status}
             </p>
           )}
           {/* The mockup's two pills across the screen: the filled one is the

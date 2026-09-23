@@ -56,11 +56,17 @@ test("Today, writing an answer", async ({ page }) => {
 });
 
 test("Today, thinking", async ({ page }) => {
-  // ?thinking=open shows the bars under the hero as if a project were being
-  // re-read, with nothing polled and nothing sent (components/today/
-  // today-view.tsx useThinkingFromUrl), so the line is in the pictures
-  // without a model to answer with.
+  // ?thinking=open shows the strip above the hero in its active state, as if
+  // a project were being read, with nothing polled and nothing sent
+  // (components/today/thinking-strip.tsx), so the bars and the line are in
+  // the pictures without a model to answer with.
   await shoot(page, "/today?thinking=open", "today-thinking");
+});
+
+test("Today, reading failed", async ({ page }) => {
+  // ?thinking=failed shows the strip's failed state: the line in the warn
+  // tone, why, and the way to fix it as a link to Settings.
+  await shoot(page, "/today?thinking=failed", "today-reading-failed");
 });
 
 test("A question, opened", async ({ page }) => {

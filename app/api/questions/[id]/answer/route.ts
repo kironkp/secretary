@@ -37,9 +37,6 @@ const STATUS: Record<AnswerResult["status"], number> = {
   "not-open": 409,
 };
 
-/** What the client shows when the words could not be read; the field keeps the text. */
-const UNREADABLE = "Could not read that right now";
-
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const user = await requireSession();
   if (isErrorResponse(user)) return user;
@@ -58,10 +55,15 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       result = await answerInOwnWords(user.id, user.timezone, id, parsed.text, parsed.source);
     } catch (e) {
       // No model, a model error, or output that was not an interpretation:
-      // nothing was written, and the honest answer is "try again", not 500.
+      // nothing was written, and the honest answer is why, not 500. The
+      // error's message is the user's line (the provider's when reading is
+      // paused, else "Could not read that right now."); the field keeps the
+      // text. What actually happened goes to the log.
       if (!(e instanceof InterpretError)) throw e;
-      console.error(`understanding: could not read an answer in the user's words: ${e.message}`);
-      return NextResponse.json({ error: UNREADABLE }, { status: 503 });
+      console.error(
+        `understanding: could not read an answer in the user's words: ${e.message}${e.detail ? ` (${e.detail})` : ""}`
+      );
+      return NextResponse.json({ error: e.message }, { status: 503 });
     }
   } else {
     result = await answerQuestion(

@@ -97,11 +97,22 @@ export function anthropic(): Anthropic {
 const userClients = new Map<string, Anthropic>();
 
 /**
- * The multi-user resolution: the user's connected Claude account first, then
- * the house key, else null (caller falls back to its OpenAI path). Site login
- * and Claude connection are separate layers — see connectedAccounts schema.
+ * Which key a call goes out on: the house key from the environment, or a
+ * connected account's key named by its 4-char tail (never the key itself).
+ * Provider health (lib/understanding/provider-health.ts) remembers failures
+ * per key, so a house key over its cap says nothing about a connected one.
  */
-export async function anthropicFor(userId: string): Promise<Anthropic | null> {
+export type KeySource = "house" | `connected:${string}`;
+
+/**
+ * The multi-user resolution with the key it landed on: the user's connected
+ * Claude account first, then the house key, else null (caller falls back to
+ * its OpenAI path). Site login and Claude connection are separate layers —
+ * see connectedAccounts schema.
+ */
+export async function anthropicClientFor(
+  userId: string
+): Promise<{ client: Anthropic; source: KeySource } | null> {
   const { db } = await import("@/lib/db");
   const { connectedAccounts } = await import("@/lib/db/schema");
   const { and, eq } = await import("drizzle-orm");
@@ -111,18 +122,24 @@ export async function anthropicFor(userId: string): Promise<Anthropic | null> {
     .where(and(eq(connectedAccounts.userId, userId), eq(connectedAccounts.provider, "anthropic")))
     .limit(1);
   if (row) {
+    const source: KeySource = `connected:${row.keyTail}`;
     const cached = userClients.get(row.id);
-    if (cached) return cached;
+    if (cached) return { client: cached, source };
     const { decryptSecret } = await import("@/lib/crypto");
     try {
       const c = new Anthropic({ apiKey: decryptSecret(row.encryptedKey) });
       userClients.set(row.id, c);
-      return c;
+      return { client: c, source };
     } catch {
       // corrupt/undecryptable row — fall through to the house key
     }
   }
-  return process.env.ANTHROPIC_API_KEY ? anthropic() : null;
+  return process.env.ANTHROPIC_API_KEY ? { client: anthropic(), source: "house" } : null;
+}
+
+/** anthropicClientFor without the key's name: the client, or null. */
+export async function anthropicFor(userId: string): Promise<Anthropic | null> {
+  return (await anthropicClientFor(userId))?.client ?? null;
 }
 
 /** Invalidate the per-user client cache after connect/disconnect. */

@@ -252,7 +252,7 @@ describe("runProject on the duplicate-CPO scenario", () => {
     expect((await recordRow()).version).toBe(3);
   });
 
-  it("(7) a model that fails twice leaves the record untouched and logs the failure", async () => {
+  it("(7) a model that fails every attempt leaves the record untouched and logs the failure", async () => {
     const before = await recordRow();
     const broken = fakeModel((bundle) => {
       const out = validOutputFor(bundle, ids);
@@ -283,7 +283,7 @@ describe("runProject on the duplicate-CPO scenario", () => {
     expect(result.status).toBe("failed");
     if (result.status !== "failed") return;
     expect(result.errors.join("\n")).toContain("not-a-real-task");
-    expect(broken.calls).toHaveLength(2);
+    expect(broken.calls).toHaveLength(3);
     expect(broken.calls[1].previousErrors.join("\n")).toContain("not-a-real-task");
     // SPEC §4: second failure -> keep the previous record, log ONE line, move on.
     expect(logged).toBe(1);
@@ -658,11 +658,11 @@ describe("the backoff after a failed run is for the validator's failures only", 
       if (first.status !== "failed") return;
       // Marked as the provider's, apart from the validator's.
       expect(first.errors).toEqual(["model: 429 no credits"]);
-      expect(throwing.calls).toHaveLength(2);
+      expect(throwing.calls).toHaveLength(3);
 
       const second = await sweepRun(throwing);
       expect(second.status).toBe("failed");
-      expect(throwing.calls).toHaveLength(4);
+      expect(throwing.calls).toHaveLength(6);
     } finally {
       errorSpy.mockRestore();
     }
@@ -672,7 +672,7 @@ describe("the backoff after a failed run is for the validator's failures only", 
     expect(rows[1].errors).toEqual(["model: 429 no credits"]);
   });
 
-  it("a model whose output fails validation twice is not called again on the same inputs within six hours", async () => {
+  it("a model whose output fails validation on every attempt is not called again on the same inputs within six hours", async () => {
     const broken = fakeModel((bundle) => {
       const out = minimalOutputFor(bundle);
       return {
@@ -696,12 +696,12 @@ describe("the backoff after a failed run is for the validator's failures only", 
       if (first.status !== "failed") return;
       expect(first.errors.join("\n")).toContain("not-a-real-task");
       expect(first.errors.some((e) => e.startsWith("model: "))).toBe(false);
-      expect(broken.calls).toHaveLength(2);
+      expect(broken.calls).toHaveLength(3);
 
       // The sweep again: same inputs, same rejection expected, no call.
       const second = await sweepRun(broken);
       expect(second).toEqual({ status: "skipped", reason: "backoff" });
-      expect(broken.calls).toHaveLength(2);
+      expect(broken.calls).toHaveLength(3);
 
       // A person pressing "Understand now" is asking to try now.
       const forced = await runProject(U.id, projectId, {
@@ -712,7 +712,7 @@ describe("the backoff after a failed run is for the validator's failures only", 
         force: true,
       });
       expect(forced.status).toBe("failed");
-      expect(broken.calls).toHaveLength(4);
+      expect(broken.calls).toHaveLength(6);
     } finally {
       errorSpy.mockRestore();
     }
@@ -750,7 +750,8 @@ describe("the backoff after a failed run is for the validator's failures only", 
       const first = await sweepRun(mixed);
       expect(first.status).toBe("failed");
       if (first.status !== "failed") return;
-      expect(mixed.calls).toHaveLength(2);
+      // Every attempt was spent: the first at the provider, the rest refused.
+      expect(mixed.calls).toHaveLength(3);
       // The log keeps the provider failure beside the validator's lines.
       expect(first.errors[0]).toBe("model: 429 no credits");
       expect(first.errors.some((e) => e.includes("not-a-real-task"))).toBe(true);
@@ -758,7 +759,7 @@ describe("the backoff after a failed run is for the validator's failures only", 
       // The model did answer on these inputs and was refused: no call.
       const second = await sweepRun(mixed);
       expect(second).toEqual({ status: "skipped", reason: "backoff" });
-      expect(mixed.calls).toHaveLength(2);
+      expect(mixed.calls).toHaveLength(3);
     } finally {
       errorSpy.mockRestore();
     }

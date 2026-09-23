@@ -337,8 +337,11 @@ a fact; it never proposes a write, so §5's closed list holds here too.
   and then the writes that went through, when there were any beyond the
   memory.
 - The model unreachable, or its output not an interpretation: 503
-  `{ error: "Could not read that right now" }`, nothing written, and the
-  screen keeps the words in the field.
+  `{ error }`, nothing written, and the screen keeps the words in the
+  field. The error is the provider's line when reading is paused (§8,
+  "Reading is paused: the model has no credits.") and otherwise "Could not
+  read that right now."; what actually happened goes to the log, never to
+  the screen.
 
 Voice: one new tool, `answer_question`, flat schema, bounded strings:
 
@@ -459,7 +462,46 @@ write site to say the same thing less reliably.
   hash it read, the model, the tokens, and how it ended (`ok`, `failed` with
   the validator's errors, or `skipped` with the reason). The one exception
   is a hash match, which is the sweep's normal state and would drown the
-  rows that matter.
+  rows that matter. A provider's own failure is logged as
+  `model: <provider>: <what it said>` ("model: openai: 429 You have no
+  credits remaining…"), so the row says which key refused and why.
+- **The screen sees the run** (`lib/understanding/progress.ts`, `GET
+  /api/understanding/progress`). A run that does not skip publishes each
+  phase to an in-process channel keyed by user and project — `queued`
+  ("Waiting to read Caltrans", a follow-up behind a run in flight),
+  `gathering` ("Reading Caltrans" — "4 tasks, 4 messages, 2 memories"),
+  `reading` ("Thinking with Claude Sonnet 5" — "attempt 2 of 2" on the
+  retry), `checking` ("Checking what it wrote"), `storing` ("Writing the
+  record") — and finishes as `ok` ("Read Caltrans" — "2 new questions, 1
+  updated", or "nothing new to ask") or `failed` ("Could not read Caltrans"
+  — "the model has no credits", "the Claude limit resets on October 1",
+  "the model's answer did not check out"), with a reason (`no-credits`,
+  `capped`, `auth`, `validation`, `other`). Finished runs stay five minutes,
+  twenty per user; a skip publishes nothing; a run that throws still ends
+  its entry. The route returns the snapshot, the newest ok-or-failed run
+  row worded the same way (so a fresh dyno has something true to say), and
+  the provider object below. Every line is authored on the server.
+- **Provider health** (`lib/understanding/provider-health.ts`). Every
+  model call the loop makes goes through `callByProvider` (run.ts), which
+  notes each key's last outcome in a per-process memory: a 400 "usage
+  limits… regain access on 2026-10-01" is `capped` until that day, a 429
+  "no credits" is `no-credits`, a 401 is `auth`, a timeout or a refusal
+  says nothing. The chat and voice routes note theirs too. `providerHealth`
+  reads the memory for the key the user would use — or, when the process
+  has no note for it, the newest run rows — and says whether reading can
+  happen (`ok`: at least one allowed provider with a key and no known
+  reason to fail) and, when not, why and what to do: "Reading is paused:
+  the Claude limit resets on October 1 and OpenAI has no credits." / "Add
+  credits, raise the limit, or connect your own key in Settings." That
+  line is what the answer route's 503, the interview's "Ask me more" and
+  Settings show; the memory is per key, so the house key over its cap says
+  nothing about a key the user connected.
+- **Connected keys.** The run, the one-sentence read (§6) and the chat use
+  the user's connected Anthropic key when there is one, else the house key
+  (`anthropicClientFor`), and the user's connected OpenAI key, else the
+  house key (`openaiClientFor`; the voice token is minted the same way).
+  The hour-long preference for OpenAI after a Claude failure is per Claude
+  key for the same reason.
 
 Cost on today's data: 8 projects, 45 open tasks, 85 memories, 212 user
 messages. A bundle is 5–15k tokens; the daily re-run is 8 calls; a busy day

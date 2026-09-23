@@ -81,6 +81,33 @@ describe("withFallback", () => {
     const secondary: ModelCall = async () => result("secondary");
     await expect(withFallback(primary, secondary)(input)).resolves.toEqual(result("secondary"));
   });
+
+  it("with the secondary preferred and closed, the primary answers and the preference is reported wrong", async () => {
+    const primary = vi.fn<ModelCall>(async () => result("primary"));
+    const secondary = vi.fn<ModelCall>(async () => {
+      throw new Error("429 no credits");
+    });
+    const onFallback = vi.fn();
+    const onRecovered = vi.fn();
+    const call = withFallback(primary, secondary, onFallback, () => true, onRecovered);
+
+    await expect(call(input)).resolves.toEqual(result("primary"));
+    expect(secondary).toHaveBeenCalledTimes(1);
+    expect(primary).toHaveBeenCalledTimes(1);
+    expect(onFallback).not.toHaveBeenCalled();
+    expect(onRecovered).toHaveBeenCalledTimes(1);
+    expect((onRecovered.mock.calls[0][0] as Error).message).toBe("429 no credits");
+  });
+
+  it("with the secondary preferred and both closed, the primary's error is the one thrown", async () => {
+    const primary: ModelCall = async () => {
+      throw new Error("claude down");
+    };
+    const secondary: ModelCall = async () => {
+      throw new Error("openai down");
+    };
+    await expect(withFallback(primary, secondary, undefined, () => true)(input)).rejects.toThrow("claude down");
+  });
 });
 
 // The choice interpret.ts shares with the run, on a call shape of its own:

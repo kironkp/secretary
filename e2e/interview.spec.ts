@@ -12,6 +12,9 @@ import { E2E_QUESTION } from "./global-setup";
 
 const card = (page: Page) => page.getByTestId("interview");
 const tabs = (page: Page) => page.locator('nav[aria-label="Sections"] a');
+/** The thinking strip above the card (components/today/thinking-strip.tsx) and its main line. */
+const strip = (page: Page) => page.locator("[data-thinking-strip]");
+const stripLine = (page: Page) => strip(page).locator("[data-line]");
 
 async function questionStatus(page: Page): Promise<string> {
   const res = await page.request.get(`/api/questions/${E2E_QUESTION.id}`);
@@ -110,6 +113,24 @@ test.describe("the Interview", () => {
     );
   });
 
+  test("the thinking strip sits above the card", async ({ page }) => {
+    // The same strip as Today's, in the same place: one quiet card above the
+    // question, saying where the reading stands, with a phase the tests read.
+    await expect(strip(page)).toBeVisible();
+    await expect(strip(page)).toHaveAttribute("data-phase", /^(idle|active|failed|paused)$/);
+    await expect(stripLine(page)).toHaveAttribute("role", "status");
+    const s = await strip(page).boundingBox();
+    const c = await card(page).boundingBox();
+    expect(s).not.toBeNull();
+    expect(c).not.toBeNull();
+    expect(s!.y + s!.height).toBeLessThanOrEqual(c!.y);
+    // Idle, it is a slim card: two lines, never a second hero. (Paused or
+    // failed it carries the way out as a third line, so only idle is measured.)
+    if ((await strip(page).getAttribute("data-phase")) === "idle") {
+      expect(s!.height).toBeLessThanOrEqual(72);
+    }
+  });
+
   test("the evidence opens on a tap and shows both tasks by their real titles", async ({ page }) => {
     await page.locator("[data-evidence-toggle]").click();
     await expect(page.locator("[data-evidence-toggle]")).toHaveAttribute("aria-expanded", "true");
@@ -179,13 +200,13 @@ test.describe("the Interview", () => {
     await note.press("Enter");
 
     // The receipt is the server's reply, said back, on the status line under
-    // the card, with the thinking bars under it while the project is re-read.
-    // The question is exactly as open as it was: the answer never left the
-    // browser, so the queue still leads with it and the card stays.
-    await expect(page.getByText("Got it. Noted.")).toBeVisible();
+    // the card, and on the strip above it, live, until the server says what
+    // it is doing with the answer. The question is exactly as open as it
+    // was: the answer never left the browser, so the queue still leads with
+    // it and the card stays.
     await expect(page.locator("[data-receipt]")).toHaveText("Got it. Noted.");
-    await expect(page.locator("[data-thinking]")).toBeVisible();
-    await expect(page.locator("[data-thinking]")).toContainText("Reading E2E Project…");
+    await expect(strip(page)).toHaveAttribute("data-phase", "active");
+    await expect(stripLine(page)).toHaveAttribute("data-line", "Got it. Noted.");
     expect(posted).toEqual({ text: words, source: "interview" });
     expect(await questionStatus(page)).toMatch(/^(open|asked)$/);
     await expect(card(page)).toHaveAttribute("data-question-id", E2E_QUESTION.id);

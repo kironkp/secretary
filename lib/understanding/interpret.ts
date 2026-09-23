@@ -20,10 +20,11 @@
 import { z } from "zod";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { writesInWords } from "@/components/today/copy";
-import { anthropicFor } from "@/lib/anthropic";
+import { anthropicClientFor } from "@/lib/anthropic";
 import { recordUsage } from "@/lib/usage";
 import { localDateInTz } from "./gather";
-import { callByProvider } from "./run";
+import { errorMessage, providerLine } from "./provider-health";
+import { callByProvider, type CallMeta } from "./run";
 import type { QuestionView } from "./today";
 
 export type Interpretation = {
@@ -35,22 +36,40 @@ export type Interpretation = {
   reply: string;
 };
 
-export type InterpretCall = (input: { system: string; user: string }) => Promise<{
+export type InterpretCall = ((input: { system: string; user: string }) => Promise<{
   output: unknown;
   model: string;
   inputTokens: number;
   outputTokens: number;
-}>;
+}>) &
+  CallMeta;
 
 /**
  * The text could not be read. Distinguished from every other error so a
- * caller can say "try again" rather than "something broke": nothing has been
- * written when this is thrown.
+ * caller can say why rather than "something broke": nothing has been
+ * written when this is thrown. `message` is the line for the user — the
+ * provider's trouble when that is what it is ("Reading is paused: the
+ * model has no credits."), else UNREADABLE — and `detail` is what actually
+ * happened, for the log.
  */
 export class InterpretError extends Error {
-  constructor(message: string) {
+  readonly detail: string | null;
+  constructor(message: string, opts: { detail?: string } = {}) {
     super(message);
     this.name = "InterpretError";
+    this.detail = opts.detail ?? null;
+  }
+}
+
+/** What the user is told when their words could not be read and no provider is to blame. */
+export const UNREADABLE = "Could not read that right now.";
+
+/** The provider's line when reading is paused, else UNREADABLE. */
+async function unreadableLine(userId: string): Promise<string> {
+  try {
+    return (await providerLine(userId)) ?? UNREADABLE;
+  } catch {
+    return UNREADABLE;
   }
 }
 
@@ -153,10 +172,12 @@ const INTERPRET_JSON_SCHEMA = z.toJSONSchema(interpretationOut) as Record<string
  * short fields about one sentence, and the answer is waiting on it.
  */
 async function claudeInterpretCall(userId: string): Promise<InterpretCall | null> {
-  const client = await anthropicFor(userId);
-  if (!client) return null;
+  const resolved = await anthropicClientFor(userId);
+  if (!resolved) return null;
+  const { client, source } = resolved;
   const model = process.env.UNDERSTANDING_INTERPRET_MODEL ?? DEFAULT_ANTHROPIC_MODEL;
-  return async ({ system, user }) => {
+  const meta: CallMeta = { modelName: model, provider: "anthropic", source };
+  return Object.assign(async ({ system, user }: { system: string; user: string }) => {
     // messages.parse is fine here where run.ts avoids it: this schema has no
     // enums for the wire format to demote, so the SDK's own parse can only
     // fail on a shape the zod check below would refuse anyway.
@@ -167,9 +188,9 @@ async function claudeInterpretCall(userId: string): Promise<InterpretCall | null
       messages: [{ role: "user", content: user }],
       output_config: { effort: "low", format: zodOutputFormat(interpretationOut) },
     });
-    if (response.stop_reason === "refusal") throw new InterpretError("claude refusal");
+    if (response.stop_reason === "refusal") throw new Error("claude refusal");
     if (!response.parsed_output) {
-      throw new InterpretError(`claude structured output missing (stop_reason ${response.stop_reason})`);
+      throw new Error(`claude structured output missing (stop_reason ${response.stop_reason})`);
     }
     return {
       output: response.parsed_output,
@@ -177,21 +198,24 @@ async function claudeInterpretCall(userId: string): Promise<InterpretCall | null
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,
     };
-  };
+  }, meta);
 }
 
 /**
- * OpenAI on the house key, or null without OPENAI_API_KEY.
+ * OpenAI on the user's key (their connected account first, then the house
+ * key; lib/openai.ts openaiClientFor), or null with neither.
  * UNDERSTANDING_INTERPRET_OPENAI_MODEL names the model, as
  * UNDERSTANDING_OPENAI_MODEL does for the run.
  */
-async function openaiInterpretCall(): Promise<InterpretCall | null> {
-  if (!process.env.OPENAI_API_KEY) return null;
-  // Lazy: lib/openai.ts builds its client at import time, and this module
-  // must stay importable with no key at all.
-  const { openai } = await import("@/lib/openai");
+async function openaiInterpretCall(userId: string): Promise<InterpretCall | null> {
+  // Lazy: lib/openai.ts builds the house client at import time.
+  const { openaiClientFor } = await import("@/lib/openai");
+  const resolved = await openaiClientFor(userId);
+  if (!resolved) return null;
+  const { client: openai, source } = resolved;
   const model = process.env.UNDERSTANDING_INTERPRET_OPENAI_MODEL ?? DEFAULT_OPENAI_MODEL;
-  return async ({ system, user }) => {
+  const meta: CallMeta = { modelName: model, provider: "openai", source };
+  return Object.assign(async ({ system, user }: { system: string; user: string }) => {
     const response = await openai.responses.create({
       model,
       instructions: system,
@@ -214,13 +238,13 @@ async function openaiInterpretCall(): Promise<InterpretCall | null> {
     if (!text.trim()) {
       // Named, so a response cut short is logged as what it is.
       const why = response.incomplete_details?.reason ?? response.status ?? "no status";
-      throw new InterpretError(`openai returned no text (${why})`);
+      throw new Error(`openai returned no text (${why})`);
     }
     let output: unknown;
     try {
       output = JSON.parse(text);
     } catch (e) {
-      throw new InterpretError(`openai output is not JSON: ${e instanceof Error ? e.message : String(e)}`);
+      throw new Error(`openai output is not JSON: ${e instanceof Error ? e.message : String(e)}`);
     }
     return {
       output,
@@ -228,7 +252,7 @@ async function openaiInterpretCall(): Promise<InterpretCall | null> {
       inputTokens: response.usage?.input_tokens ?? 0,
       outputTokens: response.usage?.output_tokens ?? 0,
     };
-  };
+  }, meta);
 }
 
 /**
@@ -238,19 +262,26 @@ async function openaiInterpretCall(): Promise<InterpretCall | null> {
  * key on one side does not turn every typed answer into "try again" while
  * the run next to it keeps working. Under vitest and with
  * UNDERSTANDING_DISABLED there is no default: a test passes its own call,
- * and a disabled loop reads nothing.
+ * and a disabled loop reads nothing. With no model at all the error's line
+ * is the provider's (no key, or every key refused), so the user hears why.
  */
 async function defaultInterpretCall(userId: string): Promise<InterpretCall> {
-  if (process.env.VITEST) throw new InterpretError("no interpret model under vitest; pass a call");
+  if (process.env.VITEST) {
+    throw new InterpretError(UNREADABLE, { detail: "no interpret model under vitest; pass a call" });
+  }
   if (process.env.UNDERSTANDING_DISABLED === "true") {
-    throw new InterpretError("understanding is disabled (UNDERSTANDING_DISABLED)");
+    throw new InterpretError(UNREADABLE, { detail: "understanding is disabled (UNDERSTANDING_DISABLED)" });
   }
   const call = await callByProvider(
     () => claudeInterpretCall(userId),
-    () => openaiInterpretCall(),
+    () => openaiInterpretCall(userId),
     "interpret call"
   );
-  if (!call) throw new InterpretError("no model available: no Claude client and no OPENAI_API_KEY");
+  if (!call) {
+    throw new InterpretError(await unreadableLine(userId), {
+      detail: "no model available: no Claude client and no OpenAI key",
+    });
+  }
   return call;
 }
 
@@ -286,8 +317,13 @@ export async function interpretAnswer(
   try {
     result = await model({ system: INTERPRET_SYSTEM, user });
   } catch (e) {
-    if (e instanceof InterpretError) throw e;
-    throw new InterpretError(`interpret call failed: ${e instanceof Error ? e.message : String(e)}`);
+    // The call itself failed — a rejection, a refusal, no text. The user's
+    // line is the provider's when reading is paused (the memory heard the
+    // failure through callByProvider), else plain; what happened is kept
+    // beside it for the log.
+    throw new InterpretError(await unreadableLine(userId), {
+      detail: `interpret call failed: ${errorMessage(e)}`,
+    });
   }
 
   // Billed before the shape check: a call that came back malformed still cost
@@ -302,11 +338,11 @@ export async function interpretAnswer(
 
   const parsed = interpretationOut.safeParse(result.output);
   if (!parsed.success) {
-    throw new InterpretError(
-      `interpretation has the wrong shape: ${parsed.error.issues
+    throw new InterpretError(UNREADABLE, {
+      detail: `interpretation has the wrong shape: ${parsed.error.issues
         .map((i) => `${i.path.map(String).join(".") || "(root)"}: ${i.message}`)
-        .join("; ")}`
-    );
+        .join("; ")}`,
+    });
   }
 
   const known = new Set(question.answers.map((a) => a.id));

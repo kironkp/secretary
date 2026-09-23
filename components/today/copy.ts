@@ -38,15 +38,21 @@ function joinWords(parts: string[]): string {
   return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
 }
 
-type OpCounts = Partial<Record<Write["op"], number>>;
+/** The ops, plus "unblock": a set_blocked_reason with an empty reason, which clears the blocker. */
+type OpCounts = Partial<Record<Write["op"] | "unblock", number>>;
 
-/** The least a write has to carry to be put into words: its op, and for set_project the project's name. */
-type WordedWrite = { op: string; project?: string };
+/** The least a write has to carry to be put into words: its op, for set_project the project's name, for set_blocked_reason the reason. */
+type WordedWrite = { op: string; project?: string; reason?: string };
 
 function countOps(writes: WordedWrite[]): OpCounts {
   const counts: OpCounts = {};
   for (const w of writes) {
-    const op = w.op as Write["op"];
+    // A reason left out (a test's bare op) still reads as recording one;
+    // only an explicit empty string is the unblock.
+    const op =
+      w.op === "set_blocked_reason" && w.reason !== undefined && w.reason.trim() === ""
+        ? "unblock"
+        : (w.op as Write["op"]);
     counts[op] = (counts[op] ?? 0) + 1;
   }
   return counts;
@@ -86,6 +92,7 @@ export function writesInWords(writes: WordedWrite[]): string {
         : `records why ${c.set_blocked_reason} tasks are stuck`
     );
   }
+  if (c.unblock) parts.push(c.unblock === 1 ? "unblocks it" : `unblocks ${c.unblock} tasks`);
   if (c.set_project) {
     const under = underProject(writes);
     parts.push(c.set_project === 1 ? `files it${under}` : `files ${c.set_project} tasks${under}`);
@@ -114,6 +121,7 @@ export function appliedInWords(applied: WordedWrite[]): string {
   if (c.set_recurrence) {
     parts.push(c.set_recurrence === 1 ? "made it repeat" : `made ${c.set_recurrence} tasks repeat`);
   }
+  if (c.unblock) parts.push(c.unblock === 1 ? "unblocked it" : `unblocked ${c.unblock} tasks`);
   if (c.set_blocked_reason) {
     parts.push(
       c.set_blocked_reason === 1
@@ -199,6 +207,24 @@ export function setAsideInWords(n: number): string | null {
 export function readingLabel(projectName: string | null | undefined): string {
   const name = projectName?.trim();
   return name ? `Reading ${name}…` : "Reading the project…";
+}
+
+/**
+ * How long ago a run finished, for the thinking strip's idle line ("2 new
+ * questions, 12 min ago"). Digits, short units, never rounded up to a lie;
+ * a stamp that does not parse says nothing.
+ */
+export function agoInWords(iso: string, now: number): string {
+  const at = Date.parse(iso);
+  if (!Number.isFinite(at)) return "";
+  const seconds = Math.max(0, Math.floor((now - at) / 1000));
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${plural(hours, "hour", "hours")} ago`;
+  const days = Math.floor(hours / 24);
+  return days === 1 ? "yesterday" : `${days} days ago`;
 }
 
 /**

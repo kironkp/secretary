@@ -7,6 +7,7 @@
 import { NextResponse } from "next/server";
 import { isErrorResponse, requireSession } from "@/lib/api";
 import { checkUnderstandNowQuota } from "@/lib/rate-limit";
+import { providerHealth } from "@/lib/understanding/provider-health";
 import { runAll, runInFlight } from "@/lib/understanding/run";
 import { tallyResults, understandingDisabled } from "@/lib/understanding/sweep";
 
@@ -45,5 +46,20 @@ export async function POST() {
       n + (r.status === "ok" ? r.questions.created.length + r.questions.reopened.length : 0),
     0
   );
+  // Every project failed and the models are the reason: say so, and what to
+  // do, rather than report a reading that found nothing to ask. Still 200:
+  // the numbers are real.
+  if (ran === 0 && failed > 0) {
+    const health = await providerHealth(user.id);
+    if (!health.ok) {
+      return NextResponse.json({
+        ran,
+        failed,
+        questionsCreated,
+        error: health.line,
+        action: health.action,
+      });
+    }
+  }
   return NextResponse.json({ ran, failed, questionsCreated });
 }

@@ -369,14 +369,22 @@ describe("answerInOwnWords", () => {
       throw new Error("429 rate limited");
     };
     await expect(answerInOwnWords(U.id, TZ, q.throws, "close it", "today", call)).rejects.toBeInstanceOf(InterpretError);
-    await expect(answerInOwnWords(U.id, TZ, q.throws, "close it", "today", call)).rejects.toThrow("429 rate limited");
+    // The message is the user's line; what the call said rides in `detail`
+    // for the log (lib/understanding/interpret.ts InterpretError).
+    const thrown = await answerInOwnWords(U.id, TZ, q.throws, "close it", "today", call).catch((e) => e);
+    expect(thrown).toBeInstanceOf(InterpretError);
+    expect((thrown as InterpretError).message).toBe("Could not read that right now.");
+    expect((thrown as InterpretError).detail).toContain("429 rate limited");
     expect(await questionRow(q.throws)).toEqual({ status: "open", resolution: null });
     expect((await memoryRows()).some((m) => m.fact === "close it")).toBe(false);
   });
 
   it("(8) output that is not an interpretation is an InterpretError too, after the call is billed", async () => {
     const call = fakeCall({ answer: "close-both" });
-    await expect(answerInOwnWords(U.id, TZ, q.shape, "close it", "today", call)).rejects.toThrow(/wrong shape/);
+    const thrown = await answerInOwnWords(U.id, TZ, q.shape, "close it", "today", call).catch((e) => e);
+    expect(thrown).toBeInstanceOf(InterpretError);
+    expect((thrown as InterpretError).message).toBe("Could not read that right now.");
+    expect((thrown as InterpretError).detail).toMatch(/wrong shape/);
     expect(await questionRow(q.shape)).toEqual({ status: "open", resolution: null });
     const billed = await db.select({ model: usage.model }).from(usage).where(eq(usage.userId, U.id));
     expect(billed.filter((b) => b.model === "fake-interpret").length).toBeGreaterThanOrEqual(2);
@@ -489,7 +497,9 @@ describe("POST /api/questions/[id]/answer with text", () => {
     // Nothing scripted: no model under vitest, as with no key in production.
     const res = await post(q.route, { text: "not until Marissa signs", source: "today" });
     expect(res.status).toBe(503);
-    expect(await res.json()).toEqual({ error: "Could not read that right now" });
+    // Under vitest no provider has failed, so the line is the plain one, not
+    // the provider's ("Reading is paused: …", lib/understanding/provider-health.ts).
+    expect(await res.json()).toEqual({ error: "Could not read that right now." });
     expect(await questionRow(q.route)).toEqual({ status: "asked", resolution: null });
     expect((await memoryRows()).some((m) => m.fact === "not until Marissa signs")).toBe(false);
     expect(scheduled.calls).toEqual([]);

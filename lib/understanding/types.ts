@@ -135,7 +135,10 @@ export const writeSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("drop_task"), taskId }),
   z.object({ op: z.literal("set_due"), taskId, dueAt: isoDateOrDateTime }),
   z.object({ op: z.literal("set_recurrence"), taskId, recurrence: z.enum(RECURRENCES) }),
-  z.object({ op: z.literal("set_blocked_reason"), taskId, reason: z.string().min(1).max(300) }),
+  // An empty reason unblocks the task (status back to todo, no blocker): the
+  // model reaches for it that way ("Just unblock it"), and there is no
+  // other op for it.
+  z.object({ op: z.literal("set_blocked_reason"), taskId, reason: z.string().max(300) }),
   // A project NAME, not an id: the bundle names one project, and the task
   // tools already resolve a name the way a spoken "file it under Caltrans"
   // is resolved (lib/secretary/tools.ts update_task), so an answer and a

@@ -1531,8 +1531,10 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         outcome = await answerInOwnWords(ctx.userId, ctx.timezone, a.question_id, a.own_words, "voice");
       } catch (e) {
         if (!(e instanceof InterpretError)) throw e;
+        // The error's message is the user's line: plain, or the provider's
+        // when reading is paused, so the secretary can say why.
         return {
-          result: { error: "Could not read that right now; offer the listed answers or try again" },
+          result: { error: `${e.message} Offer the listed answers, or try again.` },
         };
       }
     } else {

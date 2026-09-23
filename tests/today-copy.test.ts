@@ -55,6 +55,9 @@ describe("what an answer will write", () => {
     expect(writesInWords([{ op: "set_due" }])).toBe("sets a date");
     expect(writesInWords([{ op: "set_recurrence" }])).toBe("makes it repeat");
     expect(writesInWords([{ op: "set_blocked_reason" }])).toBe("records why it is stuck");
+    // An empty reason is the unblock, in both tenses.
+    expect(writesInWords([{ op: "set_blocked_reason", reason: "" }])).toBe("unblocks it");
+    expect(appliedInWords([{ op: "set_blocked_reason", reason: "" }])).toBe("Unblocked it");
     expect(writesInWords([{ op: "remember_fact" }])).toBe("remembers a fact");
     expect(writesInWords([{ op: "clear_expectation" }])).toBe("clears a follow-up");
   });

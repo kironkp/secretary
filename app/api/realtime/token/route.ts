@@ -14,6 +14,7 @@ import { buildLexicon, lexiconPrompt } from "@/lib/secretary/lexicon";
 import { buildInstructions, VOICE_MODALITY_RULES } from "@/lib/secretary/persona";
 import { openAIVoiceToolDefs } from "@/lib/secretary/tool-schemas";
 import {
+  openaiKeyFor,
   REALTIME_MODEL_DEFAULT,
   REALTIME_MODEL_MINI,
   REALTIME_TRANSCRIBE_MODEL,
@@ -21,6 +22,12 @@ import {
   REALTIME_VOICES,
   TRANSCRIBE_LANGUAGE,
 } from "@/lib/openai";
+import { noteProviderFailure, noteProviderOk } from "@/lib/understanding/provider-health";
+
+/** What the client shows when OpenAI refuses to start a session; the reason decides which. */
+const VOICE_NEEDS_CREDITS = "Voice needs OpenAI credits. Add credits or connect your own key in Settings.";
+const VOICE_NEEDS_KEY = "Voice needs a working OpenAI key. Check the key in Settings.";
+const VOICE_NO_KEY = "Voice needs an OpenAI key. Connect one in Settings.";
 
 const bodySchema = z.object({
   model: z.string().optional(),
@@ -82,6 +89,10 @@ export async function POST(req: Request) {
   if (!quota.ok) {
     return NextResponse.json({ error: quota.message }, { status: quota.status });
   }
+  // The secret is minted on the user's connected OpenAI key when they have
+  // one, else the house key; the key itself never leaves this server.
+  const key = await openaiKeyFor(user.id);
+  if (!key) return NextResponse.json({ error: VOICE_NO_KEY }, { status: 502 });
   if (!conversationId) {
     const [conv] = await db
       .insert(conversations)
@@ -128,7 +139,7 @@ export async function POST(req: Request) {
   const res = await fetch("https://api.openai.com/v1/realtime/client_secrets", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      Authorization: `Bearer ${key.apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -168,11 +179,22 @@ export async function POST(req: Request) {
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     console.error("client_secrets failed:", res.status, detail.slice(0, 500));
+    // OpenAI refusing the key is the same fact for every surface: the
+    // provider memory hears it (Settings and the progress line say so), and
+    // the user hears what to do rather than "try again".
+    if (res.status === 429 || res.status === 401 || res.status === 403) {
+      noteProviderFailure("openai", `${res.status} ${detail.slice(0, 500)}`, key.source);
+      return NextResponse.json(
+        { error: res.status === 429 ? VOICE_NEEDS_CREDITS : VOICE_NEEDS_KEY },
+        { status: 502 }
+      );
+    }
     return NextResponse.json(
       { error: "Couldn't start a voice session. Try again in a moment." },
       { status: 502 }
     );
   }
+  noteProviderOk("openai", key.source);
   const secret = (await res.json()) as { value: string };
 
   let usageId = reuseUsageId;

@@ -14,9 +14,15 @@ import { buildInstructions } from "@/lib/secretary/persona";
 import { openAIToolDefs } from "@/lib/secretary/tool-schemas";
 import { executeTool, type ToolOutcome } from "@/lib/secretary/tools";
 import { runExtraction } from "@/lib/secretary/extraction";
-import { openai, TEXT_MODEL } from "@/lib/openai";
-import { anthropicFor, chatProvider, chatSettings, claudeBrainEnabled } from "@/lib/anthropic";
+import { openaiClientFor, TEXT_MODEL } from "@/lib/openai";
+import { anthropicClientFor, chatProvider, chatSettings, claudeBrainEnabled } from "@/lib/anthropic";
 import { runClaudeChat } from "@/lib/secretary/chat-claude";
+import {
+  errorMessage,
+  noteProviderFailure,
+  noteProviderOk,
+  outageLine,
+} from "@/lib/understanding/provider-health";
 import { recordUsage } from "@/lib/usage";
 import {
   openAIAttachmentBlocks,
@@ -129,10 +135,11 @@ export async function POST(req: Request) {
   // key — the user's connected account first, then the house key; without
   // either the turn quietly runs the OpenAI default.
   const chip = await chatSettings(user.id);
-  const claudeClient =
+  const claudeResolved =
     chatProvider(chip.model) === "anthropic" && claudeBrainEnabled()
-      ? await anthropicFor(user.id)
+      ? await anthropicClientFor(user.id)
       : null;
+  const claudeClient = claudeResolved?.client ?? null;
   const useClaude = Boolean(claudeClient);
   const openAIModel = chatProvider(chip.model) === "openai" ? chip.model : TEXT_MODEL;
   const openAIEffort = chatProvider(chip.model) === "openai" ? chip.effort : undefined;
@@ -201,6 +208,7 @@ export async function POST(req: Request) {
       totalOut = result.outputTokens;
       servedBy = chip.model;
       claudeServed = true;
+      noteProviderOk("anthropic", claudeResolved?.source);
       // Claude turns aren't in OpenAI's server-side chain — force the next
       // OpenAI turn to replay history instead of resuming a stale id.
       await db
@@ -217,12 +225,25 @@ export async function POST(req: Request) {
           : "claude chat failed, falling back to openai:",
         e instanceof Error ? e.message : e
       );
+      // The provider memory hears it, so Settings and the progress line can
+      // say the key is capped or refused, whichever surface saw it first.
+      noteProviderFailure("anthropic", errorMessage(e), claudeResolved?.source);
     }
   }
 
+  // The user's connected OpenAI key first, then the house key. With neither
+  // and no Claude turn served there is nothing to answer with.
+  const gpt = claudeServed ? null : await openaiClientFor(user.id);
+  if (!claudeServed && !gpt) {
+    return NextResponse.json(
+      { error: "The secretary has no OpenAI key. Connect one in Settings." },
+      { status: 502 }
+    );
+  }
+
   try {
-    for (let round = 0; !claudeServed && round < MAX_TOOL_ROUNDS; round++) {
-      const response = await openai.responses.create({
+    for (let round = 0; !claudeServed && gpt && round < MAX_TOOL_ROUNDS; round++) {
+      const response = await gpt.client.responses.create({
         model: openAIModel,
         instructions,
         input: input as never,
@@ -263,10 +284,19 @@ export async function POST(req: Request) {
       }
       input = outputs;
     }
+    if (!claudeServed && gpt) noteProviderOk("openai", gpt.source);
   } catch (e) {
-    console.error("chat failed:", e instanceof Error ? e.message : e);
+    const message = errorMessage(e);
+    console.error("chat failed:", message);
+    // When the provider said why — no credits, a cap, a refused key — the
+    // user hears that and what to do, not "try again".
+    const failure = noteProviderFailure("openai", message, gpt?.source);
     return NextResponse.json(
-      { error: "The secretary couldn't respond. Try again." },
+      {
+        error:
+          outageLine("The secretary could not respond", "openai", failure) ??
+          "The secretary couldn't respond. Try again.",
+      },
       { status: 502 }
     );
   }

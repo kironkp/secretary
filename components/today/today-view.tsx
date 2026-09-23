@@ -8,12 +8,14 @@
 // 34px title, 22px question, 15px reasoning, 16px rows, 20px section titles.
 //
 // Answering, as the user feels it: the tapped pill fills and the others fade
-// the moment it is pressed, a line under the card says "Applying…" and then
-// what was applied, the thinking bars come on while the project is re-read,
-// and the next question takes the card's place with the old one fading out
-// and the new one rising in. The page is never rebuilt: every change is a
-// state update on the same tree, keyed by question id, so scroll, the
-// sections below and the other rows stay exactly where they are.
+// the moment it is pressed, the thinking strip above the card says "Applying
+// your answer", then what was applied, then what the server is doing with
+// it ("Reading Caltrans", "Thinking with Claude Sonnet 5") until the reading
+// has landed or failed; a line under the card keeps the receipt. The next
+// question takes the card's place with the old one fading out and the new
+// one rising in. The page is never rebuilt: every change is a state update
+// on the same tree, keyed by question id, so scroll, the sections below and
+// the other rows stay exactly where they are.
 //
 // Client component: it talks to /api/today and /api/questions only. Every
 // type it needs is imported as a type, so nothing server-only crosses over.
@@ -22,15 +24,14 @@
 // truncate, no line-clamp, no nowrap on any text; every tap target is 44px.
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
-import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { openDetail } from "@/components/dashboard/shared";
 import { ErrorNote } from "@/components/ui";
 import type { QuestionView, TodayData } from "@/lib/understanding/today";
 import type { BoundRow } from "@/lib/workspace/types";
 import { AnswerButtons, type AnswerReply } from "./answer-buttons";
-import { dateLine, kindClass, kindLabel, lateInWords, readingLabel, receiptInWords, updatedLine } from "./copy";
-import { Thinking, useReread } from "./thinking";
+import { dateLine, kindClass, kindLabel, lateInWords, receiptInWords, updatedLine } from "./copy";
+import { ThinkingStrip, type StripActivity } from "./thinking-strip";
 
 /** A question answered by voice or on another device disappears within this. */
 const POLL_MS = 60_000;
@@ -56,17 +57,6 @@ type Rows = { source: QuestionView[]; shown: QuestionView[]; leaving: Set<string
 const selectedFor = (answered: Answered | null, questionId: string) =>
   answered?.questionId === questionId ? answered.answerId : null;
 
-/**
- * `?thinking=open` shows the bars under the hero as if a re-read were under
- * way, with nothing polled and nothing sent: how e2e/screens.spec.ts
- * photographs them, since CI has no model to answer with. Like ?own=open it
- * cannot be gated on NODE_ENV (the browser specs run the production build)
- * and is harmless anywhere: it shows a line.
- */
-function useThinkingFromUrl(): boolean {
-  return useSearchParams().get("thinking") === "open";
-}
-
 export function TodayView({
   initial,
   today: initialToday,
@@ -86,29 +76,22 @@ export function TodayView({
   const [answered, setAnswered] = useState<Answered | null>(null);
   const [receipt, setReceipt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const reread = useReread();
-  const thinkingFromUrl = useThinkingFromUrl();
+  /** What the strip says on this screen's own account: the answer in flight, then its receipt. */
+  const [activity, setActivity] = useState<StripActivity | null>(null);
   // A refresh that lands while an answer is in flight would swap the hero out
   // from under the button that was just pressed; the ref is current at once.
   const busy = useRef(false);
-  // When a run last finished, as this screen last read it: the stamp the
-  // bars watch after an answer (the same one the Interview watches). A ref,
-  // because state would be a render behind inside post().
-  const lastRunAt = useRef<string | null>(initial.lastRunAt);
 
-  /** One read of /api/today applied in place; the server's run stamp, or null when nothing was read. */
-  const load = useCallback(async (): Promise<string | null> => {
+  /** One read of /api/today applied in place. */
+  const load = useCallback(async (): Promise<void> => {
     try {
       const res = await fetch("/api/today", { cache: "no-store" });
-      if (!res.ok) return null;
+      if (!res.ok) return;
       const next = (await res.json()) as TodayData;
-      lastRunAt.current = next.lastRunAt;
       setData(next);
       setToday(dateLine(new Date(), timezone));
-      return next.lastRunAt;
     } catch {
       // A failed poll is not worth a message; the next one is a minute away.
-      return null;
     }
   }, [timezone]);
 
@@ -119,8 +102,10 @@ export function TodayView({
   }, [load]);
 
   // Freshness: the poll, the window coming back, and any write the app
-  // announces (a voice answer lands as "secretary:data-changed"): a stale
-  // question answered elsewhere disappears on the next of any of them.
+  // announces (a voice answer lands as "secretary:data-changed", and so does
+  // a reading that has finished, from the strip): a stale question answered
+  // elsewhere disappears, and the questions a reading wrote arrive, on the
+  // next of any of them.
   useEffect(() => {
     const id = setInterval(() => void refresh(), POLL_MS);
     const onFocus = () => void refresh();
@@ -141,9 +126,10 @@ export function TodayView({
    * in the field for another try (the model could not read them, or the
    * server was out of reach); the field closes only on true.
    *
-   * The pill lights and "Applying…" shows before the request leaves; the
-   * pills stay held until the refresh after the reply has swapped the card,
-   * so the acknowledged state never flickers back to a live row of pills.
+   * The pill lights and the strip says "Applying your answer" before the
+   * request leaves; the pills stay held until the refresh after the reply
+   * has swapped the card, so the acknowledged state never flickers back to
+   * a live row of pills.
    */
   const post = async (
     question: QuestionView,
@@ -153,8 +139,13 @@ export function TodayView({
     setAnswering(true);
     setAnswered({ questionId: question.id, answerId: "answerId" in body ? body.answerId : "own" });
     setError(null);
-    setReceipt("Applying…");
-    const since = lastRunAt.current;
+    setReceipt(null);
+    const started: StripActivity = {
+      line: "Applying your answer",
+      startedAt: Date.now(),
+      projectId: question.projectId,
+    };
+    setActivity(started);
     let taken = false;
     try {
       const res = await fetch(`/api/questions/${question.id}/answer`, {
@@ -165,7 +156,11 @@ export function TodayView({
       const reply = (await res.json().catch(() => null)) as AnswerReply | { error?: string } | null;
       if (res.ok && reply && "status" in reply && reply.status === "resolved") {
         // What was applied, or what Secretary read the words as; never more.
-        setReceipt(receiptInWords(reply));
+        // The same words on the strip, until the server says what it is
+        // doing with the answer (SPEC §6 step 4: the project is re-read).
+        const words = receiptInWords(reply);
+        setReceipt(words);
+        setActivity({ ...started, line: words });
         // The questions the answer set aside leave the list now, in the same
         // moment the receipt names them, not on the refresh that follows.
         const gone = new Set(reply.superseded ?? []);
@@ -180,30 +175,27 @@ export function TodayView({
         }
         // Any write elsewhere in the app can say so; the board updates at once.
         window.dispatchEvent(new Event("secretary:data-changed"));
-        // The project is being re-read (SPEC §6 step 4): the bars say so
-        // until a run finishes after `since`, or for a minute.
-        reread.start({
-          label: readingLabel(question.projectName),
-          since,
-          tick: async () => (busy.current ? null : load()),
-        });
         taken = true;
       } else if (res.status === 409) {
         setReceipt("That question was already answered.");
+        setActivity({ ...started, status: "done" });
         taken = true;
       } else if (res.status === 404) {
         setReceipt("That question is gone.");
+        setActivity({ ...started, status: "done" });
         taken = true;
       } else if (res.status === 503) {
-        // Nothing was written; the words are still in the field.
-        setReceipt(null);
-        setError("Could not read that right now, try again.");
+        // Nothing was written; the words are still in the field. The server
+        // says why when it can (the model has no credits); the strip shows
+        // the same standing condition as the paused state.
+        setActivity({ ...started, status: "done" });
+        setError((reply && "error" in reply && reply.error) || "Could not read that right now, try again.");
       } else {
-        setReceipt(null);
+        setActivity({ ...started, status: "done" });
         setError("That answer could not be applied.");
       }
     } catch {
-      setReceipt(null);
+      setActivity({ ...started, status: "done" });
       setError("Could not reach the server.");
     }
     if (!taken) setAnswered(null);
@@ -313,7 +305,6 @@ export function TodayView({
   const ownPastDue = pastDue.filter((r) => !isSuggested(r));
   const suggestedPastDue = pastDue.filter(isSuggested);
   const updated = updatedLine(data.updatedAt, timezone);
-  const thinking = reread.label ?? (thinkingFromUrl ? readingLabel(null) : null);
   const entering = swap.n > 0;
 
   return (
@@ -329,6 +320,10 @@ export function TodayView({
       {error && <ErrorNote>{error}</ErrorNote>}
 
       <div className="flex flex-col gap-3">
+        {/* What Secretary is doing with the data, above the question it
+            bears on: the one moving element while an answer is applied and
+            the project re-read. */}
+        <ThinkingStrip activity={activity} />
         <div ref={stackRef} className="swap-stack">
           {swap.ghost && (
             <HeroCard
@@ -361,23 +356,13 @@ export function TodayView({
           )}
         </div>
 
-        {/* What the answer did, then the re-read under way: the mockup's
-            15px secondary line under the card, 12px apart. The receipt is
-            one element from "Applying…" on, so the announcement is one. */}
-        {(receipt || thinking) && (
-          <div className="flex flex-col gap-3">
-            {receipt && (
-              <p
-                role="status"
-                aria-live="polite"
-                data-receipt
-                className="px-1 text-[15px] leading-[1.4] text-faint wrap-anywhere"
-              >
-                {receipt}
-              </p>
-            )}
-            {thinking && <Thinking label={thinking} />}
-          </div>
+        {/* What the answer did: the mockup's 15px secondary line under the
+            card, 12px apart, once the reply has landed. The strip above
+            announces the phases, so this line is not a live region twice. */}
+        {receipt && (
+          <p data-receipt className="px-1 text-[15px] leading-[1.4] text-faint wrap-anywhere">
+            {receipt}
+          </p>
         )}
       </div>
 

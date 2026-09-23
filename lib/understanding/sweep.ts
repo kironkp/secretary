@@ -12,7 +12,7 @@
 // This module also answers the Settings section (app/api/understanding):
 // which provider and model a run would use, the latest run per project, and
 // the tally shape both the sweep and "Understand now" report in.
-import { and, count, desc, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   clarifications,
@@ -22,6 +22,7 @@ import {
   user,
 } from "@/lib/db/schema";
 import { QUESTION_KINDS } from "./types";
+import { failedLines, okLines } from "./progress";
 import { healDuplicates, retireAsrClarifications } from "./questions";
 import {
   DEFAULT_MODEL,
@@ -285,6 +286,56 @@ export async function latestRunPerProject(userId: string): Promise<ProjectRunSta
       lastErrors: r.lastErrors,
     }))
     .sort((a, b) => a.projectName.localeCompare(b.projectName));
+}
+
+/** The newest run of the user's that did something, worded as the progress channel words a finish. */
+export type LastRun = {
+  projectName: string;
+  status: "ok" | "failed";
+  line: string;
+  detail: string | null;
+  /** ISO. */
+  finishedAt: string;
+};
+
+/**
+ * The newest ok or failed understanding_runs row of this user (a skip is
+ * not a run the screen should name), with its project's name and the same
+ * line and detail finish() would have published for it: an ok row's detail
+ * counts the questions it created (created_by_run names the run; what it
+ * updated or dismissed is not on the row, so it is not claimed), a failed
+ * row's reads its logged errors. One query, for GET /api/understanding/progress.
+ */
+export async function lastRunFor(userId: string): Promise<LastRun | null> {
+  const [row] = await db
+    .select({
+      status: understandingRuns.status,
+      errors: understandingRuns.errors,
+      finishedAt: understandingRuns.finishedAt,
+      projectName: projects.name,
+      created: sql<number>`(select count(*) from ${clarifications} where ${clarifications.createdByRun} = ${understandingRuns.id})`.mapWith(
+        Number
+      ),
+    })
+    .from(understandingRuns)
+    .innerJoin(projects, eq(projects.id, understandingRuns.projectId))
+    .where(
+      and(eq(understandingRuns.userId, userId), inArray(understandingRuns.status, ["ok", "failed"]))
+    )
+    .orderBy(desc(understandingRuns.startedAt))
+    .limit(1);
+  if (!row) return null;
+  const lines =
+    row.status === "ok"
+      ? okLines(row.projectName, { created: row.created })
+      : failedLines(row.projectName, row.errors ?? []);
+  return {
+    projectName: row.projectName,
+    status: row.status === "ok" ? "ok" : "failed",
+    line: lines.line,
+    detail: lines.detail,
+    finishedAt: row.finishedAt.toISOString(),
+  };
 }
 
 /** Open or asked questions of the three understanding kinds. */
