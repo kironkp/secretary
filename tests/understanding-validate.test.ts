@@ -652,3 +652,32 @@ describe("an answer's targets are evidence by definition (SPEC §6)", () => {
     expect(errors.some((e) => e.includes("task-nowhere"))).toBe(true);
   });
 });
+
+describe("a question is one breath and an answer is an action (SPEC §7)", () => {
+  it("rejects a question longer than 14 words and names the count", () => {
+    const out = validOutput();
+    out.questions[0].question =
+      "Should I clean up the CPO 2073 Production monitor tasks that still say blocked even though the notes and finished task say the work is done?";
+    const errors = errorsOf(out).filter((e) => e.includes(".question:"));
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatch(/\d+ words; say it in at most 14/);
+  });
+
+  it("rejects a pasted title with a slash in the question", () => {
+    const out = validOutput();
+    out.questions[0].question = "Close CPO 2073 / Production monitor?";
+    expect(errorsOf(out).some((e) => e.includes("contains a slash"))).toBe(true);
+  });
+
+  it("rejects an answer label that is a code or too long, and accepts an action", () => {
+    const out = validOutput();
+    out.questions[0].answers[0].label = "Mark FY2027 done";
+    expect(errorsOf(out).some((e) => e.includes("carries a code"))).toBe(true);
+
+    out.questions[0].answers[0].label = "Close the old copy and keep the new one";
+    expect(errorsOf(out).some((e) => e.includes("not an action in plain words"))).toBe(true);
+
+    out.questions[0].answers[0].label = "Close the old one";
+    expect(errorsOf(out)).toEqual([]);
+  });
+});

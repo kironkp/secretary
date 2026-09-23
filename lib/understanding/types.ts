@@ -76,6 +76,11 @@ export type Unknown = z.infer<typeof unknownSchema>;
 /** What was asked, when, and what the user said, so the next run reasons from it. */
 export const askedSchema = z.object({
   questionId: z.string().min(1).max(80),
+  /** The question as the user saw it, so the model can tell a rewording of
+   *  an answered question from a new one; older entries lack it. */
+  question: z.string().max(400).optional(),
+  /** The "type:id" keys of its evidence, for the same reason. */
+  evidence: z.array(z.string().max(120)).max(40).optional(),
   askedAt: z.string().min(1).max(64),
   answer: z.string().max(1000).optional(),
   answeredAt: z.string().max(64).optional(),

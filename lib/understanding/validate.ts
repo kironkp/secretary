@@ -184,6 +184,12 @@ const fold = (s: string): string => s.toLowerCase().replace(/\s+/g, " ").trim();
 /** A quote shorter than this could be "the"; it names nothing on its own. */
 const MIN_QUOTE_CHARS = 4;
 
+/** A question is one breath (SPEC §7): the mockup's longest is ten words. */
+const MAX_QUESTION_WORDS = 14;
+/** An answer label is an action: "Close the old one" is four words, 17 characters. */
+const MAX_LABEL_WORDS = 4;
+const MAX_LABEL_CHARS = 28;
+
 /** Four words in a row is a quotation; three is a phrase anyone could write. */
 const MIN_RUN_WORDS = 4;
 
@@ -423,6 +429,30 @@ export function validateRunOutput(output: unknown, bundle: Bundle): ValidationRe
     checkText(q.why, `${path}.why`);
     if (!/[?.]["')]*$/.test(q.question.trim())) {
       errors.push(`${path}.question: must end with ? or .`);
+    }
+    // Said out loud in one breath (SPEC §7; the user could not read
+    // "Should I clean up the CPO 2073 / Production monitor tasks that still
+    // say blocked even though the notes and finished task say the FY2027
+    // work is done?"). Words, not characters: numbers and names are words.
+    const questionWords = q.question.trim().split(/\s+/).length;
+    if (questionWords > MAX_QUESTION_WORDS) {
+      errors.push(
+        `${path}.question: ${questionWords} words; say it in at most ${MAX_QUESTION_WORDS}, naming the thing by its nickname and number, not its title`
+      );
+    }
+    if (q.question.includes("/")) {
+      errors.push(`${path}.question: contains a slash; that is a pasted title, name the thing instead`);
+    }
+    for (const [ai, a] of q.answers.entries()) {
+      const words = a.label.trim().split(/\s+/).length;
+      if (words > MAX_LABEL_WORDS || a.label.length > MAX_LABEL_CHARS) {
+        errors.push(
+          `${path}.answers[${ai}].label: "${a.label}" is not an action in plain words; at most ${MAX_LABEL_WORDS} words and ${MAX_LABEL_CHARS} characters, like "Close the old one" or "Keep them"`
+        );
+      }
+      if (/\/|\b[A-Z]{2,}\d{2,}\b|\b[A-Z]{3}-\d{3,}\b/.test(a.label)) {
+        errors.push(`${path}.answers[${ai}].label: "${a.label}" carries a code or a slash; say the action in plain words`);
+      }
     }
     if (countSentences(q.why) > 2) errors.push(`${path}.why: more than 2 sentences`);
     if (!referencesEvidence(q.why, q.evidence, texts)) {
