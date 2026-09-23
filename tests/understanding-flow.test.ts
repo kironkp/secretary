@@ -437,7 +437,11 @@ describe("the Caltrans pair, end to end", () => {
       .values(twin("flow-twin-c", new Date(t0.getTime() + 2000), [task(ids.albumOverdue), { type: "event", id: ids.eventDentist }]))
       .returning({ id: clarifications.id });
     const swept = await sweepUnderstanding({ now: NOW, userIds: [U.id] });
-    expect(swept).toEqual({ users: 1, ran: 0, skipped: 0, failed: 0, retiredAsr: 0, healed: 1, repaired: 0, restored: 0 });
+    // The same sweep also puts back the history: the questions answered in
+    // the steps above have no asked entry, because the record here was
+    // written by a run, not by the answer path (backfillAsked).
+    expect(swept).toMatchObject({ users: 1, ran: 0, skipped: 0, failed: 0, retiredAsr: 0, healed: 1, repaired: 0 });
+    expect(swept.restored).toBeGreaterThanOrEqual(1);
     expect(await rowOf(third.id)).toMatchObject({ status: "dismissed", resolution: `duplicate of ${older.id}` });
     expect((await rowOf(older.id)).status).toBe("open");
   });
@@ -639,6 +643,42 @@ describe("the Caltrans pair, end to end", () => {
     expect(entry?.answer).toBe("Keep them");
     expect(entry?.answeredAt).toBe(NOW.toISOString());
     // Idempotent: nothing left to restore.
+    expect(await backfillAsked(U.id, ids.caltrans)).toBe(0);
+  });
+
+  it("(15) an entry that is an id with no question text is completed, keeping when it was asked", async () => {
+    // What the record carried before the asked list included the question:
+    // the model could not tell what had been asked, only that something was.
+    const [old] = await db
+      .insert(clarifications)
+      .values({
+        userId: U.id,
+        projectId: ids.caltrans,
+        kind: "need_to_know",
+        question: "Which remaining CPO is the September payment?",
+        context: "One a month, none chosen.",
+        evidence: [task(ids.statement)],
+        answers: [{ id: "lenses", label: "Lenses (2110)", writes: [{ op: "resolve" }] }],
+        identity: "blank-entry",
+        status: "resolved",
+        resolution: "Lenses (2110)",
+        resolvedAt: NOW,
+      })
+      .returning({ id: clarifications.id });
+    const askedLongAgo = new Date(NOW.getTime() - 86_400_000).toISOString();
+    await upsertAsked(U.id, ids.caltrans, [{ questionId: old.id, askedAt: askedLongAgo }]);
+
+    expect(await backfillAsked(U.id, ids.caltrans)).toBe(1);
+    const [after] = await db
+      .select({ body: records.body })
+      .from(records)
+      .where(and(eq(records.userId, U.id), eq(records.projectId, ids.caltrans)));
+    const entry = (after.body.asked ?? []).find((a) => a.questionId === old.id);
+    expect(entry?.question).toBe("Which remaining CPO is the September payment?");
+    expect(entry?.answer).toBe("Lenses (2110)");
+    expect(entry?.evidence).toEqual([`task:${ids.statement}`]);
+    // The moment it was put to the user is the record's, not the row's.
+    expect(entry?.askedAt).toBe(askedLongAgo);
     expect(await backfillAsked(U.id, ids.caltrans)).toBe(0);
   });
 });

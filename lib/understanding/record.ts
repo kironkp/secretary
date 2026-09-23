@@ -56,8 +56,9 @@ export async function upsertAsked(
  * recoverable: `clarifications` still holds each question's text, the rows
  * it rested on, what the user said and when it closed. For every project
  * this puts back an entry for each settled question the record no longer
- * mentions, so the next run sees what it already asked. Existing entries are
- * left exactly as they are. Returns the number restored.
+ * mentions, and completes any entry that is an id with no question text or
+ * no answer, so the next run sees what it already asked and what the user
+ * said. Returns how many entries it wrote.
  */
 export async function backfillAsked(userId: string, projectId: string): Promise<number> {
   const [record] = await db
@@ -67,7 +68,7 @@ export async function backfillAsked(userId: string, projectId: string): Promise<
     .limit(1);
   if (!record) return 0;
 
-  const known = new Set((record.body.asked ?? []).map((a) => a.questionId));
+  const existing = new Map((record.body.asked ?? []).map((a) => [a.questionId, a]));
   const settled = await db
     .select({
       id: clarifications.id,
@@ -88,16 +89,27 @@ export async function backfillAsked(userId: string, projectId: string): Promise<
       )
     );
 
-  const missing: Asked[] = settled
-    .filter((row) => !known.has(row.id))
-    .map((row) => ({
+  // Entries written before the asked list carried the question (2026-09-22)
+  // are an id and nothing else: the model cannot tell what was asked, which
+  // is no better than the entry being gone. Those are completed here too,
+  // keeping the askedAt the record already had — it is the truth about when
+  // the question was put to the user.
+  const missing: Asked[] = [];
+  for (const row of settled) {
+    const had = existing.get(row.id);
+    const needsText = !had?.question || (had.evidence ?? []).length === 0;
+    const needsAnswer = Boolean(row.resolution) && !had?.answer;
+    if (had && !needsText && !needsAnswer) continue;
+    missing.push({
+      ...had,
       questionId: row.id,
       question: row.question,
       evidence: row.evidence.map((s) => `${s.type}:${s.id}`),
-      askedAt: (row.surfacedAt ?? row.createdAt).toISOString(),
-      ...(row.resolution ? { answer: row.resolution } : {}),
-      ...(row.resolvedAt ? { answeredAt: row.resolvedAt.toISOString() } : {}),
-    }));
+      askedAt: had?.askedAt ?? (row.surfacedAt ?? row.createdAt).toISOString(),
+      ...(row.resolution ? { answer: had?.answer ?? row.resolution } : {}),
+      ...(row.resolvedAt ? { answeredAt: had?.answeredAt ?? row.resolvedAt.toISOString() } : {}),
+    });
+  }
   if (missing.length === 0) return 0;
   await upsertAsked(userId, projectId, missing);
   return missing.length;
