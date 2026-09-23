@@ -484,22 +484,50 @@ export async function answerInOwnWords(
     }));
   }
 
+  // No listed answer fits, but the words are an instruction: the writes the
+  // model composed (interpret.ts), checked against this question's evidence
+  // exactly as a stored answer's are. A write naming a row the question
+  // never showed is refused and SAID so, rather than dropped quietly —
+  // silence there is what turned "old suggestions you can get rid of" into
+  // a note on 2026-09-23 while four tasks stayed on the list.
+  const allowed = new Set(question.evidence.map((s) => `${s.type}:${s.id}`));
+  const composed: Write[] = [];
+  const refused: FailedWrite[] = [];
+  for (const w of reading.writes) {
+    const target = targetOf(w);
+    const key = target ? `${target.type}:${target.id}` : null;
+    if (key && !allowed.has(key)) {
+      refused.push({ op: w.op, id: target?.id, error: "that row is not one this question shows" });
+      continue;
+    }
+    composed.push(w);
+  }
+
   return withOpenRow(userId, question.id, async (tx) => {
-    const outcome: Applied = { applied: [], failed: [] };
+    const closedAt = new Date();
+    const { succeeded, ...outcome } = await applyWrites(ctx, composed, closedAt);
+    outcome.failed.push(...refused);
     // "answer" rather than the source: the tag says what kind of memory
     // this is (the user answering a question in their own words), and the
     // project's name is how gather.ts finds it for the next run.
     const tags = [question.projectName, "answer"].filter((t): t is string => !!t);
     await remember(ctx, reading.fact ?? words, tags, outcome);
-    // A memory changes no row, so nothing else rests on what this answer did.
-    const closedAt = new Date();
+    // What the writes changed can make other pending questions obsolete,
+    // the same as a tapped answer's do.
+    const superseded = await supersedeByWrites(
+      tx,
+      userId,
+      question.id,
+      changedRowsOf(succeeded),
+      closedAt
+    );
     await resolveRow(tx, userId, question.id, `In your words: ${words}`, closedAt);
     if (question.projectId) await logAnswer(userId, question.projectId, question.id, words, closedAt);
     return {
       status: "resolved",
       projectId: question.projectId,
       ...outcome,
-      superseded: [],
+      superseded,
       reply: reading.reply,
     };
   });

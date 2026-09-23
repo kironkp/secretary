@@ -35,6 +35,22 @@ const BANNED = new RegExp(
   "i"
 );
 
+/**
+ * A promise of future action by Secretary. The loop writes a record and
+ * questions; it never touches the user's rows, and only an answer they give
+ * does. So "I'll clear them rather than chase the dates" — a real lede on
+ * 2026-09-23 — was a promise nothing could keep, and Kiron reasonably read
+ * it as done. The committed future is refused; the conditional ("I would
+ * close that old copy") is a recommendation and stays, because that is how
+ * an answer's why is supposed to read.
+ */
+const PROMISE = /\bI(?:'| a)?(?:'ll|\u2019ll| will| am going to|'m going to|\u2019m going to| plan to| intend to)\b/i;
+
+export function promiseIn(text: string): string | null {
+  const m = PROMISE.exec(text);
+  return m ? m[0] : null;
+}
+
 export function bannedWordIn(text: string): string | null {
   const m = BANNED.exec(text);
   return m ? m[0] : null;
@@ -336,6 +352,10 @@ export function validateRunOutput(output: unknown, bundle: Bundle): ValidationRe
   const errors: string[] = [];
   const ids = idIndex(bundle);
   const texts = textIndex(bundle);
+  /** Open tasks Secretary suggested: the rows a question must let the user bin. */
+  const openSuggestions = new Set(
+    bundle.tasksOpen.filter((t) => t.source === "suggested").map((t) => t.id)
+  );
 
   // --- step 1: every source points at a row in the bundle ------------------
   const checkSources = (sources: Source[], path: string) => {
@@ -363,6 +383,12 @@ export function validateRunOutput(output: unknown, bundle: Bundle): ValidationRe
     if (banned) errors.push(`${path}: banned word "${banned}"`);
     const day = spelledDayIn(text);
     if (day) errors.push(`${path}: days as digits, not "${day}"`);
+    const promise = promiseIn(text);
+    if (promise) {
+      errors.push(
+        `${path}: "${promise}" promises something you cannot do. Nothing here changes the user's list; only an answer they give does. Say what is true now, or what you would do if they said so.`
+      );
+    }
   };
 
   const r = value.record;
@@ -423,6 +449,28 @@ export function validateRunOutput(output: unknown, bundle: Bundle): ValidationRe
           q.evidence.push(target);
           listed.add(`${target.type}:${target.id}`);
         }
+      }
+    }
+    // A question resting on the app's OWN open suggestions must offer a way
+    // to bin them. They are Secretary's guesses, not the user's work, and
+    // the honest choice about a guess nobody took up is to drop it. On
+    // 2026-09-23 a question about four such rows offered only "did they
+    // happen", "partly", "restart tomorrow" and a way out, so when Kiron
+    // typed "old suggestions you can get rid of" there was nothing behind
+    // the words and the four tasks stayed on his list.
+    const suggested = q.evidence
+      .filter((e) => e.type === "task" && openSuggestions.has(e.id))
+      .map((e) => e.id);
+    if (suggested.length > 0) {
+      const drops = new Set(
+        q.answers.flatMap((a) =>
+          a.writes.flatMap((w) => (w.op === "drop_task" ? [w.taskId] : []))
+        )
+      );
+      if (!suggested.some((id) => drops.has(id))) {
+        errors.push(
+          `${path}.answers: rests on ${suggested.length === 1 ? "a task" : `${suggested.length} tasks`} I suggested and the user never took up, so one answer must drop ${suggested.length === 1 ? "it" : "them"} (drop_task on ${suggested.join(", ")})`
+        );
       }
     }
     checkSources(q.evidence, path);

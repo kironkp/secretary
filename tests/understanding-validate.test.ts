@@ -681,3 +681,85 @@ describe("a question is one breath and an answer is an action (SPEC §7)", () =>
     expect(errorsOf(out)).toEqual([]);
   });
 });
+describe("a question about my own suggestions must offer to drop them (SPEC §7)", () => {
+  /** The bundle with T_CHECK marked as a task Secretary suggested and nobody took up. */
+  const suggestedBundle = (): Bundle => {
+    const b = makeBundle();
+    b.tasksOpen = b.tasksOpen.map((t) => (t.id === T_CHECK ? { ...t, source: "suggested" } : t));
+    return b;
+  };
+
+  it("rejects answers that can only complete or reschedule it, and names the row to drop", () => {
+    // The 2026-09-23 shape: four stale suggestions, and every answer either
+    // says they happened or moves their dates. Nothing bins them, so "old
+    // suggestions you can get rid of" had nothing behind it.
+    const out = validOutput();
+    out.questions[0].evidence = [{ type: "task", id: T_CHECK }];
+    out.questions[0].why = "Check what is blocking CPO 2073 and report back is 22 days late.";
+    out.questions[0].answers = [
+      { id: "done", label: "Yes, done", writes: [{ op: "complete_task", taskId: T_CHECK }, { op: "resolve" }] },
+      { id: "later", label: "Not yet", writes: [{ op: "set_due", taskId: T_CHECK, dueAt: "2026-09-30" }] },
+      { id: "keep", label: "Keep it", writes: [{ op: "resolve" }] },
+    ];
+    const res = validateRunOutput(out, suggestedBundle());
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    const hit = res.errors.find((e) => e.includes("never took up"));
+    expect(hit).toBeDefined();
+    expect(hit).toContain(T_CHECK);
+    expect(hit).toContain("drop_task");
+  });
+
+  it("passes once one answer drops it", () => {
+    const out = validOutput();
+    out.questions[0].evidence = [{ type: "task", id: T_CHECK }];
+    out.questions[0].why = "Check what is blocking CPO 2073 and report back is 22 days late.";
+    out.questions[0].answers = [
+      { id: "drop", label: "Drop it", writes: [{ op: "drop_task", taskId: T_CHECK }, { op: "resolve" }] },
+      { id: "keep", label: "Keep it", writes: [{ op: "resolve" }] },
+    ];
+    expect(validateRunOutput(out, suggestedBundle()).ok).toBe(true);
+  });
+
+  it("leaves a question about the user's own tasks alone", () => {
+    // T_CHECK is "spoken" in the plain bundle: the user's work, not my guess.
+    const out = validOutput();
+    out.questions[0].evidence = [{ type: "task", id: T_CHECK }];
+    out.questions[0].why = "Check what is blocking CPO 2073 and report back is 22 days late.";
+    out.questions[0].answers = [
+      { id: "done", label: "Yes, done", writes: [{ op: "complete_task", taskId: T_CHECK }, { op: "resolve" }] },
+      { id: "keep", label: "Keep it", writes: [{ op: "resolve" }] },
+    ];
+    expect(validateRunOutput(out, makeBundle()).ok).toBe(true);
+  });
+});
+
+describe("the words never promise what the loop cannot do (SPEC §7)", () => {
+  it("rejects a lede that says it will clear things, and says why", () => {
+    // Verbatim from the Overdue widget on 2026-09-23. Nothing in a run
+    // touches the user's rows, so this was a promise nobody could keep.
+    const out = validOutput();
+    const widgetId = Object.keys(out.words.ledes)[0];
+    out.words.ledes[widgetId] =
+      "You said these are old suggestions rather than real remaining work, so I'll clear them rather than chase the dates.";
+    const res = validateRunOutput(out, makeBundle());
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    const hit = res.errors.find((e) => e.includes("promises something you cannot do"));
+    expect(hit).toBeDefined();
+    expect(hit).toContain("I'll");
+  });
+
+  it("rejects the same promise in a question's why", () => {
+    const out = validOutput();
+    out.questions[0].why = `${out.questions[0].why} I will close the old copy.`;
+    const errors = errorsOf(out);
+    expect(errors.some((e) => e.includes("promises something you cannot do"))).toBe(true);
+  });
+
+  it("allows a recommendation, which is how a why is supposed to read", () => {
+    const out = validOutput();
+    out.questions[0].why = `${out.questions[0].why} I would close the old copy.`;
+    expect(validateRunOutput(out, makeBundle()).ok).toBe(true);
+  });
+});
