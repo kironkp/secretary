@@ -1,8 +1,8 @@
 // The run — docs/understanding/SPEC.md §4 and §8.
 //
 // One model call per project whose inputs changed. The shape of a run never
-// varies: gather, hash, compare, call, validate (retry once with the errors
-// quoted), store. The model is an injected function so every test passes a
+// varies: gather, hash, compare, call, validate (up to three attempts, each
+// quoting the errors of the one before), store. The model is an injected function so every test passes a
 // fake and nothing here can reach a live model under vitest; the real one is
 // whatever modelCallFor resolves — Claude, OpenAI, or Claude with OpenAI as
 // the fallback. Storage is the only side effect, and it happens only after
@@ -38,6 +38,7 @@ import {
   noteProviderFailure,
   noteProviderOk,
   recordProviderError,
+  taggedProviderFailures,
   tagProviderFailure,
   type ProviderName,
 } from "./provider-health";
@@ -160,11 +161,24 @@ const OUTPUT_FORMAT_TEXT =
  * model has no credits" while Claude was ready.
  */
 export class ModelOutputError extends Error {
-  constructor(message: string) {
+  /** What the answer cost, when the call knows: a refused answer is billed all the same. */
+  readonly usage: CallUsage | null;
+  /** Which provider gave the answer; tracked() fills it in. */
+  provider: ProviderName | null = null;
+  constructor(message: string, usage: CallUsage | null = null) {
     super(message);
     this.name = "ModelOutputError";
+    this.usage = usage;
   }
 }
+
+/** The tokens one call was billed for, whatever came back. */
+export type CallUsage = {
+  model: string;
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+};
 
 /**
  * The JSON object in a model's text: the whole text when it is JSON, else
@@ -218,10 +232,23 @@ export async function anthropicModelCall(userId: string): Promise<ModelCall | nu
         output_config: { effort },
       })
       .finalMessage();
-    if (response.stop_reason === "refusal") throw new ModelOutputError("claude refusal");
+    // input_tokens is the uncached part only: the system prompt and schema
+    // this call marks cacheable are billed as cache_creation (the first
+    // call) or cache_read (the rest) and are most of the prompt, so a row
+    // counting input_tokens alone said a 30k-token call was 4k. Read before
+    // the answer is judged: a refused answer was billed all the same.
+    const usage = response.usage;
+    const cached = usage.cache_read_input_tokens ?? 0;
+    const billed: CallUsage = {
+      model,
+      inputTokens: usage.input_tokens + (usage.cache_creation_input_tokens ?? 0) + cached,
+      cachedInputTokens: cached,
+      outputTokens: usage.output_tokens,
+    };
+    if (response.stop_reason === "refusal") throw new ModelOutputError("claude refusal", billed);
     const text = response.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
     if (!text.trim()) {
-      throw new ModelOutputError(`claude returned no text (stop_reason ${response.stop_reason})`);
+      throw new ModelOutputError(`claude returned no text (stop_reason ${response.stop_reason})`, billed);
     }
     let json: unknown;
     try {
@@ -229,22 +256,11 @@ export async function anthropicModelCall(userId: string): Promise<ModelCall | nu
     } catch (e) {
       // max_tokens cutting the JSON short, or a slip in it; the retry quotes this.
       throw new ModelOutputError(
-        `claude output is not JSON (stop_reason ${response.stop_reason}): ${e instanceof Error ? e.message : String(e)}`
+        `claude output is not JSON (stop_reason ${response.stop_reason}): ${e instanceof Error ? e.message : String(e)}`,
+        billed
       );
     }
-    // input_tokens is the uncached part only: the system prompt and schema
-    // this call marks cacheable are billed as cache_creation (the first
-    // call) or cache_read (the rest) and are most of the prompt, so a row
-    // counting input_tokens alone said a 30k-token call was 4k.
-    const usage = response.usage;
-    const cached = usage.cache_read_input_tokens ?? 0;
-    return {
-      output: toRunOutput(json),
-      model,
-      inputTokens: usage.input_tokens + (usage.cache_creation_input_tokens ?? 0) + cached,
-      cachedInputTokens: cached,
-      outputTokens: usage.output_tokens,
-    };
+    return { output: toRunOutput(json), ...billed };
   }, meta);
 }
 
@@ -308,23 +324,25 @@ export async function openaiModelCall(userId: string): Promise<ModelCall | null>
       },
     });
     const text = response.output_text ?? "";
-    if (!text.trim()) throw new ModelOutputError("openai returned no text");
+    // OpenAI's input_tokens is the whole prompt; cached_tokens the part
+    // served from cache. Read before the answer is judged (see the Claude call).
+    const billed: CallUsage = {
+      model,
+      inputTokens: response.usage?.input_tokens ?? 0,
+      cachedInputTokens: response.usage?.input_tokens_details?.cached_tokens ?? 0,
+      outputTokens: response.usage?.output_tokens ?? 0,
+    };
+    if (!text.trim()) throw new ModelOutputError("openai returned no text", billed);
     let json: unknown;
     try {
       json = jsonFromText(text);
     } catch (e) {
       throw new ModelOutputError(
-        `openai output is not JSON: ${e instanceof Error ? e.message : String(e)}`
+        `openai output is not JSON: ${e instanceof Error ? e.message : String(e)}`,
+        billed
       );
     }
-    return {
-      output: toRunOutput(json),
-      model,
-      // OpenAI's input_tokens is the whole prompt; cached_tokens the part served from cache.
-      inputTokens: response.usage?.input_tokens ?? 0,
-      cachedInputTokens: response.usage?.input_tokens_details?.cached_tokens ?? 0,
-      outputTokens: response.usage?.output_tokens ?? 0,
-    };
+    return { output: toRunOutput(json), ...billed };
   }, meta);
 }
 
@@ -332,13 +350,14 @@ export async function openaiModelCall(userId: string): Promise<ModelCall | null>
 type Call<Input, Output> = (input: Input) => Promise<Output>;
 
 /**
- * A call that tries `primary` and, when it THROWS — any error: an API
- * rejection, a refusal, output that is not JSON — calls `secondary` with the
- * same input. `onFallback` sees the error once per fallback. A primary that
- * returns is never second-guessed: an output that fails validation is the
- * run's retry to handle, not a reason to switch providers. Generic over the
- * call's shape so the one-sentence read in interpret.ts gets the same second
- * road as the run.
+ * A call that tries `primary` and, when the ROAD is closed — an API
+ * rejection, a cap, a timeout — calls `secondary` with the same input.
+ * `onFallback` sees the error once per fallback. A primary that answers is
+ * never second-guessed: an output that fails validation, or that is not
+ * JSON at all (ModelOutputError), is the run's retry to handle with the
+ * same model, not a reason to switch providers. Generic over the call's
+ * shape so the one-sentence read in interpret.ts gets the same second road
+ * as the run.
  */
 export function withFallback<Input, Output>(
   primary: Call<Input, Output>,
@@ -370,7 +389,9 @@ export function withFallback<Input, Output>(
           onRecovered?.(e);
           return out;
         } catch (e2) {
-          if (!(e2 instanceof ModelOutputError)) onBothClosed?.(e2, e);
+          // Whatever the primary did, closed or a bad answer, the error
+          // that propagates carries the secondary's failure too.
+          onBothClosed?.(e2, e);
           throw e2;
         }
       }
@@ -384,7 +405,7 @@ export function withFallback<Input, Output>(
       try {
         return await secondary(input);
       } catch (e2) {
-        if (!(e2 instanceof ModelOutputError)) onBothClosed?.(e2, e);
+        onBothClosed?.(e2, e);
         throw e2;
       }
     }
@@ -420,6 +441,13 @@ function tracked<Input, Output>(
       noteProviderOk(provider, source);
       return out;
     } catch (e) {
+      if (e instanceof ModelOutputError) {
+        // The provider answered; the answer was bad. The road is open, and
+        // a standing note of a cap or empty credits is stale now.
+        noteProviderOk(provider, source);
+        e.provider ??= provider;
+        throw e;
+      }
       const message = errorMessage(e);
       noteProviderFailure(provider, message, source);
       tagProviderFailure(e, { provider, source, message });
@@ -576,9 +604,9 @@ const FAILED_BACKOFF_MS = 6 * 60 * 60_000;
 const BOOTED_AT = Date.now() - process.uptime() * 1000;
 
 /**
- * How a failure of the provider's own — the call threw: a 429, a 400 over
- * the usage cap, a timeout, a refusal, output that was not JSON — is marked
- * in a run's logged errors, apart from the validator's. The backoff above
+ * How a failure of the provider's own — the road was closed: a 429, a 400
+ * over the usage cap, a timeout — is marked in a run's logged errors, apart
+ * from the validator's and from a bad answer (ModelOutputError). The backoff above
  * reads it: such a run says nothing about the inputs, since the model never
  * answered on them, so it must not keep the next sweep from trying. After
  * the prefix, the provider that failed and what it said ("openai: 429 …";
@@ -868,10 +896,30 @@ async function runOnce(
       });
     } catch (e) {
       if (e instanceof ModelOutputError) {
-        // The model answered, badly: the validator's kind of rejection,
-        // quoted back on the next attempt, with no word to the provider
-        // memory (the provider was fine; the answer was not).
-        errors = [e.message];
+        // The model answered, badly. Billed all the same.
+        if (e.usage) {
+          modelId = e.usage.model;
+          inputTokens += e.usage.inputTokens;
+          cachedInputTokens += e.usage.cachedInputTokens;
+          outputTokens += e.usage.outputTokens;
+        }
+        const closed = taggedProviderFailures(e);
+        if (closed.length > 0) {
+          // The road that goes first was closed and the other answered
+          // badly: the inputs were never properly answered, so the log
+          // reads as provider failures (both of them) and the next sweep
+          // tries again, with the first road open by then or not.
+          const lines = [...closed, { provider: e.provider, source: "house" as const, message: e.message }].map(
+            (f) => `${MODEL_ERROR_PREFIX}${failureLogLine(f)}`
+          );
+          providerErrors.push(...lines);
+          errors = lines;
+        } else {
+          // The validator's kind of rejection: quoted back on the next
+          // attempt, with no word to the provider memory (the provider was
+          // fine; the answer was not).
+          errors = [e.message];
+        }
         if (attempt + 1 < MAX_ATTEMPTS) {
           console.warn(`understanding: ${name}: attempt ${attempt + 1} of ${MAX_ATTEMPTS} refused: ${e.message}`);
         }

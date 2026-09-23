@@ -24,7 +24,7 @@ import { anthropicClientFor } from "@/lib/anthropic";
 import { recordUsage } from "@/lib/usage";
 import { localDateInTz } from "./gather";
 import { errorMessage, providerLine } from "./provider-health";
-import { callByProvider, type CallMeta } from "./run";
+import { callByProvider, ModelOutputError, type CallMeta } from "./run";
 import type { QuestionView } from "./today";
 
 export type Interpretation = {
@@ -190,9 +190,11 @@ async function claudeInterpretCall(userId: string): Promise<InterpretCall | null
       messages: [{ role: "user", content: user }],
       output_config: { effort: "low", format: zodOutputFormat(interpretationOut) },
     });
-    if (response.stop_reason === "refusal") throw new Error("claude refusal");
+    // A bad answer, not a closed road: never a reason to switch providers
+    // or to prefer OpenAI for the hour (run.ts ModelOutputError).
+    if (response.stop_reason === "refusal") throw new ModelOutputError("claude refusal");
     if (!response.parsed_output) {
-      throw new Error(`claude structured output missing (stop_reason ${response.stop_reason})`);
+      throw new ModelOutputError(`claude structured output missing (stop_reason ${response.stop_reason})`);
     }
     const usage = response.usage;
     const cached = usage.cache_read_input_tokens ?? 0;

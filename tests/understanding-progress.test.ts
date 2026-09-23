@@ -463,6 +463,18 @@ describe("the lines", () => {
       detail: "the model did not answer",
       reason: "other",
     });
+    // A road that merely did not answer is named beside the one that is out
+    // of credits, not dropped so that the other reads as "the model".
+    expect(
+      failedLines("Caltrans", [
+        `${MODEL_ERROR_PREFIX}anthropic: 529 overloaded_error`,
+        `${MODEL_ERROR_PREFIX}openai: 429 You have no credits remaining`,
+      ])
+    ).toEqual({
+      line: "Could not read Caltrans",
+      detail: "Claude is not answering and OpenAI has no credits",
+      reason: "no-credits",
+    });
     expect(failedLines("Caltrans", ["record.things[0].state.sources: at least one source"])).toEqual({
       line: "Could not read Caltrans",
       detail: "the model's answer did not check out",

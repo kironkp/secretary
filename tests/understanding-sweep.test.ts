@@ -259,6 +259,10 @@ describe("the configuration Settings shows", () => {
         provider: "none",
         model: null,
       });
+      // And a connected OpenAI key stands in for that house key.
+      expect(
+        await withEnv("UNDERSTANDING_PROVIDER", undefined, () => describeProvider({ connectedOpenai: true }))
+      ).toEqual({ provider: "openai", model: "gpt-5.5" });
       expect(await hasConnectedAnthropic(U.id)).toBe(false);
     } finally {
       if (savedA === undefined) delete process.env.ANTHROPIC_API_KEY;

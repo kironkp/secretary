@@ -820,4 +820,80 @@ describe("the backoff after a failed run is for the validator's failures only", 
       warnSpy.mockRestore();
     }
   });
+
+  it("a UUID copied one character wrong is mended before the validator, and the stored record carries the real id", async () => {
+    await db.insert(tasks).values({
+      userId: U.id,
+      projectId,
+      title: "Backoff task five",
+      status: "todo",
+      createdAt: new Date(NOW.getTime() - 17 * 86_400_000),
+      updatedAt: new Date(NOW.getTime() - 17 * 86_400_000),
+    });
+    let real = "";
+    const slipping = fakeModel((bundle) => {
+      const out = minimalOutputFor(bundle);
+      real = bundle.tasksOpen[0].id;
+      const slipped = real.slice(0, -1) + (real.endsWith("a") ? "b" : "a");
+      return {
+        ...out,
+        record: {
+          ...out.record,
+          rules: [{ text: "One task at a time.", sources: [{ type: "task", id: slipped }], confidence: "high" }],
+        },
+      };
+    });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const result = await sweepRun(slipping);
+      expect(result.status, JSON.stringify(result)).toBe("ok");
+      expect(slipping.calls).toHaveLength(1);
+      const [row] = await db
+        .select({ body: records.body })
+        .from(records)
+        .where(and(eq(records.userId, U.id), eq(records.projectId, projectId)));
+      expect(row.body.rules[0].sources[0].id).toBe(real);
+      expect(warnSpy.mock.calls.some((c) => String(c[0]).includes("1 id mended"))).toBe(true);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("a bad answer is billed: its tokens reach the run row and the usage table even when every attempt is refused", async () => {
+    await db.insert(tasks).values({
+      userId: U.id,
+      projectId,
+      title: "Backoff task six",
+      status: "todo",
+      createdAt: new Date(NOW.getTime() - 16 * 86_400_000),
+      updatedAt: new Date(NOW.getTime() - 16 * 86_400_000),
+    });
+    const cut = fakeModel(() => {
+      throw new ModelOutputError("claude output is not JSON (stop_reason max_tokens): cut short", {
+        model: "fake-cut",
+        inputTokens: 10,
+        cachedInputTokens: 2,
+        outputTokens: 5,
+      });
+    });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const usageBefore = (await usageRows()).length;
+    try {
+      const result = await sweepRun(cut);
+      expect(result.status).toBe("failed");
+      const rows = await runRows();
+      const last = rows[rows.length - 1];
+      expect(last.status).toBe("failed");
+      expect(last.model).toBe("fake-cut");
+      expect(last.inputTokens).toBe(30);
+      expect(last.outputTokens).toBe(15);
+      const usageAfter = await usageRows();
+      expect(usageAfter).toHaveLength(usageBefore + 1);
+      expect(usageAfter[usageAfter.length - 1]).toMatchObject({ model: "fake-cut", inputTokens: 30, outputTokens: 15 });
+    } finally {
+      errorSpy.mockRestore();
+      warnSpy.mockRestore();
+    }
+  });
 });

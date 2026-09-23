@@ -11,6 +11,7 @@ import {
   type ModelCall,
 } from "@/lib/understanding/run";
 import type { Bundle } from "@/lib/understanding/types";
+import { noteProviderFailure, providerNote, resetProviderMemory } from "@/lib/understanding/provider-health";
 
 const savedProvider = process.env.UNDERSTANDING_PROVIDER;
 
@@ -175,6 +176,27 @@ describe("callByProvider", () => {
   afterEach(() => {
     claude.mockClear();
     gpt.mockClear();
+    resetProviderMemory();
+  });
+
+  it("a bad answer from Claude goes back to Claude, and the memory calls Claude ok again", async () => {
+    delete process.env.UNDERSTANDING_PROVIDER;
+    // A standing note from the outage: the cap that just lifted.
+    noteProviderFailure("anthropic", "429 You have no credits remaining");
+    expect(providerNote("anthropic", "house")?.state).toBe("no-credits");
+    const b = build();
+    const call = (await callByProvider(b.claude, b.gpt, "read"))!;
+    claude.mockImplementationOnce(async () => {
+      throw new ModelOutputError("claude output is not JSON (stop_reason end_turn)");
+    });
+    const thrown = await call({ user: "three" }).catch((e: unknown) => e);
+    expect(thrown).toBeInstanceOf(ModelOutputError);
+    // Not a closed road: OpenAI was never asked, no hour of preferring it.
+    expect(gpt).not.toHaveBeenCalled();
+    await expect(call({ user: "four" })).resolves.toBe("claude read four");
+    // The provider answered, so its note is cleared, and the answer names it.
+    expect(providerNote("anthropic", "house")?.state).toBe("ok");
+    expect((thrown as ModelOutputError).provider).toBe("anthropic");
   });
 
   it("builds and uses only the named provider", async () => {

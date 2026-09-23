@@ -258,7 +258,7 @@ export function gatheringLines(
   return { line: `Reading ${projectName}`, detail: parts.join(", ") };
 }
 
-/** "Thinking with Claude Sonnet 5" — "attempt 2 of 2" on a retry; "Thinking" when the call names no model. */
+/** "Thinking with Claude Sonnet 5" — "attempt 2 of 3" on a retry; "Thinking" when the call names no model. */
 export function readingLines(
   modelId: string | undefined,
   attempt: number,
@@ -317,12 +317,17 @@ export function failedLines(projectName: string, errors: string[]): FailedLines 
     byProvider.set(f.provider, c);
     if (reason === "other" && c.state !== "other") reason = REASON_OF[c.state];
   }
-  const named = [...byProvider.entries()].filter(([, c]) => c.state !== "other");
-  if (named.length === 0) return { line, detail: "the model did not answer", reason: "other" };
+  // Every road that failed gets its clause, a provider that merely did not
+  // answer (a timeout, a 529) included: "Claude is not answering and OpenAI
+  // has no credits" is the truth, "the model has no credits" is not.
+  const entries = [...byProvider.entries()];
+  if (entries.every(([, c]) => c.state === "other")) {
+    return { line, detail: "the model did not answer", reason: "other" };
+  }
   const order = (p: ProviderName | null) => (p === "anthropic" ? 0 : p === "openai" ? 1 : 2);
-  named.sort(([a], [b]) => order(a) - order(b));
-  const single = named.length === 1;
-  const clauses = named.map(([p, c]) => outageClause(p ?? "openai", c, single || p === null));
+  entries.sort(([a], [b]) => order(a) - order(b));
+  const single = entries.length === 1;
+  const clauses = entries.map(([p, c]) => outageClause(p ?? "openai", c, single || p === null));
   return { line, detail: joinClauses(clauses), reason };
 }
 

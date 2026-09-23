@@ -219,6 +219,12 @@ export function tagProviderFailure(e: unknown, failure: ProviderFailure): void {
   (tagged.providerFailures ??= []).push(failure);
 }
 
+/** Only what was tagged on the error: nothing guessed, nothing noted. */
+export function taggedProviderFailures(e: unknown): ProviderFailure[] {
+  const tagged = typeof e === "object" && e !== null ? (e as Tagged).providerFailures : undefined;
+  return tagged ? [...tagged] : [];
+}
+
 /**
  * The provider failures behind an error the run caught. A tagged error was
  * noted in the memory where it was thrown; an untagged one (a fake, a
