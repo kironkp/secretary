@@ -198,14 +198,69 @@ export type CallUsage = {
  */
 export function jsonFromText(text: string): unknown {
   const trimmed = text.trim();
-  try {
-    return JSON.parse(trimmed);
-  } catch (first) {
-    const start = trimmed.indexOf("{");
-    const end = trimmed.lastIndexOf("}");
-    if (start === -1 || end <= start) throw first;
-    return JSON.parse(trimmed.slice(start, end + 1));
+  const attempts = [trimmed];
+  const start = trimmed.indexOf("{");
+  const end = trimmed.lastIndexOf("}");
+  if (start !== -1 && end > start) attempts.push(trimmed.slice(start, end + 1));
+
+  let first: unknown = null;
+  for (const [i, candidate] of attempts.entries()) {
+    for (const source of [candidate, nullForUndefined(candidate)]) {
+      try {
+        return JSON.parse(source);
+      } catch (e) {
+        if (i === 0 && first === null) first = e;
+      }
+      // The second pass is only worth making when it changed something.
+      if (source === candidate && nullForUndefined(candidate) === candidate) break;
+    }
   }
+  throw first;
+}
+
+/**
+ * `undefined` where JSON allows only a value, turned into null.
+ *
+ * Since the schema travels as text rather than as an API-enforced format
+ * (OUTPUT_FORMAT_TEXT), Claude occasionally writes a JavaScript literal
+ * into its JSON: on 2026-09-23 a run died three attempts deep on
+ * `"resumePointer":undefined`. An optional field set to null is what the
+ * model meant, and toRunOutput strips nulls before the validator sees
+ * them. Only tokens OUTSIDE strings are touched, so a fact that contains
+ * the word undefined is left exactly as written.
+ */
+function nullForUndefined(json: string): string {
+  let out = "";
+  let inString = false;
+  for (let i = 0; i < json.length; i++) {
+    const ch = json[i];
+    if (inString) {
+      out += ch;
+      if (ch === "\\") {
+        // An escape takes the next character with it, whatever it is.
+        i += 1;
+        out += json[i] ?? "";
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      out += ch;
+      continue;
+    }
+    if (json.startsWith("undefined", i) && !/[A-Za-z0-9_$]/.test(json[i - 1] ?? "")) {
+      const after = json[i + "undefined".length] ?? "";
+      if (!/[A-Za-z0-9_$]/.test(after)) {
+        out += "null";
+        i += "undefined".length - 1;
+        continue;
+      }
+    }
+    out += ch;
+  }
+  return out;
 }
 
 /**

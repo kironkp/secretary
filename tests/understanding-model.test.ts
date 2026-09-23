@@ -5,6 +5,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   callByProvider,
+  jsonFromText,
   modelCallFor,
   ModelOutputError,
   withFallback,
@@ -240,5 +241,38 @@ describe("callByProvider", () => {
     } finally {
       warn.mockRestore();
     }
+  });
+});
+describe("jsonFromText", () => {
+  it("reads plain JSON, and JSON wrapped in prose or a fence", () => {
+    expect(jsonFromText('{"a":1}')).toEqual({ a: 1 });
+    expect(jsonFromText('Here it is:\n```json\n{"a":1}\n```')).toEqual({ a: 1 });
+  });
+
+  it("reads an object whose optional field was written as undefined", () => {
+    // 2026-09-23: a whole run died three attempts deep on
+    // `"resumePointer":undefined`. The model meant "no value", which is null.
+    expect(jsonFromText('{"a":1,"resumePointer":undefined}')).toEqual({ a: 1, resumePointer: null });
+    expect(jsonFromText('{"a": undefined , "b":2}')).toEqual({ a: null, b: 2 });
+    expect(jsonFromText('{"list":[1,undefined,3]}')).toEqual({ list: [1, null, 3] });
+  });
+
+  it("leaves the word undefined alone inside a string", () => {
+    expect(jsonFromText('{"fact":"the total was undefined in the export"}')).toEqual({
+      fact: "the total was undefined in the export",
+    });
+    // Including when it sits next to an escaped quote.
+    expect(jsonFromText('{"fact":"she said \\"undefined\\" out loud","b":undefined}')).toEqual({
+      fact: 'she said "undefined" out loud',
+      b: null,
+    });
+  });
+
+  it("does not touch a longer word that merely starts with undefined", () => {
+    expect(jsonFromText('{"a":"x","b":"undefinedness"}')).toEqual({ a: "x", b: "undefinedness" });
+  });
+
+  it("throws the first error when nothing can be read", () => {
+    expect(() => jsonFromText("not json at all")).toThrow();
   });
 });

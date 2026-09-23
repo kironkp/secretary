@@ -31,7 +31,13 @@ function slip(a: string, b: string): number {
 /** The one known id of this type within MAX_SLIP of `id`, or null when none or several. */
 export function nearestId(id: string, known: Set<string>): string | null {
   if (known.has(id)) return id;
-  const lower = id.toLowerCase();
+  // A stray character the model carried in with the id: on 2026-09-23 a run
+  // was refused for `unknown message id "6ae41b15-...-1eb6317f1918}"`, one
+  // brace too many, which no same-length comparison can mend. Ids are hex
+  // and dashes, so anything else at either end is not part of one.
+  const trimmed = id.replace(/^[^0-9A-Za-z]+/, "").replace(/[^0-9A-Za-z]+$/, "");
+  if (trimmed !== id && known.has(trimmed)) return trimmed;
+  const lower = trimmed.toLowerCase();
   let hit: string | null = null;
   for (const candidate of known) {
     if (slip(lower, candidate.toLowerCase()) > MAX_SLIP) continue;

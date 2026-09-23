@@ -38,6 +38,18 @@ describe("nearestId", () => {
     expect(nearestId(T1.toUpperCase(), known)).toBe(T1);
   });
 
+  it("mends an id carrying a stray character, whatever its length", () => {
+    // The real one on 2026-09-23: `unknown message id "6ae41b15-…-1eb6317f1918}"`.
+    const known = new Set([T1, T2]);
+    expect(nearestId(`${T1}}`, known)).toBe(T1);
+    expect(nearestId(`"${T1}"`, known)).toBe(T1);
+    expect(nearestId(` ${T1},`, known)).toBe(T1);
+    // A stray character AND a slipped digit is still one id away.
+    expect(nearestId("04718334-6af8-480c-89e2-f2d1a1d00cc4}", known)).toBe(T1);
+    // Trimming does not invent a match out of something unrelated.
+    expect(nearestId("{not-an-id}", known)).toBeNull();
+  });
+
   it("refuses an id that is that close to two known ids", () => {
     const twins = new Set(["abcdefab-0000-4000-8000-000000000001", "abcdefab-0000-4000-8000-000000000002"]);
     expect(nearestId("abcdefab-0000-4000-8000-000000000003", twins)).toBeNull();
