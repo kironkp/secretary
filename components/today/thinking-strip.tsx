@@ -369,7 +369,9 @@ export function ThinkingStrip({
     startedAt: number | null;
     pending: Shown[];
     timer: ReturnType<typeof setTimeout> | null;
-  }>({ shown: want, since: 0, startedAt, pending: [], timer: null });
+    /** The screen's own lines already shown for this tap, so each gets one beat and no more. */
+    localShown: Set<string>;
+  }>({ shown: want, since: 0, startedAt, pending: [], timer: null, localShown: new Set() });
   const { phase, line, detail, action, tone, source } = want;
   useLayoutEffect(() => {
     const next: Shown = { phase, line, detail, action, tone, source };
@@ -379,6 +381,7 @@ export function ThinkingStrip({
       st.shown = item;
       st.since = Date.now();
       st.startedAt = startedAt;
+      if (item.source === "local") st.localShown.add(item.line);
       setHeld(item);
     };
     const pump = () => {
@@ -388,12 +391,47 @@ export function ThinkingStrip({
       show(item);
       if (st.pending.length) st.timer = setTimeout(pump, DWELL_MS);
     };
+    const schedule = () => {
+      if (st.timer) return;
+      const wait = st.since + DWELL_MS - Date.now();
+      if (wait <= 0) pump();
+      else st.timer = setTimeout(pump, wait);
+    };
     if (startedAt !== st.startedAt) {
       if (st.timer) clearTimeout(st.timer);
       st.timer = null;
       st.pending = [];
+      st.localShown = new Set();
       show(next);
       return;
+    }
+    // The screen's own line when the server has already taken the floor:
+    // derive() prefers the server's entry, so the receipt ("Closed 1 task")
+    // would never be asked for once a poll has shown the run under way. It
+    // still gets its beat, ahead of whatever the server says next.
+    const own =
+      activity && activity.startedAt === startedAt && (activity.status ?? "active") === "active"
+        ? activity.line
+        : null;
+    if (
+      next.source === "server" &&
+      own &&
+      !st.localShown.has(own) &&
+      own !== st.shown.line &&
+      !st.pending.some((p) => p.line === own)
+    ) {
+      const item: Shown = {
+        phase: "active",
+        line: own,
+        detail: activity?.detail ?? null,
+        action: null,
+        tone: "ink",
+        source: "local",
+      };
+      const firstServer = st.pending.findIndex((p) => p.source === "server");
+      if (firstServer === -1) st.pending.push(item);
+      else st.pending.splice(firstServer, 0, item);
+      schedule();
     }
     const tail = st.pending[st.pending.length - 1];
     if (tail ? sameLine(next, tail) : sameLine(next, st.shown)) {
@@ -410,12 +448,8 @@ export function ThinkingStrip({
     }
     if (tail && tail.source === "server" && next.source === "server") st.pending[st.pending.length - 1] = next;
     else st.pending.push(next);
-    if (!st.timer) {
-      const wait = st.since + DWELL_MS - Date.now();
-      if (wait <= 0) pump();
-      else st.timer = setTimeout(pump, wait);
-    }
-  }, [phase, line, detail, action, tone, source, startedAt]);
+    schedule();
+  }, [phase, line, detail, action, tone, source, startedAt, activity]);
   useEffect(() => {
     const st = dwell.current;
     return () => {
