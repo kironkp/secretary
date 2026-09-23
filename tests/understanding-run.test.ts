@@ -717,4 +717,50 @@ describe("the backoff after a failed run is for the validator's failures only", 
       errorSpy.mockRestore();
     }
   });
+
+  it("a 429 on the first attempt and a rejection on the second is a rejection: the sweep backs off", async () => {
+    // New inputs, so the failed rows above do not decide this one.
+    await db.insert(tasks).values({
+      userId: U.id,
+      projectId,
+      title: "Backoff task two",
+      status: "todo",
+      createdAt: new Date(NOW.getTime() - 20 * 86_400_000),
+      updatedAt: new Date(NOW.getTime() - 20 * 86_400_000),
+    });
+    const mixed = fakeModel((bundle, call) => {
+      if (call.attempt === 0) throw new Error("429 no credits");
+      const out = minimalOutputFor(bundle);
+      return {
+        ...out,
+        record: {
+          ...out.record,
+          rules: [
+            {
+              text: "A rule about a task that does not exist.",
+              sources: [{ type: "task", id: "not-a-real-task" }],
+              confidence: "high",
+            },
+          ],
+        },
+      };
+    });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const first = await sweepRun(mixed);
+      expect(first.status).toBe("failed");
+      if (first.status !== "failed") return;
+      expect(mixed.calls).toHaveLength(2);
+      // The log keeps the provider failure beside the validator's lines.
+      expect(first.errors[0]).toBe("model: 429 no credits");
+      expect(first.errors.some((e) => e.includes("not-a-real-task"))).toBe(true);
+
+      // The model did answer on these inputs and was refused: no call.
+      const second = await sweepRun(mixed);
+      expect(second).toEqual({ status: "skipped", reason: "backoff" });
+      expect(mixed.calls).toHaveLength(2);
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
 });

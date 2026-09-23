@@ -13,10 +13,14 @@
 //
 // The second half is the guard that keeps ruled-on issues from returning in
 // new words: every row a resolved, dismissed or superseded question rested on
-// is "settled" at the moment that question closed. A draft whose rows are all
-// settled, none of them changed since, and that carries no new message or
-// memory, is the same issue again and is skipped. A row edited after the
-// settlement, or a new message, is new evidence, and the issue may reopen.
+// is "settled", for that question's kind, at the moment it closed. A draft of
+// the same kind whose rows are all settled, none of them changed since, and
+// that carries no new message or memory, is the same issue again and is
+// skipped. A row edited after the settlement, or a new message, is new
+// evidence, and the issue may reopen. The kind is part of it because it is
+// part of a question's identity (questions.ts): "is this done?" about a task
+// is not "is this on the list twice?" about the same task, and a ruling on
+// the second must not silence the first for a month.
 import { and, eq, gt, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { clarifications } from "@/lib/db/schema";
@@ -96,11 +100,19 @@ export async function supersedeByWrites(
 /** How long a ruled-on row stays settled without new evidence. */
 export const SETTLED_DAYS = 30;
 
+/** The settled map's key: a row, under the kind of the question that rested on it. */
+export function settledKey(kind: string, source: { type: string; id: string }): string {
+  return `${kind} ${source.type}:${source.id}`;
+}
+
 /**
  * Every evidence key of the user's questions that closed in the last
- * SETTLED_DAYS, with the latest moment it was ruled on. Resolved, dismissed
- * and superseded all count: each is a person or the loop deciding that the
- * issue on those rows was seen.
+ * SETTLED_DAYS, under each question's kind, with the latest moment it was
+ * ruled on. Resolved, dismissed and superseded all count: each is a person
+ * or the loop deciding that the issue on those rows was seen. The one
+ * dismissal that is not a ruling is a text twin ("duplicate of <id>"): the
+ * row that was kept carries the ruling, and the twin's own rows, which may
+ * differ, were never decided on, so they do not settle.
  */
 export async function settledEvidence(
   executor: Executor,
@@ -110,6 +122,7 @@ export async function settledEvidence(
   const since = new Date(now.getTime() - SETTLED_DAYS * 86_400_000);
   const rows = await executor
     .select({
+      kind: clarifications.kind,
       evidence: clarifications.evidence,
       resolvedAt: clarifications.resolvedAt,
       createdAt: clarifications.createdAt,
@@ -120,6 +133,7 @@ export async function settledEvidence(
         eq(clarifications.userId, userId),
         inArray(clarifications.status, ["resolved", "dismissed", "superseded"]),
         inArray(clarifications.kind, [...QUESTION_KINDS]),
+        sql`coalesce(${clarifications.resolution}, '') not like 'duplicate of %'`,
         // resolved_at is new; older rows fall back to created_at, which is
         // earlier than the truth and therefore errs toward asking again.
         gt(sql`coalesce(${clarifications.resolvedAt}, ${clarifications.createdAt})`, since)
@@ -129,7 +143,7 @@ export async function settledEvidence(
   for (const r of rows) {
     const at = r.resolvedAt ?? r.createdAt;
     for (const s of r.evidence ?? []) {
-      const key = `${s.type}:${s.id}`;
+      const key = settledKey(r.kind, s);
       const prev = settled.get(key);
       if (!prev || prev < at) settled.set(key, at);
     }
@@ -139,23 +153,23 @@ export async function settledEvidence(
 
 /**
  * Is this draft the same issue again? True when every row it rests on was
- * settled and none changed after its settlement. A message or memory the
- * settled set has never seen is new evidence, and so is a task or expectation
- * whose updatedAt is later than the moment it was ruled on. A draft with no
- * evidence at all is never "already ruled on" (the validator refuses it
- * anyway).
+ * settled by a question of the same kind and none changed after its
+ * settlement. A message or memory the settled set has never seen is new
+ * evidence, and so is a task or expectation whose updatedAt is later than
+ * the moment it was ruled on. A draft with no evidence at all is never
+ * "already ruled on" (the validator refuses it anyway).
  */
 export function isAlreadyRuledOn(
+  kind: string,
   evidence: Source[],
   settled: Map<string, Date>,
   updatedAtOf: (key: string) => Date | null
 ): boolean {
   if (evidence.length === 0) return false;
   for (const s of evidence) {
-    const key = `${s.type}:${s.id}`;
-    const at = settled.get(key);
+    const at = settled.get(settledKey(kind, s));
     if (!at) return false;
-    const changed = updatedAtOf(key);
+    const changed = updatedAtOf(`${s.type}:${s.id}`);
     if (changed && changed > at) return false;
   }
   return true;

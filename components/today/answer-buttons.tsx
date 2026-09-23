@@ -93,7 +93,19 @@ export function AnswerButtons({
   const [opened, setOpened] = useState<boolean | null>(null);
   const [text, setText] = useState("");
   const field = useRef<HTMLInputElement>(null);
+  const ownPill = useRef<HTMLButtonElement>(null);
   const open = !!onOwnWords && !onWriteYourOwn && (opened ?? fromUrl);
+
+  /**
+   * Back to the pills without sending, from Escape or Cancel. Focus goes to
+   * the "Write your own" pill the field replaced, so a keyboard user is
+   * where they were and not at the top of the page; the pill is on screen
+   * only after the close has rendered, hence flushSync.
+   */
+  const close = () => {
+    flushSync(() => setOpened(false));
+    ownPill.current?.focus();
+  };
 
   // A field opened by the URL gets its focus here; a tapped one gets it
   // below, inside the gesture.
@@ -157,7 +169,7 @@ export function AnswerButtons({
               // Escape is the keyboard's Cancel: back to the pills, words dropped.
               if (e.key === "Escape" && !disabled) {
                 e.preventDefault();
-                setOpened(false);
+                close();
               }
             }}
             placeholder="Your answer"
@@ -179,7 +191,7 @@ export function AnswerButtons({
           type="button"
           data-own-cancel
           disabled={disabled}
-          onClick={() => setOpened(false)}
+          onClick={close}
           className={`grid min-h-11 w-full place-items-center text-accent disabled:opacity-50 ${type}`}
         >
           Cancel
@@ -208,6 +220,7 @@ export function AnswerButtons({
       ))}
       {(onOwnWords || onWriteYourOwn) && (
         <button
+          ref={ownPill}
           type="button"
           data-write-own
           data-selected={selected === "own" || undefined}

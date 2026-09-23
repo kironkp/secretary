@@ -152,6 +152,8 @@ describe("the Caltrans pair, end to end", () => {
   let q1 = "";
   let q2 = "";
   let walter = "";
+  /** Q2's identity back as a new row, from step (7). */
+  let q2Again = "";
   let firstRunId = "";
   let newMessageId = "";
   const completedAt: Record<string, string> = {};
@@ -305,6 +307,7 @@ describe("the Caltrans pair, end to end", () => {
       skippedSettled: [],
     });
     const reopened = result.questions.reopened[0];
+    q2Again = reopened;
 
     // A new row with Q2's identity; the superseded one stays as the record of the ruling.
     const same = (await questionRows()).filter((r) => r.identity === questionIdentity(q2Draft()));
@@ -435,5 +438,43 @@ describe("the Caltrans pair, end to end", () => {
     expect(swept).toEqual({ users: 1, ran: 0, skipped: 0, failed: 0, retiredAsr: 0, healed: 1 });
     expect(await rowOf(third.id)).toMatchObject({ status: "dismissed", resolution: `duplicate of ${older.id}` });
     expect((await rowOf(older.id)).status).toBe("open");
+  });
+
+  it("(11) a question of another kind on the settled rows is a new question; the same kind in new words is still the ruled-on one", async () => {
+    // Q1 (doesn't add up) and Q2 (need to know) settled the check task for
+    // their kinds. "Did you check?" is a done_yet on it: nobody ruled on
+    // that, so it is asked. A need_to_know on the same row, in new words,
+    // is Q2's issue again. The open rows are re-proposed so none is
+    // dismissed for being forgotten.
+    const doneYet: QuestionDraft = {
+      kind: "done_yet",
+      question: "Did you check what is blocking CPO 2073?",
+      why: `"Check what is blocking CPO 2073 and report back" was closed with the old copy.`,
+      evidence: [task(ids.checkCpo)],
+      answers: [
+        { id: "yes", label: "Yes", writes: [{ op: "resolve" }] },
+        { id: "no", label: "Not yet", writes: [{ op: "resolve" }] },
+      ],
+    };
+    const sameKind: QuestionDraft = {
+      ...doneYet,
+      kind: "need_to_know",
+      question: "Is anything still holding CPO 2073 up?",
+    };
+    const model = withQuestions([q2Draft(), walterDraft(newMessageId), doneYet, sameKind]);
+    const result = await run(model);
+    expect(result.status, JSON.stringify(result)).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.questions.created).toHaveLength(1);
+    expect(result.questions).toMatchObject({
+      dismissed: [],
+      skippedDuplicates: [],
+      skippedSettled: [sameKind.question],
+      reopened: [],
+    });
+    expect(result.questions.updated.sort()).toEqual([walter, q2Again].sort());
+    const asked = await rowOf(result.questions.created[0]);
+    expect(asked).toMatchObject({ kind: "done_yet", status: "open", createdByRun: await latestRunId() });
+    expect((await shownToday()).ids).toContain(asked.id);
   });
 });

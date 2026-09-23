@@ -651,10 +651,12 @@ describe("syncQuestions heals a standing pair of same-text rows", () => {
     expect(r).toEqual({ created: [], updated: [row.a], dismissed: [], skippedDuplicates: [], skippedSettled: [], reopened: [] });
     expect(await rowById(row.a)).toMatchObject({ status: "open", context: "why a, run 3" });
     expect(await rowById(row.b)).toMatchObject({ status: "dismissed" });
-    // The dismissed twin's identity is spent: proposed again on the same
-    // unchanged row, it is the settled guard's to report, and nothing else.
+    // The dismissed twin proposed again: its dismissal as a duplicate was
+    // no ruling on its row (supersede.ts settledEvidence), so it is the
+    // text guard, not the settled guard, that keeps it out while the row
+    // it was a twin of still stands.
     const again = await syncQuestions(U.id, p.caltrans, [fromB], caltrans());
-    expect(again).toEqual({ created: [], updated: [], dismissed: [], skippedDuplicates: [], skippedSettled: [TEXT], reopened: [] });
+    expect(again).toEqual({ created: [], updated: [], dismissed: [], skippedDuplicates: [TEXT], skippedSettled: [], reopened: [] });
     expect(await rows()).toHaveLength(2);
   });
 
@@ -665,9 +667,10 @@ describe("syncQuestions heals a standing pair of same-text rows", () => {
     expect(r).toEqual({ created: [], updated: [row.c], dismissed: [row.a], skippedDuplicates: [], skippedSettled: [], reopened: [] });
     expect(await rowById(row.c)).toMatchObject({ status: "open", context: "why c, run 2" });
     expect(await rowById(row.a)).toMatchObject({ status: "dismissed", resolution: `duplicate of ${row.c}` });
-    // The Caltrans row is spent too: its run cannot bring the pair back.
+    // The Caltrans run cannot bring the pair back either: the Album row now
+    // holds the words, so its draft is a duplicate of that row.
     const caltransAgain = await syncQuestions(U.id, p.caltrans, [fromA], caltrans());
-    expect(caltransAgain).toEqual({ created: [], updated: [], dismissed: [], skippedDuplicates: [], skippedSettled: [TEXT], reopened: [] });
+    expect(caltransAgain).toEqual({ created: [], updated: [], dismissed: [], skippedDuplicates: [TEXT], skippedSettled: [], reopened: [] });
     expect(await rows()).toHaveLength(3);
   });
 

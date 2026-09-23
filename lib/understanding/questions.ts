@@ -124,11 +124,12 @@ export function rankDraft(draft: QuestionDraft, bundle: Bundle): number {
  *   evidence, answers, rank — keeping its status and surfacedAt, so a
  *   question the user has seen does not become a new card.
  * - The settled guard (supersede.ts), the memory of asking: every row a
- *   resolved, dismissed or superseded question rested on is settled at the
- *   moment that question closed. A draft whose rows are all settled and
- *   unchanged since, whether its identity is one that closed or a new one
- *   in new words on the same rows, is the same issue again and is skipped
- *   (skippedSettled). A closed identity whose draft carries new evidence —
+ *   resolved, dismissed or superseded question rested on is settled, for
+ *   that question's kind, at the moment it closed. A draft of that kind
+ *   whose rows are all settled and unchanged since, whether its identity is
+ *   one that closed or a new one in new words on the same rows, is the same
+ *   issue again and is skipped (skippedSettled); a draft of another kind on
+ *   the same rows is another question. A closed identity whose draft carries new evidence —
  *   a task edited after the ruling, a message the ruling never saw — may
  *   reopen: a NEW row with the same identity is inserted (the identity
  *   index is not unique) and reported in `reopened`; the closed row keeps
@@ -192,7 +193,7 @@ export async function syncQuestions(
   // own (isAlreadyRuledOn).
   const updatedAtOf = (key: string): Date | null => updatedAtByKey.get(key) ?? null;
   const ruledOn = (draft: QuestionDraft): boolean =>
-    isAlreadyRuledOn(draft.evidence, settled, updatedAtOf);
+    isAlreadyRuledOn(draft.kind, draft.evidence, settled, updatedAtOf);
 
   // Every open or asked question of the user's, by normalized text, for the
   // text guard: one read up front rather than one per draft.
@@ -215,13 +216,23 @@ export async function syncQuestions(
   const keptByText = new Map<string, string>();
   /** Rows dismissed this run as duplicates: never a twin again, never refreshed. */
   const retired = new Set<string>();
+  // Both dismissals below write only over a row still pending: an answer
+  // landing between this sync's reads and its writes may have superseded
+  // the row (supersede.ts, outside any run), and that ruling stands.
   const retire = async (id: string, duplicateOf: string): Promise<void> => {
-    await db
+    const hit = await db
       .update(clarifications)
       .set({ status: "dismissed", resolution: `duplicate of ${duplicateOf}`, resolvedAt: closedAt })
-      .where(and(eq(clarifications.userId, userId), eq(clarifications.id, id)));
+      .where(
+        and(
+          eq(clarifications.userId, userId),
+          eq(clarifications.id, id),
+          inArray(clarifications.status, [...OPEN_STATUSES])
+        )
+      )
+      .returning({ id: clarifications.id });
     retired.add(id);
-    dismissed.push(id);
+    if (hit.length) dismissed.push(id);
   };
 
   // First the identity of every draft and the row it would refresh, so the
@@ -380,15 +391,22 @@ export async function syncQuestions(
   for (const row of standing) {
     if (row.identity && identities.has(row.identity)) continue;
     if (!row.evidence.some((s) => evidenceMoved(s, row.createdAt))) continue;
-    await db
+    const hit = await db
       .update(clarifications)
       .set({
         status: "dismissed",
         resolution: "resolved by a change in the data",
         resolvedAt: closedAt,
       })
-      .where(and(eq(clarifications.userId, userId), eq(clarifications.id, row.id)));
-    dismissed.push(row.id);
+      .where(
+        and(
+          eq(clarifications.userId, userId),
+          eq(clarifications.id, row.id),
+          inArray(clarifications.status, [...OPEN_STATUSES])
+        )
+      )
+      .returning({ id: clarifications.id });
+    if (hit.length) dismissed.push(row.id);
   }
 
   return { created, updated, dismissed, skippedDuplicates, skippedSettled, reopened };

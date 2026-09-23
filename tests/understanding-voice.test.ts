@@ -194,6 +194,59 @@ describe("answer_question, the voice tool", () => {
   });
 });
 
+describe("resolve_clarification, the voice-flow tool", () => {
+  it("never closes a question of the three understanding kinds, however well the text matches", async () => {
+    const [row] = await db
+      .insert(clarifications)
+      .values({
+        userId: U.id,
+        kind: "need_to_know",
+        rank: 100,
+        status: "open",
+        projectId: ids.caltrans,
+        identity: "voice-not-for-resolve",
+        question: "Is the parking permit on the Caltrans list on purpose?",
+        context: "why",
+        evidence: [{ type: "task", id: ids.statement }],
+        answers: [{ id: "yes", label: "Yes", writes: [{ op: "resolve" }] }],
+      })
+      .returning({ id: clarifications.id });
+    const { result } = await executeTool(ctx, "resolve_clarification", {
+      question: "parking permit on the Caltrans list",
+      answer: "yes, on purpose",
+      action: "note",
+    });
+    expect((result as { error?: string }).error).toContain("No open clarification");
+    expect(await questionRow(row.id)).toMatchObject({ status: "open", resolution: null, resolvedAt: null });
+    await db.delete(clarifications).where(and(eq(clarifications.userId, U.id), eq(clarifications.id, row.id)));
+  });
+
+  it("stamps resolved_at on the voice-flow row it resolves, like every other way out of pending", async () => {
+    const [row] = await db
+      .insert(clarifications)
+      .values({
+        userId: U.id,
+        kind: "asr_span",
+        status: "open",
+        subject: "Marisa Toledo",
+        question: 'I heard "Marisa Toledo" — is that Marissa, or someone new?',
+        context: "send it to Marisa Toledo",
+      })
+      .returning({ id: clarifications.id });
+    const { result } = await executeTool(ctx, "resolve_clarification", {
+      question: "Marisa Toledo",
+      answer: "someone new, leave it",
+      action: "note",
+    });
+    expect((result as { resolved?: boolean }).resolved).toBe(true);
+    const after = await questionRow(row.id);
+    expect(after.status).toBe("resolved");
+    expect(after.resolution).toBe("note: someone new, leave it");
+    expect(after.resolvedAt).not.toBeNull();
+    await db.delete(clarifications).where(and(eq(clarifications.userId, U.id), eq(clarifications.id, row.id)));
+  });
+});
+
 describe("the briefing", () => {
   let text = "";
 

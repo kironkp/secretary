@@ -10,6 +10,7 @@ import {
   changedRowsOf,
   isAlreadyRuledOn,
   settledEvidence,
+  settledKey,
   supersedeByWrites,
 } from "@/lib/understanding/supersede";
 import type { Answer, Source, Write } from "@/lib/understanding/types";
@@ -140,38 +141,89 @@ describe("an answer supersedes the questions that rested on what it changed", ()
 });
 
 describe("a ruled-on issue does not return without new evidence", () => {
-  it("settledEvidence carries every row of a closed question with the moment it closed", async () => {
+  const message = { type: "message" as const, id: "" };
+
+  it("settledEvidence carries every row of a closed question, under its kind, with the moment it closed", async () => {
     // Q1 is answered now; Q2 was superseded above.
     await db
       .update(clarifications)
       .set({ status: "resolved", resolution: "Close the old one", resolvedAt: NOW })
       .where(and(eq(clarifications.userId, U.id), eq(clarifications.id, q1)));
     const settled = await settledEvidence(db, U.id, NOW);
-    expect(settled.get(`task:${ids.blockedCpo}`)?.toISOString()).toBe(NOW.toISOString());
-    expect(settled.get(`task:${ids.checkCpo}`)?.toISOString()).toBe(NOW.toISOString());
-    expect(settled.get(`message:${ids.msgNothingBlocked}`)).toBeDefined();
+    // Both closed questions rested on the open copy and the check, each for its own kind.
+    expect(settled.get(settledKey("doesnt_add_up", task(ids.blockedCpo)))?.toISOString()).toBe(NOW.toISOString());
+    expect(settled.get(settledKey("need_to_know", task(ids.blockedCpo)))?.toISOString()).toBe(NOW.toISOString());
+    expect(settled.get(settledKey("need_to_know", task(ids.checkCpo)))?.toISOString()).toBe(NOW.toISOString());
+    expect(settled.get(settledKey("need_to_know", { ...message, id: ids.msgNothingBlocked }))).toBeDefined();
+    // Only Q2 cited the message, and only Q1 the finished copy.
+    expect(settled.has(settledKey("doesnt_add_up", { ...message, id: ids.msgNothingBlocked }))).toBe(false);
+    expect(settled.has(settledKey("need_to_know", task(ids.doneCpo)))).toBe(false);
+    // Nothing of that kind ever rested on them.
+    expect(settled.has(settledKey("done_yet", task(ids.checkCpo)))).toBe(false);
     // Q3 is still open: its rows are not settled.
-    expect(settled.has(`task:${ids.statement}`)).toBe(false);
+    expect(settled.has(settledKey("need_to_know", task(ids.statement)))).toBe(false);
   });
 
   it("the same issue on the same unchanged rows is already ruled on", async () => {
     const settled = await settledEvidence(db, U.id, NOW);
     const before = new Date(NOW.getTime() - 3_600_000);
     const draft = [task(ids.blockedCpo), task(ids.checkCpo)];
-    expect(isAlreadyRuledOn(draft, settled, () => before)).toBe(true);
+    expect(isAlreadyRuledOn("need_to_know", draft, settled, () => before)).toBe(true);
+    expect(isAlreadyRuledOn("doesnt_add_up", draft, settled, () => before)).toBe(true);
+  });
+
+  it("a question of another kind on the same rows is not the same issue", async () => {
+    // "Did you check?" about the check task, after "is it on the list
+    // twice?" and "what is blocking it?" were ruled on: nobody has answered
+    // this one, and a month of silence on the task would be a lost question.
+    const settled = await settledEvidence(db, U.id, NOW);
+    const before = new Date(NOW.getTime() - 3_600_000);
+    expect(isAlreadyRuledOn("done_yet", [task(ids.checkCpo)], settled, () => before)).toBe(false);
+    expect(isAlreadyRuledOn("done_yet", [task(ids.blockedCpo), task(ids.checkCpo)], settled, () => before)).toBe(false);
+    // The finished copy was only ever cited by Q1: under Q2's kind it is unsettled.
+    expect(isAlreadyRuledOn("need_to_know", [task(ids.doneCpo)], settled, () => before)).toBe(false);
   });
 
   it("a row edited after the ruling is new evidence", async () => {
     const settled = await settledEvidence(db, U.id, NOW);
     const after = new Date(NOW.getTime() + 3_600_000);
     const draft = [task(ids.blockedCpo), task(ids.checkCpo)];
-    expect(isAlreadyRuledOn(draft, settled, (key) => (key === `task:${ids.blockedCpo}` ? after : null))).toBe(false);
+    expect(isAlreadyRuledOn("need_to_know", draft, settled, (key) => (key === `task:${ids.blockedCpo}` ? after : null))).toBe(false);
   });
 
   it("a message the ruling never saw is new evidence, and an unsettled row is not ruled on", async () => {
     const settled = await settledEvidence(db, U.id, NOW);
-    expect(isAlreadyRuledOn([task(ids.blockedCpo), { type: "message", id: ids.msgCpo }], settled, () => null)).toBe(false);
-    expect(isAlreadyRuledOn([task(ids.statement)], settled, () => null)).toBe(false);
-    expect(isAlreadyRuledOn([], settled, () => null)).toBe(false);
+    expect(isAlreadyRuledOn("need_to_know", [task(ids.blockedCpo), { ...message, id: ids.msgCpo }], settled, () => null)).toBe(false);
+    expect(isAlreadyRuledOn("need_to_know", [task(ids.statement)], settled, () => null)).toBe(false);
+    expect(isAlreadyRuledOn("need_to_know", [], settled, () => null)).toBe(false);
+  });
+
+  it("a text twin dismissed as a duplicate settles nothing; a dismissal by the data does", async () => {
+    // Two done_yet rows in the same words, one on the statement task. The
+    // one on the statement is the newer and is dismissed as the twin: nobody
+    // decided anything about the statement, so a done_yet question on it is
+    // still open to ask. The same row dismissed because the data moved is a
+    // ruling, and settles it.
+    const twin = await insertQuestion({
+      kind: "done_yet",
+      question: "Is the statement done?",
+      evidence: [task(ids.statement)],
+      answers: [{ id: "yes", label: "Yes", writes: [{ op: "resolve" }] }],
+      identity: "id-twin",
+    });
+    await db
+      .update(clarifications)
+      .set({ status: "dismissed", resolution: `duplicate of ${q3}`, resolvedAt: NOW })
+      .where(and(eq(clarifications.userId, U.id), eq(clarifications.id, twin)));
+    let settled = await settledEvidence(db, U.id, NOW);
+    expect(settled.has(settledKey("done_yet", task(ids.statement)))).toBe(false);
+    expect(isAlreadyRuledOn("done_yet", [task(ids.statement)], settled, () => null)).toBe(false);
+
+    await db
+      .update(clarifications)
+      .set({ resolution: "resolved by a change in the data" })
+      .where(and(eq(clarifications.userId, U.id), eq(clarifications.id, twin)));
+    settled = await settledEvidence(db, U.id, NOW);
+    expect(settled.get(settledKey("done_yet", task(ids.statement)))?.toISOString()).toBe(NOW.toISOString());
   });
 });

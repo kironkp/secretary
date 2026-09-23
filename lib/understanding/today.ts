@@ -305,6 +305,13 @@ export type TodayData = {
   comingUp: BoundRow[];
   /** When any record was last written, ISO; null before the first run. */
   updatedAt: string | null;
+  /**
+   * When a run last finished, any status, ISO; null before the first. What
+   * the thinking bars watch after an answer (components/today/thinking.tsx):
+   * a re-read that failed finishes too, and the bars end with it rather
+   * than running out their minute. The same stamp the Interview carries.
+   */
+  lastRunAt: string | null;
 };
 
 type RecordWords = { projectId: string; todayLine: string; updatedAt: Date };
@@ -440,7 +447,7 @@ export async function buildToday(
 ): Promise<TodayData> {
   const { start } = dayRangeInTz(timezone, now);
 
-  const [queue, [{ open }], [pastDueCounts], dueToday, pastDueAll, comingUp, recordRows] = await Promise.all([
+  const [queue, [{ open }], [pastDueCounts], dueToday, pastDueAll, comingUp, recordRows, [lastRun]] = await Promise.all([
     listQuestions(userId, { limit: QUEUE_LIMIT }),
     db
       .select({ open: count() })
@@ -495,6 +502,10 @@ export async function buildToday(
       .select({ projectId: records.projectId, words: records.words, updatedAt: records.updatedAt })
       .from(records)
       .where(eq(records.userId, userId)),
+    db
+      .select({ at: max(understandingRuns.finishedAt) })
+      .from(understandingRuns)
+      .where(eq(understandingRuns.userId, userId)),
   ]);
 
   const views = await viewQuestions(userId, queue, timezone);
@@ -521,6 +532,7 @@ export async function buildToday(
     (max, r) => (max === null || r.updatedAt > max ? r.updatedAt : max),
     null
   );
+  const lastRunAt = lastRun?.at ? new Date(lastRun.at) : null;
 
   return {
     todayLine,
@@ -536,6 +548,7 @@ export async function buildToday(
     pastDue,
     comingUp,
     updatedAt: updatedAt ? updatedAt.toISOString() : null,
+    lastRunAt: lastRunAt && !Number.isNaN(lastRunAt.getTime()) ? lastRunAt.toISOString() : null,
   };
 }
 

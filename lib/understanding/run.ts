@@ -369,6 +369,18 @@ const FAILED_BACKOFF_MS = 6 * 60 * 60_000;
  */
 export const MODEL_ERROR_PREFIX = "model: ";
 
+/**
+ * Whether a failed run's logged errors say its LAST attempt failed at the
+ * provider. The log is every provider failure plus the last attempt's own
+ * errors (runOnce), so it is provider failures only exactly when the last
+ * attempt was one; a rejection after a 429 leaves the validator's lines in
+ * it. An empty log (a row from before errors were kept) is not a provider
+ * failure either.
+ */
+function failedAtProvider(errors: string[]): boolean {
+  return errors.length > 0 && errors.every((e) => e.startsWith(MODEL_ERROR_PREFIX));
+}
+
 type RunLog = {
   /** The run's id, fixed at its start: what created_by_run on a question names. */
   id: string;
@@ -553,9 +565,13 @@ async function runOnce(
       last.finishedAt &&
       Date.now() - last.finishedAt.getTime() < FAILED_BACKOFF_MS &&
       // Only a run the model answered and the validator refused is expected
-      // to fail the same way again on the same inputs. A run the provider
-      // failed (MODEL_ERROR_PREFIX) never read them; it tries again.
-      !(last.errors ?? []).some((e) => e.startsWith(MODEL_ERROR_PREFIX))
+      // to fail the same way again on the same inputs. A run whose last
+      // attempt the provider failed (MODEL_ERROR_PREFIX) never got an answer
+      // on them; it tries again. The log keeps every provider failure next
+      // to the LAST attempt's errors, so it is all provider failures exactly
+      // when the last attempt was one: a 429 on the first attempt followed
+      // by a rejection on the second is a rejection, and backs off.
+      !failedAtProvider(last.errors ?? [])
     ) {
       // Same inputs, same rejection expected; a change in the data tries at once.
       return { status: "skipped", reason: "backoff" };

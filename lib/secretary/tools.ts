@@ -1,7 +1,7 @@
 // Tool executor — the secretary's hands. Every function is user-scoped; the
 // voice path reaches it via POST /api/secretary/tools, the text path calls
 // executeTool directly inside /api/chat.
-import { and, count, desc, eq, gte, ilike, inArray, isNotNull, lt, ne } from "drizzle-orm";
+import { and, count, desc, eq, gte, ilike, inArray, isNotNull, lt, ne, notInArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { matchProjectName } from "@/lib/project-names";
 import {
@@ -46,6 +46,7 @@ import { REGISTRY_COMPONENTS, REGISTRY_VERSION } from "@/lib/layout/registry";
 import { computeSignals } from "@/lib/layout/signals";
 import { applyBans, validatePlan } from "@/lib/layout/validator";
 import { setAsideInWords } from "@/components/today/copy";
+import { QUESTION_KINDS } from "@/lib/understanding/types";
 import { findDuplicate, findDuplicateEvent } from "./dedupe";
 import { clearExpectationsFor } from "./expectations";
 import { spawnNextOccurrence } from "./recurrence";
@@ -1442,11 +1443,19 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
 
   async resolve_clarification(ctx, args) {
     const a = toolSchemas.resolve_clarification.parse(args);
+    // The voice-flow kinds only, in SQL and not just in the prompt: a
+    // question of the three understanding kinds closes through
+    // answer_question (its writes, the supersede, the record's asked entry),
+    // and a text match here must never resolve one past all of that.
     const rows = await db
       .select()
       .from(clarifications)
       .where(
-        and(eq(clarifications.userId, ctx.userId), inArray(clarifications.status, ["open", "asked"]))
+        and(
+          eq(clarifications.userId, ctx.userId),
+          inArray(clarifications.status, ["open", "asked"]),
+          notInArray(clarifications.kind, [...QUESTION_KINDS])
+        )
       );
     const needle = a.question.toLowerCase();
     const target =
@@ -1486,8 +1495,8 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     }
     await db
       .update(clarifications)
-      .set({ status: "resolved", resolution: `${a.action}: ${a.answer}` })
-      .where(eq(clarifications.id, target.id));
+      .set({ status: "resolved", resolution: `${a.action}: ${a.answer}`, resolvedAt: new Date() })
+      .where(and(eq(clarifications.userId, ctx.userId), eq(clarifications.id, target.id)));
     return { result: { resolved: true, action: a.action } };
   },
 

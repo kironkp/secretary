@@ -262,13 +262,16 @@ that drafted it, so a question always says why it exists.
 
 **The settled guard** (`lib/understanding/supersede.ts`, applied in
 `syncQuestions`) is what keeps a closed question closed. Every row a
-resolved, dismissed or superseded question rested on is *settled* at the
-moment it closed, for 30 days. A draft whose evidence rows are all settled
-and none changed since — a task's `updatedAt` later than the settlement is
-a change; a message or memory the settled set has never seen is new
-evidence — is the same issue again, whether it carries a closed identity or
-a new one in new words on the same rows, and is skipped
-(`skippedSettled`). A closed identity whose draft brings new evidence
+resolved, dismissed or superseded question rested on is *settled*, for that
+question's kind, at the moment it closed, for 30 days. A draft of that kind
+whose evidence rows are all settled and none changed since — a task's
+`updatedAt` later than the settlement is a change; a message or memory the
+settled set has never seen is new evidence — is the same issue again,
+whether it carries a closed identity or a new one in new words on the same
+rows, and is skipped (`skippedSettled`). The kind is part of it because it
+is part of the identity: a `done_yet` about a task is not the
+`doesnt_add_up` that cited the same task, and a ruling on one must not
+silence the other. A closed identity whose draft brings new evidence
 reopens: a new row with the same identity is inserted and reported
 (`reopened`); the closed row stays as the record of the ruling. The
 identity index is not unique on purpose. Nothing dismisses a question
@@ -405,10 +408,12 @@ write site to say the same thing less reliably.
 - **Backoff, for the validator only.** A project whose last run failed on
   the same inputs is not run again by the sweep for six hours, so a
   rejection is not paid for six times an hour. Only a run the model
-  answered and the validator refused arms this; a failure of the provider's
-  own (a 429, a usage cap, a timeout — logged with the prefix `model: `)
-  says nothing about the inputs and is tried again on the next sweep.
-  "Understand now" and an answer's re-run ignore the backoff.
+  answered and the validator refused arms this; a run whose last attempt
+  failed at the provider (a 429, a usage cap, a timeout — logged with the
+  prefix `model: `) says nothing about the inputs and is tried again on the
+  next sweep. A 429 on the first attempt followed by a rejection on the
+  second is a rejection. "Understand now" and an answer's re-run ignore the
+  backoff.
 
   Built: `lib/understanding/sweep.ts` `sweepUnderstanding`, started from the
   boot hook (`instrumentation.ts`) two minutes after the server starts and

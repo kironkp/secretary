@@ -39,15 +39,17 @@ function labelClass(label: string): string {
 }
 
 /**
- * When a record was last written, from /api/today: the stamp the thinking
- * bars watch after an answer. This page has no stamp of its own, so it is
- * read alongside the answer, before the re-read can have written anything.
+ * When a re-read last finished, from /api/today: the stamp the thinking
+ * bars watch after an answer, the same one Today and the Interview watch.
+ * A run that failed finishes too, so the bars end when the reading ends,
+ * not a minute later. This page has no stamp of its own, so it is read
+ * alongside the answer, before the re-read can have finished.
  */
-async function recordStamp(): Promise<string | null> {
+async function runStamp(): Promise<string | null> {
   try {
     const res = await fetch("/api/today", { cache: "no-store" });
     if (!res.ok) return null;
-    return ((await res.json()) as { updatedAt: string | null }).updatedAt;
+    return ((await res.json()) as { lastRunAt: string | null }).lastRunAt;
   } catch {
     return null;
   }
@@ -127,7 +129,7 @@ export function QuestionView({ initial }: { initial: QuestionData }) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         }),
-        recordStamp(),
+        runStamp(),
       ]);
       const reply = (await res.json().catch(() => null)) as AnswerReply | { error?: string } | null;
       if (res.ok && reply && "status" in reply && reply.status === "resolved") {
@@ -137,8 +139,8 @@ export function QuestionView({ initial }: { initial: QuestionData }) {
         // Any write elsewhere in the app can say so; the board updates at once.
         window.dispatchEvent(new Event("secretary:data-changed"));
         // The project is being re-read (SPEC §6 step 4): the bars say so
-        // until a record is written after `since`, or for a minute.
-        reread.start({ label: readingLabel(question.projectName), since, tick: recordStamp });
+        // until a run finishes after `since`, or for a minute.
+        reread.start({ label: readingLabel(question.projectName), since, tick: runStamp });
       } else if (res.status === 409) {
         setReceipt("This question was already answered.");
         setQuestion((q) => ({ ...q, status: "resolved" }));

@@ -91,20 +91,21 @@ export function TodayView({
   // A refresh that lands while an answer is in flight would swap the hero out
   // from under the button that was just pressed; the ref is current at once.
   const busy = useRef(false);
-  // The stamp the screen last saw, for the watch after an answer: state would
-  // be a render behind inside post().
-  const updatedAt = useRef<string | null>(initial.updatedAt);
+  // When a run last finished, as this screen last read it: the stamp the
+  // bars watch after an answer (the same one the Interview watches). A ref,
+  // because state would be a render behind inside post().
+  const lastRunAt = useRef<string | null>(initial.lastRunAt);
 
-  /** One read of /api/today applied in place; the server's stamp, or null when nothing was read. */
+  /** One read of /api/today applied in place; the server's run stamp, or null when nothing was read. */
   const load = useCallback(async (): Promise<string | null> => {
     try {
       const res = await fetch("/api/today", { cache: "no-store" });
       if (!res.ok) return null;
       const next = (await res.json()) as TodayData;
-      updatedAt.current = next.updatedAt;
+      lastRunAt.current = next.lastRunAt;
       setData(next);
       setToday(dateLine(new Date(), timezone));
-      return next.updatedAt;
+      return next.lastRunAt;
     } catch {
       // A failed poll is not worth a message; the next one is a minute away.
       return null;
@@ -153,7 +154,7 @@ export function TodayView({
     setAnswered({ questionId: question.id, answerId: "answerId" in body ? body.answerId : "own" });
     setError(null);
     setReceipt("Applying…");
-    const since = updatedAt.current;
+    const since = lastRunAt.current;
     let taken = false;
     try {
       const res = await fetch(`/api/questions/${question.id}/answer`, {
@@ -165,10 +166,22 @@ export function TodayView({
       if (res.ok && reply && "status" in reply && reply.status === "resolved") {
         // What was applied, or what Secretary read the words as; never more.
         setReceipt(receiptInWords(reply));
+        // The questions the answer set aside leave the list now, in the same
+        // moment the receipt names them, not on the refresh that follows.
+        const gone = new Set(reply.superseded ?? []);
+        if (gone.size > 0) {
+          setData((d) => {
+            const questions = d.questions.filter((q) => !gone.has(q.id));
+            const left = d.questions.length - questions.length;
+            return left === 0
+              ? d
+              : { ...d, questions, counts: { ...d.counts, questions: d.counts.questions - left } };
+          });
+        }
         // Any write elsewhere in the app can say so; the board updates at once.
         window.dispatchEvent(new Event("secretary:data-changed"));
         // The project is being re-read (SPEC §6 step 4): the bars say so
-        // until a record is written after `since`, or for a minute.
+        // until a run finishes after `since`, or for a minute.
         reread.start({
           label: readingLabel(question.projectName),
           since,

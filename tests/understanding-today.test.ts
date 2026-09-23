@@ -10,7 +10,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { clarifications, events, records, tasks, user } from "@/lib/db/schema";
+import { clarifications, events, records, tasks, understandingRuns, user } from "@/lib/db/schema";
 import { buildToday, cutQuote, mechanicalTodayLine, viewQuestion } from "@/lib/understanding/today";
 import { getQuestion } from "@/lib/understanding/questions";
 import type { ProjectRecord } from "@/lib/understanding/types";
@@ -146,6 +146,12 @@ beforeAll(async () => {
     words: { ledes: {} },
     updatedAt: at(-1),
   });
+  // Two runs, the later one failed: lastRunAt is when a run last finished,
+  // whatever it made of it (the bars after an answer end on a failure too).
+  await db.insert(understandingRuns).values([
+    { userId: U.id, projectId: ids.caltrans, startedAt: at(-3), finishedAt: at(-3), status: "ok" },
+    { userId: U.id, projectId: ids.caltrans, startedAt: at(-2), finishedAt: at(-2), status: "failed", errors: ["model: 429"] },
+  ]);
 });
 
 afterAll(async () => {
@@ -188,6 +194,7 @@ describe("buildToday on the duplicate-CPO scenario", () => {
     expect(data.comingUp.map((r) => r.id)).toEqual([ids.eventLinked, ids.eventTerm, ids.eventDentist]);
 
     expect(data.updatedAt).toBe(at(-1).toISOString());
+    expect(data.lastRunAt).toBe(at(-2).toISOString());
   });
 
   it("(2) showing a question marks it surfaced and logs it as asked on the project's record, once", async () => {
