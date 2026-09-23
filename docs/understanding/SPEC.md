@@ -271,7 +271,9 @@ whether it carries a closed identity or a new one in new words on the same
 rows, and is skipped (`skippedSettled`). The kind is part of it because it
 is part of the identity: a `done_yet` about a task is not the
 `doesnt_add_up` that cited the same task, and a ruling on one must not
-silence the other. A closed identity whose draft brings new evidence
+silence the other. A row dismissed as a text twin (`duplicate of <id>`) is
+not a ruling on its own rows: the kept row carries the ruling, and while it
+stands the text guard keeps the twin out. A closed identity whose draft brings new evidence
 reopens: a new row with the same identity is inserted and reported
 (`reopened`); the closed row stays as the record of the ruling. The
 identity index is not unique on purpose. Nothing dismisses a question
