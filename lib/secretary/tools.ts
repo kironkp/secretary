@@ -1497,8 +1497,41 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
   // from this module: a static import would be a cycle at load time.
   async answer_question(ctx, args) {
     const a = toolSchemas.answer_question.parse(args);
-    const { answerQuestion, rerunAfterAnswer } = await import("@/lib/understanding/answer");
-    const outcome = await answerQuestion(ctx.userId, ctx.timezone, a.question_id, a.answer_id, a.note, "voice");
+    const { answerQuestion, answerInOwnWords, rerunAfterAnswer } = await import(
+      "@/lib/understanding/answer"
+    );
+    const { InterpretError } = await import("@/lib/understanding/interpret");
+    let outcome: Awaited<ReturnType<typeof answerQuestion>>;
+    if (a.answer_id) {
+      // Words given alongside a listed answer ride as its note when there
+      // is none: the user said something extra, not something else.
+      outcome = await answerQuestion(
+        ctx.userId,
+        ctx.timezone,
+        a.question_id,
+        a.answer_id,
+        a.note ?? a.own_words,
+        "voice"
+      );
+    } else if (a.own_words?.trim()) {
+      // The user's own words: one model call reads them against the
+      // question (SPEC §6, lib/understanding/interpret.ts). A read that
+      // fails writes nothing; the caller can offer the listed answers.
+      try {
+        outcome = await answerInOwnWords(ctx.userId, ctx.timezone, a.question_id, a.own_words, "voice");
+      } catch (e) {
+        if (!(e instanceof InterpretError)) throw e;
+        return {
+          result: { error: "Could not read that right now; offer the listed answers or try again" },
+        };
+      }
+    } else {
+      return {
+        result: {
+          error: "Give answer_id (one of the ids printed after \"answers:\") or own_words (what the user said instead)",
+        },
+      };
+    }
     if (outcome.status === "not-found") {
       return { result: { error: `No question with id ${a.question_id} in the briefing's OPEN QUESTIONS` } };
     }
@@ -1508,7 +1541,9 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     if (outcome.status === "bad-answer") {
       return {
         result: {
-          error: `No answer with id ${a.answer_id} on that question; use one of the ids printed after "answers:"`,
+          error: a.answer_id
+            ? `No answer with id ${a.answer_id} on that question; use one of the ids printed after "answers:"`
+            : "Nothing to read in own_words",
         },
       };
     }
@@ -1524,7 +1559,14 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
       );
     }
     return {
-      result: { status: outcome.status, applied: outcome.applied, failed: outcome.failed },
+      result: {
+        status: outcome.status,
+        applied: outcome.applied,
+        failed: outcome.failed,
+        // The one sentence the reading came back with, for the model to
+        // relay in its own register; absent for a listed answer.
+        ...(outcome.reply ? { reply: outcome.reply } : {}),
+      },
       toast: { icon: "check", text: "Answered" },
     };
   },

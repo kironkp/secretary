@@ -118,6 +118,21 @@ export function rankDraft(draft: QuestionDraft, bundle: Bundle): number {
  *   evidence, answers, rank — keeping its status and surfacedAt, so a
  *   question the user has seen does not become a new card.
  * - Anything else is inserted open.
+ * - A second guard, by text (normalizeQuestionText). Identity stays
+ *   evidence-based; this catches the same question asked from two evidence
+ *   sets, or from two projects, which Today then showed as two rows. Drafts
+ *   that refresh a row go before drafts that would insert one, so a
+ *   question already on Today keeps its row and its wording wins:
+ *     - a refresh whose text an open or asked row of the user's ALSO
+ *       carries, in ANY project, dismisses that row as its duplicate
+ *       ("duplicate of <id>"), so a pair that already exists is healed by
+ *       the next run that re-proposes either of them, not frozen;
+ *     - a refresh whose text another row kept THIS run already carries is
+ *       itself the duplicate, and is dismissed the same way;
+ *     - a new draft whose text a kept or standing row carries is skipped and
+ *       reported in skippedDuplicates.
+ *   The row a draft refreshes in place is never its own twin, and a text is
+ *   free again once the row carrying it is resolved or dismissed.
  * - Rows of the three kinds for this project that this run did not propose
  *   are dismissed only when the data moved under them AFTER they were asked:
  *   an evidence task finished since the row was created (or gone from the
@@ -130,28 +145,94 @@ export async function syncQuestions(
   projectId: string,
   drafts: QuestionDraft[],
   bundle: Bundle
-): Promise<{ created: string[]; updated: string[]; dismissed: string[] }> {
+): Promise<{ created: string[]; updated: string[]; dismissed: string[]; skippedDuplicates: string[] }> {
   const created: string[] = [];
   const updated: string[] = [];
   const dismissed: string[] = [];
+  const skippedDuplicates: string[] = [];
   const identities = new Set<string>();
 
+  // Every open or asked question of the user's, by normalized text, for the
+  // text guard: one read up front rather than one per draft.
+  const standingByText = new Map<string, string[]>();
+  const standingTexts = await db
+    .select({ id: clarifications.id, question: clarifications.question })
+    .from(clarifications)
+    .where(
+      and(
+        eq(clarifications.userId, userId),
+        inArray(clarifications.kind, [...QUESTION_KINDS]),
+        inArray(clarifications.status, [...OPEN_STATUSES])
+      )
+    );
+  for (const row of standingTexts) {
+    const key = normalizeQuestionText(row.question);
+    standingByText.set(key, [...(standingByText.get(key) ?? []), row.id]);
+  }
+  /** The row that holds each text after this run's writes so far. */
+  const keptByText = new Map<string, string>();
+  /** Rows dismissed this run as duplicates: never a twin again, never refreshed. */
+  const retired = new Set<string>();
+  const retire = async (id: string, duplicateOf: string): Promise<void> => {
+    await db
+      .update(clarifications)
+      .set({ status: "dismissed", resolution: `duplicate of ${duplicateOf}` })
+      .where(and(eq(clarifications.userId, userId), eq(clarifications.id, id)));
+    retired.add(id);
+    dismissed.push(id);
+  };
+
+  // First the identity of every draft and the row it would refresh, so the
+  // refreshes can go first (see the rule above); the text guard needs to
+  // know which drafts those are before it writes anything.
+  const pending: { draft: QuestionDraft; identity: string; existing: { id: string } | null }[] = [];
   for (const draft of drafts) {
     const identity = questionIdentity(draft);
     // The same question twice in one run: the first wins, the second is noise.
     if (identities.has(identity)) continue;
     identities.add(identity);
 
-    const rank = rankDraft(draft, bundle);
     const [existing] = await db
       .select({ id: clarifications.id, status: clarifications.status })
       .from(clarifications)
       .where(and(eq(clarifications.userId, userId), eq(clarifications.identity, identity)))
       .orderBy(desc(clarifications.createdAt))
       .limit(1);
+    if (existing && (existing.status === "resolved" || existing.status === "dismissed")) continue;
+    pending.push({ draft, identity, existing: existing ?? null });
+  }
+  const ordered = [...pending.filter((p) => p.existing), ...pending.filter((p) => !p.existing)];
+
+  for (const { draft, identity, existing } of ordered) {
+    const rank = rankDraft(draft, bundle);
+    // The text guard. The row this draft would refresh (same identity) is
+    // excluded: a question re-proposed with its own wording is not a twin
+    // of itself.
+    const text = normalizeQuestionText(draft.question);
+    const twins = (standingByText.get(text) ?? []).filter(
+      (id) => id !== existing?.id && !retired.has(id)
+    );
 
     if (existing) {
-      if (existing.status === "resolved" || existing.status === "dismissed") continue;
+      // Retired earlier this run, as the twin of a row that went first.
+      if (retired.has(existing.id)) continue;
+      const holder = keptByText.get(text);
+      if (holder) {
+        // Reworded into the words another row already holds after this
+        // run's earlier writes: this row is the duplicate, that one stays.
+        await retire(existing.id, holder);
+        continue;
+      }
+      // Standing rows with these words are this row's duplicates, however
+      // they came to be: the pair Today showed is closed here.
+      for (const twin of twins) await retire(twin, existing.id);
+      keptByText.set(text, existing.id);
+    } else if (keptByText.has(text) || twins.length > 0) {
+      skippedDuplicates.push(draft.question);
+      continue;
+    }
+
+    if (existing) {
       await db
         .update(clarifications)
         .set({
@@ -182,6 +263,7 @@ export async function syncQuestions(
         status: "open",
       })
       .returning({ id: clarifications.id });
+    keptByText.set(text, row.id);
     created.push(row.id);
   }
 
@@ -241,7 +323,22 @@ export async function syncQuestions(
     dismissed.push(row.id);
   }
 
-  return { created, updated, dismissed };
+  return { created, updated, dismissed, skippedDuplicates };
+}
+
+/**
+ * The text guard's key: case-blind, whitespace-collapsed, end punctuation
+ * dropped, so "Is the statement done?" and "is the statement done" are one
+ * question. Nothing subtler: two wordings of one question are the run's
+ * identity to catch, and a guard that reached for synonyms would start
+ * skipping questions that are really different.
+ */
+export function normalizeQuestionText(text: string): string {
+  return text
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[\s.,;:!?…]+$/u, "");
 }
 
 // --------------------------------------------------------------------------

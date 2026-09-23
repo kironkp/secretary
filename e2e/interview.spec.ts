@@ -132,6 +132,51 @@ test.describe("the Interview", () => {
     expect(await questionStatus(page)).toBe(before);
   });
 
+  test("Write your own asks for the words in the note field, and Enter sends them", async ({ page }) => {
+    // The user's words (2026-09-22): "if there's a yes, no, or multiple
+    // choice, there's always an extra option with write your own". The last
+    // pill, grey like the way out, and a target a thumb can hit.
+    const write = card(page).locator("[data-write-own]");
+    await expect(write).toHaveText("Write your own");
+    await assertTapTargets(page, ["[data-testid=interview] [data-write-own]"]);
+
+    // The card already has the note field, so there is no second field:
+    // with nothing typed, the tap asks for the words there.
+    const note = page.locator("#interview-note");
+    await write.click();
+    await expect(note).toBeFocused();
+    await expect(note).toHaveAttribute("placeholder", "Your answer");
+    await expect(card(page).locator("[data-answer]")).toHaveCount(2);
+
+    // CI has no model to read the words, so the route is answered here with
+    // the body the server sends for a written answer (lib/understanding/
+    // answer.ts answerInOwnWords). Nothing reaches the database.
+    const words = "They are one job.";
+    let posted: unknown = null;
+    await page.route(`**/api/questions/${E2E_QUESTION.id}/answer`, async (route) => {
+      posted = route.request().postDataJSON();
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          status: "resolved",
+          projectId: null,
+          applied: [{ op: "remember_fact" }],
+          failed: [],
+          reply: "Noted.",
+        }),
+      });
+    });
+    await note.fill(words);
+    await note.press("Enter");
+
+    // The receipt is the server's reply, said back. The question is exactly
+    // as open as it was: the answer never left the browser.
+    await expect(page.getByText("Got it. Noted.")).toBeVisible();
+    expect(posted).toEqual({ text: words, source: "interview" });
+    expect(await questionStatus(page)).toMatch(/^(open|asked)$/);
+  });
+
   test("the API lists the queue with the seeded question", async ({ page }) => {
     const res = await page.request.get("/api/interview");
     expect(res.ok()).toBeTruthy();

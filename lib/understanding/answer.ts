@@ -18,9 +18,11 @@ import { clarifications, expectations, records } from "@/lib/db/schema";
 import { executeTool, resolveProject, type ToolContext } from "@/lib/secretary/tools";
 import { tzOffsetMs } from "@/lib/time";
 import { localDateInTz } from "./gather";
-import { getQuestion } from "./questions";
+import { interpretAnswer, type InterpretCall } from "./interpret";
+import { getQuestion, type QuestionRow } from "./questions";
 import { upsertAsked } from "./record";
-import { writeSchema, type Asked, type Write } from "./types";
+import { viewQuestion } from "./today";
+import { writeSchema, type Answer, type Asked, type Write } from "./types";
 
 /**
  * Where an answer was given. A note kept as a memory is tagged with it, so
@@ -41,12 +43,23 @@ export type AnswerResult =
       projectId: string | null;
       applied: AppliedWrite[];
       failed: FailedWrite[];
+      /**
+       * One sentence back to the user, only when the answer came in their
+       * own words (answerInOwnWords): what Secretary read the words as. A
+       * tapped answer has no reply; its receipt is appliedInWords.
+       */
+      reply?: string;
     }
   | { status: "not-open" }
   | { status: "not-found" }
   | { status: "bad-answer" };
 
+type Resolved = Extract<AnswerResult, { status: "resolved" }>;
+
 const isOpen = (status: string) => status === "open" || status === "asked";
+
+/** The route and the voice tool cap the text here too; a longer one is a note, not an answer. */
+export const MAX_OWN_WORDS = 1000;
 
 /** The row a write touches, so it can be checked against the evidence. */
 function targetOf(w: Write): { type: "task" | "expectation"; id: string } | null {
@@ -185,6 +198,155 @@ async function applyWrite(ctx: ToolContext, w: Write, now: Date): Promise<WriteO
   }
 }
 
+// --------------------------------------------------------------------------
+// The pieces a tapped answer and a typed one share
+// --------------------------------------------------------------------------
+
+/**
+ * The stored writes, read back through the schema (types.ts) rather than
+ * trusted, and checked against the evidence: a row seeded or migrated by
+ * hand with an op outside the closed list is refused whole, not a crash
+ * halfway through, and (SPEC §5, §6) a write naming a task or expectation
+ * outside the question's evidence refuses the answer before anything runs.
+ * Null means bad-answer.
+ */
+function checkedWrites(question: QuestionRow, answer: Answer): Write[] | null {
+  const parsed = z.array(writeSchema).safeParse(answer.writes);
+  if (!parsed.success) return null;
+  const allowed = new Set(question.evidence.map((s) => `${s.type}:${s.id}`));
+  for (const w of parsed.data) {
+    const target = targetOf(w);
+    if (target && !allowed.has(`${target.type}:${target.id}`)) return null;
+  }
+  return parsed.data;
+}
+
+type Applied = { applied: AppliedWrite[]; failed: FailedWrite[] };
+
+/** The writes in order; a failed one is reported and the rest still run. */
+async function applyWrites(ctx: ToolContext, writes: Write[], now: Date): Promise<Applied> {
+  const applied: AppliedWrite[] = [];
+  const failed: FailedWrite[] = [];
+  for (const w of writes) {
+    if (w.op === "resolve") continue;
+    const id = targetOf(w)?.id;
+    const outcome = await applyWrite(ctx, w, now);
+    if (outcome.ok) {
+      applied.push({
+        op: w.op,
+        ...(id ? { id } : {}),
+        ...(outcome.project ? { project: outcome.project } : {}),
+      });
+    } else {
+      failed.push({ op: w.op, ...(id ? { id } : {}), error: outcome.error });
+    }
+  }
+  return { applied, failed };
+}
+
+/** A memory through remember_fact, reported the way any other write is. */
+async function remember(ctx: ToolContext, fact: string, tags: string[], into: Applied): Promise<void> {
+  const outcome = await viaTool(ctx, "remember_fact", { fact, tags });
+  if (outcome.ok) into.applied.push({ op: "remember_fact" });
+  else into.failed.push({ op: "remember_fact", error: outcome.error });
+}
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * SPEC §6 step 1, "refuse unless open", has to hold against two answers
+ * landing at once — a tap and a spoken one, or a tap and the same words
+ * typed on the Interview. The row is locked for the length of the answer, so
+ * the second waits, then finds it resolved. The tools write on their own
+ * connections and none of them touches this row, so the lock cannot wait on
+ * them. `body` runs only for an open row.
+ */
+function withOpenRow(
+  userId: string,
+  questionId: string,
+  body: (tx: Tx) => Promise<Resolved>
+): Promise<AnswerResult> {
+  return db.transaction(async (tx) => {
+    const [locked] = await tx
+      .select({ status: clarifications.status })
+      .from(clarifications)
+      .where(and(eq(clarifications.userId, userId), eq(clarifications.id, questionId)))
+      .for("update");
+    if (!locked) return { status: "not-found" };
+    if (!isOpen(locked.status)) return { status: "not-open" };
+    return body(tx);
+  });
+}
+
+/** SPEC §6 step 3: the question closes, with what the user said as the resolution. */
+async function resolveRow(tx: Tx, userId: string, questionId: string, resolution: string): Promise<void> {
+  await tx
+    .update(clarifications)
+    .set({ status: "resolved", resolution })
+    .where(and(eq(clarifications.userId, userId), eq(clarifications.id, questionId)));
+}
+
+/**
+ * One listed answer, applied: its writes in order, the note kept, the row
+ * resolved, the record's asked entry updated. Both a tap (answerQuestion)
+ * and typed words the model read as this answer (answerInOwnWords) end
+ * here, so there is one write loop and one meaning of "answered". `read`
+ * is present only for typed words: what the model distilled from them.
+ */
+async function commitAnswer(
+  tx: Tx,
+  ctx: ToolContext,
+  question: QuestionRow,
+  answer: Answer,
+  writes: Write[],
+  note: string | undefined,
+  source: AnswerSource | undefined,
+  now: Date,
+  read?: { fact: string | null }
+): Promise<Resolved> {
+  const trimmedNote = note?.trim() ?? "";
+  const resolution = trimmedNote ? `${answer.label}: ${trimmedNote}` : answer.label;
+
+  const outcome = await applyWrites(ctx, writes, now);
+
+  // A note on an answer that writes nothing ("Keep them", with a line
+  // saying why) would otherwise live only in the resolution column, which
+  // no run reads. It is kept as a memory tagged with the project's name,
+  // which is how gather.ts finds a memory for a project, so the next run
+  // reasons from what the user typed. The question and the label go in
+  // front of the note: a memory reading "they are different jobs" on its
+  // own names nothing. The second tag is where the answer was given
+  // (Today, the Interview, a call), when the caller said; every surface
+  // that takes a note comes through here.
+  if (trimmedNote && writes.every((w) => w.op === "resolve")) {
+    const tags = [question.projectName, source].filter((t): t is string => !!t);
+    const fact = `Asked "${question.question}", you answered "${answer.label}": ${trimmedNote}`;
+    await remember(ctx, fact, tags, outcome);
+  } else if (read?.fact) {
+    // Typed words that meant an answer AND said more ("yes, close them
+    // both, the new one is 0394"): the writes carry the answer, and the
+    // fact the model distilled from the rest is kept the way the fact path
+    // below keeps one, under the project and "answer", so the explanation
+    // the user typed reaches the next run. The words themselves reach it
+    // through the asked entry, which logs the whole resolution.
+    const tags = [question.projectName, "answer"].filter((t): t is string => !!t);
+    await remember(ctx, read.fact, tags, outcome);
+  }
+
+  await resolveRow(tx, ctx.userId, question.id, resolution);
+  if (question.projectId) {
+    // The resolution, not the bare label: SPEC §5 has asked[] carry the
+    // answer text so the next run can reason from it, and with a note or
+    // typed words that text is "Label: what they said".
+    await logAnswer(ctx.userId, question.projectId, question.id, resolution, now);
+  }
+  return { status: "resolved", projectId: question.projectId, ...outcome };
+}
+
+// --------------------------------------------------------------------------
+// A tapped answer
+// --------------------------------------------------------------------------
+
 /**
  * Apply one answer to one question. Refuses (bad-answer) before touching
  * anything when the answer is unknown, its stored writes do not fit the
@@ -208,85 +370,81 @@ export async function answerQuestion(
 
   const answer = question.answers.find((a) => a.id === answerId);
   if (!answer) return { status: "bad-answer" };
-
-  // The stored writes are read back through the schema (types.ts) rather
-  // than trusted: a row seeded or migrated by hand with an op outside the
-  // closed list is a bad answer, refused whole, not a crash halfway through.
-  const parsed = z.array(writeSchema).safeParse(answer.writes);
-  if (!parsed.success) return { status: "bad-answer" };
-  const writes = parsed.data;
-
-  // SPEC §5, §6: ids come from the evidence, or the answer is refused whole.
-  const allowed = new Set(question.evidence.map((s) => `${s.type}:${s.id}`));
-  for (const w of writes) {
-    const target = targetOf(w);
-    if (target && !allowed.has(`${target.type}:${target.id}`)) return { status: "bad-answer" };
-  }
+  const writes = checkedWrites(question, answer);
+  if (!writes) return { status: "bad-answer" };
 
   const now = new Date();
   const ctx: ToolContext = { userId, timezone };
-  // SPEC §6 step 3: resolve, with the note kept as the resolution.
-  const trimmedNote = note?.trim() ?? "";
-  const resolution = trimmedNote ? `${answer.label}: ${trimmedNote}` : answer.label;
+  return withOpenRow(userId, question.id, (tx) =>
+    commitAnswer(tx, ctx, question, answer, writes, note, source, now)
+  );
+}
 
-  // SPEC §6 step 1, "refuse unless open", has to hold against two answers
-  // landing at once — a tap and a spoken one. The row is locked for the
-  // length of the answer, so the second waits, then finds it resolved. The
-  // tools write on their own connections and none of them touches this row,
-  // so the lock cannot wait on them.
-  return db.transaction(async (tx) => {
-    const [locked] = await tx
-      .select({ status: clarifications.status })
-      .from(clarifications)
-      .where(and(eq(clarifications.userId, userId), eq(clarifications.id, question.id)))
-      .for("update");
-    if (!locked) return { status: "not-found" };
-    if (!isOpen(locked.status)) return { status: "not-open" };
+// --------------------------------------------------------------------------
+// An answer in the user's own words
+// --------------------------------------------------------------------------
 
-    const applied: AppliedWrite[] = [];
-    const failed: FailedWrite[] = [];
-    for (const w of writes) {
-      if (w.op === "resolve") continue;
-      const id = targetOf(w)?.id;
-      const outcome = await applyWrite(ctx, w, now);
-      if (outcome.ok) {
-        applied.push({
-          op: w.op,
-          ...(id ? { id } : {}),
-          ...(outcome.project ? { project: outcome.project } : {}),
-        });
-      } else {
-        failed.push({ op: w.op, ...(id ? { id } : {}), error: outcome.error });
-      }
-    }
+/**
+ * "Write your own": the user typed `text` instead of tapping an answer. One
+ * model call (interpret.ts) reads it against the question. When the words
+ * mean a listed answer, that answer is applied exactly as a tap would be,
+ * with the words as its note, and a fact the model distilled from them on
+ * top is kept as a memory (commitAnswer). When they add information
+ * instead, the words (or the one-sentence fact the model distilled from
+ * them) become a memory tagged with the project and "answer", the question
+ * resolves as "In your words: …", and the record's asked entry carries the
+ * words so the next run reasons from them. Either way the result carries
+ * the model's one-sentence reply for the receipt.
+ *
+ * The model reads BEFORE the row is locked: a call takes seconds, and a
+ * lock held that long would make a tap on the same question wait on a
+ * model. An InterpretError (no model, a model error, unreadable output)
+ * propagates with nothing written; the route answers 503 and the field
+ * keeps the text. The re-run is the caller's to schedule, as for a tap.
+ */
+export async function answerInOwnWords(
+  userId: string,
+  timezone: string,
+  questionId: string,
+  text: string,
+  source?: AnswerSource,
+  call?: InterpretCall
+): Promise<AnswerResult> {
+  const question = await getQuestion(userId, questionId);
+  if (!question) return { status: "not-found" };
+  if (!isOpen(question.status)) return { status: "not-open" };
 
-    // A note on an answer that writes nothing ("Keep them", with a line
-    // saying why) would otherwise live only in the resolution column, which
-    // no run reads. It is kept as a memory tagged with the project's name,
-    // which is how gather.ts finds a memory for a project, so the next run
-    // reasons from what the user typed. The question and the label go in
-    // front of the note: a memory reading "they are different jobs" on its
-    // own names nothing. The second tag is where the answer was given
-    // (Today, the Interview, a call), when the caller said; every surface
-    // that takes a note comes through here.
-    if (trimmedNote && writes.every((w) => w.op === "resolve")) {
-      const tags = [question.projectName, source].filter((t): t is string => !!t);
-      const fact = `Asked "${question.question}", you answered "${answer.label}": ${trimmedNote}`;
-      const outcome = await viaTool(ctx, "remember_fact", { fact, tags });
-      if (outcome.ok) applied.push({ op: "remember_fact" });
-      else failed.push({ op: "remember_fact", error: outcome.error });
-    }
+  const words = text.trim();
+  if (!words || words.length > MAX_OWN_WORDS) return { status: "bad-answer" };
 
-    await tx
-      .update(clarifications)
-      .set({ status: "resolved", resolution })
-      .where(and(eq(clarifications.userId, userId), eq(clarifications.id, question.id)));
+  const view = await viewQuestion(userId, question, timezone);
+  const reading = await interpretAnswer(userId, timezone, view, words, call);
 
-    if (question.projectId) {
-      await logAnswer(userId, question.projectId, question.id, answer.label, now);
-    }
+  const now = new Date();
+  const ctx: ToolContext = { userId, timezone };
 
-    return { status: "resolved", projectId: question.projectId, applied, failed };
+  if (reading.answerId) {
+    const answer = question.answers.find((a) => a.id === reading.answerId);
+    const writes = answer ? checkedWrites(question, answer) : null;
+    // interpretAnswer only returns an id from this question's answers, so
+    // this is a stored answer whose writes are malformed: refused, like a tap.
+    if (!answer || !writes) return { status: "bad-answer" };
+    return withOpenRow(userId, question.id, async (tx) => ({
+      ...(await commitAnswer(tx, ctx, question, answer, writes, words, source, now, reading)),
+      reply: reading.reply,
+    }));
+  }
+
+  return withOpenRow(userId, question.id, async (tx) => {
+    const outcome: Applied = { applied: [], failed: [] };
+    // "answer" rather than the source: the tag says what kind of memory
+    // this is (the user answering a question in their own words), and the
+    // project's name is how gather.ts finds it for the next run.
+    const tags = [question.projectName, "answer"].filter((t): t is string => !!t);
+    await remember(ctx, reading.fact ?? words, tags, outcome);
+    await resolveRow(tx, userId, question.id, `In your words: ${words}`);
+    if (question.projectId) await logAnswer(userId, question.projectId, question.id, words, now);
+    return { status: "resolved", projectId: question.projectId, ...outcome, reply: reading.reply };
   });
 }
 
@@ -311,7 +469,10 @@ async function logAnswer(
     .limit(1);
   if (!record) return;
   const existing = record.body.asked?.find((a) => a.questionId === questionId);
+  // Spread first: whatever surfacing wrote on the entry (the question's text
+  // and evidence keys, when it did) survives the answer landing on it.
   const entry: Asked = {
+    ...existing,
     questionId,
     askedAt: existing?.askedAt ?? now.toISOString(),
     answer,

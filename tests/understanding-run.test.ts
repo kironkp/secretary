@@ -362,21 +362,21 @@ describe("runProject on the duplicate-CPO scenario", () => {
   it("(10) a resolved or dismissed identity is never re-created", async () => {
     await db
       .update(clarifications)
-      .set({ status: "resolved", resolution: "Yes, that is the last step" })
+      .set({ status: "resolved", resolution: "Yes, last step" })
       .where(and(eq(clarifications.userId, U.id), eq(clarifications.id, needToKnowId)));
 
     const again = fakeModel((bundle) => validOutputFor(bundle, ids));
     const result = await run({ model: again, force: true });
     expect(result.status, JSON.stringify(result)).toBe("ok");
     if (result.status !== "ok") return;
-    expect(result.questions).toEqual({ created: [], updated: [], dismissed: [] });
+    expect(result.questions).toEqual({ created: [], updated: [], dismissed: [], skippedDuplicates: [] });
 
     const rows = await questionRows();
     expect(rows).toHaveLength(2);
     const ntk = rows.find((r) => r.id === needToKnowId)!;
     const dau = rows.find((r) => r.id === doesntAddUpId)!;
     expect(ntk.status).toBe("resolved");
-    expect(ntk.resolution).toBe("Yes, that is the last step");
+    expect(ntk.resolution).toBe("Yes, last step");
     expect(dau.status).toBe("dismissed");
     // The same identities, exactly one row each.
     const drafts = validOutputFor(again.calls[0].bundle, ids).questions;

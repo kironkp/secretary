@@ -131,9 +131,10 @@ describe("answer_question, the voice tool", () => {
       required?: string[];
     };
     expect(Object.keys(params.properties ?? {}).sort()).toEqual(
-      ["answer_id", "note", "question_id"].sort()
+      ["answer_id", "note", "own_words", "question_id"].sort()
     );
-    expect(params.required).toEqual(["question_id", "answer_id"]);
+    // answer_id is optional since own_words: one flat tool, two ways to answer.
+    expect(params.required).toEqual(["question_id"]);
     expect(def?.description).toContain("Never use resolve_clarification");
     // Bounded strings: the schema refuses an id longer than the column would hold.
     expect(toolSchemas.answer_question.safeParse({ question_id: "x".repeat(81), answer_id: "a" }).success).toBe(false);

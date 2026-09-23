@@ -48,6 +48,13 @@ test("Today", async ({ page }) => {
   await shoot(page, "/today", "today");
 });
 
+test("Today, writing an answer", async ({ page }) => {
+  // ?own=open shows "Write your own" already open, with nothing typed and
+  // nothing sent (components/today/answer-buttons.tsx useOwnWordsFromUrl),
+  // so the field is in the pictures without a model to answer with.
+  await shoot(page, "/today?own=open", "today-writing");
+});
+
 test("A question, opened", async ({ page }) => {
   await shoot(page, `/today/${E2E_QUESTION.id}`, "question");
 });

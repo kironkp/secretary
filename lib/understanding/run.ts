@@ -204,23 +204,28 @@ export async function openaiModelCall(userId: string): Promise<ModelCall | null>
   };
 }
 
+/** Any call to a model: the run's ModelCall, or interpret.ts's InterpretCall. */
+type Call<Input, Output> = (input: Input) => Promise<Output>;
+
 /**
- * A ModelCall that tries `primary` and, when it THROWS — any error: an API
+ * A call that tries `primary` and, when it THROWS — any error: an API
  * rejection, a refusal, output that is not JSON — calls `secondary` with the
  * same input. `onFallback` sees the error once per fallback. A primary that
  * returns is never second-guessed: an output that fails validation is the
- * run's retry to handle, not a reason to switch providers.
+ * run's retry to handle, not a reason to switch providers. Generic over the
+ * call's shape so the one-sentence read in interpret.ts gets the same second
+ * road as the run.
  */
-export function withFallback(
-  primary: ModelCall,
-  secondary: ModelCall,
+export function withFallback<Input, Output>(
+  primary: Call<Input, Output>,
+  secondary: Call<Input, Output>,
   onFallback?: (error: unknown) => void,
   /** Asked before every call: true sends it straight to `secondary`. The
    *  run's own retry reuses one ModelCall, so a preference set by the first
    *  attempt's failure has to be read here, per call, not once when the
    *  wrapper is built — otherwise the retry pays for the same rejection. */
   preferSecondary?: () => boolean
-): ModelCall {
+): Call<Input, Output> {
   return async (input) => {
     if (preferSecondary?.()) return secondary(input);
     try {
@@ -240,7 +245,7 @@ const PREFER_OPENAI_MS = 60 * 60_000;
 let preferOpenaiUntil = 0;
 
 /**
- * The production model for one user, by UNDERSTANDING_PROVIDER:
+ * The provider choice, by UNDERSTANDING_PROVIDER, for any call shape:
  *   anthropic  Claude or nothing.
  *   openai     OpenAI or nothing.
  *   auto       Claude with OpenAI behind it (the default). A Claude call that
@@ -249,29 +254,43 @@ let preferOpenaiUntil = 0;
  *              written, and OpenAI goes first for the next 60 minutes so a
  *              sweep over eight projects does not pay for eight rejections.
  *              With only one provider available, that one; null with neither.
+ * The two builders are thunks so a provider the setting rules out is never
+ * built (each costs a client lookup). `what` names the call in the warning.
+ * The hour-long memory of a Claude failure is one per process, shared by
+ * every caller: a read of one typed answer (interpret.ts) has no reason to
+ * pay for a rejection the sweep just saw.
  */
-export async function modelCallFor(userId: string): Promise<ModelCall | null> {
+export async function callByProvider<Input, Output>(
+  claude: () => Promise<Call<Input, Output> | null>,
+  gpt: () => Promise<Call<Input, Output> | null>,
+  what: string
+): Promise<Call<Input, Output> | null> {
   const env = process.env.UNDERSTANDING_PROVIDER;
   const provider: Provider = (PROVIDERS as readonly string[]).includes(env ?? "")
     ? (env as Provider)
     : "auto";
-  if (provider === "anthropic") return anthropicModelCall(userId);
-  if (provider === "openai") return openaiModelCall(userId);
+  if (provider === "anthropic") return claude();
+  if (provider === "openai") return gpt();
 
-  const [claude, gpt] = await Promise.all([anthropicModelCall(userId), openaiModelCall(userId)]);
-  if (!claude) return gpt;
-  if (!gpt) return claude;
+  const [primary, secondary] = await Promise.all([claude(), gpt()]);
+  if (!primary) return secondary;
+  if (!secondary) return primary;
   return withFallback(
-    claude,
-    gpt,
+    primary,
+    secondary,
     (e) => {
       preferOpenaiUntil = Date.now() + PREFER_OPENAI_MS;
       console.warn(
-        `understanding: claude call failed (${e instanceof Error ? e.message : String(e)}); using openai for the next 60 minutes`
+        `understanding: claude ${what} failed (${e instanceof Error ? e.message : String(e)}); using openai for the next 60 minutes`
       );
     },
     () => Date.now() < preferOpenaiUntil
   );
+}
+
+/** The production model for one user: the run's two calls, chosen as callByProvider says. */
+export function modelCallFor(userId: string): Promise<ModelCall | null> {
+  return callByProvider(() => anthropicModelCall(userId), () => openaiModelCall(userId), "call");
 }
 
 // --------------------------------------------------------------------------

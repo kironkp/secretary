@@ -1,21 +1,31 @@
 // POST /api/questions/[id]/answer — docs/understanding/SPEC.md §6.
 //
-// The writes happen inside answerQuestion, through the existing tools. The
-// project's re-run (§6 step 4) is scheduled with after(): the response
-// carries the writes that succeeded and never waits on a model.
+// Two ways to answer, one of them per request: `answerId` picks a listed
+// answer (a tapped pill), `text` answers in the user's own words ("Write
+// your own"), which one small model call reads against the question. The
+// writes happen inside lib/understanding/answer.ts, through the existing
+// tools. The project's re-run (§6 step 4) is scheduled with after(): the
+// response carries the writes that succeeded and never waits on a model.
 import { NextResponse, after } from "next/server";
 import { z } from "zod";
-import { isErrorResponse, parseBody, requireSession } from "@/lib/api";
+import { badRequest, isErrorResponse, parseBody, requireSession } from "@/lib/api";
 import {
   ANSWER_SOURCES,
+  MAX_OWN_WORDS,
+  answerInOwnWords,
   answerQuestion,
   rerunAfterAnswer,
   type AnswerResult,
 } from "@/lib/understanding/answer";
+import { InterpretError } from "@/lib/understanding/interpret";
 
 const bodySchema = z.object({
-  answerId: z.string().min(1).max(40),
-  note: z.string().max(500).optional(),
+  answerId: z.string().min(1).max(40).optional(),
+  // One cap with `text`: on the opened question and the Interview the same
+  // field is the note and the words, so the two limits have to agree.
+  note: z.string().max(MAX_OWN_WORDS).optional(),
+  /** The user's own words, instead of a listed answer. */
+  text: z.string().min(1).max(MAX_OWN_WORDS).optional(),
   /** Which screen is answering; a note kept as a memory is tagged with it. */
   source: z.enum(ANSWER_SOURCES).optional(),
 });
@@ -27,6 +37,9 @@ const STATUS: Record<AnswerResult["status"], number> = {
   "not-open": 409,
 };
 
+/** What the client shows when the words could not be read; the field keeps the text. */
+const UNREADABLE = "Could not read that right now";
+
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const user = await requireSession();
   if (isErrorResponse(user)) return user;
@@ -34,8 +47,33 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   const parsed = parseBody(bodySchema, await req.json().catch(() => ({})));
   if (isErrorResponse(parsed)) return parsed;
+  // Exactly one: a pill or the field, never both, never neither.
+  if ((parsed.answerId === undefined) === (parsed.text === undefined)) {
+    return badRequest("Give exactly one of answerId or text");
+  }
 
-  const result = await answerQuestion(user.id, user.timezone, id, parsed.answerId, parsed.note, parsed.source);
+  let result: AnswerResult;
+  if (parsed.text !== undefined) {
+    try {
+      result = await answerInOwnWords(user.id, user.timezone, id, parsed.text, parsed.source);
+    } catch (e) {
+      // No model, a model error, or output that was not an interpretation:
+      // nothing was written, and the honest answer is "try again", not 500.
+      if (!(e instanceof InterpretError)) throw e;
+      console.error(`understanding: could not read an answer in the user's words: ${e.message}`);
+      return NextResponse.json({ error: UNREADABLE }, { status: 503 });
+    }
+  } else {
+    result = await answerQuestion(
+      user.id,
+      user.timezone,
+      id,
+      parsed.answerId as string,
+      parsed.note,
+      parsed.source
+    );
+  }
+
   if (result.status === "resolved" && result.projectId) {
     const projectId = result.projectId;
     after(() => rerunAfterAnswer(user.id, projectId, user.timezone));

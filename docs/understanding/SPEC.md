@@ -266,20 +266,50 @@ open after that.
 2. Find the answer; apply its `writes` in order through the existing tool
    implementations (`complete_task`, `update_task`, `remember_fact`, …) so the
    honesty rule, the recurrence spawner and the audit path all apply.
-3. Append `resolve`; store `note` as `resolution`. A note on an answer whose
-   only write is `resolve` ("Keep them", with a line saying why) is also
-   kept as a memory, prefixed with the question and the label so it names
-   what it is about, tagged with the project's name (how §3 finds a memory
-   for a project) and with `source` (`today`, `interview` or `voice`) when
-   the caller gave one. Nothing else reads the resolution column.
+3. Append `resolve`; store `note` as `resolution` ("Label: note"). A note on
+   an answer whose only write is `resolve` ("Keep them", with a line saying
+   why) is also kept as a memory, prefixed with the question and the label
+   so it names what it is about, tagged with the project's name (how §3
+   finds a memory for a project) and with `source` (`today`, `interview` or
+   `voice`) when the caller gave one. The record's `asked[]` entry logs the
+   whole resolution, so a note reaches the next run. Nothing else reads the
+   resolution column.
 4. Run that project immediately (§8). Return the writes that succeeded. The
    client says "Closed" only for those.
+
+**Write your own.** Every question also takes
+`{ text, source? }` in place of `answerId` (exactly one of the two; `text`
+1..1000 characters, the same cap as `note`): the user's own words, from the
+last pill on every answering screen. One small model call
+(`lib/understanding/interpret.ts`, the run's provider choice: Claude with
+OpenAI behind it) reads the words against the question, its evidence and its
+answers as the screen words them, and returns `{ answerId | null, fact |
+null, reply }`. It only ever chooses between the question's own answers and
+a fact; it never proposes a write, so §5's closed list holds here too.
+
+- `answerId` set: that answer is applied exactly as a tap would be (step 2
+  and 3 above) with the words as the note; a `fact` the model distilled on
+  top is kept as a memory tagged with the project and `answer`.
+- `answerId` null: `fact ?? text` is kept as a memory tagged with the
+  project and `answer`; the question resolves as "In your words: <text>";
+  `asked[]` carries the text; `applied` is `[{ op: "remember_fact" }]`.
+- Either way the response carries `reply`, one sentence back to the user
+  that never claims anything was done; the receipt says "Got it. <reply>"
+  and then the writes that went through, when there were any beyond the
+  memory.
+- The model unreachable, or its output not an interpretation: 503
+  `{ error: "Could not read that right now" }`, nothing written, and the
+  screen keeps the words in the field.
 
 Voice: one new tool, `answer_question`, flat schema, bounded strings:
 
 ```ts
-{ question_id: string, answer_id: string, note?: string }
+{ question_id: string, answer_id?: string, note?: string, own_words?: string }
 ```
+
+`answer_id` picks a listed answer; `own_words` (max 1000) is the spoken
+answer that matched none of them, read the same way as `text` above, with
+the reply returned for the model to relay. One of the two is required.
 
 The briefing already injects one open clarification per pause
 (`lib/secretary/briefing.ts:558`) and tells the model to call

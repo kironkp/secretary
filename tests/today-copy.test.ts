@@ -10,6 +10,7 @@ import {
   kindClass,
   kindLabel,
   lateInWords,
+  receiptInWords,
   updatedLine,
   writesInWords,
 } from "@/components/today/copy";
@@ -119,6 +120,57 @@ describe("what an answer did write", () => {
         { op: "drop_task", error: "task not found" },
       ])
     ).toBe("2 writes did not go through: task not found");
+  });
+});
+
+describe("the receipt", () => {
+  it("is the writes when there is no reply (a tapped pill)", () => {
+    expect(receiptInWords({ applied: [{ op: "complete_task" }, { op: "complete_task" }], failed: [] })).toBe(
+      "Closed 2 tasks"
+    );
+    expect(receiptInWords({ applied: [], failed: [] })).toBe("Nothing changed");
+  });
+
+  it("says the reply back, and then the writes that went through", () => {
+    // Words the model mapped to "Close both": the user is told what was
+    // read AND that the tasks were closed (SPEC §10 is about not claiming
+    // more; the writes that ran are the confirmation the mockup drew).
+    expect(
+      receiptInWords({
+        applied: [{ op: "complete_task" }, { op: "complete_task" }],
+        failed: [],
+        reply: "You want both copies closed.",
+      })
+    ).toBe("Got it. You want both copies closed. Closed 2 tasks.");
+    // A reply without its full stop still reads as two sentences.
+    expect(
+      receiptInWords({ applied: [{ op: "set_due" }], failed: [], reply: "You want it on the 22nd" })
+    ).toBe("Got it. You want it on the 22nd. Set a date.");
+  });
+
+  it("keeps the reply alone when only a memory, or nothing, was written", () => {
+    expect(receiptInWords({ applied: [{ op: "remember_fact" }], failed: [], reply: "Noted." })).toBe(
+      "Got it. Noted."
+    );
+    expect(receiptInWords({ applied: [], failed: [], reply: "You are keeping both." })).toBe(
+      "Got it. You are keeping both."
+    );
+    expect(receiptInWords({ applied: [{ op: "resolve" }], failed: [], reply: "Keeping them." })).toBe(
+      "Got it. Keeping them."
+    );
+  });
+
+  it("names a write that did not go through either way", () => {
+    expect(
+      receiptInWords({
+        applied: [{ op: "complete_task" }],
+        failed: [{ op: "complete_task", error: "task not found" }],
+        reply: "You want both closed.",
+      })
+    ).toBe("Got it. You want both closed. Closed 1 task. 1 write did not go through: task not found");
+    expect(
+      receiptInWords({ applied: [], failed: [{ op: "complete_task", error: "task not found" }] })
+    ).toBe("Nothing changed. 1 write did not go through: task not found");
   });
 });
 

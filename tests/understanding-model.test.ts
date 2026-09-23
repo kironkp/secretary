@@ -3,7 +3,7 @@
 // answers a throwing primary with the secondary on the same input. The
 // wrapper is tested through its seam, withFallback, with two fakes.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { modelCallFor, withFallback, type ModelCall } from "@/lib/understanding/run";
+import { callByProvider, modelCallFor, withFallback, type ModelCall } from "@/lib/understanding/run";
 import type { Bundle } from "@/lib/understanding/types";
 
 const savedProvider = process.env.UNDERSTANDING_PROVIDER;
@@ -80,5 +80,69 @@ describe("withFallback", () => {
     };
     const secondary: ModelCall = async () => result("secondary");
     await expect(withFallback(primary, secondary)(input)).resolves.toEqual(result("secondary"));
+  });
+});
+
+// The choice interpret.ts shares with the run, on a call shape of its own:
+// which thunk is built, and which call answers, per provider setting.
+describe("callByProvider", () => {
+  type Read = (input: { user: string }) => Promise<string>;
+  const claude = vi.fn<Read>(async ({ user }) => `claude read ${user}`);
+  const gpt = vi.fn<Read>(async ({ user }) => `gpt read ${user}`);
+  const build = () => {
+    const built = { claude: 0, gpt: 0 };
+    return {
+      built,
+      claude: async () => (built.claude++, claude as Read),
+      gpt: async () => (built.gpt++, gpt as Read),
+    };
+  };
+
+  afterEach(() => {
+    claude.mockClear();
+    gpt.mockClear();
+  });
+
+  it("builds and uses only the named provider", async () => {
+    process.env.UNDERSTANDING_PROVIDER = "anthropic";
+    let b = build();
+    await expect((await callByProvider(b.claude, b.gpt, "read"))!({ user: "x" })).resolves.toBe("claude read x");
+    expect(b.built).toEqual({ claude: 1, gpt: 0 });
+
+    process.env.UNDERSTANDING_PROVIDER = "openai";
+    b = build();
+    await expect((await callByProvider(b.claude, b.gpt, "read"))!({ user: "x" })).resolves.toBe("gpt read x");
+    expect(b.built).toEqual({ claude: 0, gpt: 1 });
+  });
+
+  it("with neither named, uses whichever provider exists, and null with none", async () => {
+    delete process.env.UNDERSTANDING_PROVIDER;
+    const b = build();
+    await expect((await callByProvider(async () => null, b.gpt, "read"))!({ user: "x" })).resolves.toBe("gpt read x");
+    await expect((await callByProvider(b.claude, async () => null, "read"))!({ user: "x" })).resolves.toBe(
+      "claude read x"
+    );
+    await expect(callByProvider<{ user: string }, string>(async () => null, async () => null, "read")).resolves.toBeNull();
+  });
+
+  it("with both, Claude answers first and a throw is answered by OpenAI on the same input, with one warning naming the call", async () => {
+    delete process.env.UNDERSTANDING_PROVIDER;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const b = build();
+      const call = (await callByProvider(b.claude, b.gpt, "interpret call"))!;
+      await expect(call({ user: "one" })).resolves.toBe("claude read one");
+      expect(gpt).not.toHaveBeenCalled();
+
+      claude.mockImplementationOnce(async () => {
+        throw new Error("400 usage limit");
+      });
+      await expect(call({ user: "two" })).resolves.toBe("gpt read two");
+      expect(gpt).toHaveBeenCalledWith({ user: "two" });
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0][0]).toContain("claude interpret call failed (400 usage limit)");
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

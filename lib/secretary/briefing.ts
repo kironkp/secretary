@@ -574,7 +574,7 @@ export async function buildBriefing(
   if (openQuestions.length) {
     lines.push(
       "",
-      "OPEN QUESTIONS — from your reading of the user's projects. Ask the FIRST one at a natural pause, in your own words, offering its answers; one per session unless the user asks for more. When they answer, call answer_question with the question_id and the answer_id (note for anything extra). Never resolve_clarification for these."
+      "OPEN QUESTIONS — from your reading of the user's projects. Ask the FIRST one at a natural pause, in your own words, offering its answers; one per session unless the user asks for more. When they answer, call answer_question with the question_id and the answer_id (note for anything extra). When what they said matches none of the listed answers, leave answer_id out and put their words in own_words; relay the reply it returns. Never resolve_clarification for these."
     );
     for (const q of openQuestions) {
       // Labels can carry commas ("Yes, that is the last step"), so the

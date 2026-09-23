@@ -17,19 +17,10 @@ import { ChevronRight } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { openDetail } from "@/components/dashboard/shared";
 import { ErrorNote, SuccessNote } from "@/components/ui";
-import type { AnswerResult } from "@/lib/understanding/answer";
 import type { QuestionView, TodayData } from "@/lib/understanding/today";
 import type { BoundRow } from "@/lib/workspace/types";
-import { AnswerButtons } from "./answer-buttons";
-import {
-  appliedInWords,
-  dateLine,
-  failedInWords,
-  kindClass,
-  kindLabel,
-  lateInWords,
-  updatedLine,
-} from "./copy";
+import { AnswerButtons, type AnswerReply } from "./answer-buttons";
+import { dateLine, kindClass, kindLabel, lateInWords, receiptInWords, updatedLine } from "./copy";
 
 /** A question answered by voice or on another device disappears within this. */
 const POLL_MS = 60_000;
@@ -82,27 +73,44 @@ export function TodayView({
     };
   }, [refresh]);
 
-  const answer = async (question: QuestionView, answerId: string) => {
+  /**
+   * One request to the answer route: a tapped pill sends { answerId }, the
+   * "Write your own" field sends { text }. Resolves true when the question
+   * took the answer or is gone either way, false when the words should stay
+   * in the field for another try (the model could not read them, or the
+   * server was out of reach); the field closes only on true.
+   */
+  const post = async (
+    question: QuestionView,
+    body: { answerId: string } | { text: string; source: "today" }
+  ): Promise<boolean> => {
     busy.current = true;
     setAnswering(true);
     setError(null);
     setReceipt(null);
+    let taken = false;
     try {
       const res = await fetch(`/api/questions/${question.id}/answer`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ answerId }),
+        body: JSON.stringify(body),
       });
-      const body = (await res.json().catch(() => null)) as AnswerResult | { error?: string } | null;
-      if (res.ok && body && "status" in body && body.status === "resolved") {
-        const failed = failedInWords(body.failed);
-        setReceipt(appliedInWords(body.applied) + (failed ? `. ${failed}` : ""));
+      const reply = (await res.json().catch(() => null)) as AnswerReply | { error?: string } | null;
+      if (res.ok && reply && "status" in reply && reply.status === "resolved") {
+        // What was applied, or what Secretary read the words as; never more.
+        setReceipt(receiptInWords(reply));
         // Any write elsewhere in the app can say so; the board updates at once.
         window.dispatchEvent(new Event("secretary:data-changed"));
+        taken = true;
       } else if (res.status === 409) {
         setReceipt("That question was already answered.");
+        taken = true;
       } else if (res.status === 404) {
         setReceipt("That question is gone.");
+        taken = true;
+      } else if (res.status === 503) {
+        // Nothing was written; the words are still in the field.
+        setError("Could not read that right now, try again.");
       } else {
         setError("That answer could not be applied.");
       }
@@ -114,6 +122,7 @@ export function TodayView({
       // Whatever happened, the screen should now say what is true.
       void refresh();
     }
+    return taken;
   };
 
   const { hero, questions, counts, pastDue, comingUp } = data;
@@ -157,10 +166,14 @@ export function TodayView({
           </Link>
           <p className="text-[15px] leading-[1.4] wrap-anywhere">{hero.why}</p>
           <div className="mt-0.5">
+            {/* Keyed by the question: the next hero starts with its pills,
+                not with the last one's field still open. */}
             <AnswerButtons
+              key={hero.id}
               answers={hero.answers}
               disabled={answering}
-              onAnswer={(id) => void answer(hero, id)}
+              onAnswer={(id) => void post(hero, { answerId: id })}
+              onOwnWords={(text) => post(hero, { text, source: "today" })}
             />
           </div>
         </section>

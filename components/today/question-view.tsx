@@ -11,14 +11,22 @@
 // Sep 1", "Done Sep 1", "Still open") next to the whole text, never a summary.
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
-import { useState } from "react";
-import { ErrorNote, Input, SuccessNote } from "@/components/ui";
-import type { AnswerResult } from "@/lib/understanding/answer";
+import { useEffect, useRef, useState } from "react";
+import { ErrorNote, SuccessNote } from "@/components/ui";
 import type { EvidenceView, QuestionView as QuestionData } from "@/lib/understanding/today";
-import { AnswerButtons } from "./answer-buttons";
-import { appliedInWords, failedInWords, kindClass, kindLabel, writesInWords } from "./copy";
+import {
+  AnswerButtons,
+  FIELD_CLASS,
+  OWN_WORDS_MAX,
+  useOwnWordsFromUrl,
+  type AnswerReply,
+} from "./answer-buttons";
+import { kindClass, kindLabel, receiptInWords, writesInWords } from "./copy";
 
-const NOTE_MAX = 500;
+/** What the route takes: a listed answer, with a note if there is one, or the user's own words. */
+type AnswerBody =
+  | { answerId: string; note?: string; source?: "today" }
+  | { text: string; source: "today" };
 
 /** The source label's colour says what kind of thing it is at a glance. */
 function labelClass(label: string): string {
@@ -60,26 +68,44 @@ function EvidenceRow({ item }: { item: EvidenceView }) {
 export function QuestionView({ initial }: { initial: QuestionData }) {
   const [question, setQuestion] = useState<QuestionData>(initial);
   const [note, setNote] = useState("");
+  // "Write your own" with nothing typed asks for the words through the note
+  // field. null until the user says so with a tap; before that the URL
+  // (?own=open, the screenshot hook) decides.
+  const [askedFor, setAskedFor] = useState<boolean | null>(null);
+  const fromUrl = useOwnWordsFromUrl();
+  const askedForWords = askedFor ?? fromUrl;
+  const noteField = useRef<HTMLInputElement>(null);
   const [answering, setAnswering] = useState(false);
   const [receipt, setReceipt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const open = question.status === "open" || question.status === "asked";
 
-  const answer = async (answerId: string) => {
+  // The URL-asked field (a screenshot) gets its focus here; a tap gets it in
+  // writeYourOwn, inside the gesture, where iOS will raise the keyboard.
+  useEffect(() => {
+    if (fromUrl) noteField.current?.focus();
+  }, [fromUrl]);
+
+  /**
+   * One request to the answer route: a tapped pill sends { answerId } with
+   * the note if there is one, "Write your own" sends the note as { text }.
+   * A 503 is the model unable to read the words: nothing was written, so
+   * the words stay in the field for another try.
+   */
+  const post = async (body: AnswerBody) => {
     setAnswering(true);
     setError(null);
     try {
-      const trimmed = note.trim();
       const res = await fetch(`/api/questions/${question.id}/answer`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(trimmed ? { answerId, note: trimmed, source: "today" } : { answerId }),
+        body: JSON.stringify(body),
       });
-      const body = (await res.json().catch(() => null)) as AnswerResult | { error?: string } | null;
-      if (res.ok && body && "status" in body && body.status === "resolved") {
-        const failed = failedInWords(body.failed);
-        setReceipt(appliedInWords(body.applied) + (failed ? `. ${failed}` : ""));
+      const reply = (await res.json().catch(() => null)) as AnswerReply | { error?: string } | null;
+      if (res.ok && reply && "status" in reply && reply.status === "resolved") {
+        // What was applied, or what Secretary read the words as; never more.
+        setReceipt(receiptInWords(reply));
         setQuestion((q) => ({ ...q, status: "resolved" }));
         // Any write elsewhere in the app can say so; the board updates at once.
         window.dispatchEvent(new Event("secretary:data-changed"));
@@ -88,6 +114,8 @@ export function QuestionView({ initial }: { initial: QuestionData }) {
         setQuestion((q) => ({ ...q, status: "resolved" }));
       } else if (res.status === 404) {
         setError("This question is gone.");
+      } else if (res.status === 503) {
+        setError("Could not read that right now, try again.");
       } else {
         setError("That answer could not be applied.");
       }
@@ -96,6 +124,27 @@ export function QuestionView({ initial }: { initial: QuestionData }) {
     } finally {
       setAnswering(false);
     }
+  };
+
+  const answer = (answerId: string) => {
+    const trimmed = note.trim();
+    void post(trimmed ? { answerId, note: trimmed, source: "today" } : { answerId });
+  };
+
+  /**
+   * The note field is the field: a second one under it would be two places
+   * to type. With words in it, they are sent as the answer; with none, the
+   * field asks for them (focus, and "Your answer" in place of the note's
+   * prompt), and Enter sends once there are some.
+   */
+  const writeYourOwn = () => {
+    const trimmed = note.trim();
+    if (trimmed) {
+      void post({ text: trimmed, source: "today" });
+      return;
+    }
+    setAskedFor(true);
+    noteField.current?.focus();
   };
 
   return (
@@ -167,21 +216,33 @@ export function QuestionView({ initial }: { initial: QuestionData }) {
 
         {open ? (
           <>
-            <Input
+            <input
+              ref={noteField}
               id="answer-note"
+              type="text"
               value={note}
-              maxLength={NOTE_MAX}
+              maxLength={OWN_WORDS_MAX}
               disabled={answering}
               onChange={(e) => setNote(e.target.value)}
-              placeholder="Add a note, if you want"
-              aria-label="A note with your answer"
-              className="min-h-11 rounded-xl border-0 bg-card text-[15px]"
+              onKeyDown={(e) => {
+                // Enter sends only once the field was asked for the answer:
+                // a note typed to go with a pill is not sent on its own.
+                if (e.key === "Enter" && askedForWords) {
+                  e.preventDefault();
+                  writeYourOwn();
+                }
+              }}
+              placeholder={askedForWords ? "Your answer" : "Add a note, if you want"}
+              aria-label={askedForWords ? "Your answer, in your own words" : "A note with your answer"}
+              enterKeyHint={askedForWords ? "send" : undefined}
               autoComplete="off"
+              className={`w-full ${FIELD_CLASS} text-[15px]`}
             />
             <AnswerButtons
               answers={question.answers}
               disabled={answering}
-              onAnswer={(id) => void answer(id)}
+              onAnswer={answer}
+              onWriteYourOwn={writeYourOwn}
               size="page"
             />
           </>

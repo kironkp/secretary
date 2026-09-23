@@ -26,18 +26,27 @@
 import Link from "next/link";
 import { ChevronDown } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AnswerButtons } from "@/components/today/answer-buttons";
-import { appliedInWords, failedInWords, kindClass, kindLabel } from "@/components/today/copy";
-import { ErrorNote, Input, SuccessNote } from "@/components/ui";
-import type { AnswerResult } from "@/lib/understanding/answer";
+import {
+  AnswerButtons,
+  FIELD_CLASS,
+  OWN_WORDS_MAX,
+  useOwnWordsFromUrl,
+  type AnswerReply,
+} from "@/components/today/answer-buttons";
+import { kindClass, kindLabel, receiptInWords } from "@/components/today/copy";
+import { ErrorNote, SuccessNote } from "@/components/ui";
 import type { EvidenceView, InterviewData, QuestionView } from "@/lib/understanding/today";
 import { footerLine, progressLine } from "./words";
 
 /** A question answered by voice or on another device disappears within this. */
 const POLL_MS = 60_000;
-/** The receipt ("Closed 2 tasks") stays on screen this long before the next question. */
+/** The receipt ("Closed 2 tasks", "Got it. …") stays on screen this long before the next question. */
 const RECEIPT_MS = 2000;
-const NOTE_MAX = 500;
+
+/** What the route takes: a listed answer, with a note if there is one, or the user's own words. */
+type AnswerBody =
+  | { answerId: string; note?: string; source?: "interview" }
+  | { text: string; source: "interview" };
 /**
  * "Ask me more" can take a minute, and Heroku's router gives up on a request
  * after 30 seconds while the run goes on inside the dyno. When the POST comes
@@ -114,6 +123,13 @@ export function InterviewView({
   /** Answered on this screen, for "Question 4 of 14". */
   const [done, setDone] = useState(0);
   const [note, setNote] = useState("");
+  // "Write your own" with nothing typed asks for the words through the note
+  // field. null until the user says so with a tap; before that the URL
+  // (?own=open, the screenshot hook) decides.
+  const [askedFor, setAskedFor] = useState<boolean | null>(null);
+  const fromUrl = useOwnWordsFromUrl();
+  const askedForWords = askedFor ?? fromUrl;
+  const noteField = useRef<HTMLInputElement>(null);
   const [evidenceOpen, setEvidenceOpen] = useState(false);
   const [answering, setAnswering] = useState(false);
   const [reading, setReading] = useState(false);
@@ -174,24 +190,34 @@ export function InterviewView({
   ];
   const current = queue[0] ?? null;
 
-  const answer = async (question: QuestionView, answerId: string) => {
+  // The URL-asked field (a screenshot) gets its focus here; a tap gets it in
+  // writeYourOwn, inside the gesture, where iOS will raise the keyboard.
+  useEffect(() => {
+    if (fromUrl) noteField.current?.focus();
+  }, [fromUrl]);
+
+  /**
+   * One request to the answer route: a tapped pill sends { answerId } with
+   * the note if there is one, "Write your own" sends the note as { text }.
+   * Either way the receipt is read for a beat and the next question comes.
+   */
+  const post = async (question: QuestionView, body: AnswerBody) => {
     busy.current = true;
     setAnswering(true);
     setError(null);
     setReceipt(null);
     setStatus(null);
     try {
-      const trimmed = note.trim();
       const res = await fetch(`/api/questions/${question.id}/answer`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(trimmed ? { answerId, note: trimmed, source: "interview" } : { answerId }),
+        body: JSON.stringify(body),
       });
-      const body = (await res.json().catch(() => null)) as AnswerResult | { error?: string } | null;
-      if (res.ok && body && "status" in body && body.status === "resolved") {
-        const failed = failedInWords(body.failed);
-        // The receipt says only what was applied (SPEC §10, the honesty rule).
-        setReceipt(appliedInWords(body.applied) + (failed ? `. ${failed}` : ""));
+      const reply = (await res.json().catch(() => null)) as AnswerReply | { error?: string } | null;
+      if (res.ok && reply && "status" in reply && reply.status === "resolved") {
+        // The receipt says only what was applied (SPEC §10, the honesty
+        // rule), or what Secretary read the words as.
+        setReceipt(receiptInWords(reply));
         // Any write elsewhere in the app can say so; the board updates at once.
         window.dispatchEvent(new Event("secretary:data-changed"));
         setDone((n) => n + 1);
@@ -199,6 +225,11 @@ export function InterviewView({
         setReceipt("That question was already answered.");
       } else if (res.status === 404) {
         setReceipt("That question is gone.");
+      } else if (res.status === 503) {
+        // The model could not read the words. Nothing was written, and they
+        // stay in the field for another try.
+        setError("Could not read that right now, try again.");
+        return;
       } else {
         setError("That answer could not be applied.");
         return;
@@ -209,6 +240,7 @@ export function InterviewView({
       await load();
       setReceipt(null);
       setNote("");
+      setAskedFor(false);
       setEvidenceOpen(false);
       setSkipped((s) => s.filter((id) => id !== question.id));
     } catch {
@@ -219,6 +251,27 @@ export function InterviewView({
     }
   };
 
+  const answer = (question: QuestionView, answerId: string) => {
+    const trimmed = note.trim();
+    void post(question, trimmed ? { answerId, note: trimmed, source: "interview" } : { answerId });
+  };
+
+  /**
+   * The note field is the field: a second one under it would be two places
+   * to type. With words in it, they are sent as the answer; with none, the
+   * field asks for them (focus, and "Your answer" in place of the note's
+   * prompt), and Enter sends once there are some.
+   */
+  const writeYourOwn = (question: QuestionView) => {
+    const trimmed = note.trim();
+    if (trimmed) {
+      void post(question, { text: trimmed, source: "interview" });
+      return;
+    }
+    setAskedFor(true);
+    noteField.current?.focus();
+  };
+
   /**
    * To the back of this screen's queue. Nothing is written about the skipped
    * question; the one now in front is fetched as `front` so it is marked
@@ -227,6 +280,7 @@ export function InterviewView({
   const skip = (question: QuestionView) => {
     setSkipped((s) => [...s.filter((id) => id !== question.id), question.id]);
     setNote("");
+    setAskedFor(false);
     setEvidenceOpen(false);
     setReceipt(null);
     setError(null);
@@ -333,22 +387,34 @@ export function InterviewView({
                 </ul>
               ))}
 
-            <Input
+            <input
+              ref={noteField}
               id="interview-note"
+              type="text"
               value={note}
-              maxLength={NOTE_MAX}
+              maxLength={OWN_WORDS_MAX}
               disabled={answering}
               onChange={(e) => setNote(e.target.value)}
-              placeholder="Add a note, if you want"
-              aria-label="A note with your answer"
-              className="min-h-11 rounded-xl border-0 bg-surface-2 text-[15px]"
+              onKeyDown={(e) => {
+                // Enter sends only once the field was asked for the answer:
+                // a note typed to go with a pill is not sent on its own.
+                if (e.key === "Enter" && askedForWords) {
+                  e.preventDefault();
+                  writeYourOwn(current);
+                }
+              }}
+              placeholder={askedForWords ? "Your answer" : "Add a note, if you want"}
+              aria-label={askedForWords ? "Your answer, in your own words" : "A note with your answer"}
+              enterKeyHint={askedForWords ? "send" : undefined}
               autoComplete="off"
+              className={`w-full ${FIELD_CLASS} text-[15px]`}
             />
             <div className="mt-0.5">
               <AnswerButtons
                 answers={current.answers}
                 disabled={answering}
-                onAnswer={(id) => void answer(current, id)}
+                onAnswer={(id) => answer(current, id)}
+                onWriteYourOwn={() => writeYourOwn(current)}
               />
             </div>
           </section>

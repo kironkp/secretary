@@ -145,6 +145,33 @@ export function failedInWords(failed: { op: string; error: string }[]): string |
   return `${plural(failed.length, "write", "writes")} did not go through: ${reasons}`;
 }
 
+/** A reply as one sentence: the model is asked for a full stop, and a missing one is added. */
+const sentence = (s: string): string => (/[.!?…]$/u.test(s) ? s : `${s}.`);
+
+/**
+ * The receipt for an answer, tapped or written. A reply is what Secretary
+ * read the words as, said back after "Got it.". The writes that went through
+ * are still named after it (SPEC §10's honesty rule is about not claiming
+ * more, and "Closed 2 tasks" is the confirmation the mockup drew), except a
+ * memory alone, which the reply already stands for. Without a reply the
+ * receipt is the writes. A write that did not go through is named either way.
+ */
+export function receiptInWords(body: {
+  applied: WordedWrite[];
+  failed: { op: string; error: string }[];
+  reply?: string;
+}): string {
+  const reply = body.reply?.trim();
+  const acted = body.applied.some((w) => w.op !== "remember_fact" && w.op !== "resolve");
+  let said: string;
+  if (!reply) said = appliedInWords(body.applied);
+  else if (acted) said = `Got it. ${sentence(reply)} ${appliedInWords(body.applied)}.`;
+  else said = `Got it. ${reply}`;
+  const failed = failedInWords(body.failed);
+  // A reply ends in its own full stop; the failure is a second sentence.
+  return failed ? `${said.replace(/[.!]$/, "")}. ${failed}` : said;
+}
+
 /**
  * The tasks binding formats a past-due date as "3d overdue"
  * (lib/workspace/bindings.ts formatDue). Today says it in words, digits kept:

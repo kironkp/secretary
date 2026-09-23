@@ -16,6 +16,9 @@ const eslintConfig = defineConfig([
     ".next-sim/**",
     ".pgdata-sim/**",
     "sim/reports/**",
+    // Verify builds (NEXT_DIST_DIR=.next-verify-<name> npx next build), so a
+    // lint run while one exists does not read its generated code.
+    ".next-verify*/**",
   ]),
 ]);
 

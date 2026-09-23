@@ -25,6 +25,12 @@ async function evidenceTaskIds(page: Page): Promise<string[]> {
   return body.evidence.filter((e) => e.type === "task").map((e) => e.id);
 }
 
+async function questionStatus(page: Page): Promise<string> {
+  const res = await page.request.get(`/api/questions/${E2E_QUESTION.id}`);
+  expect(res.ok(), `GET /api/questions/${E2E_QUESTION.id} -> ${res.status()}`).toBeTruthy();
+  return ((await res.json()) as { status: string }).status;
+}
+
 async function taskStatus(page: Page, id: string): Promise<string> {
   const res = await page.request.get(`/api/tasks/${id}`);
   expect(res.ok(), `GET /api/tasks/${id} -> ${res.status()}`).toBeTruthy();
@@ -150,6 +156,59 @@ test.describe("before answering", () => {
     await expect(back).toBeVisible();
     await expect(back).toHaveAttribute("href", "/today");
     expect((await back.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+  });
+
+  test("Write your own opens a field, and Send posts the words", async ({ page }) => {
+    // The user's words (2026-09-22): "if there's a yes, no, or multiple
+    // choice, there's always an extra option with write your own". The last
+    // pill, grey like the way out, and a target a thumb can hit.
+    const write = hero(page).locator("[data-write-own]");
+    await expect(write).toHaveText("Write your own");
+    await assertTapTargets(page, ["[data-testid=today-hero] [data-write-own]"]);
+
+    // The tap swaps the pills for the field, already focused, with a way back.
+    await write.click();
+    const field = hero(page).locator("[data-own-field]");
+    await expect(field).toBeVisible();
+    await expect(field).toBeFocused();
+    await expect(field).toHaveAttribute("placeholder", "Your answer");
+    await expect(hero(page).locator("[data-answer]")).toHaveCount(0);
+    await assertTapTargets(page, ["[data-own-field]", "[data-own-send]", "[data-own-cancel]"]);
+
+    // Cancel brings the pills back, untouched.
+    await hero(page).locator("[data-own-cancel]").click();
+    await expect(hero(page).locator("[data-answer]")).toHaveCount(2);
+    await expect(field).toHaveCount(0);
+    await write.click();
+
+    // CI has no model to read the words, so the route is answered here with
+    // the body the server sends for a written answer (lib/understanding/
+    // answer.ts answerInOwnWords). Nothing reaches the database, and the
+    // question stays open for the tests that follow.
+    const words = "They are one job; the finished copy is the real one.";
+    let posted: unknown = null;
+    await page.route(`**/api/questions/${E2E_QUESTION.id}/answer`, async (route) => {
+      posted = route.request().postDataJSON();
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          status: "resolved",
+          projectId: null,
+          applied: [{ op: "remember_fact" }],
+          failed: [],
+          reply: "Noted.",
+        }),
+      });
+    });
+    await field.fill(words);
+    await hero(page).locator("[data-own-send]").click();
+
+    // The receipt is the server's reply, said back; the field has closed.
+    await expect(page.getByText("Got it. Noted.")).toBeVisible();
+    expect(posted).toEqual({ text: words, source: "today" });
+    await expect(field).toHaveCount(0);
+    expect(await questionStatus(page)).toMatch(/^(open|asked)$/);
   });
 });
 

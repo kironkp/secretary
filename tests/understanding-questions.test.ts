@@ -10,6 +10,7 @@ import { clarifications, conversations, entities, messages, projects, user } fro
 import {
   getQuestion,
   listQuestions,
+  normalizeQuestionText,
   questionIdentity,
   rankDraft,
   retireAsrClarifications,
@@ -292,7 +293,7 @@ describe("syncQuestions", () => {
       ],
     });
     const r = await syncQuestions(U.id, projectId, [reworded], open());
-    expect(r).toEqual({ created: [], updated: [id], dismissed: [] });
+    expect(r).toEqual({ created: [], updated: [id], dismissed: [], skippedDuplicates: [] });
     const all = await rows();
     expect(all).toHaveLength(1);
     expect(all[0].question).toBe(reworded.question);
@@ -304,7 +305,7 @@ describe("syncQuestions", () => {
 
   it("leaves a forgotten question alone while its evidence is unchanged", async () => {
     const r = await syncQuestions(U.id, projectId, [], open());
-    expect(r).toEqual({ created: [], updated: [], dismissed: [] });
+    expect(r).toEqual({ created: [], updated: [], dismissed: [], skippedDuplicates: [] });
     const [row] = await rows();
     expect(row.status).toBe("asked");
   });
@@ -315,7 +316,7 @@ describe("syncQuestions", () => {
     const finished = new Date().toISOString();
     const gone = bundle({ project: { id: projectId, name: "Caltrans", status: "active" }, tasksOpen: [], tasksDone: [task("a", { status: "done", completedAt: finished, updatedAt: finished })] });
     const r = await syncQuestions(U.id, projectId, [], gone);
-    expect(r).toEqual({ created: [], updated: [], dismissed: [id] });
+    expect(r).toEqual({ created: [], updated: [], dismissed: [id], skippedDuplicates: [] });
     const [row] = await rows();
     expect(row.status).toBe("dismissed");
     expect(row.resolution).toBe("resolved by a change in the data");
@@ -323,7 +324,7 @@ describe("syncQuestions", () => {
 
   it("never re-creates a dismissed identity, even when the draft comes back", async () => {
     const r = await syncQuestions(U.id, projectId, [first], open());
-    expect(r).toEqual({ created: [], updated: [], dismissed: [] });
+    expect(r).toEqual({ created: [], updated: [], dismissed: [], skippedDuplicates: [] });
     const all = await rows();
     expect(all).toHaveLength(1);
     expect(all[0].status).toBe("dismissed");
@@ -344,7 +345,7 @@ describe("syncQuestions", () => {
     const created = await syncQuestions(U.id, projectId, [ask], twin);
     expect(created.created).toHaveLength(1);
     const forgot = await syncQuestions(U.id, projectId, [], twin);
-    expect(forgot).toEqual({ created: [], updated: [], dismissed: [] });
+    expect(forgot).toEqual({ created: [], updated: [], dismissed: [], skippedDuplicates: [] });
     expect((await rows()).find((x) => x.id === created.created[0])!.status).toBe("open");
 
     const finished = new Date().toISOString();
@@ -411,6 +412,281 @@ describe("syncQuestions", () => {
     } finally {
       await db.delete(projects).where(and(eq(projects.userId, U.id), eq(projects.id, other.id)));
     }
+  });
+});
+
+// --------------------------------------------------------------------------
+// syncQuestions: the text guard
+// --------------------------------------------------------------------------
+
+describe("syncQuestions dedupes by text", () => {
+  const U = { id: `test-sync-text-${crypto.randomUUID()}`, email: `sync-text-${Date.now()}@p11.test` };
+  const p = { caltrans: "", album: "" };
+  // The row Today showed twice: the same words from two evidence sets.
+  const TEXT = "Do you still want my two event prep suggestions before tomorrow's event?";
+
+  beforeAll(async () => {
+    await db.insert(user).values({ id: U.id, name: "Sync Text Tester", email: U.email, timezone: TZ });
+    const [caltrans] = await db
+      .insert(projects)
+      .values({ userId: U.id, name: "Caltrans", status: "active" })
+      .returning();
+    const [album] = await db
+      .insert(projects)
+      .values({ userId: U.id, name: "Album", status: "active" })
+      .returning();
+    p.caltrans = caltrans.id;
+    p.album = album.id;
+  });
+  afterAll(async () => {
+    await db.delete(user).where(eq(user.id, U.id));
+  });
+
+  const rows = () =>
+    db
+      .select()
+      .from(clarifications)
+      .where(eq(clarifications.userId, U.id))
+      .orderBy(clarifications.createdAt);
+
+  const caltrans = () =>
+    bundle({ project: { id: p.caltrans, name: "Caltrans", status: "active" }, tasksOpen: [task("a"), task("b")] });
+  const album = () =>
+    bundle({ project: { id: p.album, name: "Album", status: "active" }, tasksOpen: [task("c")] });
+
+  const fromA = draft("doesnt_add_up", [src("task", "a")], { question: TEXT, why: `"Task a" is my suggestion.` });
+  const fromB = draft("doesnt_add_up", [src("task", "b")], { question: TEXT, why: `"Task b" is my suggestion.` });
+  const fromC = draft("doesnt_add_up", [src("task", "c")], { question: TEXT, why: `"Task c" is my suggestion.` });
+  let kept = "";
+
+  it("normalizeQuestionText is blind to case, whitespace and end punctuation, and nothing else", () => {
+    expect(normalizeQuestionText("  Is the  statement done?  ")).toBe("is the statement done");
+    expect(normalizeQuestionText("Is the statement done?!")).toBe("is the statement done");
+    expect(normalizeQuestionText("is the statement done")).toBe("is the statement done");
+    expect(normalizeQuestionText("Is the statement done.")).toBe("is the statement done");
+    // Inner punctuation is part of the question.
+    expect(normalizeQuestionText("CPO 2073: done?")).toBe("cpo 2073: done");
+    expect(normalizeQuestionText("Is the statement done?")).not.toBe(normalizeQuestionText("Is the statement due?"));
+  });
+
+  it("two drafts with the same text and different evidence in one run yield one row", async () => {
+    expect(questionIdentity(fromA)).not.toBe(questionIdentity(fromB));
+    const r = await syncQuestions(U.id, p.caltrans, [fromA, fromB], caltrans());
+    expect(r.created).toHaveLength(1);
+    expect(r.updated).toEqual([]);
+    expect(r.dismissed).toEqual([]);
+    expect(r.skippedDuplicates).toEqual([TEXT]);
+    const all = await rows();
+    expect(all).toHaveLength(1);
+    expect(all[0].identity).toBe(questionIdentity(fromA));
+    expect(all[0].evidence).toEqual(fromA.evidence);
+    kept = all[0].id;
+  });
+
+  it("a draft whose text matches an open row in another project is skipped, however it is cased or punctuated", async () => {
+    const variants = [
+      TEXT,
+      TEXT.toUpperCase(),
+      `  ${TEXT.replace(/ /g, "   ")}  `,
+      TEXT.replace(/\?$/, ""),
+      `${TEXT}!`,
+    ];
+    for (const question of variants) {
+      const r = await syncQuestions(U.id, p.album, [{ ...fromC, question }], album());
+      expect(r, question).toEqual({ created: [], updated: [], dismissed: [], skippedDuplicates: [question] });
+    }
+    expect(await rows()).toHaveLength(1);
+  });
+
+  it("the row a draft refreshes in place is not its own twin", async () => {
+    const r = await syncQuestions(U.id, p.caltrans, [{ ...fromA, why: `"Task a" is still my suggestion.` }], caltrans());
+    expect(r).toEqual({ created: [], updated: [kept], dismissed: [], skippedDuplicates: [] });
+    const all = await rows();
+    expect(all).toHaveLength(1);
+    expect(all[0].context).toBe(`"Task a" is still my suggestion.`);
+    expect(all[0].status).toBe("open");
+  });
+
+  it("a different text with its own evidence is not a duplicate", async () => {
+    const other = draft("done_yet", [src("task", "c")], {
+      question: "Did the album event happen?",
+      why: `"Task c" was due yesterday.`,
+    });
+    const r = await syncQuestions(U.id, p.album, [other], album());
+    expect(r.created).toHaveLength(1);
+    expect(r.skippedDuplicates).toEqual([]);
+    expect(await rows()).toHaveLength(2);
+  });
+
+  it("the same text is allowed again once the row carrying it is resolved", async () => {
+    await db
+      .update(clarifications)
+      .set({ status: "resolved", resolution: "Keep them" })
+      .where(and(eq(clarifications.userId, U.id), eq(clarifications.id, kept)));
+    const r = await syncQuestions(U.id, p.album, [fromC], album());
+    expect(r.created).toHaveLength(1);
+    expect(r.skippedDuplicates).toEqual([]);
+    const all = await rows();
+    expect(all).toHaveLength(3);
+    const fresh = all.find((x) => x.id === r.created[0])!;
+    expect(fresh.projectId).toBe(p.album);
+    expect(fresh.question).toBe(TEXT);
+    expect(fresh.status).toBe("open");
+  });
+});
+
+describe("syncQuestions heals a standing pair of same-text rows", () => {
+  // The state on the user's phone (2026-09-22): the same words on two OPEN
+  // rows with different identities. The guard above stops a pair forming;
+  // this is what happens to one that already exists.
+  const U = { id: `test-sync-pair-${crypto.randomUUID()}`, email: `sync-pair-${Date.now()}@p11.test` };
+  const p = { caltrans: "", album: "" };
+  const TEXT = "Do you still want my two Small Business event prep suggestions before tomorrow's event?";
+  const fromA = draft("doesnt_add_up", [src("task", "a")], { question: TEXT, why: "why a" });
+  const fromB = draft("doesnt_add_up", [src("task", "b")], { question: TEXT, why: "why b" });
+  const fromC = draft("doesnt_add_up", [src("task", "c")], { question: TEXT, why: "why c" });
+  const row = { a: "", b: "", c: "" };
+
+  const caltrans = () =>
+    bundle({ project: { id: p.caltrans, name: "Caltrans", status: "active" }, tasksOpen: [task("a"), task("b")] });
+  const album = () =>
+    bundle({
+      project: { id: p.album, name: "Album", status: "active" },
+      tasksOpen: [task("c"), task("d"), task("e"), task("f"), task("g")],
+    });
+
+  const rows = () =>
+    db
+      .select({
+        id: clarifications.id,
+        status: clarifications.status,
+        resolution: clarifications.resolution,
+        question: clarifications.question,
+        context: clarifications.context,
+      })
+      .from(clarifications)
+      .where(eq(clarifications.userId, U.id))
+      .orderBy(clarifications.createdAt);
+  const rowById = async (id: string) => (await rows()).find((r) => r.id === id)!;
+
+  /** A row as a run would have stored it: open, with the draft's identity. */
+  const standing = (projectId: string, d: QuestionDraft) => ({
+    userId: U.id,
+    rank: 200,
+    status: "open" as const,
+    projectId,
+    kind: d.kind,
+    question: d.question,
+    context: d.why,
+    evidence: d.evidence,
+    answers: d.answers,
+    identity: questionIdentity(d),
+  });
+
+  beforeAll(async () => {
+    await db.insert(user).values({ id: U.id, name: "Sync Pair Tester", email: U.email, timezone: TZ });
+    const [caltrans] = await db
+      .insert(projects)
+      .values({ userId: U.id, name: "Caltrans", status: "active" })
+      .returning();
+    const [album] = await db
+      .insert(projects)
+      .values({ userId: U.id, name: "Album", status: "active" })
+      .returning();
+    p.caltrans = caltrans.id;
+    p.album = album.id;
+    const [a] = await db.insert(clarifications).values(standing(p.caltrans, fromA)).returning({ id: clarifications.id });
+    const [b] = await db.insert(clarifications).values(standing(p.caltrans, fromB)).returning({ id: clarifications.id });
+    row.a = a.id;
+    row.b = b.id;
+  });
+  afterAll(async () => {
+    await db.delete(user).where(eq(user.id, U.id));
+  });
+
+  it("both re-proposed: the first is refreshed and its twin is dismissed as its duplicate", async () => {
+    const r = await syncQuestions(
+      U.id,
+      p.caltrans,
+      [
+        { ...fromA, why: "why a, run 2" },
+        { ...fromB, why: "why b, run 2" },
+      ],
+      caltrans()
+    );
+    expect(r).toEqual({ created: [], updated: [row.a], dismissed: [row.b], skippedDuplicates: [] });
+    expect(await rowById(row.a)).toMatchObject({ status: "open", context: "why a, run 2", resolution: null });
+    expect(await rowById(row.b)).toMatchObject({
+      status: "dismissed",
+      context: "why b",
+      resolution: `duplicate of ${row.a}`,
+    });
+    expect(await rows()).toHaveLength(2);
+  });
+
+  it("the next run that re-proposes only the kept one refreshes it and touches nothing else", async () => {
+    const r = await syncQuestions(U.id, p.caltrans, [{ ...fromA, why: "why a, run 3" }], caltrans());
+    expect(r).toEqual({ created: [], updated: [row.a], dismissed: [], skippedDuplicates: [] });
+    expect(await rowById(row.a)).toMatchObject({ status: "open", context: "why a, run 3" });
+    expect(await rowById(row.b)).toMatchObject({ status: "dismissed" });
+    // The dismissed twin's identity is spent: proposed again, it is nothing.
+    const again = await syncQuestions(U.id, p.caltrans, [fromB], caltrans());
+    expect(again).toEqual({ created: [], updated: [], dismissed: [], skippedDuplicates: [] });
+    expect(await rows()).toHaveLength(2);
+  });
+
+  it("a twin in another project is dismissed by whichever project's run refreshes the other", async () => {
+    const [c] = await db.insert(clarifications).values(standing(p.album, fromC)).returning({ id: clarifications.id });
+    row.c = c.id;
+    const r = await syncQuestions(U.id, p.album, [{ ...fromC, why: "why c, run 2" }], album());
+    expect(r).toEqual({ created: [], updated: [row.c], dismissed: [row.a], skippedDuplicates: [] });
+    expect(await rowById(row.c)).toMatchObject({ status: "open", context: "why c, run 2" });
+    expect(await rowById(row.a)).toMatchObject({ status: "dismissed", resolution: `duplicate of ${row.c}` });
+    // The Caltrans row is spent too: its run cannot bring the pair back.
+    const caltransAgain = await syncQuestions(U.id, p.caltrans, [fromA], caltrans());
+    expect(caltransAgain).toEqual({ created: [], updated: [], dismissed: [], skippedDuplicates: [] });
+    expect(await rows()).toHaveLength(3);
+  });
+
+  it("refreshes go first: a new draft with the words an open row is being reworded to is the duplicate, not the row", async () => {
+    const OLD = "Is the album event still on?";
+    const NEW = "Did the album event get moved?";
+    const fromD = draft("done_yet", [src("task", "d")], { question: OLD, why: "why d" });
+    const fromE = draft("done_yet", [src("task", "e")], { question: NEW, why: "why e" });
+    const [d] = await db.insert(clarifications).values(standing(p.album, fromD)).returning({ id: clarifications.id });
+    // The new draft is listed first; the refresh still wins.
+    const r = await syncQuestions(U.id, p.album, [fromE, { ...fromD, question: NEW }], album());
+    expect(r).toEqual({ created: [], updated: [d.id], dismissed: [], skippedDuplicates: [NEW] });
+    expect(await rowById(d.id)).toMatchObject({ status: "open", question: NEW });
+    expect(await rows()).toHaveLength(4);
+  });
+
+  it("a row reworded into the words another kept row already carries this run is dismissed as its duplicate", async () => {
+    const SAME = "Are the two weekly reports one job?";
+    const fromF = draft("doesnt_add_up", [src("task", "f")], { question: "Is the weekly report filed twice?", why: "why f" });
+    const fromG = draft("doesnt_add_up", [src("task", "g")], { question: "Is the timesheet filed twice?", why: "why g" });
+    const [f] = await db.insert(clarifications).values(standing(p.album, fromF)).returning({ id: clarifications.id });
+    const [g] = await db.insert(clarifications).values(standing(p.album, fromG)).returning({ id: clarifications.id });
+    const r = await syncQuestions(
+      U.id,
+      p.album,
+      [
+        { ...fromF, question: SAME },
+        { ...fromG, question: SAME },
+      ],
+      album()
+    );
+    expect(r).toEqual({ created: [], updated: [f.id], dismissed: [g.id], skippedDuplicates: [] });
+    expect(await rowById(f.id)).toMatchObject({ status: "open", question: SAME });
+    expect(await rowById(g.id)).toMatchObject({ status: "dismissed", resolution: `duplicate of ${f.id}` });
+    // The words a dismissed row used to carry are free again.
+    const fromH = draft("doesnt_add_up", [src("task", "d"), src("task", "e")], {
+      question: "Is the timesheet filed twice?",
+      why: "why h",
+    });
+    const again = await syncQuestions(U.id, p.album, [fromH], album());
+    expect(again.created).toHaveLength(1);
+    expect(again.skippedDuplicates).toEqual([]);
   });
 });
 
