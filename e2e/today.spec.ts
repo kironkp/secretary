@@ -150,6 +150,17 @@ test.describe("before answering", () => {
     await expect(page.locator('[data-answer-effect="keep"]')).toHaveText("Keep it leaves everything as it is");
 
     await assertTapTargets(page, ["[data-answer]"]);
+
+    // The pills are where the thumb is: right after the reasoning, above the
+    // evidence, and inside the first screen without a scroll.
+    const pill = await page.locator("[data-answer]").first().boundingBox();
+    const evidence = await page.locator("[data-evidence-list]").boundingBox();
+    expect(pill).not.toBeNull();
+    expect(evidence).not.toBeNull();
+    expect(pill!.y).toBeLessThan(evidence!.y);
+    const viewport = page.viewportSize();
+    expect(pill!.y + pill!.height).toBeLessThanOrEqual(viewport?.height ?? 659);
+
     // The way back is a real target too. Not getByRole("link", "Today"): the
     // nav tab of the same name comes first in the document.
     const back = page.locator("[data-back]");
@@ -174,6 +185,13 @@ test.describe("before answering", () => {
     await expect(field).toHaveAttribute("placeholder", "Your answer");
     await expect(hero(page).locator("[data-answer]")).toHaveCount(0);
     await assertTapTargets(page, ["[data-own-field]", "[data-own-send]", "[data-own-cancel]"]);
+
+    // Escape is the keyboard's Cancel: back to the pills.
+    await field.press("Escape");
+    await expect(hero(page).locator("[data-answer]")).toHaveCount(2);
+    await expect(field).toHaveCount(0);
+    await write.click();
+    await expect(field).toBeFocused();
 
     // Cancel brings the pills back, untouched.
     await hero(page).locator("[data-own-cancel]").click();
@@ -210,6 +228,40 @@ test.describe("before answering", () => {
     await expect(field).toHaveCount(0);
     expect(await questionStatus(page)).toMatch(/^(open|asked)$/);
   });
+
+  test("a pill is a button: focused, Enter answers it", async ({ page }) => {
+    // The route is answered here, as above: CI has no model, and the one
+    // seeded question must still be open for the tap test that follows. What
+    // is real is the keyboard: focus lands on the pill, Enter presses it, the
+    // pill lights, the receipt and the thinking line follow.
+    let posted: unknown = null;
+    await page.route(`**/api/questions/${E2E_QUESTION.id}/answer`, async (route) => {
+      posted = route.request().postDataJSON();
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          status: "resolved",
+          projectId: null,
+          applied: [{ op: "complete_task" }, { op: "resolve" }],
+          failed: [],
+        }),
+      });
+    });
+    const close = hero(page).locator('[data-answer="close"]');
+    await close.focus();
+    await expect(close).toBeFocused();
+    await page.keyboard.press("Enter");
+
+    await expect(close).toHaveAttribute("data-selected", "true");
+    await expect(page.locator("[data-receipt]")).toHaveText("Closed 1 task");
+    expect(posted).toEqual({ answerId: "close" });
+    // The project is being re-read: the bars say so, by the project's name.
+    await expect(page.locator("[data-thinking]")).toBeVisible();
+    await expect(page.locator("[data-thinking]")).toContainText("Reading E2E Project…");
+    // The answer never left the browser.
+    expect(await questionStatus(page)).toMatch(/^(open|asked)$/);
+  });
 });
 
 test.describe("answering", () => {
@@ -220,19 +272,81 @@ test.describe("answering", () => {
 
     await page.goto("/today");
     await expect(hero(page)).toHaveAttribute("data-question-id", E2E_QUESTION.id);
-    await hero(page).locator('[data-answer="close"]').click();
+
+    // The reply is held for a beat so "Applying…" is on screen long enough
+    // to be read; the request still reaches the server and writes.
+    await page.route(`**/api/questions/${E2E_QUESTION.id}/answer`, async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      await route.continue();
+    });
+    // The clock for "acknowledged at once": the first press event to the
+    // first paint of the receipt, measured in the page so the harness's own
+    // round trips do not count. __stay proves the page was never navigated.
+    await page.evaluate(() => {
+      const w = window as unknown as {
+        __stay: number;
+        __tap: number | null;
+        __ack: number | null;
+        __ackText: string | null;
+      };
+      w.__stay = 1;
+      w.__tap = null;
+      w.__ack = null;
+      w.__ackText = null;
+      const first = () => {
+        if (w.__tap === null) w.__tap = performance.now();
+      };
+      for (const type of ["pointerdown", "mousedown", "touchstart"]) {
+        document.addEventListener(type, first, { capture: true, once: true });
+      }
+      new MutationObserver(() => {
+        if (w.__ack !== null) return;
+        const el = document.querySelector("[data-receipt]");
+        if (el) {
+          w.__ack = performance.now();
+          w.__ackText = el.textContent;
+        }
+      }).observe(document.body, { childList: true, subtree: true });
+    });
+
+    const close = hero(page).locator('[data-answer="close"]');
+    await close.click();
+
+    // Acknowledged at once: the pill lit and "Applying…" under the card,
+    // within 200 ms of the press, before the server has said anything.
+    const receipt = page.locator("[data-receipt]");
+    await expect(receipt).toHaveText("Applying…");
+    await expect(close).toHaveAttribute("data-selected", "true");
+    const ack = await page.evaluate(() => {
+      const w = window as unknown as { __tap: number | null; __ack: number | null; __ackText: string | null };
+      return { ms: w.__tap !== null && w.__ack !== null ? w.__ack - w.__tap : null, text: w.__ackText };
+    });
+    expect(ack.text).toMatch(/^Applying/);
+    expect(ack.ms).not.toBeNull();
+    expect(ack.ms as number).toBeLessThan(200);
 
     // The write went through the task tool, so the task API says done.
     await expect.poll(() => taskStatus(page, openId), { timeout: 10_000 }).toBe("done");
 
-    // The receipt says only what was applied (SPEC §10, the honesty rule).
+    // The receipt says only what was applied (SPEC §10, the honesty rule):
+    // the same line, its words changed.
     await expect(page.getByText("Closed 1 task")).toBeVisible();
+    await expect(receipt).toHaveText("Closed 1 task");
+    // The project is being re-read: the bars say so under the receipt.
+    await expect(page.locator("[data-thinking]")).toBeVisible();
 
     // The question is resolved, so it is no longer the hero and not in the list.
     await expect(page.locator(`[data-question-id="${E2E_QUESTION.id}"]`)).toHaveCount(0, {
       timeout: 10_000,
     });
     await expect(page.locator(`[data-question-row="${E2E_QUESTION.id}"]`)).toHaveCount(0);
+
+    // The card moved on in place: the slot holds the next question or the
+    // empty state, never this one, and the page was not navigated or rebuilt.
+    const slot = page.locator("[data-testid=today-hero], [data-testid=today-hero-empty]");
+    await expect(slot).toHaveCount(1);
+    await expect(slot).not.toHaveAttribute("data-question-id", E2E_QUESTION.id);
+    expect(await page.evaluate(() => (window as unknown as { __stay: number }).__stay)).toBe(1);
   });
 
   test("a resolved question still opens, and says it was answered", async ({ page }) => {

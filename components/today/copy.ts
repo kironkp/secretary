@@ -160,6 +160,12 @@ export function receiptInWords(body: {
   applied: WordedWrite[];
   failed: { op: string; error: string }[];
   reply?: string;
+  /**
+   * The other questions this answer set aside because it changed a row they
+   * rested on (AnswerResult.superseded, SPEC §6 step 4): why a row just
+   * left the list. Named only when there are any.
+   */
+  superseded?: string[];
 }): string {
   const reply = body.reply?.trim();
   const acted = body.applied.some((w) => w.op !== "remember_fact" && w.op !== "resolve");
@@ -167,9 +173,32 @@ export function receiptInWords(body: {
   if (!reply) said = appliedInWords(body.applied);
   else if (acted) said = `Got it. ${sentence(reply)} ${appliedInWords(body.applied)}.`;
   else said = `Got it. ${reply}`;
-  const failed = failedInWords(body.failed);
-  // A reply ends in its own full stop; the failure is a second sentence.
-  return failed ? `${said.replace(/[.!]$/, "")}. ${failed}` : said;
+  // A reply ends in its own full stop; what was set aside, then a write
+  // that did not go through, are sentences of their own after it.
+  for (const more of [setAsideInWords(body.superseded?.length ?? 0), failedInWords(body.failed)]) {
+    if (more) said = `${said.replace(/[.!]$/, "")}. ${more}`;
+  }
+  return said;
+}
+
+/**
+ * The questions an answer set aside (SPEC §6 step 4), in the same words on
+ * the screen and on a call (lib/secretary/tools.ts answer_question), or null
+ * when there were none, so nothing is said.
+ */
+export function setAsideInWords(n: number): string | null {
+  if (n <= 0) return null;
+  return `${n} related question${n === 1 ? " was" : "s were"} set aside`;
+}
+
+/**
+ * The line beside the thinking bars after an answer: what is being re-read.
+ * "Reading Caltrans…" when the question knows its project, "Reading the
+ * project…" when it does not; never a claim about what the reading found.
+ */
+export function readingLabel(projectName: string | null | undefined): string {
+  const name = projectName?.trim();
+  return name ? `Reading ${name}…` : "Reading the project…";
 }
 
 /**

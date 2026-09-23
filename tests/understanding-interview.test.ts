@@ -63,7 +63,7 @@ const q = {
   noteOnly: "",
   noteWithWrite: "",
 };
-const t = { nowhere: "", withWrite: "" };
+const t = { nowhere: "", withWrite: "", fileIt: "" };
 
 const answer = (id: string, answerId: string, note?: string, source?: AnswerSource) =>
   answerQuestion(U.id, TZ, id, answerId, note, source);
@@ -102,15 +102,20 @@ beforeAll(async () => {
     .values({ id: U.id, name: "Understanding Interview Tester", email: U.email, timezone: TZ });
   ids = await seedCpoScenario(U.id, NOW);
 
-  const [nowhere, withWrite] = await db
+  // The set_project answer gets a task of its own: an answer that changes a
+  // row sets aside every other pending question resting on it (answer.ts),
+  // and the queue rows here rest on the seeded album task.
+  const [nowhere, withWrite, fileIt] = await db
     .insert(tasks)
     .values([
       { userId: U.id, projectId: ids.album, title: "Order the test pressing", status: "todo" },
       { userId: U.id, projectId: ids.album, title: "Send the weekly mix to the band", status: "todo" },
+      { userId: U.id, projectId: ids.album, title: "Chase the label about the artwork", status: "todo" },
     ])
     .returning({ id: tasks.id });
   t.nowhere = nowhere.id;
   t.withWrite = withWrite.id;
+  t.fileIt = fileIt.id;
 
   const keep = [{ id: "keep", label: "Keep it", writes: [{ op: "resolve" }] as Write[] }];
   const one = (
@@ -145,12 +150,12 @@ beforeAll(async () => {
       one("resolvedToday", ids.caltrans, "need_to_know", 0, [{ type: "task", id: ids.statement }], keep, "resolved"),
       one("resolvedYesterday", ids.caltrans, "need_to_know", 0, [{ type: "task", id: ids.statement }], keep, "resolved"),
       // The set_project answers. Ranks past the queue proper.
-      one("fileIt", ids.album, "need_to_know", 400, [{ type: "task", id: ids.albumOverdue }], [
+      one("fileIt", ids.album, "need_to_know", 400, [{ type: "task", id: t.fileIt }], [
         {
           id: "file-it",
           label: "File it under Caltrans",
           // Lower case on purpose: the name is resolved the way a spoken one is.
-          writes: [{ op: "set_project", taskId: ids.albumOverdue, project: "caltrans" }, { op: "resolve" }],
+          writes: [{ op: "set_project", taskId: t.fileIt, project: "caltrans" }, { op: "resolve" }],
         },
         ...keep,
       ]),
@@ -410,15 +415,16 @@ describe("set_project", () => {
   });
 
   it("(4) is applied by answerQuestion: the task lands in the named project, resolved the way a spoken name is", async () => {
-    expect((await taskRow(ids.albumOverdue)).projectId).toBe(ids.album);
+    expect((await taskRow(t.fileIt)).projectId).toBe(ids.album);
     const result = await answer(q.fileIt, "file-it");
     expect(result).toEqual({
       status: "resolved",
       projectId: ids.album,
-      applied: [{ op: "set_project", id: ids.albumOverdue, project: "Caltrans" }],
+      applied: [{ op: "set_project", id: t.fileIt, project: "Caltrans" }],
       failed: [],
+      superseded: [],
     });
-    expect((await taskRow(ids.albumOverdue)).projectId).toBe(ids.caltrans);
+    expect((await taskRow(t.fileIt)).projectId).toBe(ids.caltrans);
   });
 
   it("(5) a name that is no project of the user's fails the write and mints nothing", async () => {

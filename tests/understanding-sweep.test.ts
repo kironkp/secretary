@@ -70,7 +70,7 @@ describe("sweepUnderstanding", () => {
 
   it("(1) runs both active projects of the user and writes two records", async () => {
     const result = await sweepUnderstanding({ now: NOW, model, userIds: [U.id] });
-    expect(result).toEqual({ users: 1, ran: 2, skipped: 0, failed: 0, retiredAsr: 0 });
+    expect(result).toEqual({ users: 1, ran: 2, skipped: 0, failed: 0, retiredAsr: 0, healed: 0 });
     expect(model.calls).toHaveLength(2);
     const rows = await recordRows();
     expect(rows.map((r) => r.projectId).sort()).toEqual([ids.album, ids.caltrans].sort());
@@ -79,7 +79,7 @@ describe("sweepUnderstanding", () => {
 
   it("(2) the same data again is skipped on the hash and the model is not called", async () => {
     const result = await sweepUnderstanding({ now: NOW, model, userIds: [U.id] });
-    expect(result).toEqual({ users: 1, ran: 0, skipped: 2, failed: 0, retiredAsr: 0 });
+    expect(result).toEqual({ users: 1, ran: 0, skipped: 2, failed: 0, retiredAsr: 0, healed: 0 });
     expect(model.calls).toHaveLength(2);
     expect((await recordRows()).every((r) => r.version === 1)).toBe(true);
   });
@@ -88,7 +88,7 @@ describe("sweepUnderstanding", () => {
     const result = await withEnv("UNDERSTANDING_DISABLED", "true", () =>
       sweepUnderstanding({ now: NOW, model, userIds: [U.id] })
     );
-    expect(result).toEqual({ users: 0, ran: 0, skipped: 0, failed: 0, retiredAsr: 0 });
+    expect(result).toEqual({ users: 0, ran: 0, skipped: 0, failed: 0, retiredAsr: 0, healed: 0 });
     expect(model.calls).toHaveLength(2);
   });
 
@@ -110,12 +110,12 @@ describe("sweepUnderstanding", () => {
     const inFlight = sweepUnderstanding({ now: tomorrow, model: slow, userIds: [U.id] });
     await enteredOnce;
     const second = await sweepUnderstanding({ now: tomorrow, model: slow, userIds: [U.id] });
-    expect(second).toEqual({ users: 0, ran: 0, skipped: 0, failed: 0, retiredAsr: 0 });
+    expect(second).toEqual({ users: 0, ran: 0, skipped: 0, failed: 0, retiredAsr: 0, healed: 0 });
     expect(slow.calls).toHaveLength(1);
 
     release();
     const first = await inFlight;
-    expect(first).toEqual({ users: 1, ran: 2, skipped: 0, failed: 0, retiredAsr: 0 });
+    expect(first).toEqual({ users: 1, ran: 2, skipped: 0, failed: 0, retiredAsr: 0, healed: 0 });
     expect(slow.calls).toHaveLength(2);
     expect((await recordRows()).every((r) => r.version === 2)).toBe(true);
   });
@@ -165,7 +165,7 @@ describe("sweepUnderstanding", () => {
     ).length;
 
     const result = await sweepUnderstanding({ now: NOW, userIds: [U.id] });
-    expect(result).toEqual({ users: 1, ran: 0, skipped: 0, failed: 0, retiredAsr: 1 });
+    expect(result).toEqual({ users: 1, ran: 0, skipped: 0, failed: 0, retiredAsr: 1, healed: 0 });
 
     const [after] = await db
       .select({ status: clarifications.status })
@@ -181,7 +181,7 @@ describe("sweepUnderstanding", () => {
   it("(7) tallyResults maps ok, skipped and failed and ignores dry", () => {
     expect(
       tallyResults({
-        a: { status: "ok", recordId: "r", version: 1, questions: { created: [], updated: [], dismissed: [] }, ledes: {}, inputTokens: 0, outputTokens: 0 },
+        a: { status: "ok", recordId: "r", version: 1, questions: { created: [], updated: [], dismissed: [], skippedDuplicates: [], skippedSettled: [], reopened: [] }, ledes: {}, inputTokens: 0, outputTokens: 0 },
         b: { status: "skipped", reason: "unchanged" },
         c: { status: "skipped", reason: "no-model" },
         d: { status: "failed", errors: ["x"] },

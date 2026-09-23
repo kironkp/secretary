@@ -45,6 +45,7 @@ import { getPlanHead, getPreferences, savePlanAsHead } from "@/lib/layout/plan-s
 import { REGISTRY_COMPONENTS, REGISTRY_VERSION } from "@/lib/layout/registry";
 import { computeSignals } from "@/lib/layout/signals";
 import { applyBans, validatePlan } from "@/lib/layout/validator";
+import { setAsideInWords } from "@/components/today/copy";
 import { findDuplicate, findDuplicateEvent } from "./dedupe";
 import { clearExpectationsFor } from "./expectations";
 import { spawnNextOccurrence } from "./recurrence";
@@ -1558,16 +1559,26 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         )
       );
     }
+    // The pending questions this answer set aside because it changed a row
+    // they rested on (lib/understanding/supersede.ts). Said only when there
+    // were any, so the receipt stays honest, and in the words the screen's
+    // receipt uses (components/today/copy.ts): one answer, one sentence.
+    const setAside = setAsideInWords(outcome.superseded.length);
     return {
       result: {
         status: outcome.status,
         applied: outcome.applied,
         failed: outcome.failed,
+        superseded: outcome.superseded,
+        ...(setAside ? { setAside } : {}),
         // The one sentence the reading came back with, for the model to
         // relay in its own register; absent for a listed answer.
         ...(outcome.reply ? { reply: outcome.reply } : {}),
       },
-      toast: { icon: "check", text: "Answered" },
+      toast: {
+        icon: "check",
+        text: setAside ? `Answered, ${outcome.superseded.length} set aside` : "Answered",
+      },
     };
   },
 

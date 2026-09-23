@@ -10,7 +10,9 @@ import {
   kindClass,
   kindLabel,
   lateInWords,
+  readingLabel,
   receiptInWords,
+  setAsideInWords,
   updatedLine,
   writesInWords,
 } from "@/components/today/copy";
@@ -171,6 +173,40 @@ describe("the receipt", () => {
     expect(
       receiptInWords({ applied: [], failed: [{ op: "complete_task", error: "task not found" }] })
     ).toBe("Nothing changed. 1 write did not go through: task not found");
+  });
+
+  it("names the questions the answer set aside, after the writes and before a failure", () => {
+    // SPEC §6 step 5: said only when there were any, in the words the voice
+    // tool uses too.
+    expect(setAsideInWords(0)).toBeNull();
+    expect(setAsideInWords(1)).toBe("1 related question was set aside");
+    expect(setAsideInWords(2)).toBe("2 related questions were set aside");
+    expect(
+      receiptInWords({ applied: [{ op: "complete_task" }, { op: "complete_task" }], failed: [], superseded: ["q2"] })
+    ).toBe("Closed 2 tasks. 1 related question was set aside");
+    expect(receiptInWords({ applied: [{ op: "complete_task" }], failed: [], superseded: [] })).toBe(
+      "Closed 1 task"
+    );
+    expect(
+      receiptInWords({
+        applied: [{ op: "complete_task" }],
+        failed: [{ op: "complete_task", error: "task not found" }],
+        reply: "You want both closed.",
+        superseded: ["q2", "q3"],
+      })
+    ).toBe(
+      "Got it. You want both closed. Closed 1 task. 2 related questions were set aside. 1 write did not go through: task not found"
+    );
+  });
+});
+
+describe("the reading line", () => {
+  it("names the project being re-read, and says 'the project' when the question has none", () => {
+    expect(readingLabel("Caltrans")).toBe("Reading Caltrans…");
+    expect(readingLabel(" Album ")).toBe("Reading Album…");
+    expect(readingLabel("  ")).toBe("Reading the project…");
+    expect(readingLabel(null)).toBe("Reading the project…");
+    expect(readingLabel(undefined)).toBe("Reading the project…");
   });
 });
 

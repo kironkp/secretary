@@ -22,7 +22,7 @@ import {
   user,
 } from "@/lib/db/schema";
 import { QUESTION_KINDS } from "./types";
-import { retireAsrClarifications } from "./questions";
+import { healDuplicates, retireAsrClarifications } from "./questions";
 import {
   DEFAULT_MODEL,
   DEFAULT_OPENAI_MODEL,
@@ -127,9 +127,14 @@ export function tallyResults(results: Record<string, RunResult>): SweepTally {
 // The sweep
 // --------------------------------------------------------------------------
 
-export type SweepResult = SweepTally & { users: number; retiredAsr: number };
+export type SweepResult = SweepTally & {
+  users: number;
+  retiredAsr: number;
+  /** Open questions dismissed as the duplicate of an older one carrying the same words (questions.ts healDuplicates). */
+  healed: number;
+};
 
-const ZERO: SweepResult = { users: 0, ran: 0, skipped: 0, failed: 0, retiredAsr: 0 };
+const ZERO: SweepResult = { users: 0, ran: 0, skipped: 0, failed: 0, retiredAsr: 0, healed: 0 };
 
 /**
  * Module-level on purpose: one process, one sweep at a time. runAll holds a
@@ -180,6 +185,10 @@ async function sweepOnce(opts: SweepOptions): Promise<SweepResult> {
 
   const total: SweepResult = { ...ZERO, users: owners.length };
   for (const owner of owners) {
+    // Before the model, and whether or not there is one: a standing pair of
+    // same-text rows (the doubled questions on the user's phone) is healed
+    // by the sweep itself, not by a run that may never come.
+    total.healed += (await healDuplicates(owner.id, now)).length;
     const model = opts.model ?? (await modelCallFor(owner.id));
     if (!model) {
       // No model, no runs, but the retire is part of every sweep (SPEC §8:
@@ -208,9 +217,9 @@ async function sweepOnce(opts: SweepOptions): Promise<SweepResult> {
   // Quiet when nothing happened: the normal state of a sweep is every hash
   // matching, and a log line every ten minutes saying so would bury the
   // lines that matter.
-  if (total.ran + total.failed > 0) {
+  if (total.ran + total.failed + total.healed > 0) {
     console.log(
-      `understanding: ${total.ran} ran, ${total.skipped} unchanged, ${total.failed} failed`
+      `understanding: ${total.ran} ran, ${total.skipped} unchanged, ${total.failed} failed, ${total.healed} duplicate${total.healed === 1 ? "" : "s"} healed`
     );
   }
   return total;

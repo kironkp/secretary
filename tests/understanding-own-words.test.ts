@@ -240,6 +240,7 @@ describe("answerInOwnWords", () => {
         { op: "remember_fact" },
       ],
       failed: [],
+      superseded: [],
       reply: "You want both copies closed.",
     });
 
@@ -300,6 +301,7 @@ describe("answerInOwnWords", () => {
       projectId: ids.caltrans,
       applied: [{ op: "remember_fact" }],
       failed: [],
+      superseded: [],
       reply: "So the statement is not the last step; the packet to Walter is.",
     });
 
@@ -325,6 +327,7 @@ describe("answerInOwnWords", () => {
       status: "resolved",
       applied: [{ op: "remember_fact" }],
       failed: [],
+      superseded: [],
       reply: "You are waiting on Marissa first.",
     });
     const kept = (await memoryRows()).find((m) => m.fact === words);
@@ -421,6 +424,7 @@ describe("answer_question with own_words", () => {
       status: "resolved",
       applied: [{ op: "remember_fact" }],
       failed: [],
+      superseded: [],
       reply: "The packet to Walter comes after the statement.",
     });
     expect(outcome.toast).toEqual({ icon: "check", text: "Answered" });
@@ -514,6 +518,7 @@ describe("POST /api/questions/[id]/answer with text", () => {
       projectId: ids.caltrans,
       applied: [{ op: "remember_fact" }],
       failed: [],
+      superseded: [],
       reply: "You are not there yet.",
     });
     expect(await questionRow(q.route)).toEqual({ status: "resolved", resolution: "Not yet: not yet, one more step" });

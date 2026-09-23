@@ -96,6 +96,14 @@ test.describe("the Interview", () => {
       "[data-skip]",
     ]);
 
+    // The pills are where the thumb is: before the evidence disclosure, so
+    // opening the evidence never pushes them down.
+    const pill = await card(page).locator("[data-answer]").first().boundingBox();
+    const toggle = await page.locator("[data-evidence-toggle]").boundingBox();
+    expect(pill).not.toBeNull();
+    expect(toggle).not.toBeNull();
+    expect(pill!.y).toBeLessThan(toggle!.y);
+
     // The line at the bottom: a count, and when the projects were last read.
     await expect(page.locator("[data-interview-footer]")).toHaveText(
       /^\d+ answered today · last read .+$/
@@ -170,11 +178,17 @@ test.describe("the Interview", () => {
     await note.fill(words);
     await note.press("Enter");
 
-    // The receipt is the server's reply, said back. The question is exactly
-    // as open as it was: the answer never left the browser.
+    // The receipt is the server's reply, said back, on the status line under
+    // the card, with the thinking bars under it while the project is re-read.
+    // The question is exactly as open as it was: the answer never left the
+    // browser, so the queue still leads with it and the card stays.
     await expect(page.getByText("Got it. Noted.")).toBeVisible();
+    await expect(page.locator("[data-receipt]")).toHaveText("Got it. Noted.");
+    await expect(page.locator("[data-thinking]")).toBeVisible();
+    await expect(page.locator("[data-thinking]")).toContainText("Reading E2E Project…");
     expect(posted).toEqual({ text: words, source: "interview" });
     expect(await questionStatus(page)).toMatch(/^(open|asked)$/);
+    await expect(card(page)).toHaveAttribute("data-question-id", E2E_QUESTION.id);
   });
 
   test("the API lists the queue with the seeded question", async ({ page }) => {

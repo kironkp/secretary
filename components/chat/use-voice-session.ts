@@ -66,6 +66,10 @@ export function useVoiceSession() {
       provider.on("assistantSpeaking", setAssistantSpeaking);
       provider.on("modelChanged", setModel);
       provider.on("toolResult", (_name, toast, uiAction) => {
+        // A tool the secretary ran on a call may have written (an answer to a
+        // question, a task closed): the screens that poll listen for this and
+        // refresh at once, the same as after a tap.
+        window.dispatchEvent(new Event("secretary:data-changed"));
         if (uiAction?.type === "show_canvas") setCanvasSeq((s) => s + 1);
         if (!toast) return;
         const key = ++toastKey.current;

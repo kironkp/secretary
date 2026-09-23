@@ -160,6 +160,49 @@ body {
   .thinking-bar { animation: none; }
 }
 
+/* A question card giving way to the next one (components/today/today-view.tsx,
+   the Interview): the app's 340ms and the nav-tabs easing pair. The outgoing
+   card fades first (the trailing curve), then the incoming one rises 6px on
+   the leading curve; a row leaving the list fades and closes. All of it is
+   CSS, so the reduced-motion block at the end of this file collapses it to
+   an instant swap; the rules below take the transform out as well. */
+.swap-stack { position: relative; }
+.swap-stack > .hero-leave {
+  position: absolute;
+  inset: 0 0 auto 0;
+  pointer-events: none;
+  animation: hero-leave 200ms cubic-bezier(0.6, 0.05, 0.35, 1) both;
+}
+@keyframes hero-leave {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+.hero-enter {
+  animation: hero-enter 340ms cubic-bezier(0.22, 0.9, 0.32, 1) 100ms both;
+}
+@keyframes hero-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.row-leave {
+  display: grid;
+  pointer-events: none;
+  animation: row-leave 340ms cubic-bezier(0.6, 0.05, 0.35, 1) both;
+}
+.row-leave > * { min-height: 0; overflow: hidden; }
+/* The hairline between a leaving row and the next belongs to the leaving
+   row: it goes with it, so the list never shows a line along its top edge. */
+.ios-group > .row-leave + *::before { display: none; }
+@keyframes row-leave {
+  from { opacity: 1; grid-template-rows: 1fr; }
+  to { opacity: 0; grid-template-rows: 0fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .swap-stack > .hero-leave { display: none; }
+  .hero-enter { animation: none; }
+  .row-leave { display: none; }
+}
+
 /* An iOS inset grouped list: white cells on the grey ground, and a hairline
    between rows that starts at the text edge, not the card edge. */
 .ios-group > * + * {

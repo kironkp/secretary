@@ -58,11 +58,19 @@ export function AnswerButtons({
   onAnswer,
   onOwnWords,
   onWriteYourOwn,
+  selected = null,
   size = "hero",
 }: {
   answers: Answer[];
   disabled: boolean;
   onAnswer: (answerId: string) => void;
+  /**
+   * The answer just given, by id ("own" for the user's words): that pill
+   * stays filled and the others fade, from the tap until the card gives way
+   * to the next question. The acknowledgement is what the thumb sees before
+   * the server has said anything.
+   */
+  selected?: string | null;
   /**
    * Sends the user's own words. Resolving false means the screen could not
    * take them (the model could not read them, the server was unreachable):
@@ -116,9 +124,15 @@ export function AnswerButtons({
   };
 
   const type = size === "hero" ? "text-[15px]" : "text-[16px]";
-  const pill = `grid min-h-11 place-items-center whitespace-nowrap rounded-full px-3 font-semibold transition-opacity focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50 ${type}`;
+  // A pill is a button: Tab reaches it, Enter and Space answer, and the ring
+  // shows only for a keyboard (focus-visible), never after a tap.
+  const pill = `grid min-h-11 place-items-center whitespace-nowrap rounded-full px-3 font-semibold transition-opacity outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:cursor-not-allowed ${type}`;
   // The grey pill is the card's fill inside a card, and a cell on the ground.
   const grey = size === "hero" ? "bg-surface-2 text-ink" : "bg-card text-ink";
+  const filled = "bg-accent text-white active:opacity-80";
+  // With an answer given, that pill holds its colour whatever `disabled`
+  // says and the rest step back; with none, a disabled row simply dims.
+  const state = (id: string) => (selected ? (id === selected ? "" : "opacity-40") : "disabled:opacity-50");
 
   if (open) {
     return (
@@ -139,6 +153,13 @@ export function AnswerButtons({
             maxLength={OWN_WORDS_MAX}
             disabled={disabled}
             onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              // Escape is the keyboard's Cancel: back to the pills, words dropped.
+              if (e.key === "Escape" && !disabled) {
+                e.preventDefault();
+                setOpened(false);
+              }
+            }}
             placeholder="Your answer"
             aria-label="Your answer, in your own words"
             autoComplete="off"
@@ -149,7 +170,7 @@ export function AnswerButtons({
             type="submit"
             data-own-send
             disabled={disabled || !text.trim()}
-            className={`${pill} bg-accent text-white active:opacity-80`}
+            className={`${pill} ${filled} ${disabled && text.trim() ? "" : "disabled:opacity-50"}`}
           >
             Send
           </button>
@@ -175,10 +196,11 @@ export function AnswerButtons({
           key={a.id}
           type="button"
           data-answer={a.id}
+          data-selected={selected === a.id || undefined}
           disabled={disabled}
           onClick={() => onAnswer(a.id)}
-          className={`flex-auto ${pill} ${
-            i < last || answers.length === 1 ? "bg-accent text-white active:opacity-80" : grey
+          className={`flex-auto ${pill} ${state(a.id)} ${
+            selected === a.id || i < last || answers.length === 1 ? filled : grey
           }`}
         >
           {a.label}
@@ -188,9 +210,10 @@ export function AnswerButtons({
         <button
           type="button"
           data-write-own
+          data-selected={selected === "own" || undefined}
           disabled={disabled}
           onClick={writeYourOwn}
-          className={`flex-auto ${pill} ${grey}`}
+          className={`flex-auto ${pill} ${state("own")} ${grey}`}
         >
           Write your own
         </button>

@@ -8,6 +8,7 @@
 // the fallback. Storage is the only side effect, and it happens only after
 // validation has passed: a failed run leaves the previous record, its
 // questions and its words exactly as they were.
+import { randomUUID } from "node:crypto";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
@@ -23,7 +24,13 @@ import {
   UNDERSTANDING_SYSTEM,
   type RunMode,
 } from "./prompt";
-import { questionIdentity, rankDraft, retireAsrClarifications, syncQuestions } from "./questions";
+import {
+  questionIdentity,
+  rankDraft,
+  retireAsrClarifications,
+  syncQuestions,
+  type SyncResult,
+} from "./questions";
 import type { Bundle, ProjectRecord, RunOutput } from "./types";
 import { validateRunOutput } from "./validate";
 
@@ -302,7 +309,7 @@ export type RunResult =
       status: "ok";
       recordId: string;
       version: number;
-      questions: { created: string[]; updated: string[]; dismissed: string[] };
+      questions: SyncResult;
       ledes: Record<string, string>;
       todayLine?: string;
       inputTokens: number;
@@ -353,7 +360,18 @@ export type RunOptions = {
  *  The first production sweep did exactly that on the Jazz project. */
 const FAILED_BACKOFF_MS = 6 * 60 * 60_000;
 
+/**
+ * How a failure of the provider's own — the call threw: a 429, a 400 over
+ * the usage cap, a timeout, a refusal, output that was not JSON — is marked
+ * in a run's logged errors, apart from the validator's. The backoff above
+ * reads it: such a run says nothing about the inputs, since the model never
+ * answered on them, so it must not keep the next sweep from trying.
+ */
+export const MODEL_ERROR_PREFIX = "model: ";
+
 type RunLog = {
+  /** The run's id, fixed at its start: what created_by_run on a question names. */
+  id: string;
   userId: string;
   projectId: string | null;
   startedAt: Date;
@@ -373,6 +391,7 @@ type RunLog = {
 async function logRun(entry: RunLog): Promise<void> {
   try {
     await db.insert(understandingRuns).values({
+      id: entry.id,
       userId: entry.userId,
       projectId: entry.projectId,
       startedAt: entry.startedAt,
@@ -453,11 +472,15 @@ async function runProjectNow(
 ): Promise<RunResult> {
   const startedAt = new Date();
   const now = opts.now ?? new Date();
+  // One id for the run, minted here: the understanding_runs row it logs and
+  // created_by_run on every question it inserts carry the same one, so a
+  // question points at the run that made it.
+  const runId = randomUUID();
   if (opts.bundle && opts.bundle.project.id !== projectId) {
     return { status: "failed", errors: [`bundle is for project ${opts.bundle.project.id}, not ${projectId}`] };
   }
   try {
-    return await runOnce(userId, projectId, opts, startedAt, now);
+    return await runOnce(userId, projectId, opts, startedAt, now, runId);
   } catch (e) {
     // Nothing is thrown out of a run: one project's trouble must not end the
     // sweep (SPEC §8) or leave it unlogged. A database error in gather, the
@@ -467,7 +490,7 @@ async function runProjectNow(
     const message = e instanceof Error ? e.message : String(e);
     console.error(`understanding: ${projectId} failed: ${message}`);
     if (!opts.dryRun) {
-      await logRun({ userId, projectId, startedAt, status: "failed", errors: [message] });
+      await logRun({ id: runId, userId, projectId, startedAt, status: "failed", errors: [message] });
     }
     return { status: "failed", errors: [message] };
   }
@@ -479,7 +502,8 @@ async function runOnce(
   projectId: string,
   opts: RunOptions,
   startedAt: Date,
-  now: Date
+  now: Date,
+  runId: string
 ): Promise<RunResult> {
   // --- gather and compare --------------------------------------------------
   const bundle =
@@ -487,7 +511,14 @@ async function runOnce(
   if (!bundle) {
     // A dry run writes nothing, a skip row included (scripts/understand.ts --dry).
     if (!opts.dryRun) {
-      await logRun({ userId, projectId: null, startedAt, status: "skipped", reason: "no-project" });
+      await logRun({
+        id: runId,
+        userId,
+        projectId: null,
+        startedAt,
+        status: "skipped",
+        reason: "no-project",
+      });
     }
     return { status: "skipped", reason: "no-project" };
   }
@@ -510,6 +541,7 @@ async function runOnce(
         status: understandingRuns.status,
         inputsHash: understandingRuns.inputsHash,
         finishedAt: understandingRuns.finishedAt,
+        errors: understandingRuns.errors,
       })
       .from(understandingRuns)
       .where(and(eq(understandingRuns.userId, userId), eq(understandingRuns.projectId, projectId)))
@@ -519,7 +551,11 @@ async function runOnce(
       last?.status === "failed" &&
       last.inputsHash === inputsHash &&
       last.finishedAt &&
-      Date.now() - last.finishedAt.getTime() < FAILED_BACKOFF_MS
+      Date.now() - last.finishedAt.getTime() < FAILED_BACKOFF_MS &&
+      // Only a run the model answered and the validator refused is expected
+      // to fail the same way again on the same inputs. A run the provider
+      // failed (MODEL_ERROR_PREFIX) never read them; it tries again.
+      !(last.errors ?? []).some((e) => e.startsWith(MODEL_ERROR_PREFIX))
     ) {
       // Same inputs, same rejection expected; a change in the data tries at once.
       return { status: "skipped", reason: "backoff" };
@@ -531,7 +567,7 @@ async function runOnce(
   if (!model) {
     const reason = process.env.UNDERSTANDING_DISABLED === "true" ? "disabled" : "no-model";
     if (!opts.dryRun) {
-      await logRun({ userId, projectId, startedAt, status: "skipped", reason, inputsHash });
+      await logRun({ id: runId, userId, projectId, startedAt, status: "skipped", reason, inputsHash });
     }
     return { status: "skipped", reason };
   }
@@ -539,6 +575,8 @@ async function runOnce(
   const user = renderBundle(bundle, { mode: opts.mode });
   let output: RunOutput | null = null;
   let errors: string[] = [];
+  /** Every attempt the provider itself failed, kept apart from the validator's errors (see MODEL_ERROR_PREFIX). */
+  const providerErrors: string[] = [];
   let modelId = "";
   let inputTokens = 0;
   let outputTokens = 0;
@@ -555,7 +593,9 @@ async function runOnce(
       });
     } catch (e) {
       // A throw is a failed attempt like any other; the retry quotes it.
-      errors = [`model call failed: ${e instanceof Error ? e.message : String(e)}`];
+      const message = `${MODEL_ERROR_PREFIX}${e instanceof Error ? e.message : String(e)}`;
+      providerErrors.push(message);
+      errors = [message];
       continue;
     }
     modelId = result.model;
@@ -567,11 +607,15 @@ async function runOnce(
   }
 
   if (!output) {
+    // The log carries every provider failure alongside the last rejection,
+    // so the backoff can tell the two apart later.
+    const logged = [...new Set([...providerErrors, ...errors])];
     console.error(
-      `understanding: ${bundle.project.name} (${projectId}) failed after ${MAX_ATTEMPTS} attempts: ${errors.join("; ")}`
+      `understanding: ${bundle.project.name} (${projectId}) failed after ${MAX_ATTEMPTS} attempts: ${logged.join("; ")}`
     );
     if (!opts.dryRun) {
       await logRun({
+        id: runId,
         userId,
         projectId,
         startedAt,
@@ -580,10 +624,10 @@ async function runOnce(
         model: modelId || undefined,
         inputTokens,
         outputTokens,
-        errors,
+        errors: logged,
       });
     }
-    return { status: "failed", errors };
+    return { status: "failed", errors: logged };
   }
 
   if (opts.dryRun) {
@@ -622,9 +666,12 @@ async function runOnce(
     })
     .returning({ id: records.id, version: records.version });
 
-  const questions = await syncQuestions(userId, projectId, output.questions, bundle);
+  const questions = await syncQuestions(userId, projectId, output.questions, bundle, {
+    createdBy: runId,
+  });
   await recordUsage({ userId, kind: "understanding", model: modelId, inputTokens, outputTokens });
   await logRun({
+    id: runId,
     userId,
     projectId,
     startedAt,

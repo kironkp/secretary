@@ -247,10 +247,33 @@ Ranking (`lib/understanding/questions.ts`), mechanical, not model-chosen:
 Today shows one hero and up to six rows. The rest keep their rank and wait.
 
 Dedup and memory of asking: a question's identity is the hash of
-`(kind, sorted evidence ids)`. A question with the same identity as a
-`resolved` or `dismissed` row is never re-created. `asked[]` on the record
-carries the answer text so the next run can reason from it ("you said the
-album is October 10" is a decision, sourced to the answer).
+`(kind, sorted evidence ids)`. `asked[]` on the record carries the answer
+text so the next run can reason from it ("you said the album is October 10"
+is a decision, sourced to the answer).
+
+**Status.** `open | asked` are pending (asked = shown once). Three ways
+out, and each sets `resolvedAt`: `resolved` (the user answered),
+`dismissed` (the loop found the premise gone: the evidence moved, a twin
+carrying the same words, an ASR subject confirmed by use), `superseded` (an
+answer to another question changed a row this one rested on; `supersededBy`
+names that question). A closed row never goes back to pending. Every row a
+run inserts carries `createdByRun`, the `understanding_runs` id of the run
+that drafted it, so a question always says why it exists.
+
+**The settled guard** (`lib/understanding/supersede.ts`, applied in
+`syncQuestions`) is what keeps a closed question closed. Every row a
+resolved, dismissed or superseded question rested on is *settled* at the
+moment it closed, for 30 days. A draft whose evidence rows are all settled
+and none changed since — a task's `updatedAt` later than the settlement is
+a change; a message or memory the settled set has never seen is new
+evidence — is the same issue again, whether it carries a closed identity or
+a new one in new words on the same rows, and is skipped
+(`skippedSettled`). A closed identity whose draft brings new evidence
+reopens: a new row with the same identity is inserted and reported
+(`reopened`); the closed row stays as the record of the ruling. The
+identity index is not unique on purpose. Nothing dismisses a question
+because its project is old or quiet, and a row a run did not mention is
+dismissed only when the data moved under it after it was asked.
 
 The 242 open ASR-kind rows are not surfaced on Today. The first run of the
 loop dismisses any ASR-kind row whose `subject` matches a `confirmed`
@@ -274,8 +297,19 @@ open after that.
    `voice`) when the caller gave one. The record's `asked[]` entry logs the
    whole resolution, so a note reaches the next run. Nothing else reads the
    resolution column.
-4. Run that project immediately (§8). Return the writes that succeeded. The
-   client says "Closed" only for those.
+4. Set aside, in the same transaction, every other pending question of the
+   user's that rests on a row the applied writes changed
+   (`supersedeByWrites`): status `superseded`, `supersededBy` = this
+   question, `resolvedAt` = the moment the answer landed, read after the
+   writes so the rows they changed never count as changed after the
+   ruling. Closing the old CPO 2073 copy sets "What is blocking CPO 2073?"
+   aside before the user can answer an obsolete premise, without waiting
+   for the re-read. Only writes that went through count.
+5. Run that project immediately (§8). Return the writes that succeeded and
+   `superseded`, the ids set aside. The client says "Closed" only for the
+   writes, and mentions "N related questions were set aside" only when N is
+   more than zero. Answering the same question again is refused
+   (`not-open`), and nothing is written twice.
 
 **Write your own.** Every question also takes
 `{ text, source? }` in place of `answerId` (exactly one of the two; `text`
@@ -358,12 +392,23 @@ and never will, because the hash compare already answers "did anything this
 run would read change" and a flag would have to be kept honest at every
 write site to say the same thing less reliably.
 
-- **The sweep.** Every `UNDERSTANDING_SWEEP_MINUTES`, `runAll` for each user:
-  gather every active project once (the board, the memories and the 30-day
-  messages are read once and shared), compare hashes, run the ones that
-  changed, then retire ASR clarifications confirmed by use (§5). One sweep
-  per user at a time; a second that starts while one is running returns at
-  once and does nothing.
+- **The sweep.** Every `UNDERSTANDING_SWEEP_MINUTES`, for each user: first
+  heal duplicates (`healDuplicates`: among the open questions of the three
+  kinds, rows carrying the same words are one question, the oldest keeps
+  its row and the rest are dismissed as its duplicates), which needs no
+  model and runs even when none is available; then `runAll`: gather every
+  active project once (the board, the memories and the 30-day messages are
+  read once and shared), compare hashes, run the ones that changed, then
+  retire ASR clarifications confirmed by use (§5). One sweep per user at a
+  time; a second that starts while one is running returns at once and does
+  nothing.
+- **Backoff, for the validator only.** A project whose last run failed on
+  the same inputs is not run again by the sweep for six hours, so a
+  rejection is not paid for six times an hour. Only a run the model
+  answered and the validator refused arms this; a failure of the provider's
+  own (a 429, a usage cap, a timeout — logged with the prefix `model: `)
+  says nothing about the inputs and is tried again on the next sweep.
+  "Understand now" and an answer's re-run ignore the backoff.
 
   Built: `lib/understanding/sweep.ts` `sweepUnderstanding`, started from the
   boot hook (`instrumentation.ts`) two minutes after the server starts and

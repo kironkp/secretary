@@ -2,12 +2,20 @@
 //
 // The model proposes; this file decides. Rank is mechanical so the model
 // cannot promote its own question, identity is a hash so the same question
-// is never asked twice, and a row the model forgot one run is left alone
-// unless the data it rested on changed. Every query filters on userId.
+// is never asked twice, a ruled-on issue stays ruled on until a row it rests
+// on changes or new evidence appears (the settled guard, supersede.ts), and
+// a row the model forgot one run is left alone unless the data it rested on
+// changed. Every query filters on userId.
+//
+// A question's status is open | asked (pending) | resolved (answered) |
+// dismissed (the loop found the premise gone, or a twin) | superseded (an
+// answer changed a row it rested on). Every row that leaves pending gets
+// resolved_at, and every row a run inserts gets created_by_run.
 import { createHash } from "node:crypto";
 import { and, asc, desc, eq, gte, inArray, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { clarifications, entities, messages, projects } from "@/lib/db/schema";
+import { isAlreadyRuledOn, settledEvidence } from "./supersede";
 import { termMatcher } from "./terms";
 import {
   QUESTION_KINDS,
@@ -112,12 +120,20 @@ export function rankDraft(draft: QuestionDraft, bundle: Bundle): number {
 /**
  * Write one run's drafts for one project into `clarifications` (SPEC §5).
  *
- * - An identity already resolved or dismissed is skipped: asked once, never
- *   re-created. This is the memory of asking.
  * - An identity still open or asked is refreshed in place — wording, why,
  *   evidence, answers, rank — keeping its status and surfacedAt, so a
  *   question the user has seen does not become a new card.
- * - Anything else is inserted open.
+ * - The settled guard (supersede.ts), the memory of asking: every row a
+ *   resolved, dismissed or superseded question rested on is settled at the
+ *   moment that question closed. A draft whose rows are all settled and
+ *   unchanged since, whether its identity is one that closed or a new one
+ *   in new words on the same rows, is the same issue again and is skipped
+ *   (skippedSettled). A closed identity whose draft carries new evidence —
+ *   a task edited after the ruling, a message the ruling never saw — may
+ *   reopen: a NEW row with the same identity is inserted (the identity
+ *   index is not unique) and reported in `reopened`; the closed row keeps
+ *   its status, resolution and resolved_at as the record of the ruling.
+ * - Anything else is inserted open, with created_by_run = opts.createdBy.
  * - A second guard, by text (normalizeQuestionText). Identity stays
  *   evidence-based; this catches the same question asked from two evidence
  *   sets, or from two projects, which Today then showed as two rows. Drafts
@@ -138,19 +154,45 @@ export function rankDraft(draft: QuestionDraft, bundle: Bundle): number {
  *   an evidence task finished since the row was created (or gone from the
  *   bundle), or an evidence expectation cleared. A model that simply forgot
  *   a question one run must not make it flap, so a row whose evidence is as
- *   it was on the day it was asked stays exactly as it was.
+ *   it was on the day it was asked stays exactly as it was. Nothing here
+ *   dismisses a question because its project is old or quiet.
  */
 export async function syncQuestions(
   userId: string,
   projectId: string,
   drafts: QuestionDraft[],
-  bundle: Bundle
-): Promise<{ created: string[]; updated: string[]; dismissed: string[]; skippedDuplicates: string[] }> {
+  bundle: Bundle,
+  opts: SyncOptions = {}
+): Promise<SyncResult> {
   const created: string[] = [];
   const updated: string[] = [];
   const dismissed: string[] = [];
   const skippedDuplicates: string[] = [];
+  const skippedSettled: string[] = [];
+  const reopened: string[] = [];
   const identities = new Set<string>();
+
+  // The settled guard's inputs, once per sync. The window is measured on the
+  // bundle's clock, which is what its messages and done tasks were bounded
+  // by; the stamp a row gets when it closes here is the wall clock, like its
+  // created_at and like every updated_at the guard compares it against.
+  const clock = new Date(bundle.clock.nowIso);
+  const windowNow = Number.isNaN(clock.getTime()) ? new Date() : clock;
+  const closedAt = new Date();
+  const settled = await settledEvidence(db, userId, windowNow);
+  const updatedAtByKey = new Map<string, Date>();
+  for (const t of [...bundle.tasksOpen, ...bundle.tasksDone]) {
+    const at = new Date(t.updatedAt);
+    if (!Number.isNaN(at.getTime())) updatedAtByKey.set(`task:${t.id}`, at);
+  }
+  // Only a task can have "changed after the ruling": the bundle carries no
+  // updatedAt for an expectation (BundleExpectation), and a message or a
+  // memory is what it was when it was written. Those read as unchanged; a
+  // message or memory the settled set has never seen is new evidence on its
+  // own (isAlreadyRuledOn).
+  const updatedAtOf = (key: string): Date | null => updatedAtByKey.get(key) ?? null;
+  const ruledOn = (draft: QuestionDraft): boolean =>
+    isAlreadyRuledOn(draft.evidence, settled, updatedAtOf);
 
   // Every open or asked question of the user's, by normalized text, for the
   // text guard: one read up front rather than one per draft.
@@ -176,7 +218,7 @@ export async function syncQuestions(
   const retire = async (id: string, duplicateOf: string): Promise<void> => {
     await db
       .update(clarifications)
-      .set({ status: "dismissed", resolution: `duplicate of ${duplicateOf}` })
+      .set({ status: "dismissed", resolution: `duplicate of ${duplicateOf}`, resolvedAt: closedAt })
       .where(and(eq(clarifications.userId, userId), eq(clarifications.id, id)));
     retired.add(id);
     dismissed.push(id);
@@ -185,25 +227,42 @@ export async function syncQuestions(
   // First the identity of every draft and the row it would refresh, so the
   // refreshes can go first (see the rule above); the text guard needs to
   // know which drafts those are before it writes anything.
-  const pending: { draft: QuestionDraft; identity: string; existing: { id: string } | null }[] = [];
+  const pending: {
+    draft: QuestionDraft;
+    identity: string;
+    existing: { id: string } | null;
+    /** The identity closed before and this draft brings new evidence. */
+    reopens: boolean;
+  }[] = [];
   for (const draft of drafts) {
     const identity = questionIdentity(draft);
     // The same question twice in one run: the first wins, the second is noise.
     if (identities.has(identity)) continue;
     identities.add(identity);
 
-    const [existing] = await db
+    const [latest] = await db
       .select({ id: clarifications.id, status: clarifications.status })
       .from(clarifications)
       .where(and(eq(clarifications.userId, userId), eq(clarifications.identity, identity)))
       .orderBy(desc(clarifications.createdAt))
       .limit(1);
-    if (existing && (existing.status === "resolved" || existing.status === "dismissed")) continue;
-    pending.push({ draft, identity, existing: existing ?? null });
+    if (latest && (OPEN_STATUSES as readonly string[]).includes(latest.status)) {
+      pending.push({ draft, identity, existing: latest, reopens: false });
+      continue;
+    }
+    // The settled guard (see above): a closed identity, or a new one resting
+    // only on rows that closed questions settled, is the same issue again
+    // unless a row changed after the ruling or the draft cites something
+    // the ruling never saw.
+    if (ruledOn(draft)) {
+      skippedSettled.push(draft.question);
+      continue;
+    }
+    pending.push({ draft, identity, existing: null, reopens: latest !== undefined });
   }
   const ordered = [...pending.filter((p) => p.existing), ...pending.filter((p) => !p.existing)];
 
-  for (const { draft, identity, existing } of ordered) {
+  for (const { draft, identity, existing, reopens } of ordered) {
     const rank = rankDraft(draft, bundle);
     // The text guard. The row this draft would refresh (same identity) is
     // excluded: a question re-proposed with its own wording is not a twin
@@ -248,6 +307,10 @@ export async function syncQuestions(
       continue;
     }
 
+    // A reopened identity is a new row on purpose: clarifications_user_identity_idx
+    // (schema.ts) is not unique, and the closed row stays as it was, the
+    // record of the earlier ruling; the identity lookup above reads the
+    // latest row, which from here on is this one.
     const [row] = await db
       .insert(clarifications)
       .values({
@@ -261,10 +324,11 @@ export async function syncQuestions(
         identity,
         projectId,
         status: "open",
+        createdByRun: opts.createdBy ?? null,
       })
       .returning({ id: clarifications.id });
     keptByText.set(text, row.id);
-    created.push(row.id);
+    (reopens ? reopened : created).push(row.id);
   }
 
   // --- the rows this run did not mention ----------------------------------
@@ -318,12 +382,83 @@ export async function syncQuestions(
     if (!row.evidence.some((s) => evidenceMoved(s, row.createdAt))) continue;
     await db
       .update(clarifications)
-      .set({ status: "dismissed", resolution: "resolved by a change in the data" })
+      .set({
+        status: "dismissed",
+        resolution: "resolved by a change in the data",
+        resolvedAt: closedAt,
+      })
       .where(and(eq(clarifications.userId, userId), eq(clarifications.id, row.id)));
     dismissed.push(row.id);
   }
 
-  return { created, updated, dismissed, skippedDuplicates };
+  return { created, updated, dismissed, skippedDuplicates, skippedSettled, reopened };
+}
+
+export type SyncOptions = {
+  /**
+   * What created_by_run records on every row this sync inserts: the
+   * understanding_runs id of the run storing these drafts, so a question
+   * points at the run that made it.
+   */
+  createdBy?: string;
+};
+
+export type SyncResult = {
+  created: string[];
+  updated: string[];
+  dismissed: string[];
+  skippedDuplicates: string[];
+  /** Drafts skipped as an issue already ruled on (the question text): every row settled, none changed since. */
+  skippedSettled: string[];
+  /** Rows inserted for an identity that had closed, because the draft brought new evidence (the new ids). */
+  reopened: string[];
+};
+
+/**
+ * The sweep's own repair for a standing pair: among the user's open or
+ * asked questions of the three kinds, rows carrying the same words
+ * (normalizeQuestionText) are one question, and the OLDEST keeps its row —
+ * it is the one the user has been looking at longest. The rest are
+ * dismissed as its duplicates, the way the text guard in syncQuestions
+ * dismisses a twin, with resolved_at = now. Needs no model, so the sweep
+ * runs it for every owner before it looks for one (sweep.ts): the doubled
+ * rows on the user's phone are healed whether or not a run ever comes.
+ * Returns the ids it dismissed.
+ */
+export async function healDuplicates(userId: string, now: Date): Promise<string[]> {
+  const rows = await db
+    .select({ id: clarifications.id, question: clarifications.question })
+    .from(clarifications)
+    .where(
+      and(
+        eq(clarifications.userId, userId),
+        inArray(clarifications.kind, [...QUESTION_KINDS]),
+        inArray(clarifications.status, [...OPEN_STATUSES])
+      )
+    )
+    .orderBy(asc(clarifications.createdAt), asc(clarifications.id));
+  const keptByText = new Map<string, string>();
+  const dismissed: string[] = [];
+  for (const row of rows) {
+    const text = normalizeQuestionText(row.question);
+    const kept = keptByText.get(text);
+    if (!kept) {
+      keptByText.set(text, row.id);
+      continue;
+    }
+    await db
+      .update(clarifications)
+      .set({ status: "dismissed", resolution: `duplicate of ${kept}`, resolvedAt: now })
+      .where(
+        and(
+          eq(clarifications.userId, userId),
+          eq(clarifications.id, row.id),
+          inArray(clarifications.status, [...OPEN_STATUSES])
+        )
+      );
+    dismissed.push(row.id);
+  }
+  return dismissed;
 }
 
 /**
@@ -421,7 +556,7 @@ export async function retireAsrClarifications(
     if (!confirmedByUser) continue;
     await db
       .update(clarifications)
-      .set({ status: "dismissed", resolution: "confirmed by use" })
+      .set({ status: "dismissed", resolution: "confirmed by use", resolvedAt: now })
       .where(and(eq(clarifications.userId, userId), eq(clarifications.id, row.id)));
     retired++;
   }
@@ -444,8 +579,8 @@ export type QuestionRow = {
   projectId: string | null;
   projectName: string | null;
   /** listQuestions returns open and asked only; getQuestion returns any, so
-   *  the answer endpoint (SPEC §6 step 1) can refuse a resolved one by name. */
-  status: "open" | "asked" | "resolved" | "dismissed";
+   *  the answer endpoint (SPEC §6 step 1) can refuse a closed one by name. */
+  status: "open" | "asked" | "resolved" | "dismissed" | "superseded";
   surfacedAt: Date | null;
   createdAt: Date;
 };

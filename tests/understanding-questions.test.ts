@@ -293,7 +293,7 @@ describe("syncQuestions", () => {
       ],
     });
     const r = await syncQuestions(U.id, projectId, [reworded], open());
-    expect(r).toEqual({ created: [], updated: [id], dismissed: [], skippedDuplicates: [] });
+    expect(r).toEqual({ created: [], updated: [id], dismissed: [], skippedDuplicates: [], skippedSettled: [], reopened: [] });
     const all = await rows();
     expect(all).toHaveLength(1);
     expect(all[0].question).toBe(reworded.question);
@@ -305,7 +305,7 @@ describe("syncQuestions", () => {
 
   it("leaves a forgotten question alone while its evidence is unchanged", async () => {
     const r = await syncQuestions(U.id, projectId, [], open());
-    expect(r).toEqual({ created: [], updated: [], dismissed: [], skippedDuplicates: [] });
+    expect(r).toEqual({ created: [], updated: [], dismissed: [], skippedDuplicates: [], skippedSettled: [], reopened: [] });
     const [row] = await rows();
     expect(row.status).toBe("asked");
   });
@@ -316,18 +316,40 @@ describe("syncQuestions", () => {
     const finished = new Date().toISOString();
     const gone = bundle({ project: { id: projectId, name: "Caltrans", status: "active" }, tasksOpen: [], tasksDone: [task("a", { status: "done", completedAt: finished, updatedAt: finished })] });
     const r = await syncQuestions(U.id, projectId, [], gone);
-    expect(r).toEqual({ created: [], updated: [], dismissed: [id], skippedDuplicates: [] });
+    expect(r).toEqual({ created: [], updated: [], dismissed: [id], skippedDuplicates: [], skippedSettled: [], reopened: [] });
     const [row] = await rows();
     expect(row.status).toBe("dismissed");
     expect(row.resolution).toBe("resolved by a change in the data");
   });
 
-  it("never re-creates a dismissed identity, even when the draft comes back", async () => {
+  it("never re-creates a dismissed identity while its rows are as they were: the settled guard reports it", async () => {
+    // The row closed with resolved_at set; task a in this bundle was last
+    // changed before that, so the draft is the same issue again.
     const r = await syncQuestions(U.id, projectId, [first], open());
-    expect(r).toEqual({ created: [], updated: [], dismissed: [], skippedDuplicates: [] });
+    expect(r).toEqual({ created: [], updated: [], dismissed: [], skippedDuplicates: [], skippedSettled: [first.question], reopened: [] });
     const all = await rows();
     expect(all).toHaveLength(1);
     expect(all[0].status).toBe("dismissed");
+    expect(all[0].resolvedAt).not.toBeNull();
+  });
+
+  it("reopens a dismissed identity as a new row once a row it rests on changed after the ruling", async () => {
+    const [closed] = await rows();
+    const edited = new Date(closed.resolvedAt!.getTime() + 60_000).toISOString();
+    const changed = bundle({ project: { id: projectId, name: "Caltrans", status: "active" }, tasksOpen: [task("a", { dueAt: hours(20), updatedAt: edited })] });
+    const r = await syncQuestions(U.id, projectId, [first], changed, { createdBy: "test-run" });
+    expect(r.reopened).toHaveLength(1);
+    expect(r).toMatchObject({ created: [], updated: [], dismissed: [], skippedDuplicates: [], skippedSettled: [] });
+    const all = await rows();
+    expect(all).toHaveLength(2);
+    // The closed row is the record of the ruling; the new one carries the same identity, open.
+    expect(all[0]).toMatchObject({ id: closed.id, status: "dismissed" });
+    expect(all[1]).toMatchObject({ id: r.reopened[0], status: "open", identity: closed.identity, createdByRun: "test-run", resolvedAt: null });
+    // Answered by hand, so the sequence below has no standing row on task a.
+    await db
+      .update(clarifications)
+      .set({ status: "resolved", resolution: "Yes", resolvedAt: new Date() })
+      .where(eq(clarifications.id, r.reopened[0]));
   });
 
   it("leaves a forgotten question alone when its evidence was already finished when it was asked", async () => {
@@ -345,7 +367,7 @@ describe("syncQuestions", () => {
     const created = await syncQuestions(U.id, projectId, [ask], twin);
     expect(created.created).toHaveLength(1);
     const forgot = await syncQuestions(U.id, projectId, [], twin);
-    expect(forgot).toEqual({ created: [], updated: [], dismissed: [], skippedDuplicates: [] });
+    expect(forgot).toEqual({ created: [], updated: [], dismissed: [], skippedDuplicates: [], skippedSettled: [], reopened: [] });
     expect((await rows()).find((x) => x.id === created.created[0])!.status).toBe("open");
 
     const finished = new Date().toISOString();
@@ -493,14 +515,14 @@ describe("syncQuestions dedupes by text", () => {
     ];
     for (const question of variants) {
       const r = await syncQuestions(U.id, p.album, [{ ...fromC, question }], album());
-      expect(r, question).toEqual({ created: [], updated: [], dismissed: [], skippedDuplicates: [question] });
+      expect(r, question).toEqual({ created: [], updated: [], dismissed: [], skippedDuplicates: [question], skippedSettled: [], reopened: [] });
     }
     expect(await rows()).toHaveLength(1);
   });
 
   it("the row a draft refreshes in place is not its own twin", async () => {
     const r = await syncQuestions(U.id, p.caltrans, [{ ...fromA, why: `"Task a" is still my suggestion.` }], caltrans());
-    expect(r).toEqual({ created: [], updated: [kept], dismissed: [], skippedDuplicates: [] });
+    expect(r).toEqual({ created: [], updated: [kept], dismissed: [], skippedDuplicates: [], skippedSettled: [], reopened: [] });
     const all = await rows();
     expect(all).toHaveLength(1);
     expect(all[0].context).toBe(`"Task a" is still my suggestion.`);
@@ -614,7 +636,7 @@ describe("syncQuestions heals a standing pair of same-text rows", () => {
       ],
       caltrans()
     );
-    expect(r).toEqual({ created: [], updated: [row.a], dismissed: [row.b], skippedDuplicates: [] });
+    expect(r).toEqual({ created: [], updated: [row.a], dismissed: [row.b], skippedDuplicates: [], skippedSettled: [], reopened: [] });
     expect(await rowById(row.a)).toMatchObject({ status: "open", context: "why a, run 2", resolution: null });
     expect(await rowById(row.b)).toMatchObject({
       status: "dismissed",
@@ -626,12 +648,13 @@ describe("syncQuestions heals a standing pair of same-text rows", () => {
 
   it("the next run that re-proposes only the kept one refreshes it and touches nothing else", async () => {
     const r = await syncQuestions(U.id, p.caltrans, [{ ...fromA, why: "why a, run 3" }], caltrans());
-    expect(r).toEqual({ created: [], updated: [row.a], dismissed: [], skippedDuplicates: [] });
+    expect(r).toEqual({ created: [], updated: [row.a], dismissed: [], skippedDuplicates: [], skippedSettled: [], reopened: [] });
     expect(await rowById(row.a)).toMatchObject({ status: "open", context: "why a, run 3" });
     expect(await rowById(row.b)).toMatchObject({ status: "dismissed" });
-    // The dismissed twin's identity is spent: proposed again, it is nothing.
+    // The dismissed twin's identity is spent: proposed again on the same
+    // unchanged row, it is the settled guard's to report, and nothing else.
     const again = await syncQuestions(U.id, p.caltrans, [fromB], caltrans());
-    expect(again).toEqual({ created: [], updated: [], dismissed: [], skippedDuplicates: [] });
+    expect(again).toEqual({ created: [], updated: [], dismissed: [], skippedDuplicates: [], skippedSettled: [TEXT], reopened: [] });
     expect(await rows()).toHaveLength(2);
   });
 
@@ -639,12 +662,12 @@ describe("syncQuestions heals a standing pair of same-text rows", () => {
     const [c] = await db.insert(clarifications).values(standing(p.album, fromC)).returning({ id: clarifications.id });
     row.c = c.id;
     const r = await syncQuestions(U.id, p.album, [{ ...fromC, why: "why c, run 2" }], album());
-    expect(r).toEqual({ created: [], updated: [row.c], dismissed: [row.a], skippedDuplicates: [] });
+    expect(r).toEqual({ created: [], updated: [row.c], dismissed: [row.a], skippedDuplicates: [], skippedSettled: [], reopened: [] });
     expect(await rowById(row.c)).toMatchObject({ status: "open", context: "why c, run 2" });
     expect(await rowById(row.a)).toMatchObject({ status: "dismissed", resolution: `duplicate of ${row.c}` });
     // The Caltrans row is spent too: its run cannot bring the pair back.
     const caltransAgain = await syncQuestions(U.id, p.caltrans, [fromA], caltrans());
-    expect(caltransAgain).toEqual({ created: [], updated: [], dismissed: [], skippedDuplicates: [] });
+    expect(caltransAgain).toEqual({ created: [], updated: [], dismissed: [], skippedDuplicates: [], skippedSettled: [TEXT], reopened: [] });
     expect(await rows()).toHaveLength(3);
   });
 
@@ -656,7 +679,7 @@ describe("syncQuestions heals a standing pair of same-text rows", () => {
     const [d] = await db.insert(clarifications).values(standing(p.album, fromD)).returning({ id: clarifications.id });
     // The new draft is listed first; the refresh still wins.
     const r = await syncQuestions(U.id, p.album, [fromE, { ...fromD, question: NEW }], album());
-    expect(r).toEqual({ created: [], updated: [d.id], dismissed: [], skippedDuplicates: [NEW] });
+    expect(r).toEqual({ created: [], updated: [d.id], dismissed: [], skippedDuplicates: [NEW], skippedSettled: [], reopened: [] });
     expect(await rowById(d.id)).toMatchObject({ status: "open", question: NEW });
     expect(await rows()).toHaveLength(4);
   });
@@ -676,7 +699,7 @@ describe("syncQuestions heals a standing pair of same-text rows", () => {
       ],
       album()
     );
-    expect(r).toEqual({ created: [], updated: [f.id], dismissed: [g.id], skippedDuplicates: [] });
+    expect(r).toEqual({ created: [], updated: [f.id], dismissed: [g.id], skippedDuplicates: [], skippedSettled: [], reopened: [] });
     expect(await rowById(f.id)).toMatchObject({ status: "open", question: SAME });
     expect(await rowById(g.id)).toMatchObject({ status: "dismissed", resolution: `duplicate of ${f.id}` });
     // The words a dismissed row used to carry are free again.

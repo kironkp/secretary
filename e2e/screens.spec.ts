@@ -55,6 +55,14 @@ test("Today, writing an answer", async ({ page }) => {
   await shoot(page, "/today?own=open", "today-writing");
 });
 
+test("Today, thinking", async ({ page }) => {
+  // ?thinking=open shows the bars under the hero as if a project were being
+  // re-read, with nothing polled and nothing sent (components/today/
+  // today-view.tsx useThinkingFromUrl), so the line is in the pictures
+  // without a model to answer with.
+  await shoot(page, "/today?thinking=open", "today-thinking");
+});
+
 test("A question, opened", async ({ page }) => {
   await shoot(page, `/today/${E2E_QUESTION.id}`, "question");
 });

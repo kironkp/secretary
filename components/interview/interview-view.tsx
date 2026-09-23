@@ -12,6 +12,14 @@
 // Client component: it talks to /api/interview, /api/interview/more and
 // /api/questions only; every type it needs is imported as a type.
 //
+// Answering, as the user feels it (the same as Today): the tapped pill fills
+// and the others fade at once, a line under the card says "Applying…" and
+// then what was applied, and the next question takes the card as soon as
+// the queue no longer has the answered one, with the thinking bars under it
+// while the project is re-read. No fixed pause: the receipt stays under the
+// next card until the next answer, and the bars end when a run has finished
+// (lastRunAt moves) or after a minute.
+//
 // The queue is the server's rank order. "Skip for now" is local: the skipped
 // question goes to the back of what is on this screen and nothing about it is
 // written, so the next visit starts at the top again. A refresh keeps the
@@ -33,15 +41,14 @@ import {
   useOwnWordsFromUrl,
   type AnswerReply,
 } from "@/components/today/answer-buttons";
-import { kindClass, kindLabel, receiptInWords } from "@/components/today/copy";
-import { ErrorNote, SuccessNote } from "@/components/ui";
+import { kindClass, kindLabel, readingLabel, receiptInWords } from "@/components/today/copy";
+import { Thinking, useReread } from "@/components/today/thinking";
+import { ErrorNote } from "@/components/ui";
 import type { EvidenceView, InterviewData, QuestionView } from "@/lib/understanding/today";
 import { footerLine, progressLine } from "./words";
 
 /** A question answered by voice or on another device disappears within this. */
 const POLL_MS = 60_000;
-/** The receipt ("Closed 2 tasks", "Got it. …") stays on screen this long before the next question. */
-const RECEIPT_MS = 2000;
 
 /** What the route takes: a listed answer, with a note if there is one, or the user's own words. */
 type AnswerBody =
@@ -132,8 +139,14 @@ export function InterviewView({
   const noteField = useRef<HTMLInputElement>(null);
   const [evidenceOpen, setEvidenceOpen] = useState(false);
   const [answering, setAnswering] = useState(false);
+  /** The answer just given, by question and id ("own" for the words), so its pill stays lit. */
+  const [answered, setAnswered] = useState<{ questionId: string; answerId: string } | null>(null);
   const [reading, setReading] = useState(false);
   const [receipt, setReceipt] = useState<string | null>(null);
+  const reread = useReread();
+  // When a run last finished, as this screen last read it: the stamp the
+  // bars watch after an answer. A ref, so post() reads the current one.
+  const lastRunAt = useRef<string | null>(initial.lastRunAt);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // A refresh that lands while an answer is in flight would swap the question
@@ -151,6 +164,7 @@ export function InterviewView({
       const res = await fetch(url, { cache: "no-store" });
       if (!res.ok) return null;
       const next = (await res.json()) as InterviewData;
+      lastRunAt.current = next.lastRunAt;
       setData(next);
       setFooter(footerLine(next.answeredToday, next.lastRunAt, new Date()));
       return next;
@@ -166,15 +180,19 @@ export function InterviewView({
     await load();
   }, [load]);
 
-  // Freshness: the poll, and the window coming back (a question answered
-  // elsewhere disappears on the next of either).
+  // Freshness: the poll, the window coming back, and any write the app
+  // announces (a voice answer lands as "secretary:data-changed"): a question
+  // answered elsewhere disappears on the next of any of them.
   useEffect(() => {
     const id = setInterval(() => void refresh(), POLL_MS);
     const onFocus = () => void refresh();
+    const onChanged = () => void refresh();
     window.addEventListener("focus", onFocus);
+    window.addEventListener("secretary:data-changed", onChanged);
     return () => {
       clearInterval(id);
       window.removeEventListener("focus", onFocus);
+      window.removeEventListener("secretary:data-changed", onChanged);
     };
   }, [refresh]);
 
@@ -190,6 +208,13 @@ export function InterviewView({
   ];
   const current = queue[0] ?? null;
 
+  // The card is keyed by its question, and from the second one on it rises
+  // in (the hero-enter rule in globals.css). Derived during render, so the
+  // class is on the new card from its first frame.
+  const currentId = current?.id ?? null;
+  const [shown, setShown] = useState<{ id: string | null; n: number }>({ id: currentId, n: 0 });
+  if (shown.id !== currentId) setShown({ id: currentId, n: shown.n + 1 });
+
   // The URL-asked field (a screenshot) gets its focus here; a tap gets it in
   // writeYourOwn, inside the gesture, where iOS will raise the keyboard.
   useEffect(() => {
@@ -199,14 +224,17 @@ export function InterviewView({
   /**
    * One request to the answer route: a tapped pill sends { answerId } with
    * the note if there is one, "Write your own" sends the note as { text }.
-   * Either way the receipt is read for a beat and the next question comes.
+   * The pill lights and "Applying…" shows before the request leaves; the
+   * next question comes with the first refresh after the reply.
    */
   const post = async (question: QuestionView, body: AnswerBody) => {
     busy.current = true;
     setAnswering(true);
+    setAnswered({ questionId: question.id, answerId: "answerId" in body ? body.answerId : "own" });
     setError(null);
-    setReceipt(null);
+    setReceipt("Applying…");
     setStatus(null);
+    const since = lastRunAt.current;
     try {
       const res = await fetch(`/api/questions/${question.id}/answer`, {
         method: "POST",
@@ -221,6 +249,13 @@ export function InterviewView({
         // Any write elsewhere in the app can say so; the board updates at once.
         window.dispatchEvent(new Event("secretary:data-changed"));
         setDone((n) => n + 1);
+        // The project is being re-read (SPEC §6 step 4): the bars say so
+        // until a run finishes after `since`, or for a minute.
+        reread.start({
+          label: readingLabel(question.projectName),
+          since,
+          tick: async () => (busy.current ? null : ((await load())?.lastRunAt ?? null)),
+        });
       } else if (res.status === 409) {
         setReceipt("That question was already answered.");
       } else if (res.status === 404) {
@@ -228,22 +263,26 @@ export function InterviewView({
       } else if (res.status === 503) {
         // The model could not read the words. Nothing was written, and they
         // stay in the field for another try.
+        setReceipt(null);
+        setAnswered(null);
         setError("Could not read that right now, try again.");
         return;
       } else {
+        setReceipt(null);
+        setAnswered(null);
         setError("That answer could not be applied.");
         return;
       }
-      // The receipt is read for a beat, then the next question comes: the
-      // answered one is resolved, so the fetched queue no longer has it.
-      await sleep(RECEIPT_MS);
+      // The next question comes now: the answered one is resolved, so the
+      // fetched queue no longer has it. The receipt stays under the new card.
       await load();
-      setReceipt(null);
       setNote("");
       setAskedFor(false);
       setEvidenceOpen(false);
       setSkipped((s) => s.filter((id) => id !== question.id));
     } catch {
+      setReceipt(null);
+      setAnswered(null);
       setError("Could not reach the server.");
     } finally {
       busy.current = false;
@@ -338,15 +377,15 @@ export function InterviewView({
         {current ? "I ask, you answer, and your data gets sorted." : "Nothing to sort out right now."}
       </p>
 
-      {receipt && <SuccessNote>{receipt}</SuccessNote>}
       {error && <ErrorNote>{error}</ErrorNote>}
 
       {current ? (
         <>
           <section
+            key={current.id}
             data-testid="interview"
             data-question-id={current.id}
-            className="flex flex-col gap-2.5 rounded-2xl bg-card px-4 pb-3.5 pt-3.5"
+            className={`flex flex-col gap-2.5 rounded-2xl bg-card px-4 pb-3.5 pt-3.5 ${shown.n > 0 ? "hero-enter" : ""}`}
           >
             <p className={`text-[13px] font-semibold tracking-[0.01em] ${kindClass(current.kind)}`}>
               {kindLabel(current.kind)}
@@ -359,15 +398,52 @@ export function InterviewView({
             </h2>
             {current.why && <p className="text-[15px] leading-[1.4] wrap-anywhere">{current.why}</p>}
 
-            {/* The evidence, behind a disclosure: the card stays the hero's
-                size until the user asks what it rests on. Closed by default,
-                and closed again for every new question. */}
+            <input
+              ref={noteField}
+              id="interview-note"
+              type="text"
+              value={note}
+              maxLength={OWN_WORDS_MAX}
+              disabled={answering}
+              onChange={(e) => setNote(e.target.value)}
+              onKeyDown={(e) => {
+                // Enter sends only once the field was asked for the answer:
+                // a note typed to go with a pill is not sent on its own.
+                if (e.key === "Enter" && askedForWords) {
+                  e.preventDefault();
+                  writeYourOwn(current);
+                } else if (e.key === "Escape" && askedForWords) {
+                  // Back to a note with a pill; the words stay typed.
+                  e.preventDefault();
+                  setAskedFor(false);
+                }
+              }}
+              placeholder={askedForWords ? "Your answer" : "Add a note, if you want"}
+              aria-label={askedForWords ? "Your answer, in your own words" : "A note with your answer"}
+              enterKeyHint={askedForWords ? "send" : undefined}
+              autoComplete="off"
+              className={`w-full ${FIELD_CLASS} text-[15px]`}
+            />
+            <div className="mt-0.5">
+              <AnswerButtons
+                answers={current.answers}
+                selected={answered?.questionId === current.id ? answered.answerId : null}
+                disabled={answering}
+                onAnswer={(id) => answer(current, id)}
+                onWriteYourOwn={() => writeYourOwn(current)}
+              />
+            </div>
+
+            {/* The evidence, behind a disclosure, after the answers so the
+                pills stay under the thumb: the card keeps the hero's size
+                until the user asks what it rests on. Closed by default, and
+                closed again for every new question. */}
             <button
               type="button"
               data-evidence-toggle
               aria-expanded={evidenceOpen}
               onClick={() => setEvidenceOpen((o) => !o)}
-              className="-my-1 flex min-h-11 w-fit items-center gap-1 text-[15px] font-semibold text-faint"
+              className="-mb-1 flex min-h-11 w-fit items-center gap-1 text-[15px] font-semibold text-faint"
             >
               What I&rsquo;m going on
               <ChevronDown
@@ -386,38 +462,25 @@ export function InterviewView({
                   ))}
                 </ul>
               ))}
-
-            <input
-              ref={noteField}
-              id="interview-note"
-              type="text"
-              value={note}
-              maxLength={OWN_WORDS_MAX}
-              disabled={answering}
-              onChange={(e) => setNote(e.target.value)}
-              onKeyDown={(e) => {
-                // Enter sends only once the field was asked for the answer:
-                // a note typed to go with a pill is not sent on its own.
-                if (e.key === "Enter" && askedForWords) {
-                  e.preventDefault();
-                  writeYourOwn(current);
-                }
-              }}
-              placeholder={askedForWords ? "Your answer" : "Add a note, if you want"}
-              aria-label={askedForWords ? "Your answer, in your own words" : "A note with your answer"}
-              enterKeyHint={askedForWords ? "send" : undefined}
-              autoComplete="off"
-              className={`w-full ${FIELD_CLASS} text-[15px]`}
-            />
-            <div className="mt-0.5">
-              <AnswerButtons
-                answers={current.answers}
-                disabled={answering}
-                onAnswer={(id) => answer(current, id)}
-                onWriteYourOwn={() => writeYourOwn(current)}
-              />
-            </div>
           </section>
+
+          {/* What the answer did, then the re-read under way: the 15px
+              secondary line under the card, 12px apart, as on Today. */}
+          {(receipt || reread.label) && (
+            <div className="-mt-1 flex flex-col gap-3">
+              {receipt && (
+                <p
+                  role="status"
+                  aria-live="polite"
+                  data-receipt
+                  className="px-1 text-[15px] leading-[1.4] text-faint wrap-anywhere"
+                >
+                  {receipt}
+                </p>
+              )}
+              {reread.label && <Thinking label={reread.label} />}
+            </div>
+          )}
 
           <button
             type="button"

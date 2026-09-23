@@ -21,6 +21,7 @@ import { localDateInTz } from "./gather";
 import { interpretAnswer, type InterpretCall } from "./interpret";
 import { getQuestion, type QuestionRow } from "./questions";
 import { upsertAsked } from "./record";
+import { changedRowsOf, supersedeByWrites } from "./supersede";
 import { viewQuestion } from "./today";
 import { writeSchema, type Answer, type Asked, type Write } from "./types";
 
@@ -43,6 +44,13 @@ export type AnswerResult =
       projectId: string | null;
       applied: AppliedWrite[];
       failed: FailedWrite[];
+      /**
+       * The other pending questions this answer set aside: every one that
+       * rested on a row the applied writes changed (supersede.ts). Empty
+       * when nothing rested on them, or when no write changed a row; the
+       * receipt names them only when there are any.
+       */
+      superseded: string[];
       /**
        * One sentence back to the user, only when the answer came in their
        * own words (answerInOwnWords): what Secretary read the words as. A
@@ -223,10 +231,19 @@ function checkedWrites(question: QuestionRow, answer: Answer): Write[] | null {
 
 type Applied = { applied: AppliedWrite[]; failed: FailedWrite[] };
 
-/** The writes in order; a failed one is reported and the rest still run. */
-async function applyWrites(ctx: ToolContext, writes: Write[], now: Date): Promise<Applied> {
+/**
+ * The writes in order; a failed one is reported and the rest still run.
+ * `succeeded` is the writes themselves that went through, for what they
+ * changed (supersedeByWrites): a failed write changed nothing.
+ */
+async function applyWrites(
+  ctx: ToolContext,
+  writes: Write[],
+  now: Date
+): Promise<Applied & { succeeded: Write[] }> {
   const applied: AppliedWrite[] = [];
   const failed: FailedWrite[] = [];
+  const succeeded: Write[] = [];
   for (const w of writes) {
     if (w.op === "resolve") continue;
     const id = targetOf(w)?.id;
@@ -237,11 +254,12 @@ async function applyWrites(ctx: ToolContext, writes: Write[], now: Date): Promis
         ...(id ? { id } : {}),
         ...(outcome.project ? { project: outcome.project } : {}),
       });
+      succeeded.push(w);
     } else {
       failed.push({ op: w.op, ...(id ? { id } : {}), error: outcome.error });
     }
   }
-  return { applied, failed };
+  return { applied, failed, succeeded };
 }
 
 /** A memory through remember_fact, reported the way any other write is. */
@@ -278,11 +296,20 @@ function withOpenRow(
   });
 }
 
-/** SPEC §6 step 3: the question closes, with what the user said as the resolution. */
-async function resolveRow(tx: Tx, userId: string, questionId: string, resolution: string): Promise<void> {
+/**
+ * SPEC §6 step 3: the question closes, with what the user said as the
+ * resolution and `closedAt` as the moment it stopped being pending.
+ */
+async function resolveRow(
+  tx: Tx,
+  userId: string,
+  questionId: string,
+  resolution: string,
+  closedAt: Date
+): Promise<void> {
   await tx
     .update(clarifications)
-    .set({ status: "resolved", resolution })
+    .set({ status: "resolved", resolution, resolvedAt: closedAt })
     .where(and(eq(clarifications.userId, userId), eq(clarifications.id, questionId)));
 }
 
@@ -307,7 +334,7 @@ async function commitAnswer(
   const trimmedNote = note?.trim() ?? "";
   const resolution = trimmedNote ? `${answer.label}: ${trimmedNote}` : answer.label;
 
-  const outcome = await applyWrites(ctx, writes, now);
+  const { succeeded, ...outcome } = await applyWrites(ctx, writes, now);
 
   // A note on an answer that writes nothing ("Keep them", with a line
   // saying why) would otherwise live only in the resolution column, which
@@ -333,14 +360,32 @@ async function commitAnswer(
     await remember(ctx, read.fact, tags, outcome);
   }
 
-  await resolveRow(tx, ctx.userId, question.id, resolution);
+  // The moment the question stops being pending is read AFTER the writes,
+  // never before them: the settled guard (questions.ts, supersede.ts) takes
+  // a row whose updated_at is later than this moment as new evidence, and
+  // the rows this answer itself just changed carry stamps from a moment
+  // ago. The same moment closes the questions the answer sets aside.
+  const closedAt = new Date();
+  // The rows the answer changed make every other pending question that
+  // rests on one of them a question about a premise the user just changed
+  // (SPEC §6): set aside here, in the same transaction, before the re-read
+  // has had a chance to run and before the user can answer it. Only the
+  // writes that went through count; a failed write changed nothing.
+  const superseded = await supersedeByWrites(
+    tx,
+    ctx.userId,
+    question.id,
+    changedRowsOf(succeeded),
+    closedAt
+  );
+  await resolveRow(tx, ctx.userId, question.id, resolution, closedAt);
   if (question.projectId) {
     // The resolution, not the bare label: SPEC §5 has asked[] carry the
     // answer text so the next run can reason from it, and with a note or
     // typed words that text is "Label: what they said".
-    await logAnswer(ctx.userId, question.projectId, question.id, resolution, now);
+    await logAnswer(ctx.userId, question.projectId, question.id, resolution, closedAt);
   }
-  return { status: "resolved", projectId: question.projectId, ...outcome };
+  return { status: "resolved", projectId: question.projectId, ...outcome, superseded };
 }
 
 // --------------------------------------------------------------------------
@@ -442,9 +487,17 @@ export async function answerInOwnWords(
     // project's name is how gather.ts finds it for the next run.
     const tags = [question.projectName, "answer"].filter((t): t is string => !!t);
     await remember(ctx, reading.fact ?? words, tags, outcome);
-    await resolveRow(tx, userId, question.id, `In your words: ${words}`);
-    if (question.projectId) await logAnswer(userId, question.projectId, question.id, words, now);
-    return { status: "resolved", projectId: question.projectId, ...outcome, reply: reading.reply };
+    // A memory changes no row, so nothing else rests on what this answer did.
+    const closedAt = new Date();
+    await resolveRow(tx, userId, question.id, `In your words: ${words}`, closedAt);
+    if (question.projectId) await logAnswer(userId, question.projectId, question.id, words, closedAt);
+    return {
+      status: "resolved",
+      projectId: question.projectId,
+      ...outcome,
+      superseded: [],
+      reply: reading.reply,
+    };
   });
 }
 

@@ -554,13 +554,15 @@ export type InterviewData = {
 };
 
 /**
- * Questions of the three kinds answered between two instants. There is no
- * resolved_at on clarifications; the time an answer landed is kept on the
- * project's record, in asked[].answeredAt (SPEC §5, written by answer.ts),
- * so that is what is counted: one asked entry per resolved question of the
- * three kinds whose answeredAt falls in the window. A question whose project
- * has no record is not counted; every question comes from a run, and a run
- * writes the record before the questions, so that is a row seeded by hand.
+ * Questions of the three kinds answered between two instants. The time an
+ * answer landed is kept on the project's record, in asked[].answeredAt
+ * (SPEC §5, written by answer.ts), so that is what is counted: one asked
+ * entry per resolved question of the three kinds whose answeredAt falls in
+ * the window. (clarifications.resolved_at marks every way a row leaves
+ * pending, a dismissal or a supersession included, so it is not "answered".)
+ * A question whose project has no record is not counted; every question
+ * comes from a run, and a run writes the record before the questions, so
+ * that is a row seeded by hand.
  */
 async function countAnswered(userId: string, start: Date, end: Date): Promise<number> {
   const kinds = sql.join(

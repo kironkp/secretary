@@ -341,6 +341,7 @@ describe("answerQuestion", () => {
         { op: "complete_task", id: ids.checkCpo },
       ],
       failed: [],
+      superseded: [],
     });
 
     for (const id of [ids.blockedCpo, ids.checkCpo]) {
@@ -409,6 +410,7 @@ describe("answerQuestion", () => {
       projectId: ids.caltrans,
       applied: [{ op: "remember_fact" }],
       failed: [],
+      superseded: [],
     });
     const stored = await db
       .select({ fact: memories.fact, tags: memories.tags })
@@ -434,6 +436,7 @@ describe("answerQuestion", () => {
       projectId: ids.caltrans,
       applied: [{ op: "clear_expectation", id: extraExpectationId }],
       failed: [],
+      superseded: [],
     });
     const [row] = await db
       .select({ status: expectations.status, clearedAt: expectations.clearedAt })
@@ -452,6 +455,7 @@ describe("answerQuestion", () => {
       projectId: ids.album,
       applied: [{ op: "remember_fact" }],
       failed: [],
+      superseded: [],
     });
     const [stored] = await db
       .select({ status: clarifications.status, resolution: clarifications.resolution })
@@ -482,6 +486,7 @@ describe("answerQuestion", () => {
       projectId: ids.album,
       applied: [{ op: "set_due", id: t.due }],
       failed: [],
+      superseded: [],
     });
     const task = await taskRow(t.due);
     expect(task.dueAt).not.toBeNull();
@@ -512,6 +517,7 @@ describe("answerQuestion", () => {
       status: "resolved",
       applied: [{ op: "drop_task", id: t.drop }],
       failed: [],
+      superseded: [],
     });
     expect((await taskRow(t.drop)).status).toBe("dropped");
 
@@ -519,6 +525,7 @@ describe("answerQuestion", () => {
       status: "resolved",
       applied: [{ op: "set_recurrence", id: t.recur }],
       failed: [],
+      superseded: [],
     });
     const recur = await taskRow(t.recur);
     expect(recur.recurrence).toBe("weekly");
@@ -528,6 +535,7 @@ describe("answerQuestion", () => {
       status: "resolved",
       applied: [{ op: "set_blocked_reason", id: t.block }],
       failed: [],
+      superseded: [],
     });
     const blocked = await taskRow(t.block);
     expect(blocked.status).toBe("blocked");

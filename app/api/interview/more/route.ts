@@ -38,8 +38,11 @@ export async function POST() {
   });
   if (busy) return NextResponse.json(BUSY, { status: 409 });
   const { ran, failed } = tallyResults(results);
+  // A reopened question (a closed identity back with new evidence) is a new
+  // card to the user, so it counts with the created ones.
   const questionsCreated = Object.values(results).reduce(
-    (n, r) => n + (r.status === "ok" ? r.questions.created.length : 0),
+    (n, r) =>
+      n + (r.status === "ok" ? r.questions.created.length + r.questions.reopened.length : 0),
     0
   );
   return NextResponse.json({ ran, failed, questionsCreated });

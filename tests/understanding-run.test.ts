@@ -369,7 +369,19 @@ describe("runProject on the duplicate-CPO scenario", () => {
     const result = await run({ model: again, force: true });
     expect(result.status, JSON.stringify(result)).toBe("ok");
     if (result.status !== "ok") return;
-    expect(result.questions).toEqual({ created: [], updated: [], dismissed: [], skippedDuplicates: [] });
+    // Both identities closed and every row they rest on is as it was when
+    // they closed: the settled guard reports them, in the drafts' order.
+    expect(result.questions).toEqual({
+      created: [],
+      updated: [],
+      dismissed: [],
+      skippedDuplicates: [],
+      skippedSettled: [
+        "CPO 2073 is on your list twice?",
+        "Is the US Bank statement the last step before CPO 2073 is reconciled?",
+      ],
+      reopened: [],
+    });
 
     const rows = await questionRows();
     expect(rows).toHaveLength(2);
@@ -598,5 +610,111 @@ describe("runProject on the duplicate-CPO scenario", () => {
     if (result.status !== "failed") return;
     expect(result.errors).toHaveLength(1);
     expect(result.errors[0]).toMatch(/project|foreign key|violates/i);
+  });
+});
+
+describe("the backoff after a failed run is for the validator's failures only", () => {
+  // Its own project, so the failed rows here never change what the sequence
+  // above counted, and the backoff's "last run on these inputs" is this
+  // describe's own.
+  let projectId = "";
+  const runRowsHere = () =>
+    db
+      .select()
+      .from(understandingRuns)
+      .where(and(eq(understandingRuns.userId, U.id), eq(understandingRuns.projectId, projectId)))
+      .orderBy(understandingRuns.startedAt);
+  const sweepRun = (model: Parameters<typeof runProject>[2]["model"]) =>
+    runProject(U.id, projectId, { timezone: TZ, now: NOW, model, backoffAfterFailure: true });
+
+  beforeAll(async () => {
+    const [project] = await db
+      .insert(projects)
+      .values({ userId: U.id, name: "Backoff", status: "active" })
+      .returning({ id: projects.id });
+    projectId = project.id;
+    await db.insert(tasks).values({
+      userId: U.id,
+      projectId,
+      title: "Backoff task",
+      status: "todo",
+      createdAt: new Date(NOW.getTime() - 30 * 86_400_000),
+      updatedAt: new Date(NOW.getTime() - 30 * 86_400_000),
+    });
+  });
+
+  afterAll(async () => {
+    await db.delete(projects).where(and(eq(projects.userId, U.id), eq(projects.id, projectId)));
+  });
+
+  it("a model that throws (a 429, a cap, a timeout) is tried again on the next sweep", async () => {
+    const throwing = fakeModel(() => {
+      throw new Error("429 no credits");
+    });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const first = await sweepRun(throwing);
+      expect(first.status).toBe("failed");
+      if (first.status !== "failed") return;
+      // Marked as the provider's, apart from the validator's.
+      expect(first.errors).toEqual(["model: 429 no credits"]);
+      expect(throwing.calls).toHaveLength(2);
+
+      const second = await sweepRun(throwing);
+      expect(second.status).toBe("failed");
+      expect(throwing.calls).toHaveLength(4);
+    } finally {
+      errorSpy.mockRestore();
+    }
+    const rows = await runRowsHere();
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r) => r.status === "failed")).toBe(true);
+    expect(rows[1].errors).toEqual(["model: 429 no credits"]);
+  });
+
+  it("a model whose output fails validation twice is not called again on the same inputs within six hours", async () => {
+    const broken = fakeModel((bundle) => {
+      const out = minimalOutputFor(bundle);
+      return {
+        ...out,
+        record: {
+          ...out.record,
+          rules: [
+            {
+              text: "A rule about a task that does not exist.",
+              sources: [{ type: "task", id: "not-a-real-task" }],
+              confidence: "high",
+            },
+          ],
+        },
+      };
+    });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const first = await sweepRun(broken);
+      expect(first.status).toBe("failed");
+      if (first.status !== "failed") return;
+      expect(first.errors.join("\n")).toContain("not-a-real-task");
+      expect(first.errors.some((e) => e.startsWith("model: "))).toBe(false);
+      expect(broken.calls).toHaveLength(2);
+
+      // The sweep again: same inputs, same rejection expected, no call.
+      const second = await sweepRun(broken);
+      expect(second).toEqual({ status: "skipped", reason: "backoff" });
+      expect(broken.calls).toHaveLength(2);
+
+      // A person pressing "Understand now" is asking to try now.
+      const forced = await runProject(U.id, projectId, {
+        timezone: TZ,
+        now: NOW,
+        model: broken,
+        backoffAfterFailure: true,
+        force: true,
+      });
+      expect(forced.status).toBe("failed");
+      expect(broken.calls).toHaveLength(4);
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });
