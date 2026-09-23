@@ -14,7 +14,7 @@
 import { createHash } from "node:crypto";
 import { and, asc, desc, eq, gte, inArray, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { clarifications, entities, messages, projects } from "@/lib/db/schema";
+import { clarifications, entities, expectations, messages, projects, tasks } from "@/lib/db/schema";
 import { isAlreadyRuledOn, settledEvidence } from "./supersede";
 import { termMatcher } from "./terms";
 import {
@@ -477,6 +477,144 @@ export async function healDuplicates(userId: string, now: Date): Promise<string[
     dismissed.push(row.id);
   }
   return dismissed;
+}
+
+/**
+ * The sweep's repair for a question nobody can answer.
+ *
+ * An answer may only write to rows the question shows (SPEC §5, §6), and
+ * answer.ts refuses the whole answer otherwise — which is right, and is why
+ * the validator folds an answer's write targets into the question's
+ * evidence. The validator only began doing that on 2026-09-22 (commit
+ * 6057270), so a question drafted before then can carry answers naming
+ * tasks its evidence never listed: every pill returns 400, the user reads
+ * "That answer could not be applied", and the question can never be
+ * answered at all. Kiron hit one on 2026-09-23 (the Find It release
+ * question, five tasks off its evidence) and tapped it twice.
+ *
+ * So the rows are repaired rather than the rule relaxed: a write target
+ * missing from the evidence is added to it when it is a real row of the
+ * user's IN THE QUESTION'S OWN PROJECT, and then the question shows what
+ * its answers touch and the strict check passes. A target in another
+ * project, one that no longer exists, or any target on a question filed
+ * under no project cannot be shown honestly, so the question is dismissed
+ * instead of sitting there as a trap. Needs no model, so the sweep runs it
+ * for every owner. Returns what it did.
+ */
+export async function healEvidence(
+  userId: string,
+  now: Date
+): Promise<{ repaired: string[]; dismissed: string[] }> {
+  const rows = await db
+    .select({
+      id: clarifications.id,
+      projectId: clarifications.projectId,
+      evidence: clarifications.evidence,
+      answers: clarifications.answers,
+    })
+    .from(clarifications)
+    .where(
+      and(
+        eq(clarifications.userId, userId),
+        inArray(clarifications.kind, [...QUESTION_KINDS]),
+        inArray(clarifications.status, [...OPEN_STATUSES])
+      )
+    );
+
+  const repaired: string[] = [];
+  const dismissed: string[] = [];
+  for (const row of rows) {
+    const listed = new Set(row.evidence.map((s) => `${s.type}:${s.id}`));
+    const missing: Source[] = [];
+    for (const answer of row.answers) {
+      for (const w of answer.writes ?? []) {
+        const target: Source | null =
+          "taskId" in w
+            ? { type: "task", id: w.taskId }
+            : "expectationId" in w
+              ? { type: "expectation", id: w.expectationId }
+              : null;
+        if (!target) continue;
+        const key = `${target.type}:${target.id}`;
+        if (listed.has(key)) continue;
+        listed.add(key);
+        missing.push(target);
+      }
+    }
+    if (missing.length === 0) continue;
+
+    const shown: Source[] = [];
+    let unshowable = false;
+    for (const target of missing) {
+      if (!row.projectId || !(await rowInProject(userId, row.projectId, target))) {
+        unshowable = true;
+        break;
+      }
+      shown.push(target);
+    }
+    if (unshowable) {
+      await db
+        .update(clarifications)
+        .set({
+          status: "dismissed",
+          resolution: "its answers reach rows I cannot show you",
+          resolvedAt: now,
+        })
+        .where(
+          and(
+            eq(clarifications.userId, userId),
+            eq(clarifications.id, row.id),
+            inArray(clarifications.status, [...OPEN_STATUSES])
+          )
+        );
+      dismissed.push(row.id);
+      continue;
+    }
+    await db
+      .update(clarifications)
+      .set({ evidence: [...row.evidence, ...shown] })
+      .where(
+        and(
+          eq(clarifications.userId, userId),
+          eq(clarifications.id, row.id),
+          inArray(clarifications.status, [...OPEN_STATUSES])
+        )
+      );
+    repaired.push(row.id);
+  }
+  return { repaired, dismissed };
+}
+
+/** Is this row one of the user's, in this project? An expectation belongs to the project its task does. */
+async function rowInProject(
+  userId: string,
+  projectId: string,
+  target: Source
+): Promise<boolean> {
+  if (target.type === "task") {
+    const [hit] = await db
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(and(eq(tasks.userId, userId), eq(tasks.id, target.id), eq(tasks.projectId, projectId)))
+      .limit(1);
+    return hit !== undefined;
+  }
+  if (target.type === "expectation") {
+    const [hit] = await db
+      .select({ id: expectations.id })
+      .from(expectations)
+      .innerJoin(tasks, eq(tasks.id, expectations.taskId))
+      .where(
+        and(
+          eq(expectations.userId, userId),
+          eq(expectations.id, target.id),
+          eq(tasks.projectId, projectId)
+        )
+      )
+      .limit(1);
+    return hit !== undefined;
+  }
+  return false;
 }
 
 /**

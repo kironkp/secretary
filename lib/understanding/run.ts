@@ -95,9 +95,20 @@ export type ModelCall = ((input: {
 }>) &
   CallMeta;
 
-/** Exported so Settings (lib/understanding/sweep.ts describeProvider) names the same model a run would use. */
-export const DEFAULT_MODEL = "claude-sonnet-5";
-const DEFAULT_EFFORT: BrainEffort = "medium";
+/**
+ * Exported so Settings (lib/understanding/sweep.ts describeProvider) names
+ * the same model a run would use.
+ *
+ * Opus at high effort, not Sonnet at medium, since 2026-09-23. Kiron's
+ * words: "it's asked me about CPO 2110 like 10 times. It feels really
+ * stupid. It's not thinking enough." Reading nine projects' worth of tasks,
+ * messages and memories and noticing that a question has already been
+ * settled in different words is the kind of work the deeper model is for,
+ * and a run is hash-gated — it only happens when the data actually moved.
+ * The measured cost goes from about $0.16 a run to about $0.50.
+ */
+export const DEFAULT_MODEL = "claude-opus-5";
+const DEFAULT_EFFORT: BrainEffort = "high";
 /**
  * Thinking counts against max_tokens when output_config.effort is set, and
  * a Sonnet 5 run at medium effort spent most of 16000 on it: the first

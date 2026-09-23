@@ -33,7 +33,7 @@ Rules that a machine checks; output that breaks them is rejected:
 
 4. A question is what you would say out loud in one breath: one sentence, at most 14 words, ending with a question mark, like "CPO 2073 is on your list twice. Close the old one?" Name a thing by its nickname and number, never by pasting a task title; never a slash, never a code like FY2027 or ADM-2011 unless the user's own words use it. Its why is what you see, in at most two short sentences: what is open, what is finished or what the user said, and what you would do; it names at least one piece of evidence by its real title or a quote from it. evidence lists the source ids it rests on. answers: one to four; each label is an action in plain words, at most four words and 28 characters ("Close the old one", "Keep them", "Not yet", "Something else"), never a code or a title fragment, and each carries the writes it makes, using only ids from the input and only these ops: complete_task, drop_task, set_due, set_recurrence, set_blocked_reason, set_project, remember_fact, clear_expectation, resolve. set_project files a task under a project by its name (taskId and project), for a task that sits in the wrong project or in none; the name must be one listed under PROJECTS in the input, never a new one. The first answer is the one you recommend. The last answer is always a way out with no writes except resolve ("Keep them", "Something else", "Not yet"). At most eight questions per project; when there are more, keep the ones whose answer changes what happens next.
 
-5. The previous record's asked list carries each question already put to the user, with its text, the rows it rested on and the answer. Never ask again about rows an answered question covered unless those rows changed after the answer; a new wording of the same question is still the same question. "Keep them", "Not yet" and "Something else" are decisions too: the user looked and chose to leave it, so write that into decisions with the date and let it rest.
+5. ALREADY ASKED AND SETTLED lists every question already put to the user, with the rows it rested on and what they said. Read it before you write a single question, and never ask any of them again. The test is the SUBJECT, not the wording and not the rows: if a question would make the user say "I already told you that", it is the same question, however you phrase it and whatever ids you cite. A settled subject comes back only when something happened after the answer that changes it — a row finished, a date passed, the user said the opposite — and then the why must say what changed and name it. What is NOT a reason to ask again: the answer itself. Answering writes a memory of what the user said, marked "(your own record of an answer already given)" in MEMORIES; it is the ruling, so citing it as evidence for the same subject is asking the user to repeat themselves. "Keep them", "Not yet" and "Something else" are decisions too: the user looked and chose to leave it, so write that into decisions with the date and let it rest.
 
 6. Words. For each widget in the input write a lede of at most three sentences: what its rows have in common, which is first or oldest and why, what each is waiting on; name only rows that are in that widget, and never more than three of them: a lede is what the rows mean, not the list read back. todayLine: one or two sentences about this project's items due today or tomorrow and what they mean for the user, in the same voice as the questions; omit it when there are none.
 
@@ -332,6 +332,9 @@ const INTERVIEW_ADDENDUM =
   "a task with no date that clearly needs one; suggestions the user never took up; anything you cannot place. " +
   "Up to 12 questions for this project, the most useful first.";
 
+/** How many settled questions the ALREADY ASKED section carries; the newest are the ones a new draft could repeat. */
+const MAX_ASKED_SHOWN = 40;
+
 export function renderBundle(bundle: Bundle, opts: { mode?: RunMode } = {}): string {
   const tz = bundle.clock.timezone;
   const date = (iso: string) => localDateInTz(tz, new Date(iso));
@@ -391,7 +394,12 @@ export function renderBundle(bundle: Bundle, opts: { mode?: RunMode } = {}): str
     "MEMORIES",
     bundle.memories.map((m) => {
       const tags = m.tags.length ? ` [${m.tags.join(", ")}]` : "";
-      return `[memory:${m.id}] ${date(m.createdAt)} ${oneLine(m.fact)}${tags}`;
+      // A memory the answer path wrote is the record of a question already
+      // settled, not something the user volunteered. Said plainly, because
+      // reading it as fresh evidence is how one settled question came back
+      // four times, each round citing the memory the last answer left.
+      const kind = m.tags.includes("answer") ? " (your own record of an answer already given)" : "";
+      return `[memory:${m.id}] ${date(m.createdAt)}${kind} ${oneLine(m.fact)}${tags}`;
     }),
     "memories"
   );
@@ -447,6 +455,28 @@ export function renderBundle(bundle: Bundle, opts: { mode?: RunMode } = {}): str
       `widget ${w.id} "${oneLine(w.title)}":`,
       ...w.rows.map((r) => `  ${rowRef(r.id)} ${oneLine(r.title)}`),
     ])
+  );
+
+  // The asked list is in the previous record too, but the record goes out as
+  // one line of JSON and the history disappeared into it: on 2026-09-23 the
+  // same CPO 2110 question came back four times in four wordings, each new
+  // one citing the memory the last answer had written. So the history gets
+  // its own section, in the plainest form there is, with the rows each
+  // question rested on written the way every other id in this input is
+  // written, and the newest first.
+  const asked = [...(bundle.previousRecord?.asked ?? [])]
+    .sort((a, b) => (b.answeredAt ?? b.askedAt).localeCompare(a.answeredAt ?? a.askedAt))
+    .slice(0, MAX_ASKED_SHOWN);
+  section(
+    "ALREADY ASKED AND SETTLED — do not ask any of these again, in any wording",
+    asked.flatMap((a) => {
+      if (!a.question) return [];
+      const when = a.answeredAt
+        ? `answered ${date(a.answeredAt)}: "${oneLine(a.answer ?? "")}"`
+        : `asked ${date(a.askedAt)}, not answered yet`;
+      const on = (a.evidence ?? []).map((k) => `[${k}]`).join(" ");
+      return [`- "${oneLine(a.question)}" — ${when}${on ? `\n  it rested on: ${on}` : ""}`];
+    })
   );
 
   section("PREVIOUS RECORD", [

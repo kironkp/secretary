@@ -13,7 +13,7 @@ import { db } from "@/lib/db";
 import { clarifications, messages, tasks, understandingRuns, user } from "@/lib/db/schema";
 import { answerInOwnWords, answerQuestion } from "@/lib/understanding/answer";
 import type { InterpretCall } from "@/lib/understanding/interpret";
-import { healDuplicates, questionIdentity } from "@/lib/understanding/questions";
+import { healDuplicates, healEvidence, questionIdentity } from "@/lib/understanding/questions";
 import { runProject, type ModelCall } from "@/lib/understanding/run";
 import { sweepUnderstanding } from "@/lib/understanding/sweep";
 import { buildToday } from "@/lib/understanding/today";
@@ -435,7 +435,7 @@ describe("the Caltrans pair, end to end", () => {
       .values(twin("flow-twin-c", new Date(t0.getTime() + 2000), [task(ids.albumOverdue), { type: "event", id: ids.eventDentist }]))
       .returning({ id: clarifications.id });
     const swept = await sweepUnderstanding({ now: NOW, userIds: [U.id] });
-    expect(swept).toEqual({ users: 1, ran: 0, skipped: 0, failed: 0, retiredAsr: 0, healed: 1 });
+    expect(swept).toEqual({ users: 1, ran: 0, skipped: 0, failed: 0, retiredAsr: 0, healed: 1, repaired: 0 });
     expect(await rowOf(third.id)).toMatchObject({ status: "dismissed", resolution: `duplicate of ${older.id}` });
     expect((await rowOf(older.id)).status).toBe("open");
   });
@@ -476,5 +476,86 @@ describe("the Caltrans pair, end to end", () => {
     const asked = await rowOf(result.questions.created[0]);
     expect(asked).toMatchObject({ kind: "done_yet", status: "open", createdByRun: await latestRunId() });
     expect((await shownToday()).ids).toContain(asked.id);
+  });
+
+  it("(11) a question whose answers write to a row its evidence never listed is repaired, not left unanswerable", async () => {
+    // The shape Kiron hit on 2026-09-23: drafted before the validator folded
+    // an answer's write targets into its evidence, so every pill returned
+    // bad-answer and the question could never be answered at all.
+    const [stale] = await db
+      .insert(clarifications)
+      .values({
+        userId: U.id,
+        projectId: ids.caltrans,
+        kind: "done_yet",
+        question: "Did the statement actually go through?",
+        context: "The statement task is still open.",
+        // Only ONE of the two rows its answers write to.
+        evidence: [task(ids.statement)],
+        answers: [
+          {
+            id: "yes",
+            label: "Yes, it did",
+            writes: [
+              { op: "complete_task", taskId: ids.statement },
+              { op: "complete_task", taskId: ids.checkCpo },
+            ],
+          },
+          { id: "not-yet", label: "Not yet", writes: [{ op: "resolve" }] },
+        ],
+        identity: "stale-evidence",
+        status: "open",
+      })
+      .returning({ id: clarifications.id });
+
+    // Before the repair the answer is refused whole, and nothing changes.
+    expect(await answerQuestion(U.id, TZ, stale.id, "yes")).toEqual({ status: "bad-answer" });
+
+    const healed = await healEvidence(U.id, NOW);
+    expect(healed).toEqual({ repaired: [stale.id], dismissed: [] });
+    const [repaired] = await db
+      .select({ evidence: clarifications.evidence, status: clarifications.status })
+      .from(clarifications)
+      .where(eq(clarifications.id, stale.id));
+    expect(repaired.status).toBe("open");
+    // The question now shows both rows its answers touch, the one it listed first.
+    expect(repaired.evidence.map((e) => e.id)).toEqual([ids.statement, ids.checkCpo]);
+
+    // And the same tap now goes through.
+    const answered = await answerQuestion(U.id, TZ, stale.id, "yes");
+    expect(answered.status).toBe("resolved");
+    // Running it again finds nothing left to repair.
+    expect(await healEvidence(U.id, NOW)).toEqual({ repaired: [], dismissed: [] });
+  });
+
+  it("(12) a question reaching a row outside its project cannot be shown honestly, so it is dismissed", async () => {
+    const [reaching] = await db
+      .insert(clarifications)
+      .values({
+        userId: U.id,
+        projectId: ids.caltrans,
+        kind: "done_yet",
+        question: "Is the album track finished?",
+        context: "It has been open a while.",
+        evidence: [task(ids.statement)],
+        answers: [
+          // albumOverdue belongs to the Album project, not Caltrans.
+          { id: "yes", label: "Yes", writes: [{ op: "complete_task", taskId: ids.albumOverdue }] },
+          { id: "no", label: "Not yet", writes: [{ op: "resolve" }] },
+        ],
+        identity: "reaching-out",
+        status: "open",
+      })
+      .returning({ id: clarifications.id });
+
+    const healed = await healEvidence(U.id, NOW);
+    expect(healed.repaired).toEqual([]);
+    expect(healed.dismissed).toEqual([reaching.id]);
+    const [row] = await db
+      .select({ status: clarifications.status, resolution: clarifications.resolution })
+      .from(clarifications)
+      .where(eq(clarifications.id, reaching.id));
+    expect(row.status).toBe("dismissed");
+    expect(row.resolution).toBe("its answers reach rows I cannot show you");
   });
 });
