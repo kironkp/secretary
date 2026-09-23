@@ -177,10 +177,14 @@ export function receiptInWords(body: {
 }): string {
   const reply = body.reply?.trim();
   const acted = body.applied.some((w) => w.op !== "remember_fact" && w.op !== "resolve");
+  // The model often opens its reply with an acknowledgement of its own, and
+  // "Got it. Got it, I'll treat both of those…" is how that read on Today.
+  // One acknowledgement, whichever of the two gets there first.
+  const lead = reply && /^(got it|okay|ok|sure|understood|right)\b/i.test(reply) ? "" : "Got it. ";
   let said: string;
   if (!reply) said = appliedInWords(body.applied);
-  else if (acted) said = `Got it. ${sentence(reply)} ${appliedInWords(body.applied)}.`;
-  else said = `Got it. ${reply}`;
+  else if (acted) said = `${lead}${sentence(reply)} ${appliedInWords(body.applied)}.`;
+  else said = `${lead}${reply}`;
   // A reply ends in its own full stop; what was set aside, then a write
   // that did not go through, are sentences of their own after it.
   for (const more of [setAsideInWords(body.superseded?.length ?? 0), failedInWords(body.failed)]) {

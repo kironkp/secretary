@@ -55,6 +55,7 @@ describe("what an answer will write", () => {
     expect(writesInWords([{ op: "set_due" }])).toBe("sets a date");
     expect(writesInWords([{ op: "set_recurrence" }])).toBe("makes it repeat");
     expect(writesInWords([{ op: "set_blocked_reason" }])).toBe("records why it is stuck");
+
     // An empty reason is the unblock, in both tenses.
     expect(writesInWords([{ op: "set_blocked_reason", reason: "" }])).toBe("unblocks it");
     expect(appliedInWords([{ op: "set_blocked_reason", reason: "" }])).toBe("Unblocked it");
@@ -240,5 +241,29 @@ describe("dates in words", () => {
     expect(updatedLine(null, "UTC")).toBeNull();
     expect(updatedLine("not a date", "UTC")).toBeNull();
     expect(updatedLine("2026-09-22T14:40:00.000Z", "America/Los_Angeles")).toBe("Updated Tue 7:40 AM");
+  });
+});
+describe("the receipt does not say Got it twice", () => {
+  it("drops its own lead when the model's reply already opens with one", () => {
+    expect(
+      receiptInWords({
+        applied: [{ op: "complete_task" }, { op: "complete_task" }, { op: "remember_fact" }],
+        failed: [],
+        reply: "Got it, I'll treat both of those as the same completed order.",
+        superseded: ["q2"],
+      })
+    ).toBe(
+      "Got it, I'll treat both of those as the same completed order. Closed 2 tasks and remembered a fact. 1 related question was set aside"
+    );
+  });
+
+  it("still leads when the reply does not", () => {
+    expect(
+      receiptInWords({
+        applied: [{ op: "complete_task" }],
+        failed: [],
+        reply: "Both of those are the same order.",
+      })
+    ).toBe("Got it. Both of those are the same order. Closed 1 task.");
   });
 });
