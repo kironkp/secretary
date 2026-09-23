@@ -42,7 +42,10 @@ const progressIdle = () => ({
     status: "ok",
     line: "Read E2E Project",
     detail: "nothing new to ask",
-    finishedAt: new Date(Date.now() - 12 * 60_000).toISOString(),
+    // 12 min 45 s back, not 12 min: the strip's own clock ticks behind the
+    // request by up to its interval, and a stamp exactly 12 minutes old
+    // read "11 min ago" in CI. Anywhere in [12:00, 13:00) floors to 12.
+    finishedAt: new Date(Date.now() - 12 * 60_000 - 45_000).toISOString(),
   },
   provider: PROVIDER_OK,
 });
