@@ -319,7 +319,9 @@ describe("answerInOwnWords", () => {
 
     const record = await recordFor(ids.caltrans);
     const asked = record.body.asked.find((a) => a.questionId === q.fact);
-    expect(asked?.answer).toBe(words);
+    // The resolution, the way a tapped answer's is logged (commitAnswer):
+    // the record should say what was decided, not only what was typed.
+    expect(asked?.answer).toBe(`In your words: ${words}`);
     expect(asked?.askedAt).toBe(asked?.answeredAt);
   });
 
@@ -347,7 +349,7 @@ describe("answerInOwnWords", () => {
   });
 
   it("(5) an unknown question and another user's question are not-found, and nothing is read", async () => {
-    const call = fakeCall({ answerId: null, writes: [], fact: "x", reply: "x" });
+    const call = fakeCall({ answerId: null, writes: [], rejected: [], fact: "x", reply: "x" });
     expect(await answerInOwnWords(U.id, TZ, crypto.randomUUID(), "anything", "today", call)).toEqual({ status: "not-found" });
     expect(await answerInOwnWords(U.id, TZ, q.foreign, "anything", "today", call)).toEqual({ status: "not-found" });
     expect(call.seen).toEqual([]);
@@ -359,7 +361,7 @@ describe("answerInOwnWords", () => {
   });
 
   it("(6) blank or overlong text is a bad answer before any model call", async () => {
-    const call = fakeCall({ answerId: null, writes: [], fact: "x", reply: "x" });
+    const call = fakeCall({ answerId: null, writes: [], rejected: [], fact: "x", reply: "x" });
     expect(await answerInOwnWords(U.id, TZ, q.empty, "   ", "today", call)).toEqual({ status: "bad-answer" });
     expect(await answerInOwnWords(U.id, TZ, q.empty, "x".repeat(MAX_OWN_WORDS + 1), "today", call)).toEqual({
       status: "bad-answer",
@@ -427,7 +429,7 @@ describe("answer_question with own_words", () => {
   const ctx = { userId: U.id, timezone: TZ };
 
   it("routes to answerInOwnWords and hands the reply back for the model to relay", async () => {
-    scripted.next = { answerId: null, writes: [], fact: "The packet goes to Walter after the statement.", reply: "The packet to Walter comes after the statement." };
+    scripted.next = { answerId: null, writes: [], rejected: [], fact: "The packet goes to Walter after the statement.", reply: "The packet to Walter comes after the statement." };
     const outcome = await executeTool(ctx, "answer_question", {
       question_id: q.tool,
       own_words: "after the statement the packet goes to Walter",
@@ -523,7 +525,7 @@ describe("POST /api/questions/[id]/answer with text", () => {
   });
 
   it("carries the reply in the resolved body when the words are read", async () => {
-    scripted.next = { answerId: "not-yet", writes: [], fact: null, reply: "You are not there yet." };
+    scripted.next = { answerId: "not-yet", writes: [], rejected: [], fact: null, reply: "You are not there yet." };
     const res = await post(q.route, { text: "not yet, one more step", source: "today" });
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -547,7 +549,7 @@ describe("POST /api/questions/[id]/answer with text", () => {
 });
 describe("an instruction the listed answers do not offer", () => {
   // Fresh rows: the questions above are spent by the time this runs.
-  const own = { drop: "", refuse: "", listed: "" };
+  const own = { drop: "", refuse: "", listed: "", report: "", twice: "", timing: "", rowA: "", rowB: "", rowC: "", rowD: "", rowE: "" };
   let strayTask = "";
   beforeAll(async () => {
     const [stray] = await db
@@ -562,6 +564,27 @@ describe("an instruction the listed answers do not offer", () => {
       })
       .returning({ id: tasks.id });
     strayTask = stray.id;
+    const fresh = async (title: string) => {
+      const [t] = await db
+        .insert(tasks)
+        .values({
+          userId: U.id,
+          projectId: ids.caltrans,
+          title,
+          status: "todo",
+          createdAt: NOW,
+          updatedAt: NOW,
+        })
+        .returning({ id: tasks.id });
+      return t.id;
+    };
+    // Unfinished on purpose: the earlier suites close the CPO rows, and a
+    // composed write may not touch a row that is already done.
+    own.rowA = await fresh("A row the instruction will drop");
+    own.rowB = await fresh("A second row the instruction will drop");
+    own.rowC = await fresh("A row named twice in one instruction");
+    own.rowD = await fresh("A row for the refusal case");
+    own.rowE = await fresh("A second row for the refusal case");
     const mk = (identity: string, evidence: { type: "task"; id: string }[]) => ({
       userId: U.id,
       projectId: ids.caltrans,
@@ -579,12 +602,15 @@ describe("an instruction the listed answers do not offer", () => {
     const rows = await db
       .insert(clarifications)
       .values([
-        mk("own-drop", [{ type: "task", id: ids.blockedCpo }, { type: "task", id: ids.checkCpo }]),
+        mk("own-drop", [{ type: "task", id: own.rowA }, { type: "task", id: own.rowB }]),
         mk("own-refuse", [{ type: "task", id: ids.doneCpo }]),
         mk("own-listed", [{ type: "task", id: ids.statement }]),
+        mk("own-report", [{ type: "task", id: own.rowD }, { type: "task", id: own.rowE }]),
+        mk("own-twice", [{ type: "task", id: own.rowC }]),
+        mk("own-timing", [{ type: "task", id: ids.albumOverdue }]),
       ])
       .returning({ id: clarifications.id });
-    [own.drop, own.refuse, own.listed] = rows.map((r) => r.id);
+    [own.drop, own.refuse, own.listed, own.report, own.twice, own.timing] = rows.map((r) => r.id);
   });
 
   // 2026-09-23, the real one: four stale App Store suggestions, a question
@@ -594,14 +620,15 @@ describe("an instruction the listed answers do not offer", () => {
   it("(1) drops the rows the words name, supersedes what rested on them, and says what it did", async () => {
     const call = fakeCall({
       answerId: null,
+      rejected: [],
       writes: [
-        { op: "drop_task", taskId: ids.blockedCpo },
-        { op: "drop_task", taskId: ids.checkCpo },
+        { op: "drop_task", taskId: own.rowA },
+        { op: "drop_task", taskId: own.rowB },
       ],
       fact: "The open CPO 2073 copies are old suggestions, not real remaining work.",
       reply: "You want both of those off the list.",
     });
-    const before = await taskRow(ids.blockedCpo);
+    const before = await taskRow(own.rowA);
     expect(before.status).not.toBe("dropped");
 
     const result = await answerInOwnWords(U.id, TZ, own.drop, "old suggestions you can get rid of", "today", call);
@@ -610,15 +637,15 @@ describe("an instruction the listed answers do not offer", () => {
     // The receipt names exactly what ran, and nothing more: the two drops
     // the words asked for, and the memory the words themselves became.
     expect(result.applied).toEqual([
-      { op: "drop_task", id: ids.blockedCpo },
-      { op: "drop_task", id: ids.checkCpo },
+      { op: "drop_task", id: own.rowA },
+      { op: "drop_task", id: own.rowB },
       { op: "remember_fact" },
     ]);
     expect(result.failed).toEqual([]);
     expect(appliedInWords(result.applied)).toBe("Dropped 2 tasks and remembered a fact");
 
-    expect((await taskRow(ids.blockedCpo)).status).toBe("dropped");
-    expect((await taskRow(ids.checkCpo)).status).toBe("dropped");
+    expect((await taskRow(own.rowA)).status).toBe("dropped");
+    expect((await taskRow(own.rowB)).status).toBe("dropped");
     // The words are kept as well, so the next run reasons from them.
     const [memory] = await db
       .select({ fact: memories.fact })
@@ -633,6 +660,7 @@ describe("an instruction the listed answers do not offer", () => {
   it("(2) a write naming a row the question does not show is refused and reported, never applied", async () => {
     const call = fakeCall({
       answerId: null,
+      rejected: [],
       writes: [{ op: "drop_task", taskId: strayTask }],
       fact: null,
       reply: "You want that one gone.",
@@ -652,6 +680,7 @@ describe("an instruction the listed answers do not offer", () => {
   it("(3) a listed answer wins: composed writes beside one are noise and are ignored", async () => {
     const call = fakeCall({
       answerId: "keep-them",
+      rejected: [],
       writes: [{ op: "drop_task", taskId: ids.statement }],
       fact: null,
       reply: "You are leaving them.",
@@ -663,5 +692,75 @@ describe("an instruction the listed answers do not offer", () => {
     // always are for a way-out answer — and the stray drop never happened.
     expect(result.applied).toEqual([{ op: "remember_fact" }]);
     expect((await taskRow(ids.statement)).status).not.toBe("dropped");
+  });
+
+  it("(4) a write it could not read is REPORTED, never dropped in silence", async () => {
+    // The defect this whole path exists to fix, one layer up: a malformed
+    // write used to vanish, so the reply promised three and two happened.
+    const call = fakeCall({
+      answerId: null,
+      writes: [
+        { op: "drop_task" }, // no id at all
+        { op: "archive_task", taskId: own.rowE }, // not in the closed list
+        { op: "set_project", taskId: own.rowE, project: "Archive Bin" }, // unbounded destination
+        { op: "drop_task", taskId: own.rowD },
+      ],
+      rejected: [],
+      fact: null,
+      reply: "You want those off the list.",
+    });
+    const result = await answerInOwnWords(U.id, TZ, own.report, "get rid of all of those", "today", call);
+    expect(result.status).toBe("resolved");
+    if (result.status !== "resolved") return;
+    // The one readable write ran; every refusal is named, so the receipt
+    // cannot read as confirmation of the three that did not.
+    expect(result.applied).toEqual([{ op: "drop_task", id: own.rowD }, { op: "remember_fact" }]);
+    // In the order the model wrote them, each naming its own op.
+    expect(result.failed).toEqual([
+      { op: "drop_task", error: "I could not read that change" },
+      { op: "archive_task", error: "I could not read that change" },
+      { op: "set_project", error: "I cannot move a task from here" },
+    ]);
+    expect((await taskRow(own.rowE)).status).not.toBe("dropped");
+  });
+
+  it("(5) the same row named twice is written once and counted once", async () => {
+    const call = fakeCall({
+      answerId: null,
+      writes: [
+        { op: "drop_task", taskId: own.rowC },
+        { op: "drop_task", taskId: own.rowC },
+      ],
+      rejected: [],
+      fact: null,
+      reply: "You want it off the list.",
+    });
+    const result = await answerInOwnWords(U.id, TZ, own.twice, "drop it", "today", call);
+    expect(result.status).toBe("resolved");
+    if (result.status !== "resolved") return;
+    expect(result.applied).toEqual([{ op: "drop_task", id: own.rowC }, { op: "remember_fact" }]);
+    expect(appliedInWords(result.applied)).toBe("Dropped 1 task and remembered a fact");
+  });
+
+  it("(6) the question is settled AFTER its writes, so the next run reads it as ruled on", async () => {
+    // closedAt read before the writes left every changed row looking newer
+    // than the ruling, which is exactly what the settled guard calls new
+    // evidence — the "stop asking the same question" bug, reintroduced.
+    const call = fakeCall({
+      answerId: null,
+      writes: [{ op: "set_due", taskId: ids.albumOverdue, dueAt: "2026-10-01" }],
+      rejected: [],
+      fact: null,
+      reply: "You want it moved.",
+    });
+    const result = await answerInOwnWords(U.id, TZ, own.timing, "push it to the 1st", "today", call);
+    expect(result.status).toBe("resolved");
+    const [row] = await db
+      .select({ resolvedAt: clarifications.resolvedAt })
+      .from(clarifications)
+      .where(and(eq(clarifications.userId, U.id), eq(clarifications.id, own.timing)));
+    const task = await taskRow(ids.albumOverdue);
+    expect(row.resolvedAt).not.toBeNull();
+    expect(task.updatedAt.getTime()).toBeLessThanOrEqual(row.resolvedAt!.getTime());
   });
 });

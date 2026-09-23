@@ -757,6 +757,37 @@ describe("the words never promise what the loop cannot do (SPEC §7)", () => {
     expect(errors.some((e) => e.includes("promises something you cannot do"))).toBe(true);
   });
 
+  it("allows the user's own first person, quoted, which the prompt asks for", () => {
+    // referencesEvidence rewards a why that copies the user's words, and
+    // decisions is where a commitment they made belongs. Refusing those
+    // failed the whole run and locked the project out for six hours.
+    const out = validOutput();
+    out.questions[0].why = `You wrote "I'll finish reconciling that CPO once the statement lands".`;
+    const errors = errorsOf(out);
+    expect(errors.some((e) => e.includes("promises something you cannot do"))).toBe(false);
+
+    const quoted = validOutput();
+    quoted.record.decisions = [
+      {
+        text: `You decided: "I will pay CPO 2073 after the US Bank statement".`,
+        sources: [{ type: "task", id: T_DONE }],
+        confidence: "high",
+      },
+    ];
+    expect(
+      errorsOf(quoted).some((e) => e.includes("promises something you cannot do"))
+    ).toBe(false);
+  });
+
+  it("refuses a claim that the work is already done, not only a promise", () => {
+    const out = validOutput();
+    const widgetId = Object.keys(out.words.ledes)[0];
+    out.words.ledes[widgetId] = "I have cleared the old suggestions for you.";
+    expect(
+      errorsOf(out).some((e) => e.includes("promises something you cannot do"))
+    ).toBe(true);
+  });
+
   it("allows a recommendation, which is how a why is supposed to read", () => {
     const out = validOutput();
     out.questions[0].why = `${out.questions[0].why} I would close the old copy.`;

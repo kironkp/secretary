@@ -17,7 +17,7 @@
 // question closed, and the four tasks sat there — heard, recorded, not
 // acted on. The closed list and the evidence check still bound what can
 // happen: answer.ts refuses any write naming a row the question does not
-// show, exactly as it refuses one from a stored answer.
+// show, and says so in the receipt rather than dropping it quietly.
 //
 // The call is an injected function for the same reason the run's is
 // (run.ts ModelCall): a test passes a fake, and under vitest or with
@@ -37,6 +37,7 @@ import { errorMessage, providerLine } from "./provider-health";
 import { callByProvider, ModelOutputError, type CallMeta } from "./run";
 import type { QuestionView } from "./today";
 import { flatToWrite, writeOut } from "./prompt";
+import { nearestId } from "./repair";
 import { writeSchema, type Write } from "./types";
 
 export type Interpretation = {
@@ -49,11 +50,20 @@ export type Interpretation = {
    * a listed answer's own writes are the curated ones and win.
    */
   writes: Write[];
+  /**
+   * Writes this refused, so the answer path can say so. A change the user
+   * asked for that quietly does not happen is the defect this whole path
+   * exists to fix; it must never be reintroduced by a silent filter.
+   */
+  rejected: RejectedWrite[];
   /** One durable sentence in the user's words, or null when the words add nothing. */
   fact: string | null;
   /** One sentence back to the user. Never claims that anything was done. */
   reply: string;
 };
+
+/** A write the read could not use, in the shape the receipt reports a failure in. */
+export type RejectedWrite = { op: string; id: string | null; error: string };
 
 export type InterpretCall = ((input: { system: string; user: string }) => Promise<{
   output: unknown;
@@ -97,7 +107,7 @@ async function unreadableLine(userId: string): Promise<string> {
 /** The small models: a three-field read of one sentence; see defaultInterpretCall. */
 const DEFAULT_OPENAI_MODEL = "gpt-5.4-mini";
 const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-5";
-/** Claude's output cap: three short fields, with room so a long reply is a shape error, not a cut. */
+/** Claude's output cap: a short read plus at most a handful of writes, with room so a long reply is a shape error, not a cut. */
 const MAX_OUTPUT_TOKENS = 1000;
 /** What the user said when their reply comes back blank: plain, and claims nothing. */
 const FALLBACK_REPLY = "Noted.";
@@ -149,7 +159,7 @@ export function renderInterpretInput(
   if (question.why.trim()) lines.push(`why: ${question.why.trim()}`);
 
   // The bracketed id is how a write names a row, and the only ids that may
-  // appear in one: answer.ts refuses anything else (usableWrites).
+  // appear in one: answer.ts refuses anything else.
   lines.push("", "EVIDENCE (the only rows you may write to, by these ids):");
   if (question.evidenceView.length === 0) lines.push("none");
   for (const e of question.evidenceView) {
@@ -171,6 +181,33 @@ export function renderInterpretInput(
 // --------------------------------------------------------------------------
 
 /**
+ * As many writes as a stored answer may carry (types.ts answerSchema). An
+ * instruction about more rows than one question shows is not an
+ * instruction, and each write is a tool round-trip inside the row lock.
+ */
+const MAX_COMPOSED_WRITES = 20;
+
+/**
+ * The run's flat write object with `op` left as a plain string.
+ *
+ * Two reasons. The Anthropic SDK demotes an enum to prose when it builds
+ * the wire schema, so nothing on the wire constrains `op` anyway — but
+ * messages.parse would still throw on an op outside the enum, losing the
+ * WHOLE read, including a perfectly good answerId, to a 503. And OpenAI's
+ * strict mode demands every property be required, which the optional
+ * fields of a write are not (run.ts says the same of the run's schema).
+ * The closed list is enforced in code instead, by checkedComposed, which
+ * is where a rejected write can be reported rather than silently dropped.
+ */
+const interpretWriteOut = writeOut.extend({
+  op: z
+    .string()
+    .describe(
+      "One of: complete_task, drop_task, set_due, set_recurrence, set_blocked_reason, clear_expectation"
+    ),
+});
+
+/**
  * Flat, four fields: the answer ids are listed in the input and checked in
  * code afterwards, because an enum of ids would change the wire schema per
  * question and defeat any prompt caching. `writes` is the run's own flat
@@ -183,7 +220,8 @@ const interpretationOut = z.object({
     .nullable()
     .describe("The id of the listed answer the words clearly mean, else null"),
   writes: z
-    .array(writeOut)
+    .array(interpretWriteOut)
+    .max(MAX_COMPOSED_WRITES)
     .default([])
     .describe("The changes a plain instruction asks for, over EVIDENCE rows only; empty otherwise"),
   fact: z
@@ -194,6 +232,7 @@ const interpretationOut = z.object({
 });
 
 const INTERPRET_JSON_SCHEMA = z.toJSONSchema(interpretationOut) as Record<string, unknown>;
+
 
 // --------------------------------------------------------------------------
 // The default call: the same two providers as the run, chosen the same way
@@ -212,9 +251,11 @@ async function claudeInterpretCall(userId: string): Promise<InterpretCall | null
   const model = process.env.UNDERSTANDING_INTERPRET_MODEL ?? DEFAULT_ANTHROPIC_MODEL;
   const meta: CallMeta = { modelName: model, provider: "anthropic", source };
   return Object.assign(async ({ system, user }: { system: string; user: string }) => {
-    // messages.parse is fine here where run.ts avoids it: this schema has no
-    // enums for the wire format to demote, so the SDK's own parse can only
-    // fail on a shape the zod check below would refuse anyway.
+    // messages.parse is usable here where run.ts avoids it, but only
+    // because `op` is a plain string (interpretWriteOut): the SDK demotes
+    // an enum to prose when it builds the wire schema, so an enum here
+    // would let the model write an op the SDK's own parse then throws on,
+    // losing the whole read — including a good answerId — to a 503.
     const response = await client.messages.parse({
       model,
       max_tokens: MAX_OUTPUT_TOKENS,
@@ -268,7 +309,11 @@ async function openaiInterpretCall(userId: string): Promise<InterpretCall | null
         format: {
           type: "json_schema",
           name: "interpretation",
-          strict: true,
+          // Not strict: strict mode demands every property be required and
+          // additionalProperties false at every level, which a write's
+          // optional fields are not (run.ts says the same of the run's
+          // schema). The zod check below is the real enforcement.
+          strict: false,
           schema: INTERPRET_JSON_SCHEMA,
         },
       },
@@ -345,7 +390,7 @@ export async function interpretAnswer(
   call?: InterpretCall
 ): Promise<Interpretation> {
   const words = text.trim();
-  if (!words) return { answerId: null, writes: [], fact: null, reply: FALLBACK_REPLY };
+  if (!words) return { answerId: null, writes: [], rejected: [], fact: null, reply: FALLBACK_REPLY };
 
   const model = call ?? (await defaultInterpretCall(userId));
   const user = renderInterpretInput(question, words, {
@@ -396,27 +441,86 @@ export async function interpretAnswer(
   // writes are read through the same schema as a stored answer's, so an op
   // outside the closed list, or a malformed one, is simply not there.
   // Whether they may touch the rows they name is answer.ts's to say
-  // (usableWrites), which is where a stored answer is checked too.
-  const writes = answerId ? [] : checkedComposed(parsed.data.writes);
-  return { answerId, writes, fact, reply };
+  // (the evidence check in answerInOwnWords), which is where a stored answer is checked too.
+  const { writes, rejected } = answerId
+    ? { writes: [], rejected: [] }
+    : checkedComposed(parsed.data.writes, question);
+  return { answerId, writes, rejected, fact, reply };
 }
 
 /**
  * The model's flat write objects, mapped onto the closed list and parsed.
- * One that does not fit is dropped rather than throwing: the rest of the
- * instruction still stands, and the receipt only ever names what actually
- * ran. All of them dropped simply means no writes.
+ * Everything this refuses comes back in `rejected` so the answer path can
+ * tell the user, because a write that disappears in silence is the whole
+ * defect this feature exists to fix — one layer up.
+ *
+ * Refused here: an op outside the closed list or a field the schema will
+ * not take; `set_project`, because its destination is a project NAME that
+ * nothing in this question bounds (resolveProject matches by containment,
+ * so "Archive Bin" can land a task in "ProbeProject Archive Bin"); and a
+ * second write on a row already named, which would be applied twice and
+ * counted twice in the receipt. `resolve` and `remember_fact` are dropped
+ * without comment: the first is what commitAnswer always does and the
+ * second is the `fact` field's job, so neither is a change to report.
  */
-function checkedComposed(flat: unknown[]): Write[] {
-  const out: Write[] = [];
+function checkedComposed(
+  flat: unknown[],
+  question: QuestionView
+): { writes: Write[]; rejected: RejectedWrite[] } {
+  const writes: Write[] = [];
+  const rejected: RejectedWrite[] = [];
+  const seen = new Set<string>();
+  // The ids this question shows, for mending a slipped one the way a run's
+  // output is mended (repair.ts) before the evidence check refuses it.
+  const byType = new Map<string, Set<string>>();
+  for (const e of question.evidenceView) {
+    if (!byType.has(e.type)) byType.set(e.type, new Set());
+    byType.get(e.type)!.add(e.id);
+  }
+
   for (const w of flat) {
-    const parsed = writeSchema.safeParse(flatToWrite(w));
-    // `resolve` is the question closing itself, which commitAnswer always
-    // does; `remember_fact` is the `fact` field's job. Neither is a change
-    // to a row, and both would double what the receipt says.
-    if (parsed.success && parsed.data.op !== "resolve" && parsed.data.op !== "remember_fact") {
-      out.push(parsed.data);
+    const op = typeof w === "object" && w !== null ? String((w as { op?: unknown }).op ?? "") : "";
+    if (op === "resolve" || op === "remember_fact") continue;
+    if (op === "set_project") {
+      rejected.push({ op, id: null, error: "I cannot move a task from here" });
+      continue;
     }
+    const mended = mendIds(w, byType);
+    const parsed = writeSchema.safeParse(flatToWrite(mended));
+    if (!parsed.success) {
+      rejected.push({ op: op || "write", id: null, error: "I could not read that change" });
+      continue;
+    }
+    const target = targetKey(parsed.data);
+    if (target) {
+      if (seen.has(target)) continue;
+      seen.add(target);
+    }
+    writes.push(parsed.data);
+  }
+  return { writes, rejected };
+}
+
+/** A write's row, as "type:id", for the one-write-per-row rule. */
+function targetKey(w: Write): string | null {
+  if ("taskId" in w) return `task:${w.taskId}`;
+  if ("expectationId" in w) return `expectation:${w.expectationId}`;
+  return null;
+}
+
+/** A taskId or expectationId one or two characters off a row this question shows. */
+function mendIds(w: unknown, byType: Map<string, Set<string>>): unknown {
+  if (typeof w !== "object" || w === null) return w;
+  const out = { ...(w as Record<string, unknown>) };
+  for (const [field, type] of [
+    ["taskId", "task"],
+    ["expectationId", "expectation"],
+  ] as const) {
+    const id = out[field];
+    const known = byType.get(type);
+    if (typeof id !== "string" || !known) continue;
+    const mend = nearestId(id, known);
+    if (mend) out[field] = mend;
   }
   return out;
 }

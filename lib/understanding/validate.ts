@@ -40,14 +40,29 @@ const BANNED = new RegExp(
  * questions; it never touches the user's rows, and only an answer they give
  * does. So "I'll clear them rather than chase the dates" — a real lede on
  * 2026-09-23 — was a promise nothing could keep, and Kiron reasonably read
- * it as done. The committed future is refused; the conditional ("I would
- * close that old copy") is a recommendation and stays, because that is how
- * an answer's why is supposed to read.
+ * it as done. The committed future is refused, and so is the claim that it
+ * already happened ("I have cleared them"), which reads the same way. The
+ * conditional ("I would close that old copy") is a recommendation and
+ * stays, because that is how an answer's why is supposed to read. What is
+ * inside quotation marks is the user speaking and is never matched.
  */
-const PROMISE = /\bI(?:'| a)?(?:'ll|\u2019ll| will| am going to|'m going to|\u2019m going to| plan to| intend to)\b/i;
+const PROMISE =
+  /\bI(?:'ll|\u2019ll| will| am going to|'m going to|\u2019m going to| plan to| intend to| am clearing| have cleared|'ve cleared|\u2019ve cleared)\b/i;
+
+/**
+ * Text with every quotation removed. The "I" inside quotation marks is the
+ * USER speaking, not Secretary: the prompt actively rewards a why that
+ * copies four or more words out of a message (referencesEvidence), and
+ * `decisions` is where a commitment the user made in the first person
+ * belongs. Refusing those failed the whole run — three attempts, then six
+ * hours of backoff — for quoting the person correctly.
+ */
+function outsideQuotes(text: string): string {
+  return text.replace(/["\u201c\u2018'\u2019][^"\u201c\u201d\u2018\u2019]*["\u201d\u2018\u2019']/g, " ");
+}
 
 export function promiseIn(text: string): string | null {
-  const m = PROMISE.exec(text);
+  const m = PROMISE.exec(outsideQuotes(text));
   return m ? m[0] : null;
 }
 
@@ -405,6 +420,8 @@ export function validateRunOutput(output: unknown, bundle: Bundle): ValidationRe
     list.forEach((c, i) => checkClaim(c, `record.${k}[${i}]`));
   }
   r.things.forEach((t, i) => {
+    checkText(t.name, `record.things[${i}].name`);
+    t.aliases.forEach((a, ai) => checkText(a, `record.things[${i}].aliases[${ai}]`));
     checkClaim(t.state, `record.things[${i}].state`);
     checkClaim(t.waitingOn, `record.things[${i}].waitingOn`);
   });
@@ -469,12 +486,15 @@ export function validateRunOutput(output: unknown, bundle: Bundle): ValidationRe
       );
       if (!suggested.some((id) => drops.has(id))) {
         errors.push(
-          `${path}.answers: rests on ${suggested.length === 1 ? "a task" : `${suggested.length} tasks`} I suggested and the user never took up, so one answer must drop ${suggested.length === 1 ? "it" : "them"} (drop_task on ${suggested.join(", ")})`
+          `${path}.answers: rests on ${suggested.length === 1 ? "a task" : `${suggested.length} tasks`} I suggested and the user never took up, so one answer must offer to drop ${suggested.length === 1 ? "it" : "them"} — a drop_task on at least one of ${suggested.join(", ")}, and on all of them when the question is about all of them`
         );
       }
     }
     checkSources(q.evidence, path);
     checkText(q.question, `${path}.question`);
+    // A label is a button the user reads, and a thing's name is the word
+    // every sentence about it uses; both were checked for nothing.
+    q.answers.forEach((a, ai) => checkText(a.label, `${path}.answers[${ai}].label`));
     checkText(q.why, `${path}.why`);
     if (!/[?.]["')]*$/.test(q.question.trim())) {
       errors.push(`${path}.question: must end with ? or .`);

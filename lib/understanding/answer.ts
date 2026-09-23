@@ -11,10 +11,10 @@
 // The refusal in SPEC §5 — "an answer whose writes name an id not in
 // `evidence` is refused by the API" — happens here, before any write, so a
 // bad answer changes nothing at all.
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { clarifications, expectations, records } from "@/lib/db/schema";
+import { clarifications, expectations, records, tasks } from "@/lib/db/schema";
 import { executeTool, resolveProject, type ToolContext } from "@/lib/secretary/tools";
 import { tzOffsetMs } from "@/lib/time";
 import { localDateInTz } from "./gather";
@@ -491,8 +491,24 @@ export async function answerInOwnWords(
   // silence there is what turned "old suggestions you can get rid of" into
   // a note on 2026-09-23 while four tasks stayed on the list.
   const allowed = new Set(question.evidence.map((s) => `${s.type}:${s.id}`));
+  // A row the question shows but that is already finished or off the list:
+  // "get rid of them" about a done copy beside an open one would drop the
+  // record that the work was ever finished, and a stored answer's writes
+  // are curated by a run while these are not.
+  const settledTasks = new Set(
+    (
+      await db
+        .select({ id: tasks.id })
+        .from(tasks)
+        .where(and(eq(tasks.userId, userId), inArray(tasks.status, ["done", "dropped"])))
+    ).map((t) => t.id)
+  );
   const composed: Write[] = [];
-  const refused: FailedWrite[] = [];
+  const refused: FailedWrite[] = reading.rejected.map((r) => ({
+    op: r.op,
+    ...(r.id ? { id: r.id } : {}),
+    error: r.error,
+  }));
   for (const w of reading.writes) {
     const target = targetOf(w);
     const key = target ? `${target.type}:${target.id}` : null;
@@ -500,12 +516,24 @@ export async function answerInOwnWords(
       refused.push({ op: w.op, id: target?.id, error: "that row is not one this question shows" });
       continue;
     }
+    if (
+      target?.type === "task" &&
+      settledTasks.has(target.id) &&
+      (w.op === "drop_task" || w.op === "complete_task" || w.op === "set_blocked_reason")
+    ) {
+      refused.push({ op: w.op, id: target.id, error: "that one is already finished" });
+      continue;
+    }
     composed.push(w);
   }
 
   return withOpenRow(userId, question.id, async (tx) => {
+    const now2 = new Date();
+    const { succeeded, ...outcome } = await applyWrites(ctx, composed, now2);
+    // AFTER the writes, for the reason commitAnswer gives: the settled
+    // guard reads a row whose updatedAt is later than this moment as new
+    // evidence, and would let the next run ask the same question again.
     const closedAt = new Date();
-    const { succeeded, ...outcome } = await applyWrites(ctx, composed, closedAt);
     outcome.failed.push(...refused);
     // "answer" rather than the source: the tag says what kind of memory
     // this is (the user answering a question in their own words), and the
@@ -522,7 +550,9 @@ export async function answerInOwnWords(
       closedAt
     );
     await resolveRow(tx, userId, question.id, `In your words: ${words}`, closedAt);
-    if (question.projectId) await logAnswer(userId, question.projectId, question.id, words, closedAt);
+    if (question.projectId) {
+      await logAnswer(userId, question.projectId, question.id, `In your words: ${words}`, closedAt);
+    }
     return {
       status: "resolved",
       projectId: question.projectId,
