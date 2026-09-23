@@ -433,7 +433,7 @@ export function validOutputFor(bundle: Bundle, ids: CpoIds): RunOutput {
         answers: [
           {
             id: "yes-last-step",
-            label: "Yes, that is the last step",
+            label: "Yes, last step",
             writes: [
               {
                 op: "remember_fact",

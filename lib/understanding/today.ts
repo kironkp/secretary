@@ -405,13 +405,26 @@ export async function markSurfaced(
         sql`${clarifications.surfacedAt} is null`
       )
     )
-    .returning({ id: clarifications.id, projectId: clarifications.projectId });
+    .returning({
+      id: clarifications.id,
+      projectId: clarifications.projectId,
+      question: clarifications.question,
+      evidence: clarifications.evidence,
+    });
 
   const byProject = new Map<string, Asked[]>();
   for (const row of flipped) {
     if (!row.projectId) continue;
     const list = byProject.get(row.projectId) ?? [];
-    list.push({ questionId: row.id, askedAt: now.toISOString() });
+    // The text and the rows, not just the id: the next run reads this list
+    // to know what was already put to the user, and an id alone told it
+    // nothing, which is how the same question came back in new words.
+    list.push({
+      questionId: row.id,
+      question: row.question.slice(0, 400),
+      evidence: (row.evidence ?? []).slice(0, 40).map((s) => `${s.type}:${s.id}`),
+      askedAt: now.toISOString(),
+    });
     byProject.set(row.projectId, list);
   }
   for (const [projectId, entries] of byProject) {

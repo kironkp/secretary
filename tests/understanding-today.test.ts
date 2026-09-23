@@ -204,10 +204,18 @@ describe("buildToday on the duplicate-CPO scenario", () => {
     expect(hero?.status).toBe("open");
 
     const record = await recordFor(ids.caltrans);
+    // The entry carries the question's text and its evidence keys, not the id
+    // alone: the next run reads this list to know what was already put to
+    // the user, and an id told it nothing (SPEC §5).
     expect(record.body.asked).toEqual(
       expect.arrayContaining([
-        { questionId: heroId, askedAt: NOW.toISOString() },
-        { questionId: rowId, askedAt: NOW.toISOString() },
+        expect.objectContaining({
+          questionId: heroId,
+          askedAt: NOW.toISOString(),
+          question: expect.any(String),
+          evidence: expect.arrayContaining([expect.stringMatching(/^(task|message|memory|event|document|expectation):/)]),
+        }),
+        expect.objectContaining({ questionId: rowId, askedAt: NOW.toISOString() }),
       ])
     );
     expect(record.body.asked).toHaveLength(2);

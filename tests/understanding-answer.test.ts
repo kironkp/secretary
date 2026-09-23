@@ -166,7 +166,7 @@ beforeAll(async () => {
         answers: [
           {
             id: "yes-last-step",
-            label: "Yes, that is the last step",
+            label: "Yes, last step",
             writes: [
               {
                 op: "remember_fact",
@@ -419,7 +419,7 @@ describe("answerQuestion", () => {
 
     const record = await recordFor(ids.caltrans);
     const asked = record.body.asked.find((a) => a.questionId === q.fact);
-    expect(asked?.answer).toBe("Yes, that is the last step");
+    expect(asked?.answer).toBe("Yes, last step");
     expect(asked?.askedAt).toBe(asked?.answeredAt);
     // The earlier entries are untouched: (3) kept its askedAt, (5) was logged too.
     expect(record.body.asked.find((a) => a.questionId === q.close)?.askedAt).toBe(ASKED_AT);

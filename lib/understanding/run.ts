@@ -289,7 +289,10 @@ export type RunResult =
       inputTokens: number;
       outputTokens: number;
     }
-  | { status: "skipped"; reason: "unchanged" | "no-model" | "disabled" | "no-project" | "backoff" }
+  | {
+      status: "skipped";
+      reason: "unchanged" | "no-model" | "disabled" | "no-project" | "backoff" | "queued";
+    }
   | { status: "failed"; errors: string[] }
   | {
       /** opts.dryRun: the validated output, nothing written anywhere. */
@@ -377,7 +380,54 @@ async function logRun(entry: RunLog): Promise<void> {
 
 const MAX_ATTEMPTS = 2;
 
+/**
+ * One run per project at a time, and never two on top of each other. Every
+ * answer on Today starts a re-read of its project (answer.ts
+ * rerunAfterAnswer); three answers in a minute started three re-reads, and
+ * the first, gathered before the second answer, finished last and wrote
+ * questions about rows the second answer had just settled. That is the loop
+ * Kiron saw: "I'm pressing things and it seems like there's infinite doesn't
+ * add up." A run that arrives while one is in flight is not started; it is
+ * remembered, and when the running one finishes a single fresh run follows,
+ * gathering the data as it is then.
+ */
+const projectRuns = new Map<string, { promise: Promise<RunResult>; again: RunOptions | null }>();
+
 export async function runProject(
+  userId: string,
+  projectId: string,
+  opts: RunOptions
+): Promise<RunResult> {
+  const key = `${userId}:${projectId}`;
+  const current = projectRuns.get(key);
+  if (current) {
+    // A pre-gathered bundle is stale by definition here; the follow-up
+    // gathers its own.
+    current.again = { ...opts, bundle: undefined };
+    return { status: "skipped", reason: "queued" };
+  }
+  const entry: { promise: Promise<RunResult>; again: RunOptions | null } = {
+    promise: Promise.resolve({ status: "skipped", reason: "queued" }),
+    again: null,
+  };
+  entry.promise = (async () => {
+    try {
+      return await runProjectNow(userId, projectId, opts);
+    } finally {
+      projectRuns.delete(key);
+      const again = entry.again;
+      if (again) {
+        void runProject(userId, projectId, again).catch((e) =>
+          console.error(`understanding: queued run for ${projectId} failed: ${e instanceof Error ? e.message : String(e)}`)
+        );
+      }
+    }
+  })();
+  projectRuns.set(key, entry);
+  return entry.promise;
+}
+
+async function runProjectNow(
   userId: string,
   projectId: string,
   opts: RunOptions
