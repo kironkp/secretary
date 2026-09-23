@@ -25,6 +25,7 @@ import { QUESTION_KINDS } from "./types";
 import { failedLines, okLines } from "./progress";
 import { parseLoggedFailure } from "./provider-health";
 import { healDuplicates, healEvidence, retireAsrClarifications } from "./questions";
+import { backfillAsked } from "./record";
 import {
   DEFAULT_MODEL,
   DEFAULT_OPENAI_MODEL,
@@ -145,9 +146,11 @@ export type SweepResult = SweepTally & {
   healed: number;
   /** Open questions whose evidence was missing a row their own answers write to (questions.ts healEvidence). */
   repaired: number;
+  /** Answers a run had erased from a record's asked list, put back from the questions themselves (record.ts backfillAsked). */
+  restored: number;
 };
 
-const ZERO: SweepResult = { users: 0, ran: 0, skipped: 0, failed: 0, retiredAsr: 0, healed: 0, repaired: 0 };
+const ZERO: SweepResult = { users: 0, ran: 0, skipped: 0, failed: 0, retiredAsr: 0, healed: 0, repaired: 0, restored: 0 };
 
 /**
  * Module-level on purpose: one process, one sweep at a time. runAll holds a
@@ -207,6 +210,11 @@ async function sweepOnce(opts: SweepOptions): Promise<SweepResult> {
     const evidence = await healEvidence(owner.id, now);
     total.repaired += evidence.repaired.length;
     total.healed += evidence.dismissed.length;
+    // And an answer a run erased from the record is put back, so the model
+    // stops asking about something the user already settled.
+    for (const p of await activeProjectIds(owner.id)) {
+      total.restored += await backfillAsked(owner.id, p);
+    }
     const model = opts.model ?? (await modelCallFor(owner.id));
     if (!model) {
       // No model, no runs, but the retire is part of every sweep (SPEC §8:
@@ -235,9 +243,9 @@ async function sweepOnce(opts: SweepOptions): Promise<SweepResult> {
   // Quiet when nothing happened: the normal state of a sweep is every hash
   // matching, and a log line every ten minutes saying so would bury the
   // lines that matter.
-  if (total.ran + total.failed + total.healed + total.repaired > 0) {
+  if (total.ran + total.failed + total.healed + total.repaired + total.restored > 0) {
     console.log(
-      `understanding: ${total.ran} ran, ${total.skipped} unchanged, ${total.failed} failed, ${total.healed} duplicate${total.healed === 1 ? "" : "s"} healed, ${total.repaired} repaired`
+      `understanding: ${total.ran} ran, ${total.skipped} unchanged, ${total.failed} failed, ${total.healed} duplicate${total.healed === 1 ? "" : "s"} healed, ${total.repaired} repaired, ${total.restored} answers restored`
     );
   }
   return total;
@@ -384,4 +392,13 @@ export async function openQuestionCount(userId: string): Promise<number> {
       )
     );
   return row?.n ?? 0;
+}
+
+/** The active projects of one user, for the per-project repairs the sweep runs without a model. */
+async function activeProjectIds(userId: string): Promise<string[]> {
+  const rows = await db
+    .select({ id: projects.id })
+    .from(projects)
+    .where(and(eq(projects.userId, userId), eq(projects.status, "active")));
+  return rows.map((r) => r.id);
 }

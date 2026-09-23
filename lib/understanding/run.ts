@@ -1039,7 +1039,15 @@ async function runOnce(
     .onConflictDoUpdate({
       target: [records.userId, records.projectId],
       set: {
-        body,
+        // `asked` comes from the row as it is NOW, not from `previous`, which
+        // was read before the model call. A run takes minutes; answering a
+        // question starts one; so while it thinks, the user answers the next
+        // question and upsertAsked appends that answer — and writing the
+        // snapshot back here erased it. Kiron's three answers about CPO 2110
+        // on 2026-09-23 were wiped that way within five minutes, which is why
+        // the next run asked a fourth time: the history really was gone. The
+        // merge is done in SQL for the same reason upsertAsked is (record.ts).
+        body: sql`jsonb_set(${JSON.stringify(body)}::jsonb, '{asked}', coalesce(${records.body} -> 'asked', '[]'::jsonb))`,
         inputsHash,
         words,
         version: sql`${records.version} + 1`,

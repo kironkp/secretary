@@ -7,10 +7,10 @@
 // picks an answer. Both go through here so the write is one atomic UPDATE in
 // SQL rather than a read-modify-write in JS: two answers landing on the same
 // project at once (a tap and a spoken answer) must not lose each other.
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { records } from "@/lib/db/schema";
-import type { Asked } from "./types";
+import { clarifications, records } from "@/lib/db/schema";
+import { QUESTION_KINDS, type Asked } from "./types";
 
 /**
  * Replace-or-append: any existing entry for one of `entries`' questionIds is
@@ -45,4 +45,60 @@ export async function upsertAsked(
       )`,
     })
     .where(and(eq(records.userId, userId), eq(records.projectId, projectId)));
+}
+
+/**
+ * Rebuild `asked` entries the record lost.
+ *
+ * Until 2026-09-23 a run wrote the record with the `asked` list it had read
+ * before calling the model, so every answer given during those minutes was
+ * erased (run.ts, where the merge now happens in SQL). The history is
+ * recoverable: `clarifications` still holds each question's text, the rows
+ * it rested on, what the user said and when it closed. For every project
+ * this puts back an entry for each settled question the record no longer
+ * mentions, so the next run sees what it already asked. Existing entries are
+ * left exactly as they are. Returns the number restored.
+ */
+export async function backfillAsked(userId: string, projectId: string): Promise<number> {
+  const [record] = await db
+    .select({ body: records.body })
+    .from(records)
+    .where(and(eq(records.userId, userId), eq(records.projectId, projectId)))
+    .limit(1);
+  if (!record) return 0;
+
+  const known = new Set((record.body.asked ?? []).map((a) => a.questionId));
+  const settled = await db
+    .select({
+      id: clarifications.id,
+      question: clarifications.question,
+      evidence: clarifications.evidence,
+      resolution: clarifications.resolution,
+      resolvedAt: clarifications.resolvedAt,
+      surfacedAt: clarifications.surfacedAt,
+      createdAt: clarifications.createdAt,
+    })
+    .from(clarifications)
+    .where(
+      and(
+        eq(clarifications.userId, userId),
+        eq(clarifications.projectId, projectId),
+        inArray(clarifications.kind, [...QUESTION_KINDS]),
+        inArray(clarifications.status, ["resolved", "dismissed", "superseded"])
+      )
+    );
+
+  const missing: Asked[] = settled
+    .filter((row) => !known.has(row.id))
+    .map((row) => ({
+      questionId: row.id,
+      question: row.question,
+      evidence: row.evidence.map((s) => `${s.type}:${s.id}`),
+      askedAt: (row.surfacedAt ?? row.createdAt).toISOString(),
+      ...(row.resolution ? { answer: row.resolution } : {}),
+      ...(row.resolvedAt ? { answeredAt: row.resolvedAt.toISOString() } : {}),
+    }));
+  if (missing.length === 0) return 0;
+  await upsertAsked(userId, projectId, missing);
+  return missing.length;
 }

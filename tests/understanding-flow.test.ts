@@ -10,10 +10,11 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { clarifications, messages, tasks, understandingRuns, user } from "@/lib/db/schema";
+import { clarifications, messages, records, tasks, understandingRuns, user } from "@/lib/db/schema";
 import { answerInOwnWords, answerQuestion } from "@/lib/understanding/answer";
 import type { InterpretCall } from "@/lib/understanding/interpret";
 import { healDuplicates, healEvidence, questionIdentity } from "@/lib/understanding/questions";
+import { backfillAsked, upsertAsked } from "@/lib/understanding/record";
 import { runProject, type ModelCall } from "@/lib/understanding/run";
 import { sweepUnderstanding } from "@/lib/understanding/sweep";
 import { buildToday } from "@/lib/understanding/today";
@@ -22,6 +23,7 @@ import {
   CPO_NOW,
   CPO_TZ,
   fakeModel,
+  minimalOutputFor,
   seedCpoScenario,
   validOutputFor,
   type CpoIds,
@@ -435,7 +437,7 @@ describe("the Caltrans pair, end to end", () => {
       .values(twin("flow-twin-c", new Date(t0.getTime() + 2000), [task(ids.albumOverdue), { type: "event", id: ids.eventDentist }]))
       .returning({ id: clarifications.id });
     const swept = await sweepUnderstanding({ now: NOW, userIds: [U.id] });
-    expect(swept).toEqual({ users: 1, ran: 0, skipped: 0, failed: 0, retiredAsr: 0, healed: 1, repaired: 0 });
+    expect(swept).toEqual({ users: 1, ran: 0, skipped: 0, failed: 0, retiredAsr: 0, healed: 1, repaired: 0, restored: 0 });
     expect(await rowOf(third.id)).toMatchObject({ status: "dismissed", resolution: `duplicate of ${older.id}` });
     expect((await rowOf(older.id)).status).toBe("open");
   });
@@ -557,5 +559,86 @@ describe("the Caltrans pair, end to end", () => {
       .where(eq(clarifications.id, reaching.id));
     expect(row.status).toBe("dismissed");
     expect(row.resolution).toBe("its answers reach rows I cannot show you");
+  });
+
+  it("(13) an answer given while a run is thinking survives the run storing its record", async () => {
+    // The bug behind "it's asked me about CPO 2110 like 10 times": a run read
+    // the asked list before calling the model and wrote it back minutes
+    // later, erasing every answer given in between — and answering is what
+    // starts a run, so answering twice in a row erased the first answer.
+    const before = await db
+      .select({ body: records.body })
+      .from(records)
+      .where(and(eq(records.userId, U.id), eq(records.projectId, ids.caltrans)));
+    const had = (before[0]?.body.asked ?? []).length;
+
+    const mid: ModelCall = async (input) => {
+      // The user answers while the model is thinking.
+      await upsertAsked(U.id, ids.caltrans, [
+        {
+          questionId: "answered-mid-run",
+          question: "Is CPO 2110 converted yet?",
+          evidence: ["task:x"],
+          askedAt: NOW.toISOString(),
+          answer: "No, it is still on my list",
+          answeredAt: NOW.toISOString(),
+        },
+      ]);
+      return {
+        output: minimalOutputFor(input.bundle),
+        model: "fake",
+        inputTokens: 10,
+        outputTokens: 5,
+      };
+    };
+    const result = await runProject(U.id, ids.caltrans, {
+      timezone: TZ,
+      now: NOW,
+      model: mid,
+      force: true,
+    });
+    expect(result.status, JSON.stringify(result)).toBe("ok");
+
+    const [after] = await db
+      .select({ body: records.body })
+      .from(records)
+      .where(and(eq(records.userId, U.id), eq(records.projectId, ids.caltrans)));
+    const asked = after.body.asked ?? [];
+    expect(asked).toHaveLength(had + 1);
+    const kept = asked.find((a) => a.questionId === "answered-mid-run");
+    expect(kept?.answer).toBe("No, it is still on my list");
+  });
+
+  it("(14) answers a run already erased are put back from the questions themselves", async () => {
+    // A settled question whose asked entry the record never got.
+    const [lost] = await db
+      .insert(clarifications)
+      .values({
+        userId: U.id,
+        projectId: ids.caltrans,
+        kind: "doesnt_add_up",
+        question: "Is CPO 2110 on your list twice?",
+        context: "Two rows look like one job.",
+        evidence: [task(ids.doneCpo)],
+        answers: [{ id: "keep", label: "Keep them", writes: [{ op: "resolve" }] }],
+        identity: "lost-asked",
+        status: "resolved",
+        resolution: "Keep them",
+        resolvedAt: NOW,
+      })
+      .returning({ id: clarifications.id });
+
+    const restored = await backfillAsked(U.id, ids.caltrans);
+    expect(restored).toBeGreaterThanOrEqual(1);
+    const [after] = await db
+      .select({ body: records.body })
+      .from(records)
+      .where(and(eq(records.userId, U.id), eq(records.projectId, ids.caltrans)));
+    const entry = (after.body.asked ?? []).find((a) => a.questionId === lost.id);
+    expect(entry?.question).toBe("Is CPO 2110 on your list twice?");
+    expect(entry?.answer).toBe("Keep them");
+    expect(entry?.answeredAt).toBe(NOW.toISOString());
+    // Idempotent: nothing left to restore.
+    expect(await backfillAsked(U.id, ids.caltrans)).toBe(0);
   });
 });
