@@ -434,10 +434,25 @@ export const clarifications = pgTable(
     // the verbatim source snippet (for asr_span: kept with audio offsets)
     context: text("context"),
     entityId: text("entity_id").references(() => entities.id, { onDelete: "set null" }),
-    status: text("status").$type<"open" | "asked" | "resolved" | "dismissed">().notNull().default("open"),
+    // pending = open | asked; answered = resolved; dismissed = the loop found
+    // the premise gone; superseded = another question's answer changed a row
+    // this one rested on, before the user could answer it (superseded_by).
+    status: text("status")
+      .$type<"open" | "asked" | "resolved" | "dismissed" | "superseded">()
+      .notNull()
+      .default("open"),
     resolution: text("resolution"),
     askedAt: timestamp("asked_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    // When it stopped being pending, whatever the reason: the settled-evidence
+    // guard compares a row's updated_at against this to tell "the same issue
+    // again" from "the issue with new evidence".
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    // The question whose answer made this one's premise obsolete.
+    supersededBy: text("superseded_by"),
+    // Why it exists: the understanding_runs id that drafted it, or "interview"
+    // when the user asked to be asked more.
+    createdByRun: text("created_by_run"),
     // --- understanding-loop columns (SPEC §5); null/empty on the ASR kinds ---
     projectId: text("project_id").references(() => projects.id, { onDelete: "set null" }),
     // What the question rests on. An answer may only write to ids named here.

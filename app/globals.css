@@ -145,6 +145,21 @@ body {
 }
 .animate-task-in { animation: task-in 0.8s ease-out; }
 
+/* The thinking bars (components/today/thinking.tsx): the Talk screen's
+   waveform, bobbing while a project is re-read after an answer. Still under
+   reduced motion; the label carries the meaning. */
+@keyframes thinking-bob {
+  from { transform: scaleY(0.55); }
+  to { transform: scaleY(1); }
+}
+.thinking-bar {
+  transform-origin: center;
+  animation: thinking-bob 1.1s ease-in-out infinite alternate;
+}
+@media (prefers-reduced-motion: reduce) {
+  .thinking-bar { animation: none; }
+}
+
 /* An iOS inset grouped list: white cells on the grey ground, and a hairline
    between rows that starts at the text edge, not the card edge. */
 .ios-group > * + * {
