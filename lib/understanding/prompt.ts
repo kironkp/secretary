@@ -31,7 +31,7 @@ Rules that a machine checks; output that breaks them is rejected:
    doesnt_add_up: a finished copy and an open copy of the same job; a task marked blocked after the user said it is not; a weekly thing filed as one-offs; tasks Secretary suggested that sit past their date and were never taken up; an open task whose notes say it is done.
    done_yet: an open item where a later message, a finished sibling, a passed milestone or a missed follow-up says it probably happened.
 
-4. A question is what you would say out loud in one breath: one sentence, at most 14 words, ending with a question mark, like "CPO 2073 is on your list twice. Close the old one?" Name a thing by its nickname and number, never by pasting a task title; never a slash, never a code like FY2027 or ADM-2011 unless the user's own words use it. Its why is what you see, in at most two short sentences: what is open, what is finished or what the user said, and what you would do; it names at least one piece of evidence by its real title or a quote from it. evidence lists the source ids it rests on. answers: one to four; each label is an action in plain words, at most four words and 28 characters ("Close the old one", "Keep them", "Not yet", "Something else"), never a code or a title fragment, and each carries the writes it makes, using only ids from the input and only these ops: complete_task, drop_task, set_due, set_recurrence, set_blocked_reason, set_project, remember_fact, clear_expectation, resolve. set_project files a task under a project by its name (taskId and project), for a task that sits in the wrong project or in none; the name must be one listed under PROJECTS in the input, never a new one. The first answer is the one you recommend. The last answer is always a way out with no writes except resolve ("Keep them", "Something else", "Not yet"). When a question rests on a task I suggested that the user never took up, one answer must DROP it (drop_task): it is my guess, not their work, and "get rid of it" has to be one tap away. At most eight questions per project; when there are more, keep the ones whose answer changes what happens next.
+4. A question is what you would say out loud in one breath: one sentence, at most 14 words, ending with a question mark, like "CPO 2073 is on your list twice. Close the old one?" Name a thing by its nickname and number, never by pasting a task title; never a slash, never a code like FY2027 or ADM-2011 unless the user's own words use it. Its why is what you see, in at most two short sentences: what is open, what is finished or what the user said, and what you would do; it names at least one piece of evidence by its real title or a quote from it. evidence lists the source ids it rests on. answers: one to four; each label is an action in plain words, at most four words and 28 characters ("Close the old one", "Keep them", "Not yet", "Something else"), never a code or a title fragment, and each carries the writes it makes, using only ids from the input and only these ops: complete_task, drop_task, set_due, set_recurrence, set_blocked_reason, set_project, remember_fact, clear_expectation, rename_task, set_step, resolve. rename_task gives a task its corrected title (taskId and title) when the user's own words say the title is wrong. set_step puts a task on a step of one of the user's processes (taskId, process, step): the process must be one listed under PROCESSES, step is 1-based; ask "Which step is CPO 2110 on?" when a task is plainly one of a process's jobs and has no stages yet, one answer per likely step. set_project files a task under a project by its name (taskId and project), for a task that sits in the wrong project or in none; the name must be one listed under PROJECTS in the input, never a new one. The first answer is the one you recommend. The last answer is always a way out with no writes except resolve ("Keep them", "Something else", "Not yet"). When a question rests on a task I suggested that the user never took up, one answer must DROP it (drop_task): it is my guess, not their work, and "get rid of it" has to be one tap away. At most eight questions per project; when there are more, keep the ones whose answer changes what happens next.
 
 5. ALREADY ASKED AND SETTLED lists every question already put to the user, with the rows it rested on and what they said. Read it before you write a single question, and never ask any of them again. The test is the SUBJECT, not the wording and not the rows: if a question would make the user say "I already told you that", it is the same question, however you phrase it and whatever ids you cite. A settled subject comes back only when something happened after the answer that changes it — a row finished, a date passed, the user said the opposite — and then the why must say what changed and name it. What is NOT a reason to ask again: the answer itself. Answering writes a memory of what the user said, marked "(your own record of an answer already given)" in MEMORIES; it is the ruling, so citing it as evidence for the same subject is asking the user to repeat themselves. "Keep them", "Not yet" and "Something else" are decisions too: the user looked and chose to leave it, so write that into decisions with the date and let it rest.
 
@@ -55,6 +55,8 @@ export const WRITE_OPS = [
   "set_project",
   "remember_fact",
   "clear_expectation",
+  "rename_task",
+  "set_step",
   "resolve",
 ] as const;
 
@@ -135,6 +137,9 @@ export const writeOut = z.object({
   fact: z.string().optional().describe("remember_fact only"),
   tags: z.array(z.string()).optional().describe("remember_fact only"),
   expectationId: z.string().optional().describe("clear_expectation only"),
+  title: z.string().optional().describe("rename_task only: the task's corrected title"),
+  process: z.string().optional().describe("set_step only: a process name from PROCESSES"),
+  step: z.number().optional().describe("set_step only: the 1-based step the task is on"),
 });
 
 const answerOut = z.object({
@@ -214,6 +219,12 @@ export function flatToWrite(w: unknown): unknown {
       return { op: w.op, fact: w.fact, tags: w.tags ?? [] };
     case "clear_expectation":
       return { op: w.op, expectationId: w.expectationId };
+    case "rename_task":
+      return { op: w.op, taskId: w.taskId, title: w.title };
+    case "set_step":
+      return { op: w.op, taskId: w.taskId, process: w.process, step: w.step };
+    case "save_process":
+      return { op: w.op, name: w.name, steps: w.steps };
     case "resolve":
       return { op: "resolve" };
     default:
@@ -360,6 +371,17 @@ export function renderBundle(bundle: Bundle, opts: { mode?: RunMode } = {}): str
   // The names a set_project may use (validate.ts refuses any other), the
   // project being read among them, so the model can move a task in or out.
   section("PROJECTS", bundle.projectNames.map((name) => oneLine(name)));
+
+  // How the user's recurring jobs go, in their words (SPEC §6, Processes):
+  // the only names a set_step may use, and what "step 7" means.
+  if (bundle.processes?.length) {
+    section(
+      "PROCESSES",
+      bundle.processes.map(
+        (p) => `${oneLine(p.name)}: ${p.steps.map((s, i) => `${i + 1}. ${oneLine(s)}`).join(" → ")}`
+      )
+    );
+  }
 
   section(
     "OPEN TASKS",

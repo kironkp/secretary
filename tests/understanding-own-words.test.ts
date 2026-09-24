@@ -14,7 +14,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { clarifications, memories, records, tasks, usage, user } from "@/lib/db/schema";
+import { clarifications, memories, pipelineTemplates, records, tasks, usage, user } from "@/lib/db/schema";
 import { executeTool } from "@/lib/secretary/tools";
 import { answerInOwnWords, MAX_OWN_WORDS } from "@/lib/understanding/answer";
 import { appliedInWords } from "@/components/today/copy";
@@ -56,13 +56,13 @@ vi.mock("next/server", async (importOriginal) => {
 const scripted = vi.hoisted(() => ({ next: null as Interpretation | null }));
 vi.mock("@/lib/understanding/interpret", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/understanding/interpret")>();
-  const interpretAnswer: typeof actual.interpretAnswer = async (userId, tz, question, text, call) => {
+  const interpretAnswer: typeof actual.interpretAnswer = async (userId, tz, question, text, call, processes) => {
     if (!call && scripted.next) {
       const reading = scripted.next;
       scripted.next = null;
       return reading;
     }
-    return actual.interpretAnswer(userId, tz, question, text, call);
+    return actual.interpretAnswer(userId, tz, question, text, call, processes);
   };
   return { ...actual, interpretAnswer };
 });
@@ -429,7 +429,7 @@ describe("answer_question with own_words", () => {
   const ctx = { userId: U.id, timezone: TZ };
 
   it("routes to answerInOwnWords and hands the reply back for the model to relay", async () => {
-    scripted.next = { answerId: null, writes: [], rejected: [], fact: "The packet goes to Walter after the statement.", reply: "The packet to Walter comes after the statement." };
+    scripted.next = { answerId: null, writes: [], rejected: [], fact: "The packet goes to Walter after the statement.", process: null, reply: "The packet to Walter comes after the statement." };
     const outcome = await executeTool(ctx, "answer_question", {
       question_id: q.tool,
       own_words: "after the statement the packet goes to Walter",
@@ -525,7 +525,7 @@ describe("POST /api/questions/[id]/answer with text", () => {
   });
 
   it("carries the reply in the resolved body when the words are read", async () => {
-    scripted.next = { answerId: "not-yet", writes: [], rejected: [], fact: null, reply: "You are not there yet." };
+    scripted.next = { answerId: "not-yet", writes: [], rejected: [], fact: null, process: null, reply: "You are not there yet." };
     const res = await post(q.route, { text: "not yet, one more step", source: "today" });
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -762,5 +762,99 @@ describe("an instruction the listed answers do not offer", () => {
     const task = await taskRow(ids.albumOverdue);
     expect(row.resolvedAt).not.toBeNull();
     expect(task.updatedAt.getTime()).toBeLessThanOrEqual(row.resolvedAt!.getTime());
+  });
+});
+
+// 2026-09-23, the real one: "Do the US Bank statement makes no sense", then
+// the whole CPO purchase cycle in one breath. The words were one flat fact
+// and the wrong task stayed on the list.
+describe("a correction and a process in the user's own words", () => {
+  let taskId = "";
+  let questionId = "";
+  const steps = [
+    "Get vendor quotes",
+    "Fill out the Advantage form",
+    "Signatures from Marissa and Walter",
+    "Send the CPO to the vendor",
+    "Receive the items",
+    "Pay with the Cal card",
+    "Wait for the US Bank statement",
+    "Reconcile on Advantage and send paperwork to Oksana",
+  ];
+  beforeAll(async () => {
+    const [t] = await db
+      .insert(tasks)
+      .values({ userId: U.id, projectId: ids.caltrans, title: "Do the US Bank statement", status: "todo", createdAt: NOW, updatedAt: NOW })
+      .returning({ id: tasks.id });
+    taskId = t.id;
+    const [row] = await db
+      .insert(clarifications)
+      .values({
+        userId: U.id,
+        projectId: ids.caltrans,
+        kind: "done_yet",
+        question: "The 22nd has passed. Did you change the US Bank statement?",
+        context: "It was due yesterday.",
+        evidence: [{ type: "task", id: taskId }],
+        answers: [
+          { id: "done", label: "Mark it done", writes: [{ op: "complete_task", taskId }] },
+          { id: "not-yet", label: "Not yet", writes: [{ op: "resolve" }] },
+        ],
+        identity: "own-process",
+        status: "open",
+      })
+      .returning({ id: clarifications.id });
+    questionId = row.id;
+  });
+
+  it("saves the process, renames the task and puts it on its step, and shows the process to the reader", async () => {
+    const call = fakeCall({
+      answerId: null,
+      writes: [
+        { op: "rename_task", taskId, title: "Reconcile CPO 2073 once the US Bank statement is in" },
+        { op: "set_step", taskId, process: "CPO purchase cycle", step: 7 },
+      ],
+      fact: "A CPO follows the CPO purchase cycle.",
+      process: { name: "CPO purchase cycle", steps },
+      reply: "You mean the task is really the reconcile step of your CPO cycle.",
+    });
+    const result = await answerInOwnWords(U.id, TZ, questionId, "do the US bank statement makes no sense; for CPOs I get quotes, …", "interview", call);
+    expect(result.status).toBe("resolved");
+    if (result.status !== "resolved") return;
+    expect(result.failed).toEqual([]);
+    expect(result.applied.map((a) => a.op)).toEqual(["save_process", "rename_task", "set_step", "remember_fact"]);
+    expect(result.failed).toEqual([]);
+    expect(appliedInWords(result.applied)).toContain("saved a process");
+
+    const [tpl] = await db.select().from(pipelineTemplates).where(eq(pipelineTemplates.userId, U.id));
+    expect(tpl.name).toBe("CPO purchase cycle");
+    expect(tpl.steps.map((st) => st.name)).toEqual(steps);
+    expect(tpl.steps[6].blocked_by).toBe(5);
+
+    const task = await taskRow(taskId);
+    expect(task.title).toBe("Reconcile CPO 2073 once the US Bank statement is in");
+    const stages = task.stages as { name: string; done: boolean }[];
+    expect(stages.map((st) => st.done)).toEqual([true, true, true, true, true, true, false, false]);
+  });
+
+  it("hands the saved processes to the reader, so the same job is replaced rather than duplicated", async () => {
+    const [row] = await db
+      .insert(clarifications)
+      .values({
+        userId: U.id,
+        projectId: ids.caltrans,
+        kind: "need_to_know",
+        question: "Which step is CPO 2110 on?",
+        context: "It has no stages yet.",
+        evidence: [{ type: "task", id: taskId }],
+        answers: [{ id: "skip", label: "Something else", writes: [{ op: "resolve" }] }],
+        identity: "own-process-2",
+        status: "open",
+      })
+      .returning({ id: clarifications.id });
+    const call = fakeCall({ answerId: "skip", writes: [], fact: null, process: null, reply: "You would rather leave it." });
+    await answerInOwnWords(U.id, TZ, row.id, "leave it", "interview", call);
+    expect(call.seen[0].user).toContain("PROCESSES:");
+    expect(call.seen[0].user).toContain("CPO purchase cycle: 1. Get vendor quotes");
   });
 });

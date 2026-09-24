@@ -17,7 +17,7 @@ import { db } from "@/lib/db";
 import { clarifications, expectations, records, tasks } from "@/lib/db/schema";
 import { executeTool, resolveProject, type ToolContext } from "@/lib/secretary/tools";
 import { tzOffsetMs } from "@/lib/time";
-import { localDateInTz } from "./gather";
+import { loadProcesses, localDateInTz } from "./gather";
 import { interpretAnswer, type InterpretCall } from "./interpret";
 import { getQuestion, type QuestionRow } from "./questions";
 import { upsertAsked } from "./record";
@@ -78,10 +78,13 @@ function targetOf(w: Write): { type: "task" | "expectation"; id: string } | null
     case "set_recurrence":
     case "set_blocked_reason":
     case "set_project":
+    case "rename_task":
+    case "set_step":
       return { type: "task", id: w.taskId };
     case "clear_expectation":
       return { type: "expectation", id: w.expectationId };
     case "remember_fact":
+    case "save_process":
     case "resolve":
       return null;
   }
@@ -203,6 +206,32 @@ async function applyWrite(ctx: ToolContext, w: Write, now: Date): Promise<WriteO
         .where(and(eq(expectations.userId, ctx.userId), eq(expectations.id, w.expectationId)))
         .returning({ id: expectations.id });
       return cleared.length ? { ok: true } : { ok: false, error: "No such follow-up" };
+    }
+    case "rename_task":
+      return viaTool(ctx, "update_task", { task: w.taskId, title: w.title });
+    case "save_process":
+      // Each step waits on the one before: a process is an order of operations.
+      return viaTool(ctx, "save_pipeline_template", {
+        name: w.name,
+        steps: w.steps.map((name, i) => ({ name, blocked_by: i === 0 ? null : i - 1 })),
+      });
+    case "set_step": {
+      // The process's steps become the task's stages (apply_pipeline, which
+      // matches the name the way validate.ts does), then every step before
+      // this one is done: "CPO 2110 is on step 7" is a stage state.
+      const applied = await viaTool(ctx, "apply_pipeline", { task: w.taskId, template: w.process });
+      if (!applied.ok) return applied;
+      const [row] = await db
+        .select({ stages: tasks.stages })
+        .from(tasks)
+        .where(and(eq(tasks.userId, ctx.userId), eq(tasks.id, w.taskId)));
+      const stages = Array.isArray(row?.stages) ? row.stages : [];
+      if (w.step > stages.length) return { ok: false, error: `That process has ${stages.length} steps` };
+      await db
+        .update(tasks)
+        .set({ stages: stages.map((st, i) => ({ ...st, done: i < w.step - 1 })), updatedAt: now })
+        .where(and(eq(tasks.userId, ctx.userId), eq(tasks.id, w.taskId)));
+      return { ok: true };
     }
     case "resolve":
       // The question closing itself: always done at the end, never here.
@@ -467,7 +496,7 @@ export async function answerInOwnWords(
   if (!words || words.length > MAX_OWN_WORDS) return { status: "bad-answer" };
 
   const view = await viewQuestion(userId, question, timezone);
-  const reading = await interpretAnswer(userId, timezone, view, words, call);
+  const reading = await interpretAnswer(userId, timezone, view, words, call, await loadProcesses(userId));
 
   const now = new Date();
   const ctx: ToolContext = { userId, timezone };
@@ -503,7 +532,11 @@ export async function answerInOwnWords(
         .where(and(eq(tasks.userId, userId), inArray(tasks.status, ["done", "dropped"])))
     ).map((t) => t.id)
   );
-  const composed: Write[] = [];
+  // A process the words described is saved first, so a set_step in the same
+  // answer can place a task on it (SPEC §6, Processes).
+  const composed: Write[] = reading.process
+    ? [{ op: "save_process", name: reading.process.name, steps: reading.process.steps }]
+    : [];
   const refused: FailedWrite[] = reading.rejected.map((r) => ({
     op: r.op,
     ...(r.id ? { id: r.id } : {}),

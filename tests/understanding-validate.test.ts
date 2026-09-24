@@ -336,6 +336,25 @@ describe("step 3: writes", () => {
     expect(errorsOf(out)[0]).toContain('unknown expectation id "not-in-bundle"');
   });
 
+  it("a set_step must name one of the user's processes and a step it has; a run never saves one", () => {
+    const bundle = { ...makeBundle(), processes: [{ name: "CPO purchase cycle", steps: ["Quotes", "Form", "Sign"] }] };
+    const withWrite = (w: unknown) => {
+      const out = validOutput();
+      out.questions[0].answers[0].writes = [w as never, { op: "resolve" }];
+      return out;
+    };
+    expect(errorsOf(withWrite({ op: "set_step", taskId: T_CHECK, process: "cpo purchase cycle", step: 3 }), bundle)).toEqual([]);
+    expect(errorsOf(withWrite({ op: "set_step", taskId: T_CHECK, process: "Grant cycle", step: 1 }), bundle)[0]).toContain(
+      'no process named "Grant cycle"'
+    );
+    expect(errorsOf(withWrite({ op: "set_step", taskId: T_CHECK, process: "CPO purchase cycle", step: 4 }), bundle)[0]).toContain(
+      "has 3 steps"
+    );
+    expect(
+      errorsOf(withWrite({ op: "save_process", name: "Anything", steps: ["a", "b"] }), bundle)[0]
+    ).toContain("save_process is not a run's to write");
+  });
+
   it("a set_project must name one of the user's projects, matched the way a spoken name is", () => {
     const withProject = (project: string) => {
       const out = validOutput();

@@ -150,6 +150,23 @@ export const writeSchema = z.discriminatedUnion("op", [
     tags: z.array(z.string().min(1).max(40)).max(8).default([]),
   }),
   z.object({ op: z.literal("clear_expectation"), expectationId: z.string().min(1).max(80) }),
+  // The user says the title is wrong and what it really is.
+  z.object({ op: z.literal("rename_task"), taskId, title: z.string().trim().min(1).max(200) }),
+  // A task placed on a step of one of the user's processes (PROCESSES in the
+  // input, by name): the steps become its stages, the ones before `step` done.
+  z.object({
+    op: z.literal("set_step"),
+    taskId,
+    process: z.string().trim().min(1).max(80),
+    step: z.number().int().min(1).max(40),
+  }),
+  // A recurring job described step by step; only the Write-your-own reader
+  // emits it (interpret.ts), never a run (prompt.ts WRITE_OPS leaves it out).
+  z.object({
+    op: z.literal("save_process"),
+    name: z.string().trim().min(1).max(80),
+    steps: z.array(z.string().trim().min(1).max(120)).min(2).max(40),
+  }),
   z.object({ op: z.literal("resolve") }),
 ]);
 export type Write = z.infer<typeof writeSchema>;
@@ -260,6 +277,9 @@ export type BundleWidget = {
   rows: { id: string; title: string }[];
 };
 
+/** A process the user described once: a name and its ordered steps. */
+export type BundleProcess = { name: string; steps: string[] };
+
 export type Bundle = {
   userId: string;
   project: { id: string; name: string; status: string };
@@ -280,6 +300,8 @@ export type Bundle = {
    * path resolves the name against the same list and never creates one.
    */
   projectNames: string[];
+  /** The user's processes (pipeline templates): the only names a set_step may use. */
+  processes?: BundleProcess[];
   /** Inputs that fell over a bound, so a run can say what it did not see. */
   dropped: { field: string; count: number }[];
   /** The mention terms memories and messages were matched on; visible for tests. */

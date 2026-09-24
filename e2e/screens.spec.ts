@@ -77,6 +77,10 @@ test("Interview", async ({ page }) => {
   await shoot(page, "/interview", "interview");
 });
 
+test("Memory", async ({ page }) => {
+  await shoot(page, "/memory", "memory");
+});
+
 test("Workspace", async ({ page }) => {
   await shoot(page, "/workspace", "workspace");
 });

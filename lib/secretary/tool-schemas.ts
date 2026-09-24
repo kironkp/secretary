@@ -309,7 +309,7 @@ export const toolSchemas = {
       .string()
       .min(1)
       .max(80)
-      .describe("The question_id printed on the OPEN QUESTIONS line in your briefing"),
+      .describe("The question_id printed on the OPEN QUESTIONS line in your briefing, or on the interview QUEUE / next_question"),
     answer_id: z
       .string()
       .min(1)
@@ -594,7 +594,7 @@ const toolDescriptions: Record<ToolName, string> = {
   resolve_clarification:
     "The user just answered a queued clarification — record the resolution. For entity questions the action fixes the store: same_entity adds an alias, different_person creates the new person, spelling_confirmed/corrected fix the name.",
   answer_question:
-    "The user answered one of the OPEN QUESTIONS in your briefing (the ones with question_id and answer ids). Call this with the question_id and the answer_id whose label matches what they said; put anything extra they said in note. When what they said matches NONE of the listed answers — they qualified it, gave a date or a reason, or said something else entirely — leave answer_id out and put their words in own_words; the app reads them against the question and answers with one sentence you relay. Never use resolve_clarification for these.",
+    "The user answered one of the OPEN QUESTIONS in your briefing (the ones with question_id and answer ids). Call this with the question_id and the answer_id whose label matches what they said; put anything extra they said in note. When what they said matches NONE of the listed answers — they qualified it, gave a date or a reason, or said something else entirely — leave answer_id out and put their words in own_words; the app reads them against the question and answers with one sentence you relay. On an interview call the result also carries next_question (null when the queue is done): ask it next. Never use resolve_clarification for these.",
   create_expectation:
     "NEVER make a rhetorical promise: the moment you say \"I'll be asking\" / \"check back in with me\" / \"I'll follow up\", call this in the SAME turn. The user reporting progress clears it silently; a miss makes you open the next session with it (per on_miss). This is what makes your follow-through real.",
   save_pipeline_template:

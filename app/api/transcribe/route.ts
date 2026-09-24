@@ -1,6 +1,7 @@
 // Dictation transcription (C-6 / Flow 5) — its own authenticated endpoint with
 // its own rate limit, separate from the Realtime session.
 import { NextResponse } from "next/server";
+import OpenAI from "openai";
 import { db } from "@/lib/db";
 import { usage } from "@/lib/db/schema";
 import { isErrorResponse, requireSession } from "@/lib/api";
@@ -42,6 +43,15 @@ export async function POST(req: Request) {
     return NextResponse.json({ text: result.text });
   } catch (e) {
     console.error("transcribe failed:", e instanceof Error ? e.message : e);
+    if (
+      e instanceof OpenAI.APIError &&
+      (e.code === "insufficient_quota" || /no credits|quota/i.test(e.message))
+    ) {
+      return NextResponse.json(
+        { error: "Dictation is offline: the OpenAI account is out of credits." },
+        { status: 402 },
+      );
+    }
     return NextResponse.json({ error: "Transcription failed. Try again." }, { status: 502 });
   }
 }

@@ -7,6 +7,47 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 ---
 
+## v0.13 — Talk to the Interview, and it remembers how your work goes (2026-09-23)
+
+this commit
+
+**Dictation.** "Transcription failed" was the OpenAI account out of credits
+(Heroku log: `429 You have no credits remaining`); the route now says so
+instead. The dictation bar was redesigned after ChatGPT/Claude: X on the
+left, a waveform that scrolls in from the right, Stop (transcribe into the
+box) and Send (transcribe and send) together on the right. It also stopped
+restarting the recording on every parent re-render. `DictationField` puts the
+same bar behind a mic in every answer box (Interview note, opened question,
+Write your own), and those boxes grow with the text.
+
+**Corrections are instructions.** "Do the US Bank statement makes no sense"
+was filed as a fact and the task stayed. The interpreter now drops or renames
+a row the user says is wrong (`rename_task`), and a rename and a step may sit
+beside another write on the same row.
+
+**Processes.** The CPO purchase cycle was stored as one flat sentence. A
+recurring job described step by step is now a `process` on the interpreter's
+output, saved as a `pipeline_templates` row (`save_process`, each step
+blocked by the one before). `set_step` puts a task on a step (the steps
+become its stages, earlier ones done). Every run and the chat/voice briefing
+see PROCESSES; the run may ask "Which step is CPO 2110 on?". Adding processes
+to the bundle hash re-reads every project once after deploy.
+
+**Memory tab.** Processes with numbered steps and every memory, newest
+first, each deletable in place. Six tabs now share the bar's width.
+
+**Interview orb.** A tap starts the existing call in an `interview` flavor:
+the open queue in the tab's order, one question at a time through
+`answer_question`, which on that call also returns `next_question`. The orb
+breathes with the audio and shows "Thinking…" while a tool runs. Not yet
+tried on a live call; a spoken "skip" does not move the card yet.
+
+SPEC: docs/understanding/SPEC.md §5 (three ops), §6 (corrections, processes,
+interview call), §9 (orb, Memory). Checks: tsc, eslint, 817/817 vitest,
+`next build`.
+
+---
+
 ## v0.12 — The agent guide (2026-09-16)
 
 this commit

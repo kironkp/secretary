@@ -3,7 +3,7 @@
 // React binding over the UI-free voice provider.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { OpenAIRealtimeVoice } from "@/lib/realtime/openai-webrtc";
-import type { ToolToast, VoiceErrorKind, VoiceStatus } from "@/lib/realtime/types";
+import type { ToolToast, VoiceErrorKind, VoiceFlavor, VoiceStatus } from "@/lib/realtime/types";
 
 export type TranscriptLine = { id: string; role: "user" | "assistant"; text: string; final: boolean };
 export type ActiveToast = ToolToast & { key: number };
@@ -20,6 +20,9 @@ export function useVoiceSession() {
   // Bumped when a tool outcome asks for the canvas (SPEC §7.6 auto-open);
   // the call UI watches it and flips its in-call canvas into view.
   const [canvasSeq, setCanvasSeq] = useState(0);
+  // Tool calls the model is waiting on right now: the pause on a call is
+  // the secretary thinking, and the interview orb shows it.
+  const [toolsInFlight, setToolsInFlight] = useState(0);
   const toastKey = useRef(0);
 
   // Lines are keyed by the server's item id: barge-in interleaves user and
@@ -48,12 +51,18 @@ export function useVoiceSession() {
   );
 
   const start = useCallback(
-    async (chosenModel: string, chosenVoice?: string, chosenEffort?: string) => {
+    async (
+      chosenModel: string,
+      chosenVoice?: string,
+      chosenEffort?: string,
+      flavor?: VoiceFlavor
+    ) => {
       const provider = new OpenAIRealtimeVoice();
       providerRef.current = provider;
       setTranscript([]);
       setToasts([]);
       setCanvasSeq(0);
+      setToolsInFlight(0);
       setError(null);
       provider.on("status", (s, detail) => {
         setStatus(s);
@@ -65,7 +74,9 @@ export function useVoiceSession() {
       provider.on("assistantTranscript", appendTranscript("assistant"));
       provider.on("assistantSpeaking", setAssistantSpeaking);
       provider.on("modelChanged", setModel);
+      provider.on("toolStarted", () => setToolsInFlight((n) => n + 1));
       provider.on("toolResult", (_name, toast, uiAction) => {
+        setToolsInFlight((n) => Math.max(0, n - 1));
         // A tool the secretary ran on a call may have written (an answer to a
         // question, a task closed): the screens that poll listen for this and
         // refresh at once, the same as after a tap.
@@ -77,7 +88,12 @@ export function useVoiceSession() {
         setTimeout(() => setToasts((prev) => prev.filter((t) => t.key !== key)), 6000);
       });
       try {
-        await provider.connect({ model: chosenModel, voice: chosenVoice, effort: chosenEffort });
+        await provider.connect({
+          model: chosenModel,
+          voice: chosenVoice,
+          effort: chosenEffort,
+          flavor,
+        });
       } catch {
         /* status/error events already emitted */
       }
@@ -89,6 +105,7 @@ export function useVoiceSession() {
     const conversationId = providerRef.current?.conversationId ?? null;
     await providerRef.current?.disconnect();
     providerRef.current = null;
+    setToolsInFlight(0);
     return conversationId;
   }, []);
 
@@ -123,6 +140,8 @@ export function useVoiceSession() {
     transcript,
     toasts,
     canvasSeq,
+    /** A tool call is in flight: the model is waiting on the server. */
+    thinking: toolsInFlight > 0,
     muted,
     assistantSpeaking,
     model,

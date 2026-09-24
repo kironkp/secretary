@@ -215,8 +215,17 @@ type Write =
   | { op: "set_project"; taskId: string; project: string }  // a project NAME, never a new one
   | { op: "remember_fact"; fact: string; tags: string[] }
   | { op: "clear_expectation"; expectationId: string }
+  | { op: "rename_task"; taskId: string; title: string }     // the user says the title is wrong
+  | { op: "set_step"; taskId: string; process: string; step: number } // a PROCESSES name; 1-based
+  | { op: "save_process"; name: string; steps: string[] }    // Write your own only; never a run's
   | { op: "resolve"; }; // this question only; always appended
 ```
+
+`rename_task` retitles a task the user says is misnamed ("that makes no
+sense, it's really the reconcile step"). `set_step` puts a task on a step of
+one of the user's processes (below): the process's steps become the task's
+stages, every step before `step` done. `save_process` stores a process; only
+the interpreter of the user's own words emits it (§6), never a run.
 
 That list is closed. A question cannot propose creating a task, moving money,
 sending anything, or touching another user's data. Answering a question with
@@ -328,7 +337,8 @@ last pill on every answering screen. One small model call
 OpenAI behind it) reads the words against the question, its evidence and its
 answers as the screen words them, and returns `{ answerId | null, fact |
 null, reply }`. It only ever chooses between the question's own answers and
-a fact; it never proposes a write, so §5's closed list holds here too.
+a fact; any writes it composes are parsed through §5's closed list, so that
+list holds here too.
 
 - `answerId` set: that answer is applied exactly as a tap would be (step 2
   and 3 above) with the words as the note; a `fact` the model distilled on
@@ -346,6 +356,26 @@ a fact; it never proposes a write, so §5's closed list holds here too.
   "Reading is paused: the model has no credits.") and otherwise "Could not
   read that right now."; what actually happened goes to the log, never to
   the screen.
+
+**Corrections are instructions.** Words that say a row in EVIDENCE is wrong
+("makes no sense", "that's not a thing", "that's really X") are an
+instruction about that row, not only a fact: `drop_task` when it should not
+exist, `rename_task` when the words say what it really is. Filing them as a
+memory and leaving the wrong task on the list is the defect to avoid.
+
+**Processes.** Some answers describe how a recurring job goes, step by step
+("for a CPO: get quotes, fill the Advantage form, get signatures from Marissa
+and Walter, …"). A process is stored as a `pipeline_templates` row: a short
+name ("CPO purchase cycle") and its ordered steps in the user's words, each
+blocked by the one before. The interpreter returns it as `process: { name,
+steps[] } | null` next to `fact`, and the answer path saves it through the
+`save_pipeline_template` tool (same name, case-insensitive, replaces the
+steps). The `fact` then stays one short sentence that points at it. The
+interpreter and every run see the user's processes as `PROCESSES` in their
+input, so an answer or a question can place a task on a step (`set_step`)
+and the record can say "CPO 2110 is on step 7, waiting for the US Bank
+statement". Processes and facts are both visible, and deletable, on the
+Memory tab.
 
 Voice: one new tool, `answer_question`, flat schema, bounded strings:
 
@@ -366,6 +396,19 @@ the mapping, the API does the writes. Still one question a session: while
 an understanding question is open the ASR clarification queue waits, its row
 left open rather than marked asked, and is reached again in a session with
 none open.
+
+**Interview call.** The orb on the Interview tab starts the same call in the
+`interview` flavor (`POST /api/realtime/token { flavor: "interview" }`). The
+briefing drops OPEN QUESTIONS and the clarification queue and spends no
+nudges; an INTERVIEW MODE block (lib/secretary/interview-voice.ts) carries the
+open queue in the Interview tab's order (up to 10, same line format), and
+marks the first surfaced. The model asks one at a time, says at most "One
+sec." while a tool runs, and never narrates. Tool calls from that call carry
+`surface: "interview"`; `answer_question` then also returns `next_question`
+(the next open question after the answered one in the pre-answer order,
+wrapping to the first still open, so skipped ones come back at the end;
+marked surfaced) or null, and `questions_left`. The same applies to a
+`not-open` refusal. No `ask_at_next_pause` rides on an interview call.
 
 ## 7. Words
 
@@ -544,6 +587,14 @@ day and under a second a run.
   marked instead. Answers go through §6 with `source: "interview"`. When
   the queue is empty, "Ask me more" runs the interview mode (§8) and "Done
   for now" goes to Today.
+  A 56px orb sits above the dock (a spacer keeps the page end clear). Tap:
+  the interview call (§6); tap again: end. Live, it breathes with the louder
+  voice; while a tool call is in flight it shows a turning ring and
+  "Thinking…". Reduced motion: no scale or rotation. An answer lands as
+  `secretary:data-changed`, so the card moves on as it does after a tap.
+- **Memory** (`app/(app)/memory`): the user's processes (§6, Processes) with
+  their numbered steps, and every memory, newest first; either can be
+  deleted there. Read-only otherwise.
 
 ### Nothing is cut off
 

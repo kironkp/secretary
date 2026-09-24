@@ -3,12 +3,13 @@
 // turns "hello" into "did you send the insurance form?".
 import { and, count, desc, eq, gte, inArray, isNotNull, lt, ne, or } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { documents, events, expectations, memories, projects, tasks, user } from "@/lib/db/schema";
+import { documents, events, expectations, memories, pipelineTemplates, projects, tasks, user } from "@/lib/db/schema";
 import { dayRangeInTz } from "@/lib/time";
 import { getRecentConversationTails } from "@/lib/db/queries";
 import { getPlanHead } from "@/lib/layout/plan-store";
 import { listQuestions } from "@/lib/understanding/questions";
-import { KIND_LABELS, markSurfaced } from "@/lib/understanding/today";
+import { markSurfaced } from "@/lib/understanding/today";
+import { questionLine } from "./interview-voice";
 import { nextClarification, openClarificationCount } from "./entities";
 import { isQuietHours } from "./persona";
 import { refreshProcrastinationScores } from "./procrastination";
@@ -82,7 +83,17 @@ async function canvasBlockList(
 export async function buildBriefing(
   userId: string,
   timezone: string,
-  opts: { consumeNudges?: boolean; excludeConversationId?: string | null } = {}
+  opts: {
+    consumeNudges?: boolean;
+    excludeConversationId?: string | null;
+    /**
+     * false on an interview call (lib/secretary/interview-voice.ts): the
+     * interview block carries the whole queue and is the job of the call, so
+     * neither OPEN QUESTIONS ("one per session") nor the clarification queue
+     * rides along to argue with it, and nothing here is marked asked.
+     */
+    questions?: boolean;
+  } = {}
 ): Promise<Briefing> {
   const now = new Date();
   const today = dayRangeInTz(timezone, now);
@@ -173,6 +184,11 @@ export async function buildBriefing(
     .where(eq(memories.userId, userId))
     .orderBy(desc(memories.createdAt))
     .limit(20);
+
+  const processRows = await db
+    .select({ name: pipelineTemplates.name, steps: pipelineTemplates.steps })
+    .from(pipelineTemplates)
+    .where(eq(pipelineTemplates.userId, userId));
 
   // Today's upcoming reminders (tasks + events) — briefings are the delivery
   // mechanism until push notifications exist.
@@ -461,6 +477,14 @@ export async function buildBriefing(
         `- [${e.id}] "${e.title}" · ${fmt(e.startsAt, timezone)}${projectName ? ` · project "${projectName}"` : ""}`
       );
   }
+  // How the user's recurring jobs go (Memory tab, Processes): all of them,
+  // since "I'm starting a CPO" must bring back the steps whatever their age.
+  if (processRows.length) {
+    lines.push("", "PROCESSES (how the user's recurring jobs go; a task's stages show which step it is on):");
+    for (const p of processRows) {
+      lines.push(`- ${p.name}: ${p.steps.map((st, i) => `${i + 1}. ${st.name}`).join(" → ")}`);
+    }
+  }
   if (memoryRows.length) {
     lines.push("", "Things you know about the user:");
     for (const m of memoryRows) lines.push(`- ${m.fact}`);
@@ -570,20 +594,19 @@ export async function buildBriefing(
   // below waits, untouched (nextClarification is not called, so its row is
   // not marked asked): one question a session is the persona's discipline,
   // and two blocks each saying "ask one" would be two questions.
-  const openQuestions = await listQuestions(userId, { limit: OPEN_QUESTION_COUNT });
-  if (openQuestions.length) {
+  const openQuestions =
+    opts.questions === false ? [] : await listQuestions(userId, { limit: OPEN_QUESTION_COUNT });
+  if (opts.questions === false) {
+    // An interview call: its own block asks the queue (see the option).
+  } else if (openQuestions.length) {
     lines.push(
       "",
       "OPEN QUESTIONS — from your reading of the user's projects. Ask the FIRST one at a natural pause, in your own words, offering its answers; one per session unless the user asks for more. When they answer, call answer_question with the question_id and the answer_id (note for anything extra). When what they said matches none of the listed answers, leave answer_id out and put their words in own_words; relay the reply it returns. Never resolve_clarification for these."
     );
-    for (const q of openQuestions) {
-      // Labels can carry commas ("Yes, that is the last step"), so the
-      // answers are separated by semicolons and the line's fields by " · ".
-      const answers = q.answers.map((a) => `${a.id}=${a.label}`).join("; ");
-      lines.push(
-        `- question_id: ${q.id} · ${KIND_LABELS[q.kind]} · ${q.question} · why: ${q.why} · answers: ${answers}`
-      );
-    }
+    // Labels can carry commas ("Yes, that is the last step"), so the
+    // answers are separated by semicolons and the line's fields by " · ";
+    // one format, shared with the interview call's queue.
+    for (const q of openQuestions) lines.push(`- ${questionLine(q)}`);
     await markSurfaced(userId, openQuestions, now);
   } else {
     // Clarification queue (SPEC §11): ONE question per session, at a natural

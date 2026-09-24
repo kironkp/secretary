@@ -17,6 +17,7 @@
 import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
+import { DictationField } from "@/components/chat/dictation-field";
 import type { AnswerResult } from "@/lib/understanding/answer";
 import type { Answer } from "@/lib/understanding/types";
 
@@ -92,7 +93,7 @@ export function AnswerButtons({
   // null until the first tap or Cancel: until then the URL decides.
   const [opened, setOpened] = useState<boolean | null>(null);
   const [text, setText] = useState("");
-  const field = useRef<HTMLInputElement>(null);
+  const field = useRef<HTMLTextAreaElement>(null);
   const ownPill = useRef<HTMLButtonElement>(null);
   const open = !!onOwnWords && !onWriteYourOwn && (opened ?? fromUrl);
 
@@ -126,8 +127,8 @@ export function AnswerButtons({
     field.current?.focus();
   };
 
-  const send = async () => {
-    const trimmed = text.trim();
+  const send = async (words = text) => {
+    const trimmed = words.trim();
     if (!trimmed || disabled || !onOwnWords) return;
     const taken = await onOwnWords(trimmed);
     if (taken === false) return;
@@ -157,14 +158,15 @@ export function AnswerButtons({
         }}
       >
         <div className="flex gap-2">
-          <input
-            ref={field}
+          <div className="min-w-0 flex-1">
+          <DictationField
+            fieldRef={field}
             data-own-field
-            type="text"
             value={text}
             maxLength={OWN_WORDS_MAX}
             disabled={disabled}
-            onChange={(e) => setText(e.target.value)}
+            onChange={setText}
+            onSend={(words) => void send(words)}
             onKeyDown={(e) => {
               // Escape is the keyboard's Cancel: back to the pills, words dropped.
               if (e.key === "Escape" && !disabled) {
@@ -176,8 +178,9 @@ export function AnswerButtons({
             aria-label="Your answer, in your own words"
             autoComplete="off"
             enterKeyHint="send"
-            className={`flex-1 ${FIELD_CLASS} ${type}`}
+            className={`${FIELD_CLASS} ${type}`}
           />
+          </div>
           <button
             type="submit"
             data-own-send

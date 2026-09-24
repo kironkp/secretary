@@ -20,6 +20,11 @@ export type VoiceErrorKind =
 
 export type ToolToast = { icon: string; text: string };
 
+/** What a call is for, when it is not an ordinary one. "interview" is the orb
+ *  on the Interview tab (lib/secretary/interview-voice.ts). Kept here, not
+ *  imported from the server module, so this file stays UI- and server-free. */
+export type VoiceFlavor = "interview";
+
 /** UI-only side channel on a tool outcome (SPEC §7.6 auto-open) — the shell
  *  acts on it; the model never sees it. */
 export type ToolUIAction = { type: "show_canvas" };
@@ -31,6 +36,8 @@ export type VoiceEvents = {
   userTranscript: (id: string, text: string, final: boolean) => void;
   assistantTranscript: (id: string, text: string, final: boolean) => void;
   assistantSpeaking: (speaking: boolean) => void;
+  /** A tool call left for the server: the model is waiting on it (the pause). */
+  toolStarted: (name: string) => void;
   toolResult: (name: string, toast?: ToolToast, uiAction?: ToolUIAction) => void;
   modelChanged: (model: string) => void;
 };

@@ -44,9 +44,11 @@ import {
 } from "@/components/today/answer-buttons";
 import { kindClass, kindLabel, receiptInWords } from "@/components/today/copy";
 import { ThinkingStrip, type StripActivity } from "@/components/today/thinking-strip";
+import { DictationField } from "@/components/chat/dictation-field";
 import { ErrorNote } from "@/components/ui";
 import type { EvidenceView, InterviewData, QuestionView } from "@/lib/understanding/today";
 import { footerLine, progressLine } from "./words";
+import { InterviewOrb } from "./interview-orb";
 
 /** A question answered by voice or on another device disappears within this. */
 const POLL_MS = 60_000;
@@ -137,7 +139,7 @@ export function InterviewView({
   const [askedFor, setAskedFor] = useState<boolean | null>(null);
   const fromUrl = useOwnWordsFromUrl();
   const askedForWords = askedFor ?? fromUrl;
-  const noteField = useRef<HTMLInputElement>(null);
+  const noteField = useRef<HTMLTextAreaElement>(null);
   const [evidenceOpen, setEvidenceOpen] = useState(false);
   const [answering, setAnswering] = useState(false);
   /** The answer just given, by question and id ("own" for the words), so its pill stays lit. */
@@ -307,8 +309,8 @@ export function InterviewView({
    * field asks for them (focus, and "Your answer" in place of the note's
    * prompt), and Enter sends once there are some.
    */
-  const writeYourOwn = (question: QuestionView) => {
-    const trimmed = note.trim();
+  const writeYourOwn = (question: QuestionView, words = note) => {
+    const trimmed = words.trim();
     if (trimmed) {
       void post(question, { text: trimmed, source: "interview" });
       return;
@@ -426,14 +428,14 @@ export function InterviewView({
             </h2>
             {current.why && <p className="text-[15px] leading-[1.4] wrap-anywhere">{current.why}</p>}
 
-            <input
-              ref={noteField}
+            <DictationField
+              fieldRef={noteField}
               id="interview-note"
-              type="text"
               value={note}
               maxLength={OWN_WORDS_MAX}
               disabled={answering}
-              onChange={(e) => setNote(e.target.value)}
+              onChange={setNote}
+              onSend={(words) => writeYourOwn(current, words)}
               onKeyDown={(e) => {
                 // Enter sends only once the field was asked for the answer:
                 // a note typed to go with a pill is not sent on its own.
@@ -548,6 +550,7 @@ export function InterviewView({
       <p className="px-1 text-[13px] text-faint" data-interview-footer>
         {footer}
       </p>
+      <InterviewOrb />
     </div>
   );
 }

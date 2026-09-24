@@ -117,6 +117,12 @@ function writeLine(w: Write): string {
       return `remember_fact "${w.fact}"${w.tags.length ? ` [${w.tags.join(", ")}]` : ""}`;
     case "clear_expectation":
       return `clear_expectation ${w.expectationId}`;
+    case "rename_task":
+      return `rename_task ${w.taskId} -> "${w.title}"`;
+    case "set_step":
+      return `set_step ${w.taskId} -> ${w.process} step ${w.step}`;
+    case "save_process":
+      return `save_process "${w.name}" (${w.steps.length} steps)`;
     case "resolve":
       return "resolve";
   }

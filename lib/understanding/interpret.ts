@@ -38,7 +38,7 @@ import { callByProvider, ModelOutputError, type CallMeta } from "./run";
 import type { QuestionView } from "./today";
 import { flatToWrite, writeOut } from "./prompt";
 import { nearestId } from "./repair";
-import { writeSchema, type Write } from "./types";
+import { writeSchema, type BundleProcess, type Write } from "./types";
 
 export type Interpretation = {
   /** One of the question's answer ids, or null when the words mean none of them. */
@@ -58,6 +58,8 @@ export type Interpretation = {
   rejected: RejectedWrite[];
   /** One durable sentence in the user's words, or null when the words add nothing. */
   fact: string | null;
+  /** A recurring job the words describe step by step (SPEC §6, Processes), else null. */
+  process: { name: string; steps: string[] } | null;
   /** One sentence back to the user. Never claims that anything was done. */
   reply: string;
 };
@@ -124,16 +126,19 @@ const FALLBACK_REPLY = "Noted.";
  */
 export const INTERPRET_SYSTEM = `You read one answer for Secretary, a personal assistant. Secretary asked the user a question about one of their projects and offered a few answers to tap; the user typed their own words instead. Decide what those words mean against the listed answers, and write one sentence back.
 
-Return JSON with four fields.
+Return JSON with five fields.
 
 answerId: the id of the listed answer the user's words clearly mean, else null. Pick one only when the words say what that answer says: "yes" to a yes-or-no question means the yes answer, "the second one" means the second listed answer, "close them" means the answer that closes them. When the words qualify an answer, add a condition, or say something the answers do not cover, answerId is null.
 
 writes: the changes the user is telling Secretary to make, when answerId is null and the words are a plain instruction about the rows under EVIDENCE. Leave it empty ([]) whenever answerId is set, whenever the words are a statement rather than an instruction, and whenever you are not sure which rows are meant. This field exists because the listed answers are only a few guesses: "get rid of those" about four stale rows is an instruction, and filing it as a note instead of doing it is the thing to avoid. Each write is one object:
-  op: one of complete_task (it is finished), drop_task (it should not be on the list at all), set_due (dueAt, YYYY-MM-DD in the user's timezone), set_recurrence (recurrence), set_blocked_reason (reason; an empty reason unblocks it), set_project (project, a name), clear_expectation (expectationId).
+  op: one of complete_task (it is finished), drop_task (it should not be on the list at all), set_due (dueAt, YYYY-MM-DD in the user's timezone), set_recurrence (recurrence), set_blocked_reason (reason; an empty reason unblocks it), set_project (project, a name), clear_expectation (expectationId), rename_task (title: what the task really is, in the user's words), set_step (process: a name under PROCESSES, or the process you return in this answer; step: the 1-based step the task is on).
   taskId / expectationId: the id from EVIDENCE, copied exactly. Every id you use must be one shown there — a row the question did not show is not yours to change, and naming one throws the whole instruction away.
+A correction is an instruction. When the words say a row under EVIDENCE is wrong — "makes no sense", "that's not a thing", "that's really the reconcile step" — write it: drop_task when it should not exist, rename_task when the words say what it really is, set_step when they say where it stands in a process. Filing a correction as a fact and leaving the wrong row on the list is the thing to avoid.
 Say every row the instruction covers. "Get rid of them" about three listed rows is three drop_task writes, not one. Do not write a row the user did not mean: "drop the first one" is one write.
 
-fact: when the words add information — a date, a reason, a decision, a correction, what is really going on — one sentence in the user's own words that will still be true next month, else null. Keep the user's names, numbers and dates exactly as written; never add any. Never both answerId null and fact null unless the words say nothing at all.
+process: when the words describe how a job the user does again and again goes, step by step ("for a CPO, first I get quotes, then …"), return { name, steps }: name is a short name for the job ("CPO purchase cycle"; the user's own name when they gave one, or an existing name under PROCESSES when it is the same job, so it is replaced rather than duplicated), steps are the steps in order, each a few words in the user's own words ("Get vendor quotes", "Fill out the Advantage form", "Signatures from Marissa and Walter"). Keep every step the user said and add none. Else null.
+
+fact: when the words add information — a date, a reason, a decision, a correction, what is really going on — one sentence in the user's own words that will still be true next month, else null. Keep the user's names, numbers and dates exactly as written; never add any. When you return a process, the fact is one short sentence that points at it ("A CPO follows the CPO purchase cycle."), not the steps again. Never both answerId null and fact null unless the words say nothing at all.
 
 reply: one plain sentence to the user saying what you read their words to mean. Address them as "you" and say "I" for Secretary. You are reading, not acting: never say that anything was done, changed, closed, saved, noted or remembered, and never promise to do anything — what actually happened is shown to the user separately. No preamble, no thanks, no exclamation marks.
 
@@ -150,7 +155,8 @@ const quote = (s: string): string => `"${s.replace(/\s+/g, " ").trim()}"`;
 export function renderInterpretInput(
   question: QuestionView,
   text: string,
-  clock: { localDate: string; timezone: string }
+  clock: { localDate: string; timezone: string },
+  processes: BundleProcess[] = []
 ): string {
   const lines: string[] = [];
   lines.push(`TODAY: ${clock.localDate} (${clock.timezone})`);
@@ -165,6 +171,15 @@ export function renderInterpretInput(
   for (const e of question.evidenceView) {
     const meta = e.meta ? ` (${e.meta})` : "";
     lines.push(`- [${e.type}:${e.id}] ${e.label}: ${e.text}${meta}`);
+  }
+
+  // The user's processes: names a set_step may use, and the one to replace
+  // when the words describe the same job again.
+  if (processes.length) {
+    lines.push("", "PROCESSES:");
+    for (const p of processes) {
+      lines.push(`- ${p.name}: ${p.steps.map((s, i) => `${i + 1}. ${s}`).join(" → ")}`);
+    }
   }
 
   lines.push("", "ANSWERS:");
@@ -203,7 +218,7 @@ const interpretWriteOut = writeOut.extend({
   op: z
     .string()
     .describe(
-      "One of: complete_task, drop_task, set_due, set_recurrence, set_blocked_reason, clear_expectation"
+      "One of: complete_task, drop_task, set_due, set_recurrence, set_blocked_reason, clear_expectation, rename_task, set_step"
     ),
 });
 
@@ -228,6 +243,14 @@ const interpretationOut = z.object({
     .string()
     .nullable()
     .describe("One durable sentence in the user's own words when they add information, else null"),
+  process: z
+    .object({
+      name: z.string().describe("A short name for the recurring job"),
+      steps: z.array(z.string()).describe("Its steps in order, a few words each, in the user's words"),
+    })
+    .nullable()
+    .default(null)
+    .describe("A recurring job the words describe step by step, else null"),
   reply: z.string().describe("One plain sentence back to the user; claims nothing was done"),
 });
 
@@ -387,16 +410,21 @@ export async function interpretAnswer(
   timezone: string,
   question: QuestionView,
   text: string,
-  call?: InterpretCall
+  call?: InterpretCall,
+  processes: BundleProcess[] = []
 ): Promise<Interpretation> {
   const words = text.trim();
-  if (!words) return { answerId: null, writes: [], rejected: [], fact: null, reply: FALLBACK_REPLY };
+  if (!words) {
+    return { answerId: null, writes: [], rejected: [], fact: null, process: null, reply: FALLBACK_REPLY };
+  }
 
   const model = call ?? (await defaultInterpretCall(userId));
-  const user = renderInterpretInput(question, words, {
-    localDate: localDateInTz(timezone, new Date()),
-    timezone,
-  });
+  const user = renderInterpretInput(
+    question,
+    words,
+    { localDate: localDateInTz(timezone, new Date()), timezone },
+    processes
+  );
 
   let result: Awaited<ReturnType<InterpretCall>>;
   try {
@@ -445,7 +473,7 @@ export async function interpretAnswer(
   const { writes, rejected } = answerId
     ? { writes: [], rejected: [] }
     : checkedComposed(parsed.data.writes, question);
-  return { answerId, writes, rejected, fact, reply };
+  return { answerId, writes, rejected, fact, process: checkedProcess(parsed.data.process), reply };
 }
 
 /**
@@ -480,7 +508,8 @@ function checkedComposed(
 
   for (const w of flat) {
     const op = typeof w === "object" && w !== null ? String((w as { op?: unknown }).op ?? "") : "";
-    if (op === "resolve" || op === "remember_fact") continue;
+    // save_process is the `process` field's job, like remember_fact is the fact's.
+    if (op === "resolve" || op === "remember_fact" || op === "save_process") continue;
     if (op === "set_project") {
       rejected.push({ op, id: null, error: "I cannot move a task from here" });
       continue;
@@ -501,8 +530,20 @@ function checkedComposed(
   return { writes, rejected };
 }
 
+/** The process, trimmed and bounded the way save_process takes it, or null. */
+function checkedProcess(p: { name: string; steps: string[] } | null | undefined) {
+  if (!p) return null;
+  const name = p.name.trim().slice(0, 80);
+  const steps = p.steps.map((s) => s.trim().slice(0, 120)).filter(Boolean).slice(0, 40);
+  return name && steps.length >= 2 ? { name, steps } : null;
+}
+
 /** A write's row, as "type:id", for the one-write-per-row rule. */
 function targetKey(w: Write): string | null {
+  // A new title and a step sit beside a status change on the same row
+  // ("that's really the reconcile step" is a rename AND a step); two of the
+  // same, or two status changes, are still one write.
+  if (w.op === "rename_task" || w.op === "set_step") return `${w.op}:task:${w.taskId}`;
   if ("taskId" in w) return `task:${w.taskId}`;
   if ("expectationId" in w) return `expectation:${w.expectationId}`;
   return null;

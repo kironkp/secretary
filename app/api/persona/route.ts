@@ -24,6 +24,23 @@ const bodySchema = z.object({
   voiceEffort: z.enum(["auto", "low", "medium", "high"]).optional(),
 });
 
+/**
+ * The voice preferences only, for a surface that starts a call without the
+ * chat dock's bootstrap (the interview orb): the same voice everywhere.
+ */
+export async function GET() {
+  const session = await requireSession();
+  if (isErrorResponse(session)) return session;
+  const [row] = await db
+    .select({ persona: user.persona })
+    .from(user)
+    .where(eq(user.id, session.id));
+  return NextResponse.json({
+    voice: row?.persona?.voice ?? "marin",
+    voiceEffort: row?.persona?.voiceEffort ?? "auto",
+  });
+}
+
 export async function POST(req: Request) {
   const session = await requireSession();
   if (isErrorResponse(session)) return session;

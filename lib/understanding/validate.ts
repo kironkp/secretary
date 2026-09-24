@@ -343,7 +343,11 @@ function writeKey(w: Write): string {
     case "set_recurrence":
     case "set_blocked_reason":
     case "set_project":
+    case "rename_task":
+    case "set_step":
       return `${w.op}:${w.taskId}`;
+    case "save_process":
+      return `${w.op}:${w.name.toLowerCase()}`;
     case "clear_expectation":
       return `${w.op}:${w.expectationId}`;
     case "remember_fact":
@@ -549,6 +553,23 @@ export function validateRunOutput(output: unknown, bundle: Bundle): ValidationRe
             `${wpath}: no project named "${w.project}"; use one listed under PROJECTS: ${bundle.projectNames.join(", ") || "(none)"}`
           );
         }
+        // A set_step names a process; the apply path finds it by the same
+        // name, so one that is not under PROCESSES would fail when answered.
+        if (w.op === "set_step") {
+          const names = (bundle.processes ?? []).map((p) => p.name);
+          const proc = (bundle.processes ?? []).find(
+            (p) => p.name.toLowerCase() === w.process.toLowerCase()
+          );
+          if (!proc) {
+            errors.push(
+              `${wpath}: no process named "${w.process}"; use one listed under PROCESSES: ${names.join(", ") || "(none)"}`
+            );
+          } else if (w.step > proc.steps.length) {
+            errors.push(`${wpath}: "${proc.name}" has ${proc.steps.length} steps, not ${w.step}`);
+          }
+        }
+        // A run never saves a process; only the user's own words do (SPEC §5).
+        if (w.op === "save_process") errors.push(`${wpath}: save_process is not a run's to write`);
         const key = writeKey(w);
         if (seen.has(key)) errors.push(`${wpath}: duplicate write ${key}`);
         seen.add(key);

@@ -12,6 +12,7 @@ import { checkVoiceQuota } from "@/lib/rate-limit";
 import { buildBriefing } from "@/lib/secretary/briefing";
 import { buildLexicon, lexiconPrompt } from "@/lib/secretary/lexicon";
 import { buildInstructions, VOICE_MODALITY_RULES } from "@/lib/secretary/persona";
+import { interviewSessionBlock, VOICE_FLAVORS } from "@/lib/secretary/interview-voice";
 import { openAIVoiceToolDefs } from "@/lib/secretary/tool-schemas";
 import {
   openaiKeyFor,
@@ -38,6 +39,10 @@ const bodySchema = z.object({
   // reasoning.effort). "auto" = omit and let the API default. Higher = the
   // voice pauses longer before speaking.
   effort: z.enum(["auto", "low", "medium", "high"]).optional(),
+  // "interview": the orb on the Interview tab. Same persona, briefing and
+  // tools; the job is the open queue, one question at a time
+  // (lib/secretary/interview-voice.ts).
+  flavor: z.enum(VOICE_FLAVORS).optional(),
 });
 
 const ALLOWED_MODELS = new Set([REALTIME_MODEL_DEFAULT, REALTIME_MODEL_MINI]);
@@ -108,11 +113,18 @@ export async function POST(req: Request) {
       .where(eq(conversations.id, conversationId));
   }
 
+  const interview = parsed.flavor === "interview";
   const briefing = await buildBriefing(user.id, user.timezone, {
-    consumeNudges: !parsed.reconnect,
+    // an interview call nudges nothing, so it spends no nudges
+    consumeNudges: !parsed.reconnect && !interview,
     // this call's own thread shouldn't echo back as a "prior session"
     excludeConversationId: conversationId,
+    // the interview block below is the call's questions
+    questions: !interview,
   });
+  const interviewBlock = interview
+    ? await interviewSessionBlock(user.id, { reconnect: parsed.reconnect })
+    : null;
   const [[userRow], lexicon] = await Promise.all([
     db.select({ persona: userTable.persona }).from(userTable).where(eq(userTable.id, user.id)),
     buildLexicon(user.id),
@@ -124,6 +136,8 @@ export async function POST(req: Request) {
     }),
     "",
     VOICE_MODALITY_RULES,
+    // Last, so it is the job of the call.
+    ...(interviewBlock ? ["", interviewBlock] : []),
     ...(elMouth
       ? [
           "",

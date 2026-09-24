@@ -10,6 +10,7 @@ import type {
   ToolUIAction,
   VoiceEvents,
   VoiceErrorKind,
+  VoiceFlavor,
   VoiceProvider,
   VoiceStatus,
 } from "./types";
@@ -41,6 +42,8 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
   voice: string | undefined;
   /** Realtime thinking depth ("auto" = API default). Higher = slower to speak. */
   effort: string | undefined;
+  /** What the call is for; kept across reconnects and voice/model switches. */
+  flavor: VoiceFlavor | undefined;
   private mouth: ElevenLabsMouth | null = null;
 
   private get elMouthMode(): boolean {
@@ -137,11 +140,22 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
     this.emit("status", status, detail);
   }
 
-  async connect({ model, voice, effort }: { model: string; voice?: string; effort?: string }): Promise<void> {
+  async connect({
+    model,
+    voice,
+    effort,
+    flavor,
+  }: {
+    model: string;
+    voice?: string;
+    effort?: string;
+    flavor?: VoiceFlavor;
+  }): Promise<void> {
     this.intentionalClose = false;
     this.model = model;
     if (voice) this.voice = voice;
     if (effort) this.effort = effort;
+    if (flavor) this.flavor = flavor;
     if (this.elMouthMode && !this.mouth) {
       this.mouth = new ElevenLabsMouth();
       this.mouth.onSpeakingChange = (speaking) => this.emit("assistantSpeaking", speaking);
@@ -165,6 +179,7 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
 
     this.setStatus(this.reconnects > 0 ? "reconnecting" : "connecting");
 
+    const resuming = this.reconnects > 0 || Boolean(this.conversationId);
     const tokenRes = await fetch("/api/realtime/token", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -173,7 +188,8 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
         voice: this.voice,
         effort: this.effort,
         conversationId: this.conversationId,
-        reconnect: this.reconnects > 0 || Boolean(this.conversationId),
+        reconnect: resuming,
+        ...(this.flavor ? { flavor: this.flavor } : {}),
       }),
     });
     if (!tokenRes.ok) {
@@ -263,6 +279,10 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
     this.watchMicTrack();
     this.scheduleDebugBeacons();
     window.addEventListener("pagehide", this.pagehide);
+    // An interview opens with the first question: the user tapped the orb to
+    // be asked, so the secretary speaks first. An ordinary call waits for
+    // the user; a resumed one never re-opens.
+    if (this.flavor === "interview" && !resuming) this.send({ type: "response.create" });
   }
 
   /**
@@ -480,12 +500,27 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
     } catch {
       /* leave empty */
     }
-    const res = await fetch("/api/secretary/tools", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, args, conversationId: this.conversationId }),
-    });
-    const body = res.ok ? await res.json() : { result: { error: "Tool call failed" } };
+    this.emit("toolStarted", name);
+    // Whatever happens, the model gets an output and the UI a toolResult: a
+    // thrown fetch used to leave the call waiting on an answer that never came.
+    let body: { result?: unknown; toast?: unknown; uiAction?: unknown } = {
+      result: { error: "Tool call failed" },
+    };
+    try {
+      const res = await fetch("/api/secretary/tools", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          args,
+          conversationId: this.conversationId,
+          ...(this.flavor ? { surface: this.flavor } : {}),
+        }),
+      });
+      if (res.ok) body = await res.json();
+    } catch {
+      /* the default above */
+    }
     this.send({
       type: "conversation.item.create",
       item: {

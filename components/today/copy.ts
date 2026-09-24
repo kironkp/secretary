@@ -97,6 +97,9 @@ export function writesInWords(writes: WordedWrite[]): string {
     const under = underProject(writes);
     parts.push(c.set_project === 1 ? `files it${under}` : `files ${c.set_project} tasks${under}`);
   }
+  if (c.rename_task) parts.push(c.rename_task === 1 ? "renames it" : `renames ${c.rename_task} tasks`);
+  if (c.set_step) parts.push(c.set_step === 1 ? "sets its step" : `sets ${c.set_step} steps`);
+  if (c.save_process) parts.push("saves a process");
   if (c.remember_fact) {
     parts.push(c.remember_fact === 1 ? "remembers a fact" : `remembers ${c.remember_fact} facts`);
   }
@@ -133,6 +136,9 @@ export function appliedInWords(applied: WordedWrite[]): string {
     const under = underProject(applied);
     parts.push(c.set_project === 1 ? `filed it${under}` : `filed ${c.set_project} tasks${under}`);
   }
+  if (c.rename_task) parts.push(c.rename_task === 1 ? "renamed a task" : `renamed ${c.rename_task} tasks`);
+  if (c.set_step) parts.push(c.set_step === 1 ? "set a task's step" : `set ${c.set_step} tasks' steps`);
+  if (c.save_process) parts.push("saved a process");
   if (c.remember_fact) {
     parts.push(c.remember_fact === 1 ? "remembered a fact" : `remembered ${c.remember_fact} facts`);
   }

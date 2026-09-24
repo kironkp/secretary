@@ -443,8 +443,9 @@ export function ChatThread({
     }
   };
 
-  const send = async () => {
-    const text = input.trim();
+  // override: text to send in place of the input (dictation's Send button).
+  const send = async (override?: string) => {
+    const text = (override ?? input).trim();
     const ready = pending.filter((a) => a.id);
     if ((!text && ready.length === 0) || sending) return;
     if (pending.some((a) => !a.id && !a.error)) return; // uploads still in flight
@@ -715,9 +716,11 @@ export function ChatThread({
           {mode === "dictation" ? (
             <DictationBar
               onCancel={() => setMode("idle")}
-              onText={(text) => {
-                setInput((prev) => (prev ? `${prev} ${text}` : text));
+              onText={(text, andSend) => {
+                const full = input ? `${input} ${text}` : text;
                 setMode("idle");
+                if (andSend) void send(full);
+                else setInput(full);
               }}
               onError={(message) => {
                 setError(message);
@@ -895,7 +898,7 @@ export function ChatThread({
               )}
               {input.trim() || pending.some((a) => a.id) ? (
                 <button
-                  onClick={send}
+                  onClick={() => send()}
                   disabled={sending || pending.some((a) => !a.id && !a.error)}
                   title="Send"
                   aria-label="Send message"

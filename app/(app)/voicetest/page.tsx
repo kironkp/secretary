@@ -46,6 +46,7 @@ function TalkPreview({ minimized, state }: { minimized: boolean; state: PreviewS
       transcript: state === "connected" ? PREVIEW_LINES : [],
       toasts: [],
       canvasSeq: 0,
+      thinking: false,
       muted,
       assistantSpeaking: state === "connected",
       model: "gpt-realtime-2.1",

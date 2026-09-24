@@ -14,6 +14,9 @@ const bodySchema = z.object({
   name: z.string(),
   args: z.unknown().optional(),
   conversationId: z.string().nullish(),
+  // The call's flavor (lib/secretary/interview-voice.ts): on an interview
+  // call answer_question also returns the next question to ask.
+  surface: z.enum(["interview"]).optional(),
 });
 
 export async function POST(req: Request) {
@@ -53,7 +56,7 @@ export async function POST(req: Request) {
   }
 
   const outcome = await executeTool(
-    { userId: user.id, timezone: user.timezone, conversationId, anchorMessageId },
+    { userId: user.id, timezone: user.timezone, conversationId, anchorMessageId, surface: parsed.surface },
     parsed.name,
     parsed.args
   );
@@ -62,7 +65,13 @@ export async function POST(req: Request) {
   // tool results are the injection channel back into the realtime session.
   // At most one rides along, marked asked — the model raises it at the next
   // natural pause, never mid-flow.
-  if (parsed.name !== "queue_clarification" && parsed.name !== "resolve_clarification") {
+  // Not on an interview call: that call's one job is the understanding
+  // queue, and while it is open the ASR queue waits (SPEC §6, "Voice").
+  if (
+    parsed.surface !== "interview" &&
+    parsed.name !== "queue_clarification" &&
+    parsed.name !== "resolve_clarification"
+  ) {
     const clarification = await nextClarification(user.id);
     if (clarification && outcome.result && typeof outcome.result === "object") {
       (outcome.result as Record<string, unknown>).ask_at_next_pause = clarification.question;

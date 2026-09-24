@@ -14,6 +14,7 @@
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { DictationField } from "@/components/chat/dictation-field";
 import { ErrorNote } from "@/components/ui";
 import type { EvidenceView, QuestionView as QuestionData } from "@/lib/understanding/today";
 import {
@@ -77,7 +78,7 @@ export function QuestionView({ initial }: { initial: QuestionData }) {
   const [askedFor, setAskedFor] = useState<boolean | null>(null);
   const fromUrl = useOwnWordsFromUrl();
   const askedForWords = askedFor ?? fromUrl;
-  const noteField = useRef<HTMLInputElement>(null);
+  const noteField = useRef<HTMLTextAreaElement>(null);
   const [answering, setAnswering] = useState(false);
   /** The answer just given, by id ("own" for the words), so its pill stays lit. */
   const [selected, setSelected] = useState<string | null>(null);
@@ -168,8 +169,8 @@ export function QuestionView({ initial }: { initial: QuestionData }) {
    * field asks for them (focus, and "Your answer" in place of the note's
    * prompt), and Enter sends once there are some.
    */
-  const writeYourOwn = () => {
-    const trimmed = note.trim();
+  const writeYourOwn = (words = note) => {
+    const trimmed = words.trim();
     if (trimmed) {
       void post({ text: trimmed, source: "today" });
       return;
@@ -224,14 +225,14 @@ export function QuestionView({ initial }: { initial: QuestionData }) {
 
         {open ? (
           <>
-            <input
-              ref={noteField}
+            <DictationField
+              fieldRef={noteField}
               id="answer-note"
-              type="text"
               value={note}
               maxLength={OWN_WORDS_MAX}
               disabled={answering}
-              onChange={(e) => setNote(e.target.value)}
+              onChange={setNote}
+              onSend={(words) => writeYourOwn(words)}
               onKeyDown={(e) => {
                 // Enter sends only once the field was asked for the answer:
                 // a note typed to go with a pill is not sent on its own.

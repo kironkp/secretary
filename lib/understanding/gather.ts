@@ -20,6 +20,7 @@ import {
   projects,
   records,
   tasks,
+  pipelineTemplates,
 } from "@/lib/db/schema";
 import { dayRangeInTz } from "@/lib/time";
 import { resolveBinding } from "@/lib/workspace/bindings";
@@ -33,6 +34,7 @@ import type {
   BundleExpectation,
   BundleMemory,
   BundleMessage,
+  BundleProcess,
   BundleTask,
   BundleWidget,
 } from "./types";
@@ -83,6 +85,8 @@ export type GatherOptions = {
   messages?: MessageRow[];
   /** The user's project names (loadProjectNames), read once by gatherAll. */
   projectNames?: string[];
+  /** The user's processes (loadProcesses), read once by gatherAll. */
+  processes?: BundleProcess[];
 };
 
 const iso = (d: Date | null | undefined): string | null => (d ? d.toISOString() : null);
@@ -99,6 +103,19 @@ export async function loadProjectNames(userId: string): Promise<string[]> {
     .where(and(eq(projects.userId, userId), ne(projects.status, "archived")))
     .orderBy(asc(projects.name));
   return rows.map((r) => r.name);
+}
+
+/** The user's processes (pipeline templates), by name, each with its steps in order. */
+export async function loadProcesses(userId: string): Promise<BundleProcess[]> {
+  const rows = await db
+    .select({ name: pipelineTemplates.name, steps: pipelineTemplates.steps })
+    .from(pipelineTemplates)
+    .where(eq(pipelineTemplates.userId, userId))
+    .orderBy(asc(pipelineTemplates.name));
+  return rows.map((r) => ({
+    name: r.name,
+    steps: Array.isArray(r.steps) ? r.steps.map((s) => s.name) : [],
+  }));
 }
 
 /** YYYY-MM-DD for `date` as the user's wall calendar reads it. */
@@ -506,6 +523,7 @@ export async function gatherProject(
   const owned = opts.widgets ?? (await widgetsByOwner(userId, tz, now));
   const widgets = owned.get(project.id) ?? [];
   const projectNames = opts.projectNames ?? (await loadProjectNames(userId));
+  const processes = opts.processes ?? (await loadProcesses(userId));
 
   const localDate = localDateInTz(tz, now);
   return {
@@ -527,6 +545,7 @@ export async function gatherProject(
     previousRecord,
     widgets,
     projectNames,
+    processes,
     dropped,
     terms,
   };
@@ -587,6 +606,8 @@ export function hashBundle(bundle: Bundle): string {
     documents: byId(bundle.documents).map((d) => [d.id, d.updatedAt]),
     expectations: byId(bundle.expectations).map((e) => [e.id, e.status]),
     widgets: byId(bundle.widgets).map((w) => [w.id, w.rows.map((r) => r.id).sort()]),
+    // A process saved or changed is news to every project that might hold one of its jobs.
+    processes: (bundle.processes ?? []).map((p) => [p.name, p.steps]),
   };
   return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
 }
@@ -609,6 +630,7 @@ export async function gatherAll(userId: string, opts: GatherOptions): Promise<Bu
     memories: opts.memories ?? (await loadMemories(userId)),
     messages: opts.messages ?? (await loadMessages(userId, now)),
     projectNames: opts.projectNames ?? (await loadProjectNames(userId)),
+    processes: opts.processes ?? (await loadProcesses(userId)),
   };
   const active = await db
     .select({ id: projects.id })

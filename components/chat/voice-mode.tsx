@@ -35,6 +35,7 @@ import {
   unlockRemoteAudio,
 } from "@/lib/realtime/remote-audio";
 import { requestCanvasRefresh } from "@/lib/canvas/refresh";
+import type { VoiceFlavor } from "@/lib/realtime/types";
 import { useVoiceSession, type TranscriptLine } from "./use-voice-session";
 
 // Tool toasts arrive from the server with a legacy glyph string — map it to
@@ -188,6 +189,8 @@ export function VoiceMode({
   defaultVoice = "marin",
   defaultEffort = "auto",
   startMinimized = false,
+  flavor,
+  hidden = false,
   onTranscript,
 }: {
   /** The globally-owned session (VoiceCallProvider) — the call survives
@@ -201,6 +204,11 @@ export function VoiceMode({
   /** Start as the floating pill (split workspace / floating chat) instead of
    *  taking the whole screen. */
   startMinimized?: boolean;
+  /** What the call is for ("interview": the orb on the Interview tab). */
+  flavor?: VoiceFlavor;
+  /** Another surface is the call's UI right now (the interview orb): this
+   *  keeps running the call (audio, watchdogs, refreshes) and draws nothing. */
+  hidden?: boolean;
   /** Live transcript stream — lets the chat thread render voice lines as
    *  messages while the call is running (one conversation, not two worlds). */
   onTranscript?: (lines: TranscriptLine[]) => void;
@@ -321,7 +329,7 @@ export function VoiceMode({
   useEffect(() => {
     if (!startedRef.current) {
       startedRef.current = true;
-      session.start(model, voice, effort);
+      session.start(model, voice, effort, flavor);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -414,7 +422,7 @@ export function VoiceMode({
 
   const retry = () => {
     unlockRemoteAudio();
-    session.start(model, voice, effort);
+    session.start(model, voice, effort, flavor);
   };
 
   // Before the call is up, the reply's slot carries the state in grey. Once
@@ -529,6 +537,7 @@ export function VoiceMode({
 
   // Minimized: floating pill above EVERY page — the session lives in the app
   // shell (VoiceCallProvider), so browsing tabs never hangs up.
+  if (hidden) return null;
   if (minimized)
     return <div className="fixed inset-x-2 bottom-3 z-50 mx-auto max-w-md">{dockBar}</div>;
 

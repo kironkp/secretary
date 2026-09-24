@@ -62,6 +62,12 @@ export type ToolContext = {
   timezone: string;
   conversationId?: string;
   anchorMessageId?: string;
+  /**
+   * The kind of call a voice tool runs in, when it is not an ordinary one:
+   * "interview" is the orb on the Interview tab (lib/secretary/interview-voice.ts),
+   * where answer_question also returns the next question to ask.
+   */
+  surface?: "interview";
 };
 
 /** UI-only side channel (SPEC §7.6 auto-open): the shell acts on it; it never
@@ -1511,6 +1517,24 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
       "@/lib/understanding/answer"
     );
     const { InterpretError } = await import("@/lib/understanding/interpret");
+    // An interview call (the orb on the Interview tab) moves straight on:
+    // the result carries the next question, chosen against the queue order
+    // as it stood before this answer, so the model asks it without another
+    // round trip. Read lazily for the same cycle reason as above.
+    const interview =
+      ctx.surface === "interview" ? await import("@/lib/secretary/interview-voice") : null;
+    const before = interview
+      ? (await (await import("@/lib/understanding/questions")).listQuestions(ctx.userId)).map((q) => q.id)
+      : [];
+    const withNext = async (result: Record<string, unknown>): Promise<Record<string, unknown>> => {
+      if (!interview) return result;
+      const { next, remaining } = await interview.nextInterviewQuestion(ctx.userId, a.question_id, before);
+      return {
+        ...result,
+        next_question: next ? interview.questionLine(next) : null,
+        questions_left: remaining,
+      };
+    };
     let outcome: Awaited<ReturnType<typeof answerQuestion>>;
     if (a.answer_id) {
       // Words given alongside a listed answer ride as its note when there
@@ -1548,7 +1572,8 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
       return { result: { error: `No question with id ${a.question_id} in the briefing's OPEN QUESTIONS` } };
     }
     if (outcome.status === "not-open") {
-      return { result: { error: "That question was already answered" } };
+      // Answered on the screen a moment ago, most likely: move on all the same.
+      return { result: await withNext({ error: "That question was already answered" }) };
     }
     if (outcome.status === "bad-answer") {
       return {
@@ -1576,7 +1601,7 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     // receipt uses (components/today/copy.ts): one answer, one sentence.
     const setAside = setAsideInWords(outcome.superseded.length);
     return {
-      result: {
+      result: await withNext({
         status: outcome.status,
         applied: outcome.applied,
         failed: outcome.failed,
@@ -1585,7 +1610,7 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         // The one sentence the reading came back with, for the model to
         // relay in its own register; absent for a listed answer.
         ...(outcome.reply ? { reply: outcome.reply } : {}),
-      },
+      }),
       toast: {
         icon: "check",
         text: setAside ? `Answered, ${outcome.superseded.length} set aside` : "Answered",
