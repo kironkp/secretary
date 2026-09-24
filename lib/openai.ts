@@ -89,6 +89,12 @@ export const REALTIME_MODEL_DEFAULT =
 export const REALTIME_MODEL_MINI =
   process.env.REALTIME_MODEL_MINI ?? "gpt-realtime-2.1-mini";
 export const REALTIME_VOICE = "marin";
+// Reading a reply aloud (app/api/speak): the TTS model that speaks the
+// realtime voices by name, and the ones it has.
+export const TTS_MODEL = process.env.TTS_MODEL ?? "gpt-4o-mini-tts";
+export const TTS_VOICES = [
+  "marin", "cedar", "alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer", "verse",
+] as const;
 // Every stock realtime voice (all mint-verified 2026-08-19). marin/cedar are
 // the expressive flagship pair; the rest are the classic set.
 export const REALTIME_VOICES = [

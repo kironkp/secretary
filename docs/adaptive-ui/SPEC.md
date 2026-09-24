@@ -386,21 +386,36 @@ Rules:
 
 ## 7.7 The chat dock and tab motion (app chrome)
 
-Chat is not a tab. It is a **persistent dock** pinned to the bottom of every
-page — the secretary is always one tap away, never a navigation away. The dock
-has three states, all shell-owned chrome (invariant 1):
+Chat is not a tab. It is a **persistent dock** that rides above every page —
+the secretary is always one tap away, never a navigation away. Modelled on
+Gemini in Chrome (Kiron's screen recording, 2026-09-24). Three states, all
+shell-owned chrome (invariant 1); the tab bar stays at the bottom in all of
+them:
 
-- **Bar** (default): just the composer — text field, attach, model chip,
-  dictation mic, Talk. Tapping the field gives room to type; it does NOT pull
-  up history.
-- **Peek**: after a send, the exchange since the dock was last opened pops up
-  in a panel above the bar — the user sees the answer without the whole
-  thread. Ephemeral window: collapsing back to the bar resets it.
-- **Full**: the caret expands to the complete thread (briefing card included).
-  The caret is the only way in and out — up to expand, down to minimize.
+- **Closed** (default): one round launcher at the bottom-right corner, above
+  the tab bar. Nothing else of the chat is on screen.
+- **Bar**: tap the launcher and a floating pill rises in its place, centred:
+  a grab handle on top, then `+` (Photos · Camera · Files), the field ("Ask
+  your secretary"), dictation, the voice call, and × (back to Closed).
+  Tapping the pill, or swiping up on it, raises the keyboard in the field — it
+  never pulls up history.
+- **Full**: after a send, or dragging the handle up, the pill grows upward
+  into the conversation card (the whole thread, briefing card included) over
+  a dimmed page. Its height **follows the finger**: dragging down shrinks the
+  card and fades the conversation with it (opacity tracks the drag, the dim
+  too), and on release it snaps — past halfway down to the Bar, otherwise
+  back to Full; a fast flick decides by direction. Nothing ever stops half
+  open. The × in its header closes to Closed.
 
-Talk from the dock starts the global voice call pill-first (unchanged). The
-`?c=` deep link (push receipts) opens the dock in Full on the linked thread.
+Every assistant reply, typed or spoken, carries two small actions: **copy**
+(the text to the clipboard) and **speak** (read aloud in the user's chosen
+voice through `POST /api/speak`, OpenAI TTS with the realtime voice names;
+tap again to stop). The full-screen voice call has no transcript toggle; its
+minimize control is a labelled button, not a bare caret.
+
+The voice button in the pill starts the global voice call pill-first
+(unchanged). The `?c=` deep link (push receipts) opens the dock in Full on the
+linked thread.
 
 Tabs (Dashboard · Canvas · Spreadsheet · …) keep a single sliding indicator:
 one accent bar that **travels** to the active tab on every change — click or

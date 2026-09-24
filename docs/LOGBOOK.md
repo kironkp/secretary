@@ -7,6 +7,42 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 ---
 
+## v0.15 — The chat dock, after Gemini in Chrome (2026-09-24)
+
+this commit
+
+From Kiron's screen recording of Gemini in Chrome on the iPad. SPEC §7.7
+rewritten first.
+
+**Three states.** Closed is one round launcher at the bottom right, above a
+tab bar that now always stays put. Tap it and a floating pill rises: +
+(Photos · Camera · Files · Model, the existing Attach sheet), the field,
+dictation, the voice call, x. A send, or a drag up on the grabber, grows the
+pill into the conversation card over a dimmed page. The card's height
+follows the finger (pointer capture on the grabber and header); the
+conversation fades as it shrinks and has faded out by halfway; on release it
+snaps to the nearer end, and a flick decides by direction. 340ms on the
+app's leading curve; reduced motion cuts. Peek is gone.
+
+**One look.** The pill, the card, the launcher and the call are the same
+surface: black, `data-theme="dark"`, the accent's inset glow (call-look.ts).
+Nothing in the chat keeps the old flat composer.
+
+**Copy and speak on every reply** (message-actions.tsx), typed or spoken,
+including the call's latest reply. Speak is `POST /api/speak`:
+gpt-4o-mini-tts in the user's realtime voice (marin by default), one reply at
+a time, tap again to stop; the tap unlocks the audio element with silence so
+iOS will play what arrives after the fetch.
+
+**The voice call.** "Show me" (the transcript toggle) is removed; the
+minimize control is a labelled "Minimize" button instead of a bare caret.
+
+Checks: tsc, eslint, 824/824 vitest, `next build`; the dock driven signed in
+on the local server at iPad (1180×820) and phone (393×852) sizes — closed,
+pill, send → full, mid-drag fade, release → pill; /api/speak returns mp3.
+
+---
+
 ## v0.14 — Check-ins, and the Shop out of sight (2026-09-24)
 
 this commit

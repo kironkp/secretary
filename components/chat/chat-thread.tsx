@@ -4,13 +4,12 @@
 // bar; the conversation lives in a panel that rises above it. Three states —
 // bar (composer only), peek (the exchange since the dock last opened), full
 // (whole history + briefing). The caret expands and minimizes.
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowUp,
   Calendar,
-  ChevronDown,
-  ChevronUp,
   Clock,
   File as FileIcon,
   FileArchive,
@@ -22,7 +21,6 @@ import {
   FileVideo,
   Flame,
   Mic,
-  Paperclip,
   Plus,
   Sparkles,
   Sun,
@@ -35,10 +33,12 @@ import { requestCanvasRefresh } from "@/lib/canvas/refresh";
 import { unlockRemoteAudio } from "@/lib/realtime/remote-audio";
 import { AttachSheet } from "./attach-sheet";
 import { DictationBar } from "./dictation-bar";
-import { ModelChip, useChatModel } from "./model-chip";
+import { useChatModel } from "./model-chip";
+import { CALL_GLOW, CALL_GLOW_SMALL } from "./call-look";
+import { MessageActions } from "./message-actions";
 import { useVoiceCall } from "./voice-call-provider";
 
-export type DockState = "bar" | "peek" | "full";
+export type DockState = "closed" | "bar" | "full";
 
 type Attachment = { id: string; mime: string; name: string };
 
@@ -64,6 +64,24 @@ type PendingAttachment = {
 };
 
 const MAX_ATTACHMENTS = 4;
+
+// The card's motion is the app's (nav-tabs.tsx): 340ms on the leading curve.
+const MOVE_MS = 340;
+const MOVE_EASE = "cubic-bezier(0.22, 0.9, 0.32, 1)";
+
+const REDUCED = "(prefers-reduced-motion: reduce)";
+/** prefers-reduced-motion, live. */
+function useReducedMotion(): boolean {
+  return useSyncExternalStore(
+    (onChange) => {
+      const mq = window.matchMedia(REDUCED);
+      mq.addEventListener("change", onChange);
+      return () => mq.removeEventListener("change", onChange);
+    },
+    () => window.matchMedia(REDUCED).matches,
+    () => false
+  );
+}
 const IMAGE_MAX_EDGE = 1600;
 
 /** Raster types Safari can decode into a canvas — the only files normalizeImage
@@ -242,15 +260,11 @@ export function ChatThread({
   const [error, setError] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
   const localKey = useRef(0);
   const [pending, setPending] = useState<PendingAttachment[]>([]);
   // Attachment slots held, tracked synchronously — see addFiles.
   const slotsTaken = useRef(0);
   const dockState: DockState = dock?.state ?? "full";
-  // Peek window: index of the first message shown in peek — set at the send
-  // that opens it, so peek is "what happened since I opened the dock".
-  const peekFrom = useRef(0);
 
   // Auto-open Canvas (SPEC §7.6): navigate to the Canvas TAB — the real page,
   // nav intact. The dock collapses all the way to the bar: the paint IS the
@@ -461,12 +475,9 @@ export function ChatThread({
     pending.forEach((a) => a.previewUrl && URL.revokeObjectURL(a.previewUrl));
     setPending([]);
     slotsTaken.current = 0;
-    // Sending from the closed bar opens the peek window at THIS message: the
-    // answer pops up above the composer without dragging in the whole thread.
-    if (dock && dock.state === "bar") {
-      peekFrom.current = msgs.length;
-      dock.setState("peek");
-    }
+    // A send from the pill grows it into the conversation, the way Gemini's
+    // does: the answer arrives where the user can read it.
+    if (dock && dock.state !== "full") dock.setState("full");
     const tempId = `local-${++localKey.current}`;
     retryPayloads.current.set(tempId, { text, attachmentIds: sentAttachments.map((a) => a.id) });
     setMsgs((m) => [
@@ -499,56 +510,145 @@ export function ChatThread({
   }, [call.ended, router]);
 
   const hasBriefing = briefing.hasContent;
-  // Peek is deliberately ONE message — the latest thing said, by either of us,
-  // and nothing else. It is a glance, not a transcript: no header, no briefing,
-  // no scrollback. Anything more and it competes with the canvas it floats
-  // over. Tap it to open the full conversation.
-  const shownMsgs = dockState === "peek" ? msgs.slice(-1) : msgs;
-  const showExtras = dockState !== "peek"; // briefing + empty state
 
-  // The conversation panel: a card that rises above the composer. Height (not
-  // scale) animates between the three states so the composer never moves.
-  const panelClass = dock
-    ? `flex min-h-0 flex-none flex-col overflow-hidden rounded-2xl border bg-surface transition-all duration-300 ease-out motion-reduce:transition-none ${
-        dockState === "bar"
-          ? "pointer-events-none h-0 border-transparent opacity-0"
-          : dockState === "peek"
-            ? // Sized to its one message rather than a fixed slab, so a short
-              // reply is a small card instead of a mostly-empty panel.
-              "mb-2 max-h-[min(32dvh,18rem)] border-edge opacity-100 shadow-2xl"
-            : "mb-2 h-[min(78dvh,46rem)] border-edge opacity-100 shadow-2xl"
-      }`
-    : "flex min-h-0 flex-1 flex-col";
+  // --- the card's geometry (SPEC §7.7): shell-owned, never a model call ---
+  // One card is both the pill and the conversation: the conversation area
+  // above the composer is 0 tall in the bar and fullH in full, and while a
+  // finger is on the handle it is exactly where the finger puts it. The
+  // conversation fades as it shrinks; past halfway it has faded out.
+  const [fullH, setFullH] = useState(560);
+  useEffect(() => {
+    const measure = () => setFullH(Math.round(Math.min(window.innerHeight * 0.66, 680)));
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, []);
+  const [dragH, setDragH] = useState<number | null>(null);
+  const drag = useRef<{ y0: number; h0: number; lastY: number; lastT: number; v: number; moved: boolean } | null>(
+    null
+  );
+  const targetH = dockState === "full" ? fullH : 0;
+  const panelH = dragH ?? targetH;
+  const progress = fullH ? Math.min(1, Math.max(0, panelH / fullH)) : 0;
+  const contentOpacity = Math.min(1, Math.max(0, (progress - 0.35) / 0.5));
+  const reduceMotion = useReducedMotion();
+  const settle = reduceMotion ? "none" : `height ${MOVE_MS}ms ${MOVE_EASE}`;
+
+  const onHandleDown = (e: React.PointerEvent) => {
+    if (!dock) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    drag.current = { y0: e.clientY, h0: targetH, lastY: e.clientY, lastT: e.timeStamp, v: 0, moved: false };
+  };
+  const onHandleMove = (e: React.PointerEvent) => {
+    const d = drag.current;
+    if (!d) return;
+    const dy = e.clientY - d.y0;
+    if (Math.abs(dy) > 4) d.moved = true;
+    const dt = Math.max(1, e.timeStamp - d.lastT);
+    d.v = (e.clientY - d.lastY) / dt; // px/ms, + is downward
+    d.lastY = e.clientY;
+    d.lastT = e.timeStamp;
+    if (d.moved) setDragH(Math.min(fullH, Math.max(0, d.h0 - dy)));
+  };
+  const onHandleUp = () => {
+    const d = drag.current;
+    drag.current = null;
+    if (!d || !dock) return;
+    if (!d.moved) {
+      // A tap on the handle toggles, the way a tap on a sheet's grabber does.
+      dock.setState(dockState === "full" ? "bar" : "full");
+    } else {
+      const h = dragH ?? d.h0;
+      // A flick decides by direction; otherwise the nearer end wins.
+      const open = d.v > 0.5 ? false : d.v < -0.5 ? true : h > fullH / 2;
+      dock.setState(open ? "full" : "bar");
+    }
+    setDragH(null);
+  };
+  // Swiping up on the pill raises the keyboard; it never pulls up history.
+  const swipe = useRef<number | null>(null);
+
+  const canSend = !!input.trim() || pending.some((a) => a.id);
 
   return (
-    <div className="flex h-full min-h-0 flex-col justify-end">
-      <div className={panelClass} aria-hidden={dock ? dockState === "bar" : undefined}>
-        {/* No header in peek: it is one message, and a title bar over a single
-            line is more chrome than content. Full keeps it. */}
-        {dock && dockState === "full" && (
-          <div className="flex flex-none items-center justify-between border-b border-edge bg-card px-4 py-2">
-            <span className="text-sm font-bold">{secretaryName}</span>
-            <div className="flex items-center gap-0.5">
-              <button
-                onClick={() => dock.setState("bar")}
-                title="Minimize"
-                aria-label="Minimize chat"
-                className="flex h-7 w-7 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-2 hover:text-ink"
-              >
-                <ChevronDown size={16} strokeWidth={2} />
-              </button>
-            </div>
-          </div>
+    <>
+      {dock &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            aria-hidden
+            onClick={() => dock.setState("bar")}
+            className={`fixed inset-0 z-20 bg-black ${progress > 0.02 ? "" : "pointer-events-none"}`}
+            style={{
+              opacity: 0.35 * progress,
+              transition: dragH === null && !reduceMotion ? `opacity ${MOVE_MS}ms ${MOVE_EASE}` : "none",
+            }}
+          />,
+          document.body
         )}
       <div
-        onClick={dock && dockState === "peek" ? () => dock.setState("full") : undefined}
-        className={`min-h-0 flex-1 overflow-y-auto [-webkit-overflow-scrolling:touch] ${
-          dock && dockState === "peek" ? "cursor-pointer py-3" : "py-5"
+        data-theme="dark"
+        data-testid="chat-card"
+        data-dock={dockState}
+        className={`animate-slide-up relative mb-2 flex flex-col overflow-hidden rounded-[26px] bg-black font-sans text-ink ${
+          dock ? "" : "min-h-0 flex-1"
         }`}
+        style={{
+          boxShadow: `${progress > 0.5 ? CALL_GLOW : CALL_GLOW_SMALL}, 0 18px 50px rgba(0,0,0,0.35)`,
+          transition: reduceMotion ? undefined : `box-shadow ${MOVE_MS}ms ${MOVE_EASE}`,
+        }}
       >
-        <div className="mx-auto w-full max-w-2xl space-y-4 px-4">
-          {showExtras && hasBriefing && (
-            <div className="rounded-2xl border border-edge bg-surface p-5">
+        {/* The grabber: drag it and the card follows the finger. */}
+        <div
+          onPointerDown={onHandleDown}
+          onPointerMove={onHandleMove}
+          onPointerUp={onHandleUp}
+          onPointerCancel={onHandleUp}
+          role="button"
+          tabIndex={0}
+          aria-label={dockState === "full" ? "Drag down to shrink the conversation" : "Drag up to show the conversation"}
+          onKeyDown={(e) => {
+            if (dock && (e.key === "Enter" || e.key === " ")) {
+              e.preventDefault();
+              dock.setState(dockState === "full" ? "bar" : "full");
+            }
+          }}
+          className="flex h-5 flex-none cursor-grab touch-none items-center justify-center active:cursor-grabbing"
+        >
+          <span className="h-[5px] w-10 rounded-full bg-faint/60" />
+        </div>
+
+        <div
+          aria-hidden={dock ? progress < 0.05 : undefined}
+          className="flex min-h-0 flex-col overflow-hidden"
+          style={dock ? { height: panelH, transition: dragH === null ? settle : "none" } : { flex: 1 }}
+        >
+          <div className="flex min-h-0 flex-1 flex-col" style={{ opacity: dock ? contentOpacity : 1 }}>
+            {/* The header drags too, and its x closes the chat. */}
+            <div
+              onPointerDown={onHandleDown}
+              onPointerMove={onHandleMove}
+              onPointerUp={onHandleUp}
+              onPointerCancel={onHandleUp}
+              className="flex flex-none touch-none items-center justify-between px-4 pb-1"
+            >
+              <span className="text-[15px] font-semibold">{secretaryName}</span>
+              {dock && (
+                <button
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={() => dock.setState("closed")}
+                  title="Close"
+                  aria-label="Close chat"
+                  className="flex h-9 w-9 items-center justify-center rounded-full text-faint transition-colors hover:bg-surface-2 hover:text-ink"
+                >
+                  <X size={18} strokeWidth={2} />
+                </button>
+              )}
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-3 [-webkit-overflow-scrolling:touch]">
+              <div className="mx-auto w-full max-w-2xl space-y-4 px-4">
+          {hasBriefing && (
+            <div className="rounded-2xl bg-surface-2/70 p-5">
               <p className="mb-2.5 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-muted">
                 <Sun size={14} strokeWidth={2} className="text-warn" />
                 {briefing.dateLabel}
@@ -596,8 +696,8 @@ export function ChatThread({
             </div>
           )}
 
-          {showExtras && msgs.length === 0 && !hasBriefing && (
-            <div className="flex flex-col items-center gap-3 pt-24 text-center">
+          {msgs.length === 0 && !hasBriefing && (
+            <div className="flex flex-col items-center gap-3 pt-16 text-center">
               <span className="flex h-14 w-14 items-center justify-center rounded-full bg-accent/10 text-accent">
                 <WaveformGlyph size={24} />
               </span>
@@ -608,16 +708,17 @@ export function ChatThread({
             </div>
           )}
 
-          {shownMsgs
+
+          {msgs
             .filter((m) => m.role !== "tool")
             .map((m) => (
-              <div key={m.id}>
+              <div key={m.id} className={m.role === "user" ? "flex flex-col items-end" : ""}>
               <div
                 id={`m-${m.id}`}
-                className={`max-w-[85%] rounded-[14px] px-4 py-2.5 text-[15px] leading-relaxed transition-shadow ${
+                className={`rounded-[18px] text-[16px] leading-[1.45] transition-shadow ${
                   m.role === "user"
-                    ? `ml-auto bg-bubble text-ink ${m.failed ? "opacity-70" : ""}`
-                    : "border border-edge bg-surface"
+                    ? `max-w-[85%] bg-surface-2 px-4 py-2.5 text-ink ${m.failed ? "opacity-70" : ""}`
+                    : "max-w-[94%]"
                 }`}
               >
                 {m.mode === "voice" && (
@@ -665,11 +766,14 @@ export function ChatThread({
                 )}
                 <span className="whitespace-pre-wrap">{m.content}</span>
               </div>
+              {m.role === "assistant" && m.content.trim() && (
+                <MessageActions id={m.id} text={m.content} voice={defaultVoice} className="-ml-2 mt-0.5" />
+              )}
               {m.failed && (
                 <button
                   onClick={() => void deliver(m.id)}
                   disabled={sending}
-                  className="ml-auto mt-1 flex items-center gap-1 text-xs font-semibold text-danger disabled:opacity-50"
+                  className="mt-1 flex items-center gap-1 text-xs font-semibold text-danger disabled:opacity-50"
                 >
                   <TriangleAlert size={11} strokeWidth={2.25} className="flex-none" />
                   {m.failed} — tap to retry
@@ -683,10 +787,8 @@ export function ChatThread({
               .map((l) => (
                 <div
                   key={l.id}
-                  className={`max-w-[85%] rounded-[14px] px-4 py-2.5 text-[15px] leading-relaxed ${
-                    l.role === "user"
-                      ? "ml-auto bg-bubble text-ink"
-                      : "border border-edge bg-surface"
+                  className={`rounded-[18px] text-[16px] leading-[1.45] ${
+                    l.role === "user" ? "ml-auto max-w-[85%] bg-surface-2 px-4 py-2.5 text-ink" : "max-w-[94%]"
                   } ${l.final ? "" : "opacity-80"}`}
                 >
                   <span className="mb-1 flex items-center gap-1 text-[10px] uppercase tracking-wide text-faint">
@@ -700,19 +802,31 @@ export function ChatThread({
                 </div>
               ))}
           {sending && (
-            <div className="max-w-[85%] rounded-[14px] border border-edge bg-surface px-4 py-2.5 text-sm text-faint">
+            <div className="text-[16px] text-faint">
               <span className="animate-pulse">…</span>
             </div>
           )}
           <div ref={bottomRef} />
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
-      </div>
 
-      <div className={`flex-none ${dock ? "" : "pb-[max(env(safe-area-inset-bottom),1rem)] pt-1"}`}>
-        <div className="mx-auto max-w-2xl px-1">
-          {error && <p className="mb-2 text-xs text-danger">{error}</p>}
-
+        {/* The composer: the same row in the pill and under the conversation.
+            + (Photos · Camera · Files · Model), the field, dictation, the
+            voice call — or send once there is something to send — and, in
+            the pill, x to put the chat away. */}
+        <div
+          className="flex-none px-2 pb-2 pt-1"
+          onPointerDown={(e) => {
+            if (dockState === "bar") swipe.current = e.clientY;
+          }}
+          onPointerUp={(e) => {
+            if (swipe.current !== null && swipe.current - e.clientY > 24) inputRef.current?.focus();
+            swipe.current = null;
+          }}
+        >
+          {error && <p className="px-2 pb-1.5 text-xs text-danger">{error}</p>}
           {mode === "dictation" ? (
             <DictationBar
               onCancel={() => setMode("idle")}
@@ -727,69 +841,10 @@ export function ChatThread({
                 setMode("idle");
               }}
             />
-          ) : dock && dockState === "bar" ? (
-            // The ask bar from the "Secretary on iPhone" mockup: a plus, the
-            // field, the mic. The plus opens the mockup's Attach sheet
-            // (attach-sheet.tsx): Photo Library, Take Photo, Choose File, the
-            // Model row, Cancel. A chosen file opens the full composer so it
-            // can be seen and sent. The field opens the full composer with
-            // the cursor in it; the model chip lives there. The mic is Talk.
-            <div className="flex items-center gap-2.5 py-2.5" data-testid="ask-bar">
-              <AttachSheet
-                open={attachOpen}
-                onClose={closeAttach}
-                onFiles={(files) => {
-                  void addFiles(files);
-                  dock.setState("full");
-                }}
-                selection={chatModel}
-                restoreFocusTo={plusRef}
-              />
-              <button
-                ref={plusRef}
-                type="button"
-                onClick={() => setAttachOpen(true)}
-                disabled={pending.length >= MAX_ATTACHMENTS}
-                aria-haspopup="dialog"
-                aria-expanded={attachOpen}
-                title="Add a photo or file"
-                aria-label="Add a photo or file"
-                className="flex h-9 w-9 flex-none items-center justify-center rounded-full bg-surface-2 text-ink disabled:opacity-40"
-              >
-                <Plus size={18} strokeWidth={2} />
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  dock.setState("full");
-                  setTimeout(() => inputRef.current?.focus(), 60);
-                }}
-                className="flex h-11 min-w-0 flex-1 items-center rounded-full bg-surface-2 px-4 text-left text-[17px] text-faint"
-              >
-                Ask your secretary
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  unlockRemoteAudio();
-                  call.begin({
-                    voice: defaultVoice,
-                    effort: defaultVoiceEffort,
-                    minimized: true,
-                  });
-                }}
-                disabled={call.active}
-                title="Start a live voice conversation"
-                aria-label="Start a live voice conversation"
-                className="flex h-11 w-11 flex-none items-center justify-center rounded-full bg-accent text-white disabled:opacity-50"
-              >
-                <Mic size={22} strokeWidth={2} />
-              </button>
-            </div>
           ) : (
-            <div className="rounded-2xl border border-edge bg-surface px-2.5 py-2 shadow-sm transition-shadow focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/20">
+            <>
               {pending.length > 0 && (
-                <div className="flex flex-wrap gap-2 px-1.5 pb-2 pt-1">
+                <div className="flex flex-wrap gap-2 px-1 pb-2 pt-1">
                   {pending.map((a) => (
                     <div
                       key={a.key}
@@ -833,119 +888,99 @@ export function ChatThread({
                   ))}
                 </div>
               )}
-              <textarea
-                ref={inputRef}
-                value={input}
-                rows={1}
-                onChange={(e) => {
-                  setInput(e.target.value);
-                  e.target.style.height = "auto";
-                  e.target.style.height = Math.min(e.target.scrollHeight, 140) + "px";
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    send();
-                  }
-                }}
-                onPaste={onPaste}
-                placeholder="Message your secretary…"
-                className="max-h-[140px] w-full resize-none bg-transparent px-1.5 py-1.5 text-[15px] leading-relaxed text-ink outline-none placeholder:text-faint"
-              />
-              {/* Controls row (Claude-app style): attach + model chip left,
-                  voice/send right — the chip never fights the textarea for width. */}
-              <div className="flex items-center gap-1.5 pt-1">
-              <input
-                ref={fileRef}
-                type="file"
-                // No `accept`: iOS maps each accept entry to a UTI and greys out
-                // everything unmapped — that's why .xlsx was unselectable. "*/*"
-                // isn't mappable and behaves inconsistently across iOS versions;
-                // omitting the attribute is what presents the picker as
-                // public.item. Take Photo / Photo Library survive — accept
-                // narrowed that sheet, it didn't create it.
-                multiple
-                className="hidden"
-                onChange={(e) => {
-                  void addFiles(e.target.files);
-                  e.target.value = "";
-                }}
-              />
-              <button
-                onClick={() => fileRef.current?.click()}
-                disabled={pending.length >= MAX_ATTACHMENTS}
-                title="Attach a file"
-                aria-label="Attach a file"
-                className="flex h-9 w-9 flex-none items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-2 hover:text-ink disabled:opacity-40"
-              >
-                <Paperclip size={18} strokeWidth={1.75} />
-              </button>
-              <ModelChip selection={chatModel} />
-              <div className="min-w-0 flex-1" />
-              {dock && (
+              <div className="flex items-end gap-1" data-testid="ask-bar">
+                <AttachSheet
+                  open={attachOpen}
+                  onClose={closeAttach}
+                  onFiles={(files) => void addFiles(files)}
+                  selection={chatModel}
+                  restoreFocusTo={plusRef}
+                />
                 <button
-                  onClick={() => dock.setState(dockState === "bar" ? "full" : "bar")}
-                  title={dockState === "bar" ? "Show conversation" : "Minimize chat"}
-                  aria-label={dockState === "bar" ? "Show conversation" : "Minimize chat"}
-                  className="flex h-9 w-9 flex-none items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-2 hover:text-ink"
+                  ref={plusRef}
+                  type="button"
+                  onClick={() => setAttachOpen(true)}
+                  disabled={pending.length >= MAX_ATTACHMENTS}
+                  aria-haspopup="dialog"
+                  aria-expanded={attachOpen}
+                  title="Add a photo or file"
+                  aria-label="Add a photo or file"
+                  className="flex h-11 w-11 flex-none items-center justify-center rounded-full text-ink transition-colors hover:bg-surface-2 disabled:opacity-40"
                 >
-                  {dockState === "bar" ? (
-                    <ChevronUp size={18} strokeWidth={2} />
-                  ) : (
-                    <ChevronDown size={18} strokeWidth={2} />
-                  )}
+                  <Plus size={22} strokeWidth={1.9} />
                 </button>
-              )}
-              {input.trim() || pending.some((a) => a.id) ? (
-                <button
-                  onClick={() => send()}
-                  disabled={sending || pending.some((a) => !a.id && !a.error)}
-                  title="Send"
-                  aria-label="Send message"
-                  className="flex h-9 w-9 flex-none items-center justify-center rounded-full bg-accent text-bg transition-opacity hover:opacity-90 disabled:opacity-50"
-                >
-                  <ArrowUp size={17} strokeWidth={2.25} />
-                </button>
-              ) : (
-                <>
+                <textarea
+                  ref={inputRef}
+                  value={input}
+                  rows={1}
+                  onChange={(e) => {
+                    setInput(e.target.value);
+                    e.target.style.height = "auto";
+                    e.target.style.height = Math.min(e.target.scrollHeight, 140) + "px";
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      void send();
+                    }
+                  }}
+                  onPaste={onPaste}
+                  placeholder="Ask your secretary"
+                  aria-label="Ask your secretary"
+                  className="max-h-[140px] min-h-11 min-w-0 flex-1 resize-none bg-transparent px-1 py-[11px] text-[17px] leading-[1.3] text-ink outline-none placeholder:text-faint"
+                />
+                {canSend ? (
                   <button
-                    onClick={() => setMode("dictation")}
-                    title="Dictate a message"
-                    aria-label="Dictate a message"
-                    className="flex h-9 w-9 flex-none items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-2 hover:text-ink"
+                    onClick={() => void send()}
+                    disabled={sending || pending.some((a) => !a.id && !a.error)}
+                    title="Send"
+                    aria-label="Send message"
+                    className="flex h-11 w-11 flex-none items-center justify-center rounded-full bg-accent text-white transition-opacity hover:opacity-90 disabled:opacity-50"
                   >
-                    <Mic size={18} strokeWidth={1.75} />
+                    <ArrowUp size={20} strokeWidth={2.25} />
                   </button>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => setMode("dictation")}
+                      title="Dictate a message"
+                      aria-label="Dictate a message"
+                      className="flex h-11 w-11 flex-none items-center justify-center rounded-full text-ink transition-colors hover:bg-surface-2"
+                    >
+                      <Mic size={20} strokeWidth={1.9} />
+                    </button>
+                    <button
+                      onClick={() => {
+                        // must run synchronously inside the tap: iOS only allows
+                        // audio playback that a user gesture unlocked
+                        unlockRemoteAudio();
+                        // global call, PILL-FIRST (user ask, Aug 26)
+                        call.begin({ voice: defaultVoice, effort: defaultVoiceEffort, minimized: true });
+                      }}
+                      disabled={call.active}
+                      title="Start a live voice conversation"
+                      aria-label="Start a live voice conversation"
+                      className="flex h-11 w-11 flex-none items-center justify-center rounded-full bg-accent text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+                    >
+                      <WaveformGlyph size={20} />
+                    </button>
+                  </>
+                )}
+                {dock && dockState === "bar" && (
                   <button
-                    onClick={() => {
-                      // must run synchronously inside the tap: iOS only allows
-                      // audio playback that a user gesture unlocked
-                      unlockRemoteAudio();
-                      // global call, PILL-FIRST (user ask, Aug 26): Talk drops
-                      // into the minimal bar so the screen stays usable — the
-                      // full call view is opt-in via the expand button.
-                      call.begin({
-                        voice: defaultVoice,
-                        effort: defaultVoiceEffort,
-                        minimized: true,
-                      });
-                    }}
-                    disabled={call.active}
-                    title="Start a live voice conversation"
-                    aria-label="Start a live voice conversation"
-                    className="flex h-9 flex-none items-center gap-1.5 rounded-full bg-accent px-3.5 text-sm font-bold text-bg transition-opacity hover:opacity-90 disabled:opacity-50"
+                    onClick={() => dock.setState("closed")}
+                    title="Close"
+                    aria-label="Close chat"
+                    className="flex h-11 w-9 flex-none items-center justify-center rounded-full text-faint transition-colors hover:text-ink"
                   >
-                    <WaveformGlyph />
-                    Talk
+                    <X size={20} strokeWidth={2} />
                   </button>
-                </>
-              )}
+                )}
               </div>
-            </div>
+            </>
           )}
         </div>
       </div>
-
-    </div>
+    </>
   );
 }

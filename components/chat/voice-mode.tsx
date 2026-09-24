@@ -4,7 +4,7 @@
 // A black surface with the tint's inset glow; bottom-aligned, the user's last
 // words (right, grey), the secretary's last reply (large, white), a six-bar
 // waveform that bobs while she speaks and holds still while she listens, and
-// three round controls: Mute, Show me (the transcript), End. The call is dark
+// two round controls: Mute and End. The call is dark
 // in both themes. Voice, thinking depth and model keep their dropdowns behind
 // the "⋯" at the top right. The minimized pill rides above every page.
 //
@@ -12,6 +12,8 @@
 // while the WebRTC call is live — on iOS Safari that re-routes the audio
 // session and can silence the outbound track (dictation is unaffected because
 // it has no WebRTC). Levels come from RTCPeerConnection.getStats() instead.
+import { CALL_GLOW } from "./call-look";
+import { MessageActions } from "./message-actions";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -78,24 +80,6 @@ function MicGlyph({ off, size = 24 }: { off: boolean; size?: number }) {
       <rect x="8.5" y="3" width="7" height="12" rx="3.5" />
       <path d="M6 11.5a6 6 0 0 0 12 0M12 17.5V21" />
       {off && <path d="M4 4l16 16" strokeWidth="2" />}
-    </svg>
-  );
-}
-
-function CardGlyph({ size = 24 }: { size?: number }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      aria-hidden
-    >
-      <rect x="4" y="6" width="16" height="13" rx="3" />
-      <path d="M8 11h8M8 15h5" />
     </svg>
   );
 }
@@ -171,7 +155,7 @@ const VOICE_EFFORTS = [
 ];
 
 // The mockup's inset glow: the tint at 38%, 90px deep, on the black surface.
-const GLOW = "inset 0 0 90px 10px color-mix(in srgb, var(--accent) 38%, transparent)";
+const GLOW = CALL_GLOW;
 
 // The reply's type, the mockup's .her: 24px semibold, 1.27 leading, tight
 // tracking, balanced wrap, at most 94% wide.
@@ -218,17 +202,6 @@ export function VoiceMode({
   useEffect(() => {
     onTranscript?.(session.transcript);
   }, [session.transcript, onTranscript]);
-  // "Show me": the whole transcript in place of the latest exchange.
-  const [showTranscript, setShowTranscript] = useState(false);
-  // Live transcript follows the conversation — but only when already pinned
-  // near the bottom, so scrolling up to reread isn't fought.
-  const transcriptRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const el = transcriptRef.current;
-    if (!el) return;
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
-    if (nearBottom) el.scrollTop = el.scrollHeight;
-  }, [session.transcript]);
   // Mobile lifeline: shrink the overlay to a floating pill — the page behind
   // becomes usable while the call (owned by the app shell) keeps running.
   const [minimized, setMinimized] = useState(startMinimized);
@@ -564,13 +537,16 @@ export function VoiceMode({
         className="relative flex items-center justify-between px-2"
         style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}
       >
+        {/* A labelled button, not a bare caret: "it's really hard to find that
+            little tiny caret" (Kiron, 2026-09-24). */}
         <button
           onClick={() => setMinimized(true)}
           title="Minimize call"
           aria-label="Minimize call"
-          className="flex h-11 w-11 items-center justify-center rounded-full text-faint transition-colors hover:text-ink"
+          className="ml-1 mt-1 flex min-h-11 items-center gap-1.5 rounded-full bg-surface-2 pl-3 pr-4 text-[15px] font-semibold text-ink transition-opacity active:opacity-70"
         >
-          <ChevronDown size={24} strokeWidth={1.8} />
+          <ChevronDown size={20} strokeWidth={2} />
+          Minimize
         </button>
         <button
           onClick={() => setMenuOpen((o) => !o)}
@@ -722,40 +698,20 @@ export function VoiceMode({
           className="relative flex min-h-0 flex-1 flex-col justify-end gap-[22px] px-6"
           style={{ paddingBottom: "max(env(safe-area-inset-bottom, 0px), 24px)" }}
         >
-          {showTranscript ? (
-            // "Show me": the whole conversation, same voices, scrolling.
-            <div
-              ref={transcriptRef}
-              className="flex min-h-0 flex-col gap-3 overflow-y-auto"
-              aria-label="Transcript"
-            >
-              {session.transcript.length === 0 && (
-                <p className="text-[15px] text-faint">Transcript will appear here.</p>
-              )}
-              {session.transcript.map((line) =>
-                line.role === "user" ? (
-                  <p key={line.id} className={`${YOU_TYPE} leading-[1.35]`}>
-                    {line.text}
-                  </p>
-                ) : (
-                  <p key={line.id} className="max-w-[92%] text-[17px] leading-[1.35]">
-                    {line.text}
-                  </p>
-                )
-              )}
-            </div>
-          ) : (
-            <>
-              {lastUser && <p className={YOU_TYPE}>{lastUser.text}</p>}
-              {pendingHint ? (
-                <p className={`${REPLY_TYPE} text-faint`} aria-live="polite">
-                  {pendingHint}
-                </p>
-              ) : lastReply ? (
+          <>
+            {lastUser && <p className={YOU_TYPE}>{lastUser.text}</p>}
+            {pendingHint ? (
+              <p className={`${REPLY_TYPE} text-faint`} aria-live="polite">
+                {pendingHint}
+              </p>
+            ) : lastReply ? (
+              <div className="flex flex-col gap-1">
                 <p className={REPLY_TYPE}>{lastReply.text}</p>
-              ) : null}
-            </>
-          )}
+                {/* "Say it again" and copy, the same row every reply carries. */}
+                <MessageActions id={`call-${lastReply.id}`} text={lastReply.text} voice={voice} className="-ml-2" />
+              </div>
+            ) : null}
+          </>
           {micSilent && (
             <p className="text-[13px] leading-[1.4] text-warn">
               I can&apos;t hear anything from your mic. Try speaking louder, or end the call and
@@ -777,18 +733,6 @@ export function VoiceMode({
                 <MicGlyph off={!session.muted} />
               </span>
               {session.muted ? "Unmute" : "Mute"}
-            </button>
-            <button
-              onClick={() => setShowTranscript((s) => !s)}
-              title="Show the transcript"
-              aria-label="Show the transcript"
-              aria-pressed={showTranscript}
-              className={control}
-            >
-              <span className={`${circle} ${showTranscript ? "bg-ink text-bg" : "bg-surface-2 text-ink"}`}>
-                <CardGlyph />
-              </span>
-              Show me
             </button>
             <button onClick={endCall} title="End call" aria-label="End call" className={control}>
               <span className={`${circle} bg-danger text-white`}>
