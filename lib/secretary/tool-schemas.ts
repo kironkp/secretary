@@ -520,6 +520,14 @@ export const toolSchemas = {
     policy: z.enum(["never", "auto"]).optional().describe("accent_policy: 'never' kills the glow ring"),
     remove: z.boolean().optional().describe("true = delete this preference instead of adding it"),
   }),
+  search_web: z.object({
+    query: z.string().min(1).max(400).describe("What to look up, as a search would phrase it: 'CalHR dental plans for state employees 2026'"),
+    context: z
+      .string()
+      .max(600)
+      .optional()
+      .describe("Anything from the conversation that narrows it (who the user is, where, which plan)"),
+  }),
   consult_brain: z.object({
     question: z.string().min(1).describe("The hard question, fully self-contained"),
     context: z
@@ -635,6 +643,8 @@ const toolDescriptions: Record<ToolName, string> = {
     "Approve or reject a built component proposal. Approve = it joins the dashboard registry immediately (no restart). Reject = the need is tombstoned and never re-proposed.",
   set_layout_preference:
     "Store a durable layout preference: ban_component ('stop showing me people' → component: people_index), pin_section (freeze a section), default_variant_for (a project always compact/full/nested), accent_policy: never ('I hate the glowing ring'). remove: true deletes it. Enforced on every future plan until removed in Settings.",
+  search_web:
+    "Look something up on the live web: current facts, policies, prices, hours, phone numbers, who provides what, news, 'google it', 'search for'. You CAN search the web with this — never say you can't. On a call: say a brief 'one sec, looking that up' first, then give the answer in a sentence or two and name the site it came from. Takes a few seconds.",
   consult_brain:
     "Ask the deep-reasoning brain (Claude) a question that needs genuine analysis — tricky planning, weighing tradeoffs, drafting something hard, math beyond arithmetic. NOT for quick recall or anything your other tools already answer. On a call: say a brief 'give me a second' first, then relay the answer in your own words and register. Takes a few seconds.",
   request_capability:
@@ -702,6 +712,8 @@ export const VOICE_TOOL_NAMES = [
   "checkin_asked",
   // the Siri-asks-ChatGPT move: the mouth phones the Claude brain on demand
   "consult_brain",
+  // the live web: "google what the dental provider is for state workers"
+  "search_web",
   // the upward cycle: "I can't do that" files a shop request instead of dying
   "request_capability",
   "review_capability",

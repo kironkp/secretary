@@ -91,6 +91,9 @@ export const REALTIME_MODEL_MINI =
 export const REALTIME_VOICE = "marin";
 // Reading a reply aloud (app/api/speak): the TTS model that speaks the
 // realtime voices by name, and the ones it has.
+// search_web: a small model with OpenAI's hosted web_search tool; about four
+// seconds for a cited answer (measured 2026-09-24).
+export const SEARCH_MODEL = process.env.SEARCH_MODEL ?? "gpt-5.4-mini";
 export const TTS_MODEL = process.env.TTS_MODEL ?? "gpt-4o-mini-tts";
 export const TTS_VOICES = [
   "marin", "cedar", "alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer", "verse",

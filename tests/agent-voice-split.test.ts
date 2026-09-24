@@ -51,6 +51,7 @@ describe("fast/slow split: the mouth is thin", () => {
     expect(names).toContain("show_canvas"); // "open the canvas" without a repaint (§7.6 auto-open)
     expect(names).toContain("consult_brain"); // …and its phone-a-friend for hard questions
     expect(names).toContain("search_history"); // cross-session recall on demand (SPEC §11)
+    expect(names).toContain("search_web"); // the live web, on a call too (2026-09-24)
   });
 
   // Auto-open (SPEC §7.6): the uiAction is shell transport beside the result —

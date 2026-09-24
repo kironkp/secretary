@@ -7,6 +7,27 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 ---
 
+## v0.16 — The secretary can search the web (2026-09-24)
+
+this commit
+
+On a call Kiron asked for "a general Google search of what the dental
+provider is for California state workers" and the voice said it could not
+search the web. It could not: no tool did. `search_web` (query, optional
+context) is now one of Secretary's tools, on the call and in chat alike —
+one tool system, not a voice-only feature. It asks gpt-5.4-mini
+(`SEARCH_MODEL`) with OpenAI's hosted `web_search` for a spoken-length
+answer, strips the inline citation links, and returns the cited pages as
+`sources`. Measured about four seconds. The persona says the web is its to
+search; the tool description tells the voice to say "one sec, looking that
+up" first and name the site the answer came from. Usage is recorded as
+`other` (the per-search fee is not priced).
+
+Checked live: the CalHR dental question came back with the plan lineup and
+benefits.calhr.ca.gov as the source. 824/824 vitest.
+
+---
+
 ## v0.15 — The chat dock, after Gemini in Chrome (2026-09-24)
 
 this commit

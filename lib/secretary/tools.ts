@@ -1210,6 +1210,50 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
   // The Siri-asks-ChatGPT move: the realtime mouth (or chat) phones the
   // Claude brain for questions that need genuine analysis. Effort capped at
   // medium — a caller is waiting on the line.
+  async search_web(ctx, args) {
+    const a = toolSchemas.search_web.parse(args);
+    const { openai, SEARCH_MODEL } = await import("@/lib/openai");
+    const { recordUsage } = await import("@/lib/usage");
+    try {
+      const response = await openai.responses.create({
+        model: SEARCH_MODEL,
+        tools: [{ type: "web_search" }],
+        instructions:
+          "You look things up for a personal assistant that relays your answer aloud. Search the web, then answer directly in at most four short sentences of plain prose — no markdown, no links in the text. Lead with the answer. If sources disagree or nothing reliable turns up, say so plainly.",
+        input: a.context ? `${a.query}\n\nContext: ${a.context}` : a.query,
+      });
+      await recordUsage({
+        userId: ctx.userId,
+        kind: "other",
+        model: SEARCH_MODEL,
+        inputTokens: response.usage?.input_tokens ?? 0,
+        outputTokens: response.usage?.output_tokens ?? 0,
+      });
+      // The pages the answer cites, deduplicated, tracking tags stripped.
+      const sources: { title: string; url: string }[] = [];
+      for (const item of response.output) {
+        if (item.type !== "message") continue;
+        for (const part of item.content) {
+          if (part.type !== "output_text") continue;
+          for (const ann of part.annotations ?? []) {
+            if (ann.type !== "url_citation") continue;
+            const url = ann.url.replace(/[?&]utm_source=openai$/, "");
+            if (!sources.some((s) => s.url === url)) sources.push({ title: ann.title ?? url, url });
+          }
+        }
+      }
+      const answer = response.output_text.replace(/\s*\(\[[^\]]*\]\([^)]*\)\)/g, "").trim();
+      if (!answer) return { result: { error: "The search came back empty." } };
+      return {
+        result: { answer, sources: sources.slice(0, 4) },
+        toast: { icon: "◆", text: `Looked up: ${a.query.slice(0, 60)}` },
+      };
+    } catch (e) {
+      console.error("search_web failed:", e instanceof Error ? e.message : e);
+      return { result: { error: "The web search didn't go through. Try again in a moment." } };
+    }
+  },
+
   async consult_brain(ctx, args) {
     const a = toolSchemas.consult_brain.parse(args);
     const { anthropicFor, brainSettings, claudeBrainEnabled } = await import("@/lib/anthropic");
