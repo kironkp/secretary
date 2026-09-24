@@ -1,6 +1,7 @@
 // Tool definitions shared by the Realtime session (voice) and the Responses
 // API (text chat). One source of truth: zod schemas → OpenAI JSON schemas.
 import { z } from "zod";
+import { withoutHiddenShop } from "@/lib/shop/visible";
 
 /** A block reference: an id from the briefing, OR the words the user actually
  *  used. Resolved server-side against shared voice+touch interaction state. */
@@ -215,6 +216,20 @@ export const toolSchemas = {
   remember_fact: z.object({
     fact: z.string().min(1).describe("A durable fact about the user worth remembering"),
     tags: z.array(z.string()).optional(),
+  }),
+  set_checkin: z.object({
+    question: z
+      .string()
+      .min(1)
+      .max(200)
+      .describe("What to ask, as the user would hear it: 'Did you send the weekly status report?'"),
+    days: z.array(z.enum(["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"])).min(1).describe("The weekdays to ask on, in the user's timezone"),
+  }),
+  remove_checkin: z.object({
+    checkin: z.string().min(1).describe("Check-in id, or a distinctive fragment of its question"),
+  }),
+  checkin_asked: z.object({
+    checkin: z.string().min(1).describe("Check-in id from CHECK-INS TODAY"),
   }),
   recall_facts: z.object({}),
   get_current_datetime: z.object({}),
@@ -570,6 +585,11 @@ const toolDescriptions: Record<ToolName, string> = {
   get_tasks: "List the user's tasks, optionally filtered by status or project.",
   remember_fact:
     "Save a durable fact about the user (names, preferences, context) for future conversations.",
+  set_checkin:
+    "A standing question to ASK the user on certain weekdays — 'remind me verbally', 'on Thursdays ask me if I sent X', 'check with me every Monday about Y'. NOT a task and NOT a reminder: nothing goes on a list and nothing buzzes the phone; it comes up in conversation on those days. Same question again replaces its days.",
+  remove_checkin: "Stop asking a check-in ('you can stop asking about the status report').",
+  checkin_asked:
+    "Call right after you have asked a CHECK-INS TODAY question in this conversation, so it is not asked again today.",
   recall_facts: "Everything remembered about the user.",
   get_current_datetime:
     "The current date and time in the user's timezone. Use this instead of guessing — never assume the date.",
@@ -625,7 +645,7 @@ const toolDescriptions: Record<ToolName, string> = {
 
 /** OpenAI tool definitions (same flat shape works for Realtime and Responses). */
 export function openAIToolDefs() {
-  return (Object.keys(toolSchemas) as ToolName[]).map((name) => ({
+  return withoutHiddenShop(Object.keys(toolSchemas) as ToolName[]).map((name) => ({
     type: "function" as const,
     name,
     description: toolDescriptions[name],
@@ -635,7 +655,7 @@ export function openAIToolDefs() {
 
 /** Anthropic tool definitions — same source of truth, Messages-API shape. */
 export function anthropicToolDefs() {
-  return (Object.keys(toolSchemas) as ToolName[]).map((name) => ({
+  return withoutHiddenShop(Object.keys(toolSchemas) as ToolName[]).map((name) => ({
     name,
     description: toolDescriptions[name],
     input_schema: z.toJSONSchema(toolSchemas[name]) as Record<string, unknown>,
@@ -676,6 +696,10 @@ export const VOICE_TOOL_NAMES = [
   // stated facts are fast-path capture (one insert, no entity resolution);
   // the extractor stays the safety net for inferred ones
   "remember_fact",
+  // spoken check-ins on given weekdays: asked in conversation, never a task
+  "set_checkin",
+  "remove_checkin",
+  "checkin_asked",
   // the Siri-asks-ChatGPT move: the mouth phones the Claude brain on demand
   "consult_brain",
   // the upward cycle: "I can't do that" files a shop request instead of dying
@@ -688,7 +712,7 @@ export const VOICE_TOOL_NAMES = [
 ] as const satisfies readonly ToolName[];
 
 export function openAIVoiceToolDefs() {
-  return VOICE_TOOL_NAMES.map((name) => ({
+  return withoutHiddenShop(VOICE_TOOL_NAMES).map((name) => ({
     type: "function" as const,
     name,
     description: toolDescriptions[name],

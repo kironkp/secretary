@@ -18,6 +18,7 @@ import { VoicePicker } from "@/components/settings/voice-picker";
 import { layoutPreferences } from "@/lib/db/schema";
 import { PasskeySection } from "@/components/settings/passkey-section";
 import { ShopRequests } from "@/components/settings/shop-requests";
+import { shopVisible } from "@/lib/shop/visible";
 import { TimezoneForm } from "@/components/settings/timezone-form";
 import { UnderstandingSettings } from "@/components/settings/understanding";
 import { SignOutButton } from "@/components/settings/sign-out-button";
@@ -189,6 +190,7 @@ export default async function SettingsPage() {
         <ProposalReview />
       </section>
 
+      {shopVisible() && (
       <section className="rounded-xl border border-edge bg-surface p-5">
         <h2 className="mb-1 text-sm font-bold">The Shop</h2>
         <p className="mb-4 text-xs text-muted">
@@ -198,6 +200,7 @@ export default async function SettingsPage() {
         </p>
         <ShopRequests />
       </section>
+      )}
 
       <section className="rounded-xl border border-edge bg-surface p-5">
         <h2 className="mb-1 text-sm font-bold">Passkeys</h2>

@@ -1,7 +1,7 @@
 // The Shop (self-improvement loop): filing, dedupe, the single-flight lane,
 // the approval gate, and the prompts that carry the guardrails. VITEST guards
 // mean nothing ever spawns here — status rows are the observable truth.
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { capabilityRequests, user } from "@/lib/db/schema";
@@ -16,7 +16,7 @@ import {
   reviseRequest,
   shopSlug,
 } from "@/lib/shop/shop";
-import { anthropicToolDefs, openAIToolDefs, VOICE_TOOL_NAMES } from "@/lib/secretary/tool-schemas";
+import { anthropicToolDefs, openAIToolDefs, openAIVoiceToolDefs, VOICE_TOOL_NAMES } from "@/lib/secretary/tool-schemas";
 import { buildInstructions } from "@/lib/secretary/persona";
 import { titleSimilarity } from "@/lib/secretary/dedupe";
 
@@ -192,12 +192,28 @@ describe("prompts carry the guardrails", () => {
   });
 });
 
-describe("the dead-end killer is wired in", () => {
+describe("the shop is parked unless SHOP_VISIBLE=true", () => {
+  it("hands the model no shop tools and no shop persona by default", () => {
+    vi.stubEnv("SHOP_VISIBLE", "");
+    expect(openAIVoiceToolDefs().some((t) => t.name === "request_capability")).toBe(false);
+    expect(openAIToolDefs().some((t) => t.name === "request_capability")).toBe(false);
+    expect(anthropicToolDefs().some((t) => t.name === "review_capability")).toBe(false);
+    const instructions = buildInstructions("BRIEFING", { persona: null });
+    expect(instructions).not.toContain("request_capability");
+    expect(instructions.toLowerCase()).not.toContain("shop");
+    vi.unstubAllEnvs();
+  });
+});
+
+describe("the dead-end killer is wired in (shop visible)", () => {
+  beforeEach(() => vi.stubEnv("SHOP_VISIBLE", "true"));
+  afterEach(() => vi.unstubAllEnvs());
   it("request_capability + review_capability ride voice and both chat providers", () => {
     expect(VOICE_TOOL_NAMES).toContain("request_capability");
     expect(VOICE_TOOL_NAMES).toContain("review_capability");
     expect(openAIToolDefs().some((t) => t.name === "request_capability")).toBe(true);
     expect(anthropicToolDefs().some((t) => t.name === "review_capability")).toBe(true);
+    expect(openAIVoiceToolDefs().some((t) => t.name === "request_capability")).toBe(true);
   });
 
   it("the persona forbids dead-ending on a missing tool", () => {

@@ -7,6 +7,35 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 ---
 
+## v0.14 — Check-ins, and the Shop out of sight (2026-09-24)
+
+this commit
+
+**Check-ins.** "Weekly status reports are due every Thursday — if I talk to
+you on a Thursday, ask me if I sent it. Not a task, not a reminder." New
+`standing_checkins` table (question, weekdays in the user's timezone, the
+local date last asked) and three tools on chat and voice: `set_checkin`
+(same question replaces its days), `remove_checkin`, `checkin_asked`. The
+briefing carries CHECK-INS TODAY until the model marks one asked, plus the
+standing list; the persona routes "remind me verbally / ask me on X" there
+instead of a task. The Memory tab lists them, each deletable.
+
+**The Shop is parked, not deleted.** It had become the answer to anything
+Secretary could not do, and its requests were not getting built. Unless
+`SHOP_VISIBLE=true` (lib/shop/visible.ts): the model is not handed
+`request_capability` / `review_capability`, the persona drops the shop and
+says instead to reach for the closest tool it has (a fact, a check-in, a
+note) and otherwise say so plainly, the briefing leaves out plans and
+outcomes (ABILITIES ALREADY BUILT stays), and Settings hides the section.
+Tables, worker and tools remain.
+
+Data: the CPO purchase cycle was saved and "Do the US Bank statement" put on
+step 7 through Secretary's own chat (the tools from v0.13), not a script.
+
+Checks: tsc, eslint, 824/824 vitest, `next build`.
+
+---
+
 ## v0.13 — Talk to the Interview, and it remembers how your work goes (2026-09-23)
 
 this commit

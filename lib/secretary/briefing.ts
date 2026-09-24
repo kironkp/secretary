@@ -2,6 +2,8 @@
 // token mint and text chat, injected into system instructions. This is what
 // turns "hello" into "did you send the insurance form?".
 import { and, count, desc, eq, gte, inArray, isNotNull, lt, ne, or } from "drizzle-orm";
+import { shopVisible } from "@/lib/shop/visible";
+import { checkinsFor, daysInWords } from "./checkins";
 import { db } from "@/lib/db";
 import { documents, events, expectations, memories, pipelineTemplates, projects, tasks, user } from "@/lib/db/schema";
 import { dayRangeInTz } from "@/lib/time";
@@ -184,6 +186,8 @@ export async function buildBriefing(
     .where(eq(memories.userId, userId))
     .orderBy(desc(memories.createdAt))
     .limit(20);
+
+  const checkinState = await checkinsFor(userId, timezone, now);
 
   const processRows = await db
     .select({ name: pipelineTemplates.name, steps: pipelineTemplates.steps })
@@ -477,6 +481,19 @@ export async function buildBriefing(
         `- [${e.id}] "${e.title}" · ${fmt(e.startsAt, timezone)}${projectName ? ` · project "${projectName}"` : ""}`
       );
   }
+  // Check-ins: questions to ASK today, in conversation. Not tasks, never
+  // reminders; the model marks each asked so it comes up once a day.
+  if (checkinState.due.length) {
+    lines.push(
+      "",
+      "CHECK-INS TODAY (ask each once, naturally, early in the conversation — a quick question, not a to-do; then call checkin_asked with its id):"
+    );
+    for (const c of checkinState.due) lines.push(`- [${c.id}] ${c.question}`);
+  }
+  if (checkinState.all.length) {
+    lines.push("", "STANDING CHECK-INS (asked on these days; set_checkin / remove_checkin change them):");
+    for (const c of checkinState.all) lines.push(`- ${c.question} — ${daysInWords(c.days)}`);
+  }
   // How the user's recurring jobs go (Memory tab, Processes): all of them,
   // since "I'm starting a CPO" must bring back the steps whatever their age.
   if (processRows.length) {
@@ -655,7 +672,7 @@ export async function buildBriefing(
     );
     for (const r of shipped) lines.push(`- ${r.need.replace(/\s+/g, " ").slice(0, 130)}`);
   }
-  if (awaiting.length) {
+  if (awaiting.length && shopVisible()) {
     lines.push(
       "",
       "SHOP — plans awaiting the user's decision (approve/reject via review_capability; the plan text is in Settings):"
@@ -665,7 +682,7 @@ export async function buildBriefing(
       "Mention ONE at a natural pause: the shop drafted a plan for it — want it built? Approved builds land automatically once tests pass."
     );
   }
-  if (recent.length) {
+  if (recent.length && shopVisible()) {
     lines.push("", "SHOP — recent outcomes (mention briefly if relevant):");
     for (const r of recent) {
       lines.push(

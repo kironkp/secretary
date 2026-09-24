@@ -297,8 +297,7 @@ export function SpendSummary({
             whose audio/text split wasn&rsquo;t recorded is priced as all audio, and a model with
             no published rate is priced at the most expensive one we know.
           </>
-        )}{" "}
-        Work done through the Shop runs on your Claude subscription and is not billed here.
+        )}
       </p>
     </section>
   );

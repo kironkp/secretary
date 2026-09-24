@@ -363,6 +363,22 @@ export const memories = pgTable(
   (t) => [index("memories_user_updated_idx").on(t.userId, t.updatedAt)]
 );
 
+// Check-ins (2026-09-24): something Secretary ASKS, out loud or in chat, on
+// given weekdays — "on Thursdays, ask if I sent the weekly status report".
+// Deliberately not a task and not a reminder: nothing on a list, no push.
+// days are 0 (Sunday) .. 6 in the user's timezone; lastAskedOn is the local
+// date it was last asked, so it is asked once that day.
+export const standingCheckins = pgTable("standing_checkins", {
+  id: text("id").primaryKey().$defaultFn(uuid),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  question: text("question").notNull(),
+  days: jsonb("days").$type<number[]>().notNull(),
+  lastAskedOn: text("last_asked_on"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const layoutSpecs = pgTable("layout_specs", {
   id: text("id").primaryKey().$defaultFn(uuid),
   userId: text("user_id")

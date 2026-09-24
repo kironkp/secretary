@@ -2,6 +2,7 @@
 // "A chart I can't draw for you out loud" is now forbidden (paint_canvas is
 // how the voice draws), and the mouth carries ONLY thin tools — the store is
 // the single truth, written identically from voice and text.
+import { withoutHiddenShop } from "@/lib/shop/visible";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq, ilike } from "drizzle-orm";
 import { db } from "@/lib/db";
@@ -34,7 +35,8 @@ afterAll(async () => {
 describe("fast/slow split: the mouth is thin", () => {
   it("the realtime session carries ONLY the thin tools — no documents, layout, or project surgery", () => {
     const names = openAIVoiceToolDefs().map((t) => t.name);
-    expect(names).toEqual([...VOICE_TOOL_NAMES]);
+    // The voice list, minus the shop tools while the shop is parked (lib/shop/visible.ts).
+    expect(names).toEqual(withoutHiddenShop(VOICE_TOOL_NAMES));
     for (const heavy of [
       "create_document",
       "edit_document_section",

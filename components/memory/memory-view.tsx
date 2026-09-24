@@ -14,6 +14,13 @@ export type MemoryProcess = {
   steps: { name: string; blocked_by?: number | null; offset_days?: number | null }[];
 };
 
+export type MemoryCheckin = {
+  id: string;
+  question: string;
+  /** "Thursdays", written on the server. */
+  days: string;
+};
+
 export type MemoryFact = {
   id: string;
   fact: string;
@@ -28,7 +35,7 @@ const QUIET_TAGS = new Set(["answer", "inferred"]);
 
 const PAGE = 40;
 
-type Kind = "facts" | "processes";
+type Kind = "facts" | "processes" | "checkins";
 
 async function forget(kind: Kind, id: string): Promise<boolean> {
   try {
@@ -115,12 +122,15 @@ function stepMeta(step: MemoryProcess["steps"][number], i: number): string | nul
 
 export function MemoryView({
   processes: initialProcesses,
+  checkins: initialCheckins,
   facts: initialFacts,
 }: {
   processes: MemoryProcess[];
+  checkins: MemoryCheckin[];
   facts: MemoryFact[];
 }) {
   const [processes, setProcesses] = useState(initialProcesses);
+  const [checkins, setCheckins] = useState(initialCheckins);
   const [facts, setFacts] = useState(initialFacts);
   const [shown, setShown] = useState(PAGE);
   const [error, setError] = useState<string | null>(null);
@@ -128,6 +138,11 @@ export function MemoryView({
   async function forgetProcess(id: string) {
     setError(null);
     if (await forget("processes", id)) setProcesses((p) => p.filter((x) => x.id !== id));
+    else setError("That didn't go through. Try again in a moment.");
+  }
+  async function forgetCheckin(id: string) {
+    setError(null);
+    if (await forget("checkins", id)) setCheckins((c) => c.filter((x) => x.id !== id));
     else setError("That didn't go through. Try again in a moment.");
   }
   async function forgetFact(id: string) {
@@ -185,6 +200,28 @@ export function MemoryView({
                     );
                   })}
                 </ol>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="flex flex-col gap-2" data-testid="memory-checkins">
+        <SectionLabel count={checkins.length}>Check-ins</SectionLabel>
+        {checkins.length === 0 ? (
+          <p className="px-4 text-[15px] leading-[1.4] text-faint">
+            None yet. Say &ldquo;on Thursdays, ask me if I sent the status report&rdquo; and I&rsquo;ll ask, without
+            adding a task.
+          </p>
+        ) : (
+          <ul className="ios-group rounded-2xl bg-card">
+            {checkins.map((c) => (
+              <li key={c.id} className="flex items-start gap-3 px-4 py-3" data-checkin={c.id}>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[15px] leading-[1.4] wrap-anywhere">{c.question}</p>
+                  <p className="mt-0.5 text-[13px] text-faint">I ask on {c.days}</p>
+                </div>
+                <ForgetButton label="this check-in" onForget={() => forgetCheckin(c.id)} />
               </li>
             ))}
           </ul>

@@ -21,6 +21,8 @@ import {
   user as userTable,
   type DocSection,
 } from "@/lib/db/schema";
+import { standingCheckins } from "@/lib/db/schema";
+import { DAY_NAMES, daysInWords, findCheckin, localDay, markAsked } from "./checkins";
 import { canvasSnapshots, layoutPreferences } from "@/lib/db/schema";
 import { latestSnapshot, paintCanvas, readComposition } from "@/lib/canvas/painter";
 import {
@@ -1130,6 +1132,42 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         postponed_count: t.postponedCount,
       })),
     };
+  },
+
+  async set_checkin(ctx, args) {
+    const a = toolSchemas.set_checkin.parse(args);
+    const days = [...new Set(a.days.map((d) => DAY_NAMES.indexOf(d)))].sort();
+    const same = await findCheckin(ctx.userId, a.question);
+    if (same && same.question.toLowerCase() === a.question.trim().toLowerCase()) {
+      await db.update(standingCheckins).set({ days }).where(eq(standingCheckins.id, same.id));
+    } else {
+      await db.insert(standingCheckins).values({ userId: ctx.userId, question: a.question.trim(), days });
+    }
+    return {
+      result: {
+        saved: true,
+        question: a.question.trim(),
+        asked_on: daysInWords(days),
+        note: "A check-in, not a task: nothing was added to any list and nothing will buzz the phone. It comes up in conversation on those days.",
+      },
+      toast: { icon: "◆", text: `Check-in: ${daysInWords(days)}` },
+    };
+  },
+
+  async remove_checkin(ctx, args) {
+    const a = toolSchemas.remove_checkin.parse(args);
+    const row = await findCheckin(ctx.userId, a.checkin);
+    if (!row) return { result: { error: `No check-in matching "${a.checkin}"` } };
+    await db.delete(standingCheckins).where(and(eq(standingCheckins.userId, ctx.userId), eq(standingCheckins.id, row.id)));
+    return { result: { removed: true, question: row.question } };
+  },
+
+  async checkin_asked(ctx, args) {
+    const a = toolSchemas.checkin_asked.parse(args);
+    const row = await findCheckin(ctx.userId, a.checkin);
+    if (!row) return { result: { error: `No check-in matching "${a.checkin}"` } };
+    await markAsked(ctx.userId, row.id, localDay(ctx.timezone).date);
+    return { result: { ok: true } };
   },
 
   async remember_fact(ctx, args) {

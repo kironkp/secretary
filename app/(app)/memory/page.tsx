@@ -6,7 +6,8 @@ import { redirect } from "next/navigation";
 import { desc, eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { memories, pipelineTemplates } from "@/lib/db/schema";
+import { memories, pipelineTemplates, standingCheckins } from "@/lib/db/schema";
+import { daysInWords } from "@/lib/secretary/checkins";
 import { MemoryView } from "@/components/memory/memory-view";
 
 export default async function MemoryPage() {
@@ -15,7 +16,7 @@ export default async function MemoryPage() {
   const userId = session.user.id;
   const timezone = (session.user as { timezone?: string }).timezone ?? "UTC";
 
-  const [processRows, factRows] = await Promise.all([
+  const [processRows, factRows, checkinRows] = await Promise.all([
     db
       .select()
       .from(pipelineTemplates)
@@ -26,6 +27,11 @@ export default async function MemoryPage() {
       .from(memories)
       .where(eq(memories.userId, userId))
       .orderBy(desc(memories.createdAt)),
+    db
+      .select()
+      .from(standingCheckins)
+      .where(eq(standingCheckins.userId, userId))
+      .orderBy(desc(standingCheckins.createdAt)),
   ]);
 
   // Dates are written here, in the user's timezone, so the client never
@@ -49,6 +55,7 @@ export default async function MemoryPage() {
         recurrence: p.recurrence,
         steps: Array.isArray(p.steps) ? p.steps : [],
       }))}
+      checkins={checkinRows.map((c) => ({ id: c.id, question: c.question, days: daysInWords(c.days) }))}
       facts={factRows.map((f) => ({
         id: f.id,
         fact: f.fact,
