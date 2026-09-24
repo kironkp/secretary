@@ -565,8 +565,39 @@ export function ChatThread({
     }
     setDragH(null);
   };
-  // Swiping up on the pill raises the keyboard; it never pulls up history.
-  const swipe = useRef<number | null>(null);
+  // A swipe up on the pill itself (not just the grabber). With a
+  // conversation to show, it grows the pill back into it, following the
+  // finger; with none yet, it raises the keyboard (Gemini does both).
+  // touch-none on the pill is what makes this reach us at all: without it
+  // iOS takes a vertical swipe as a page scroll and cancels the pointer.
+  const hasConversation = msgs.some((m) => m.role !== "tool");
+  const swipe = useRef<{ y0: number; id: number } | null>(null);
+  const onPillDown = (e: React.PointerEvent) => {
+    if (dockState !== "bar" || drag.current) return;
+    swipe.current = { y0: e.clientY, id: e.pointerId };
+  };
+  const onPillMove = (e: React.PointerEvent) => {
+    const sw = swipe.current;
+    if (!sw || drag.current || !hasConversation) {
+      if (drag.current) onHandleMove(e);
+      return;
+    }
+    // Past a small upward threshold, the swipe becomes a drag of the card.
+    if (sw.y0 - e.clientY > 10) {
+      e.currentTarget.setPointerCapture(sw.id);
+      drag.current = { y0: sw.y0, h0: 0, lastY: e.clientY, lastT: e.timeStamp, v: 0, moved: true };
+      onHandleMove(e);
+    }
+  };
+  const onPillUp = (e: React.PointerEvent) => {
+    const sw = swipe.current;
+    swipe.current = null;
+    if (drag.current) {
+      onHandleUp();
+      return;
+    }
+    if (sw && !hasConversation && sw.y0 - e.clientY > 24) inputRef.current?.focus();
+  };
 
   const canSend = !!input.trim() || pending.some((a) => a.id);
 
@@ -613,7 +644,7 @@ export function ChatThread({
               dock.setState(dockState === "full" ? "bar" : "full");
             }
           }}
-          className="flex h-5 flex-none cursor-grab touch-none items-center justify-center active:cursor-grabbing"
+          className="-mb-1 flex h-7 flex-none cursor-grab touch-none items-center justify-center active:cursor-grabbing"
         >
           <span className="h-[5px] w-10 rounded-full bg-faint/60" />
         </div>
@@ -817,14 +848,11 @@ export function ChatThread({
             voice call — or send once there is something to send — and, in
             the pill, x to put the chat away. */}
         <div
-          className="flex-none px-2 pb-2 pt-1"
-          onPointerDown={(e) => {
-            if (dockState === "bar") swipe.current = e.clientY;
-          }}
-          onPointerUp={(e) => {
-            if (swipe.current !== null && swipe.current - e.clientY > 24) inputRef.current?.focus();
-            swipe.current = null;
-          }}
+          className={`flex-none px-2 pb-2 pt-1 ${dockState === "bar" ? "touch-none" : ""}`}
+          onPointerDown={onPillDown}
+          onPointerMove={onPillMove}
+          onPointerUp={onPillUp}
+          onPointerCancel={onPillUp}
         >
           {error && <p className="px-2 pb-1.5 text-xs text-danger">{error}</p>}
           {mode === "dictation" ? (
@@ -927,7 +955,12 @@ export function ChatThread({
                   onPaste={onPaste}
                   placeholder="Ask your secretary"
                   aria-label="Ask your secretary"
-                  className="max-h-[140px] min-h-11 min-w-0 flex-1 resize-none bg-transparent px-1 py-[11px] text-[17px] leading-[1.3] text-ink outline-none placeholder:text-faint"
+                  // The field is its own scroll container, so the pill's
+                  // touch-none does not reach through it: in the pill it needs
+                  // its own, or a swipe that starts on it is a cancelled scroll.
+                  className={`max-h-[140px] min-h-11 min-w-0 flex-1 resize-none bg-transparent px-1 py-[11px] text-[17px] leading-[1.3] text-ink outline-none placeholder:text-faint ${
+                    dockState === "bar" ? "touch-none" : ""
+                  }`}
                 />
                 {canSend ? (
                   <button

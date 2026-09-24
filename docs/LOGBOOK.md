@@ -7,6 +7,26 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 ---
 
+## v0.17 — Swiping up on the pill works on a real touch screen (2026-09-24)
+
+this commit
+
+Kiron on the iPad: dragging the open chat down worked, but a swipe up on the
+pill did nothing — neither the keyboard with nothing started, nor the
+conversation after one was swiped down. iOS read the vertical swipe as a page
+scroll and cancelled the pointer. The pill is now `touch-none`, and so is its
+field (a textarea is its own scroll container, so an ancestor's touch-action
+does not reach through it — a swipe starting on the field was still a
+cancelled scroll). A swipe up on the pill grows it back into the
+conversation, following the finger, when there is one; with none yet it
+raises the keyboard. The grabber's hit area is taller.
+
+Checked with real touch events (CDP) at 820×1180: fresh pill swipe-up
+focuses the field; send → full; drag down → pill; pill swipe-up → full;
+grabber swipe-up → full. 824/824 vitest.
+
+---
+
 ## v0.16 — The secretary can search the web (2026-09-24)
 
 this commit
