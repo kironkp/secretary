@@ -1,6 +1,6 @@
 {
   "name": "secretary",
-  "version": "0.20.0",
+  "version": "0.21.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -42,6 +42,7 @@
     "mailparser": "^3.9.16",
     "next": "16.2.11",
     "openai": "^6.48.0",
+    "pdf-lib": "^1.17.1",
     "pg": "^8.22.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",

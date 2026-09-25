@@ -11,7 +11,7 @@ export type MemoryProcess = {
   id: string;
   name: string;
   recurrence: string | null;
-  steps: { name: string; blocked_by?: number | null; offset_days?: number | null }[];
+  steps: { name: string; blocked_by?: number | null; offset_days?: number | null; docs?: string[] }[];
 };
 
 export type MemoryCheckin = {
@@ -195,6 +195,15 @@ export function MemoryView({
                         <span className="min-w-0 flex-1 wrap-anywhere">
                           {s.name}
                           {meta && <span className="text-[13px] text-faint"> · {meta}</span>}
+                          {s.docs && s.docs.length > 0 && (
+                            <span className="mt-0.5 flex flex-wrap gap-1">
+                              {s.docs.map((d) => (
+                                <span key={d} className="rounded-md bg-surface-2 px-1.5 py-0.5 text-[12px] text-muted">
+                                  {d}
+                                </span>
+                              ))}
+                            </span>
+                          )}
                         </span>
                       </li>
                     );

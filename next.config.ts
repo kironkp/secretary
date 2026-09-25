@@ -71,6 +71,15 @@ const nextConfig: NextConfig = {
           { key: "Cross-Origin-Resource-Policy", value: "same-origin" },
         ],
       },
+      {
+        // The compiled packet is built from the same untrusted uploads, so it
+        // gets the same lock (docs/understanding/SPEC.md §6, packets).
+        source: "/api/tasks/:id/packet/pdf",
+        headers: [
+          { key: "Content-Security-Policy", value: "default-src 'none'" },
+          { key: "Cross-Origin-Resource-Policy", value: "same-origin" },
+        ],
+      },
     ];
   },
 };

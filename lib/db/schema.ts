@@ -583,11 +583,34 @@ export const pipelineTemplates = pgTable("pipeline_templates", {
     .references(() => user.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   steps: jsonb("steps")
-    .$type<{ name: string; blocked_by?: number | null; offset_days?: number | null }[]>()
+    // docs: the documents that step needs (docs/understanding/SPEC.md §6, packets).
+    .$type<{ name: string; blocked_by?: number | null; offset_days?: number | null; docs?: string[] }[]>()
     .notNull(),
   recurrence: text("recurrence"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// A task's packet (docs/understanding/SPEC.md §6): an uploaded file filed
+// against a task under a document name ("STD 65", "ADM 2029"). The bytes stay
+// in attachments; this is only the filing.
+export const taskDocuments = pgTable(
+  "task_documents",
+  {
+    id: text("id").primaryKey().$defaultFn(uuid),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    taskId: text("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    attachmentId: text("attachment_id")
+      .notNull()
+      .references(() => attachments.id, { onDelete: "cascade" }),
+    docType: text("doc_type").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("task_documents_task_idx").on(t.taskId)]
+);
 
 // Slow-loop wishlist (SPEC §7, v1.3): the planner/user wants a component that
 // doesn't exist → a wish accumulates here instead of improvising. Dedupe by

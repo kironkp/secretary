@@ -384,6 +384,25 @@ export const toolSchemas = {
       .min(2),
     recurrence: z.enum(["daily", "weekly", "monthly", "yearly"]).optional(),
   }),
+  set_step_documents: z.object({
+    process: z.string().min(1).describe("The process name (fuzzy), e.g. 'CPO purchase cycle'"),
+    step: z.number().int().min(1).max(40).describe("The 1-based step number the documents belong to"),
+    documents: z
+      .array(z.string().min(1).max(80))
+      .max(12)
+      .describe("The documents that step needs, by the user's names: ['STD 65', \"Seller's permit\"]. [] clears them."),
+  }),
+  file_document: z.object({
+    task: z.string().min(1).describe("Task id, or a distinctive fragment of its title ('glue CPO', '2110')"),
+    doc_type: z.string().min(1).max(80).describe("Which document it is, by the user's name: 'ADM 2029', 'Quote'"),
+    attachment: z
+      .string()
+      .optional()
+      .describe("Attachment id; omit to file the file the user most recently sent"),
+  }),
+  packet_status: z.object({
+    task: z.string().min(1).describe("Task id, or a distinctive fragment of its title"),
+  }),
   apply_pipeline: z.object({
     task: z.string().min(1).describe("Task id, or a distinctive fragment of its title"),
     template: z.string().min(1).describe("Pipeline template name (fuzzy-matched)"),
@@ -627,6 +646,12 @@ const toolDescriptions: Record<ToolName, string> = {
     "NEVER make a rhetorical promise: the moment you say \"I'll be asking\" / \"check back in with me\" / \"I'll follow up\", call this in the SAME turn. The user reporting progress clears it silently; a miss makes you open the next session with it (per on_miss). This is what makes your follow-through real.",
   save_pipeline_template:
     "Save a reusable ordered checklist with dependencies (blocked_by) and per-step date offsets — e.g. CPO: update → sign (blocked by update) → pay (blocked by sign) → reconcile+submit. Use when the user describes an order of operations that will repeat.",
+  set_step_documents:
+    "Say which documents a step of a process needs ('for a CPO, step 2 needs the STD 65 and the seller's permit'). Every task on that process then shows those as a checklist it can upload against and compile into one PDF.",
+  file_document:
+    "File a document the user sent in chat against a task, under its name ('that's the ADM 2029 for the glue CPO'). It then counts toward the task's packet and its compiled PDF.",
+  packet_status:
+    "What a task's packet has and is missing, step by step ('what am I missing for 2110?'). The packet and its Compile PDF button are on the task's detail.",
   apply_pipeline:
     "Instantiate a saved pipeline template onto a task: sets its stages with computed per-step dates. 'Where am I on X' is then answered from the task's stage state — never from memory.",
   paint_canvas:
@@ -714,6 +739,9 @@ export const VOICE_TOOL_NAMES = [
   "consult_brain",
   // the live web: "google what the dental provider is for state workers"
   "search_web",
+  // packets: "what am I missing for the glue CPO", "step 8 needs the ADM 2029"
+  "packet_status",
+  "set_step_documents",
   // the upward cycle: "I can't do that" files a shop request instead of dying
   "request_capability",
   "review_capability",

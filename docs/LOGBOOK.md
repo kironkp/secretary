@@ -7,6 +7,39 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 ---
 
+## v0.21 — CPO packets: documents per step, and Compile PDF (2026-09-25)
+
+this commit
+
+Kiron, after an interview that did not get it: "for each CPO… upload the
+documents… STD 65, the seller's permit, ADM 2029 for reconciliation… this
+is what I'm missing for each step… compile it in here instead of doing it in
+Adobe." SPEC (understanding §6, documents per step) first.
+
+- A process step can name the documents it needs (`steps[i].docs`), set by
+  voice or chat: `set_step_documents { process, step, documents[] }`.
+  Re-saving a process keeps each step's documents by step name.
+- `task_documents` files an attachment against a task under a document name
+  (the bytes stay in `attachments`). Names match loosely ("std-65" is "STD
+  65"). `file_document` (chat) files the file the user just sent;
+  `packet_status` (voice and chat) says what is there and missing.
+- The task's detail has a Documents section: per step, each required
+  document ✓ or missing with Upload/Add, other files, "Add file" under any
+  name, and **Compile PDF** — `GET /api/tasks/:id/packet/pdf`: a cover
+  checklist, then every PDF's pages and each image as a page, in process
+  order; anything else is named on the cover as not included. Served with
+  the attachments' `default-src 'none'` lock, since it is built from uploads.
+- The Memory tab shows each step's documents.
+- pdf-lib 1.17.1 added (pure JS PDF merge).
+
+Checked: 5 new tests (loose names, missing list, filing, a 3-page compile,
+docs kept on re-save); the voice-schema test caught an unbounded `step`
+(now max 40). Driven locally: seeded CPO task, upload through the UI, the
+detail reads 3/5 with ADM 2029 and the US Bank statement missing, compiled
+PDF has 4 pages with the checklist cover. 829/829 vitest, `next build`.
+
+---
+
 ## v0.20 — Swipe up on the call pill; no expand, no Minimize (2026-09-25)
 
 this commit

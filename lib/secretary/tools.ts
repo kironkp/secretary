@@ -21,8 +21,9 @@ import {
   user as userTable,
   type DocSection,
 } from "@/lib/db/schema";
-import { standingCheckins } from "@/lib/db/schema";
+import { attachments, standingCheckins } from "@/lib/db/schema";
 import { DAY_NAMES, daysInWords, findCheckin, localDay, markAsked } from "./checkins";
+import { fileDocument, getPacket } from "./packets";
 import { canvasSnapshots, layoutPreferences } from "@/lib/db/schema";
 import { latestSnapshot, paintCanvas, readComposition } from "@/lib/canvas/painter";
 import {
@@ -1735,9 +1736,18 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
       .from(pipelineTemplates)
       .where(and(eq(pipelineTemplates.userId, ctx.userId), ilike(pipelineTemplates.name, a.name)));
     if (existing.length) {
+      // Saving the same process again keeps each step's documents, matched by
+      // step name, unless the new steps carry their own.
+      const docsByStep = new Map(
+        (existing[0].steps ?? []).filter((st) => st.docs?.length).map((st) => [st.name.toLowerCase(), st.docs])
+      );
+      const steps = a.steps.map((st) => {
+        const docs = docsByStep.get(st.name.toLowerCase());
+        return docs && !("docs" in st) ? { ...st, docs } : st;
+      });
       await db
         .update(pipelineTemplates)
-        .set({ steps: a.steps, recurrence: a.recurrence ?? null })
+        .set({ steps, recurrence: a.recurrence ?? null })
         .where(eq(pipelineTemplates.id, existing[0].id));
     } else {
       await db.insert(pipelineTemplates).values({
@@ -1750,6 +1760,81 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     return {
       result: { saved: true, name: a.name, steps: a.steps.length },
       toast: { icon: "✓", text: `Pipeline "${a.name}" saved` },
+    };
+  },
+
+  async set_step_documents(ctx, args) {
+    const a = toolSchemas.set_step_documents.parse(args);
+    const templates = await db.select().from(pipelineTemplates).where(eq(pipelineTemplates.userId, ctx.userId));
+    const needle = a.process.toLowerCase();
+    const template =
+      templates.find((t) => t.name.toLowerCase() === needle) ??
+      templates.find((t) => t.name.toLowerCase().includes(needle) || needle.includes(t.name.toLowerCase()));
+    if (!template) return { result: { error: `No process matching "${a.process}"` } };
+    if (a.step > template.steps.length) {
+      return { result: { error: `"${template.name}" has ${template.steps.length} steps, not ${a.step}` } };
+    }
+    const docs = [...new Set(a.documents.map((d) => d.trim()).filter(Boolean))];
+    const steps = template.steps.map((st, i) => (i === a.step - 1 ? { ...st, docs } : st));
+    await db.update(pipelineTemplates).set({ steps }).where(eq(pipelineTemplates.id, template.id));
+    return {
+      result: { saved: true, process: template.name, step: a.step, step_name: template.steps[a.step - 1].name, documents: docs },
+      toast: { icon: "✓", text: `${template.name}, step ${a.step}: ${docs.join(", ") || "no documents"}` },
+    };
+  },
+
+  async file_document(ctx, args) {
+    const a = toolSchemas.file_document.parse(args);
+    const task = await findTask(ctx.userId, a.task);
+    if (!task) return { result: { error: `No task matching "${a.task}"` } };
+    const [att] = a.attachment
+      ? await db
+          .select({ id: attachments.id, name: attachments.name })
+          .from(attachments)
+          .where(and(eq(attachments.userId, ctx.userId), eq(attachments.id, a.attachment)))
+      : await db
+          .select({ id: attachments.id, name: attachments.name })
+          .from(attachments)
+          .where(eq(attachments.userId, ctx.userId))
+          .orderBy(desc(attachments.createdAt))
+          .limit(1);
+    if (!att) return { result: { error: "No file to file — ask the user to send it in chat first." } };
+    await fileDocument(ctx.userId, task.id, att.id, a.doc_type);
+    const packet = await getPacket(ctx.userId, task.id);
+    return {
+      result: {
+        filed: true,
+        task: task.title,
+        document: a.doc_type,
+        file: att.name,
+        still_missing: packet?.missing.map((m) => `${m.doc} (${m.step})`) ?? [],
+      },
+      toast: { icon: "✓", text: `${a.doc_type} filed to ${task.title.slice(0, 40)}` },
+    };
+  },
+
+  async packet_status(ctx, args) {
+    const a = toolSchemas.packet_status.parse(args);
+    const task = await findTask(ctx.userId, a.task);
+    if (!task) return { result: { error: `No task matching "${a.task}"` } };
+    const packet = await getPacket(ctx.userId, task.id);
+    if (!packet) return { result: { error: "No such task" } };
+    return {
+      result: {
+        task: packet.title,
+        process: packet.process,
+        steps: packet.steps
+          .filter((s) => s.docs.length)
+          .map((s) => ({
+            step: s.name,
+            have: s.docs.filter((d) => d.files.length).map((d) => d.name),
+            missing: s.docs.filter((d) => !d.files.length).map((d) => d.name),
+          })),
+        other_files: packet.other.map((f) => `${f.docType}: ${f.name}`),
+        note: packet.process
+          ? "The compiled PDF is on the task's detail (Compile PDF)."
+          : "This task is not on a process yet, so nothing is required; apply_pipeline puts it on one.",
+      },
     };
   },
 

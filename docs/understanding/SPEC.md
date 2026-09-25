@@ -377,6 +377,22 @@ and the record can say "CPO 2110 is on step 7, waiting for the US Bank
 statement". Processes and facts are both visible, and deletable, on the
 Memory tab.
 
+**Documents per step (packets).** A process step may name the documents it
+needs (`steps[i].docs`, e.g. "STD 65", "Seller's permit", "ADM 2029"), set by
+voice or chat with `set_step_documents { process, step, documents[] }`. A
+task placed on that process (its stages are the process's steps) then has a
+packet: each uploaded file is filed against the task under a document name
+(`task_documents`: task, attachment, doc name — the bytes stay in
+`attachments`). Names match loosely (case, spaces and punctuation ignored:
+"std-65" is "STD 65"). The task's detail shows, per step, each required
+document as present or missing with an upload for it, plus other files; the
+chat files an uploaded attachment with `file_document { task, doc_type }` and
+answers "what am I missing" with `packet_status { task }`. **Compile PDF**
+(`GET /api/tasks/:id/packet/pdf`) is one PDF: a cover page with the checklist
+(step, document, ✓ or missing), then every PDF and image in process order
+(step order, then the order the step lists its documents, then other files);
+a file that is neither PDF nor image is named on the cover as not included.
+
 Voice: one new tool, `answer_question`, flat schema, bounded strings:
 
 ```ts

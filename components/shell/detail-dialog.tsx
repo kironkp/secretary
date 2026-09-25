@@ -21,6 +21,7 @@ import {
   X,
 } from "lucide-react";
 import { TaskEditor, isoToLocalInput, localInputToIso } from "./task-editor";
+import { PacketSection } from "./packet-section";
 
 type TaskDetail = {
   kind: "task";
@@ -349,6 +350,7 @@ export function DetailDialog() {
                   </div>
                 </div>
               )}
+              <PacketSection key={detail.task.id} taskId={detail.task.id} />
               {detail.task.priority > 0 && (
                 <Row label="Priority">
                   <span className="inline-flex items-center gap-1.5">
