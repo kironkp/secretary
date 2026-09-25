@@ -7,6 +7,23 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 ---
 
+## v0.18 — A mic button that shows whether the call can hear you (2026-09-24)
+
+this commit
+
+One `LiveMicButton` for every place the call shows mute (the full-screen
+call and its minimized pill). Live: accent blue, full size, and it jumps
+with your voice — a lift and a scale driven by the MIC level from WebRTC
+stats every 70ms (never a Web Audio analyser on the mic; iOS can silence the
+sender). Muted: grey, a step smaller, a slashed mic, and still. So if it
+moves when you talk, the call hears you. Reduced motion keeps the signal as
+a halo that brightens with the voice. The caption says the state ("Live" /
+"Muted"); the old icon showed a slashed mic while live, which read backwards.
+
+824/824 vitest; looked at live and muted states on a throwaway preview.
+
+---
+
 ## v0.17 — Swiping up on the pill works on a real touch screen (2026-09-24)
 
 this commit

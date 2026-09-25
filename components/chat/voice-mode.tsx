@@ -14,6 +14,7 @@
 // it has no WebRTC). Levels come from RTCPeerConnection.getStats() instead.
 import { CALL_GLOW } from "./call-look";
 import { MessageActions } from "./message-actions";
+import { LiveMicButton } from "./live-mic-button";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -65,25 +66,6 @@ function ToastIcon({ glyph }: { glyph: string }) {
 
 // The mockup's control glyphs, drawn as it drew them (24px, 1.8 stroke) so the
 // buttons read the same on the phone as on the design page.
-function MicGlyph({ off, size = 24 }: { off: boolean; size?: number }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      aria-hidden
-    >
-      <rect x="8.5" y="3" width="7" height="12" rx="3.5" />
-      <path d="M6 11.5a6 6 0 0 0 12 0M12 17.5V21" />
-      {off && <path d="M4 4l16 16" strokeWidth="2" />}
-    </svg>
-  );
-}
-
 function XGlyph({ size = 24 }: { size?: number }) {
   return (
     <svg
@@ -483,17 +465,12 @@ export function VoiceMode({
             >
               <Maximize2 size={18} strokeWidth={1.75} />
             </button>
-            <button
-              onClick={session.toggleMute}
-              title={session.muted ? "Unmute" : "Mute"}
-              aria-label={session.muted ? "Unmute" : "Mute"}
-              aria-pressed={session.muted}
-              className={`${pillButton} ${
-                session.muted ? "bg-ink text-bg" : "bg-surface-2 text-ink"
-              }`}
-            >
-              <MicGlyph off={!session.muted} size={20} />
-            </button>
+            <LiveMicButton
+              muted={session.muted}
+              onToggle={session.toggleMute}
+              getLevels={session.getLevels}
+              size={44}
+            />
             <button
               onClick={endCall}
               title="End call"
@@ -722,18 +699,13 @@ export function VoiceMode({
           <Waveform active={session.assistantSpeaking} className="mx-auto" />
 
           <div className="flex justify-center gap-11 pt-1.5">
-            <button
-              onClick={session.toggleMute}
-              title={session.muted ? "Unmute" : "Mute"}
-              aria-label={session.muted ? "Unmute" : "Mute"}
-              aria-pressed={session.muted}
-              className={control}
-            >
-              <span className={`${circle} ${session.muted ? "bg-ink text-bg" : "bg-surface-2 text-ink"}`}>
-                <MicGlyph off={!session.muted} />
-              </span>
-              {session.muted ? "Unmute" : "Mute"}
-            </button>
+            <LiveMicButton
+              muted={session.muted}
+              onToggle={session.toggleMute}
+              getLevels={session.getLevels}
+              size={66}
+              withLabel
+            />
             <button onClick={endCall} title="End call" aria-label="End call" className={control}>
               <span className={`${circle} bg-danger text-white`}>
                 <XGlyph />
