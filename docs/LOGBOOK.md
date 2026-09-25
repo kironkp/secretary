@@ -7,6 +7,30 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 ---
 
+## v0.22 — The launcher morphs into the pill, and back (2026-09-25)
+
+this commit
+
+Kiron: "the little chat icon on the bottom right basically just morphs into
+the UI… the icon fades as it grows out… and when you exit, it morphs back
+into that little circle." A proxy shape (docked-chat.tsx, the shared-element
+move) animates left/top/width/height/radius from the launcher's measured
+rect to the pill's, same black and glow, the icon fading on the way out;
+the real card waits invisible underneath, is shown the moment the shape
+lands, and the shape fades off it so the contents come up out of the same
+black (an earlier cut hid the shape first and the pill blinked pale). Every
+close — the pill's x, the card's x — goes through the dock and runs it
+backwards into the circle, which then swaps in place. The launcher is now
+out of the flow (absolute over the tab bar) so it can always be measured.
+The card's old slide-up entrance is gone. Done on transitionend, with a
+timer behind it; reduced motion skips it.
+
+Checked: frames captured with CDP Animation.setPlaybackRate 0.12 on the way
+in and out; three open/close cycles and an open-then-close-mid-morph at
+normal speed end clean (launcher back, no shape left). 829/829 vitest.
+
+---
+
 ## v0.21 — CPO packets: documents per step, and Compile PDF (2026-09-25)
 
 this commit

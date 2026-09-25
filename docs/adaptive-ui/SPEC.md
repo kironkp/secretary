@@ -394,7 +394,11 @@ them:
 
 - **Closed** (default): one round launcher at the bottom-right corner, above
   the tab bar. Nothing else of the chat is on screen.
-- **Bar**: tap the launcher and a floating pill rises in its place, centred:
+- **Bar**: tap the launcher and it morphs into a floating pill, centred —
+  one black shape growing from the launcher's circle to the pill's rect,
+  the launcher's icon fading as it grows, the pill's contents coming up as
+  it lands; every close runs the same morph back into the circle (340ms,
+  the app's leading curve; reduced motion cuts). The pill:
   a grab handle on top, then `+` (Photos · Camera · Files), the field ("Ask
   your secretary"), dictation, the voice call, and × (back to Closed).
   Tapping the pill, or swiping up on it, raises the keyboard in the field — it

@@ -655,7 +655,7 @@ export function ChatThread({
         data-theme="dark"
         data-testid="chat-card"
         data-dock={dockState}
-        className={`animate-slide-up relative mb-2 flex flex-col overflow-hidden rounded-[26px] bg-black font-sans text-ink ${
+        className={`relative mb-2 flex flex-col overflow-hidden rounded-[26px] bg-black font-sans text-ink ${
           dock ? "" : "min-h-0 flex-1"
         }`}
         style={{
