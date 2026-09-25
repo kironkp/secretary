@@ -7,7 +7,7 @@
 // The tab bar stays underneath throughout. Thread data is fetched once on
 // mount (after paint — navigation never waits on it); the ?c= deep link from
 // push receipts opens the dock fully on that conversation. While a voice call
-// is live the dock slides away — the call pill owns the bottom.
+// is live, its controls take the composer's place in the same card.
 import { useEffect, useState } from "react";
 import { DockHeight } from "./dock-height";
 import { TabBar } from "@/components/shell/tab-bar";
@@ -72,18 +72,21 @@ export function DockedChat() {
     };
   }, [deepC, retrySeq]);
 
+  // A live call is drawn inside the card (call-slot.ts), so the card is up
+  // for as long as the call is: closed reads as the pill until it ends.
+  const callHere = call.active && !call.hosted;
+  const shown: DockState = callHere && state === "closed" ? "bar" : state;
+
   return (
     // The wrapper lets taps through; only the card, the launcher and the tab
     // bar take them, so the strip beside the launcher never blocks the page.
     <div
-      className={`pointer-events-none fixed inset-x-0 bottom-0 z-30 transition-all duration-300 ease-out motion-reduce:transition-none ${
-        call.active ? "translate-y-full opacity-0" : ""
-      }`}
+      className="pointer-events-none fixed inset-x-0 bottom-0 z-30"
     >
       <DockHeight />
       <div className="mx-auto w-full max-w-2xl px-3">
         {bootstrap ? (
-          <div className={state === "closed" ? "hidden" : "pointer-events-auto"}>
+          <div className={shown === "closed" ? "hidden" : "pointer-events-auto"}>
             <ChatThread
               key={bootstrap.conversationId ?? "fresh"}
               initialConversationId={bootstrap.conversationId}
@@ -95,10 +98,10 @@ export function DockedChat() {
               defaultVoiceEffort={bootstrap.voiceEffort}
               initialChatModel={bootstrap.chatModel}
               initialChatEffort={bootstrap.chatEffort}
-              dock={{ state, setState }}
+              dock={{ state: shown, setState }}
             />
           </div>
-        ) : state !== "closed" ? (
+        ) : shown !== "closed" ? (
           // Placeholder pill: same silhouette, no interaction — swapped for
           // the real one as soon as the thread arrives (one fast fetch).
           <div
@@ -122,7 +125,7 @@ export function DockedChat() {
           </div>
         ) : null}
       </div>
-      {state === "closed" && (
+      {shown === "closed" && (
         <div className="flex justify-end px-4 pb-2">
           <button
             type="button"

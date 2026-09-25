@@ -7,6 +7,35 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 ---
 
+## v0.19 — A call and a chat are one widget (2026-09-25)
+
+this commit
+
+Kiron: "When voice turns on it's this old ugly interface… merge the two. The
+bar to raise and lower is the same; only inside the widget do changes
+happen." The minimized call no longer draws its own white pill. The chat
+card registers a slot where its composer was (call-slot.ts) and the call
+portals its row into it — status, full screen, the live mic, end — so the
+dark pill, its grabber, the drag and the conversation above are the same
+ones, with the live transcript in the thread. The dock no longer slides away
+during a call; Closed reads as the pill until the call ends. No dock on the
+page: the old floating pill is the fallback. The interview orb, which draws
+its own call, is untouched (`hosted`).
+
+**Found on the way, and fixed:** End pressed while a call was still
+connecting left the connect running in the background: the server's
+session row never closed, so the next call was refused ("A voice session is
+already running") for five minutes. connect() now checks after each await
+and closes what it opened (abandonConnect). And a call ended before it
+connected was billed from the epoch (startedAt 0) — now one second.
+
+Checked with a real call (fake mic) at 820×1180: the row appears in the pill
+("Listening…"), a swipe up opens the card with it at the bottom, End brings
+the composer back in ~370ms; End during "Connecting…" leaves a second call
+free to start. 824/824 vitest. SPEC §7.7 updated.
+
+---
+
 ## v0.18 — A mic button that shows whether the call can hear you (2026-09-24)
 
 this commit

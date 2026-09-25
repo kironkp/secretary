@@ -413,8 +413,13 @@ voice through `POST /api/speak`, OpenAI TTS with the realtime voice names;
 tap again to stop). The full-screen voice call has no transcript toggle; its
 minimize control is a labelled button, not a bare caret.
 
-The voice button in the pill starts the global voice call pill-first
-(unchanged). The `?c=` deep link (push receipts) opens the dock in Full on the
+The voice button in the pill starts the global voice call pill-first. **A
+call and a chat are one widget**: while a call is live and minimized, its row
+(status, full screen, the live mic, end) takes the composer's place in the
+same card — same grabber, same drag, and swiping up shows the same
+conversation with the live transcript in it. The card stays up for the whole
+call (Closed reads as the pill). Full screen is the call's own view; its
+Minimize returns to the card. The `?c=` deep link (push receipts) opens the dock in Full on the
 linked thread.
 
 Tabs (Dashboard · Canvas · Spreadsheet · …) keep a single sliding indicator:

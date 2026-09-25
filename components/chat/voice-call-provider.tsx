@@ -28,6 +28,8 @@ type VoiceCallContextValue = {
   hostCall: () => () => void;
   /** Bumped when a call ends; carries the conversation to reload. */
   ended: { conversationId: string | null; seq: number } | null;
+  /** A surface (the interview orb) is drawing the live call itself. */
+  hosted: boolean;
 };
 
 const VoiceCallContext = createContext<VoiceCallContextValue | null>(null);
@@ -68,9 +70,10 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const flavor = active ? opts.flavor : undefined;
+  const hosted = hosts > 0 && Boolean(opts.flavor);
   const value = useMemo(
-    () => ({ active, session, begin, end, flavor, hostCall, ended }),
-    [active, session, begin, end, flavor, hostCall, ended]
+    () => ({ active, session, begin, end, flavor, hostCall, ended, hosted }),
+    [active, session, begin, end, flavor, hostCall, ended, hosted]
   );
 
   return (
@@ -85,7 +88,7 @@ export function VoiceCallProvider({ children }: { children: ReactNode }) {
           defaultEffort={opts.effort ?? "auto"}
           startMinimized={opts.minimized}
           flavor={opts.flavor}
-          hidden={hosts > 0 && Boolean(opts.flavor)}
+          hidden={hosted}
         />
       )}
     </VoiceCallContext.Provider>

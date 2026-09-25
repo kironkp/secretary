@@ -202,6 +202,9 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
     const token: TokenResponse = await tokenRes.json();
     this.conversationId = token.conversationId;
     this.usageId = token.usageId;
+    // Ended while the token was on its way: close the session the server
+    // just opened, or it counts as running and refuses the next call.
+    if (this.intentionalClose) return this.abandonConnect();
 
     const pc = new RTCPeerConnection();
     this.pc = pc;
@@ -250,6 +253,7 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
       this.setStatus("error", { kind: "network", message: "Call setup failed." });
       throw new Error(`sdp-exchange-failed: ${sdpRes.status}`);
     }
+    if (this.intentionalClose) return this.abandonConnect();
     const answerSdp = await sdpRes.text();
     await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
     this.sdp = {
@@ -272,6 +276,7 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
       };
     });
 
+    if (this.intentionalClose) return this.abandonConnect();
     if (!this.startedAt) this.startedAt = Date.now();
     this.reconnects = 0;
     this.setStatus("connected");
@@ -451,17 +456,43 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
     this.micStream?.getTracks().forEach((t) => t.stop());
     this.micStream = null;
     if (this.usageId) {
-      const seconds = Math.max(1, Math.round((Date.now() - this.startedAt) / 1000));
+      // A call ended before it connected has no start: it lasted a second,
+      // not since 1970.
+      const seconds = this.startedAt ? Math.max(1, Math.round((Date.now() - this.startedAt) / 1000)) : 1;
+      const usageId = this.usageId;
+      // Once: a connect still in flight must not close it a second time.
+      this.usageId = null;
       await fetch("/api/realtime/end", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          usageId: this.usageId,
+          usageId,
           conversationId: this.conversationId,
           seconds,
           inputTokens: this.inputTokens,
           outputTokens: this.outputTokens,
         }),
+      }).catch(() => {});
+    }
+    this.setStatus("ended");
+  }
+
+  /**
+   * End was pressed while connect() was still awaiting: disconnect() ran
+   * before there was a session to close. Close what the connect opened since
+   * — the peer, and the server's session row — and stop.
+   */
+  private async abandonConnect(): Promise<void> {
+    this.teardownPeer();
+    this.micStream?.getTracks().forEach((t) => t.stop());
+    this.micStream = null;
+    if (this.usageId) {
+      const usageId = this.usageId;
+      this.usageId = null;
+      await fetch("/api/realtime/end", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ usageId, conversationId: this.conversationId, seconds: 1, inputTokens: 0, outputTokens: 0 }),
       }).catch(() => {});
     }
     this.setStatus("ended");

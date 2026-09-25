@@ -15,6 +15,8 @@
 import { CALL_GLOW } from "./call-look";
 import { MessageActions } from "./message-actions";
 import { LiveMicButton } from "./live-mic-button";
+import { useCallSlot } from "./call-slot";
+import { createPortal } from "react-dom";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -187,6 +189,7 @@ export function VoiceMode({
   // Mobile lifeline: shrink the overlay to a floating pill — the page behind
   // becomes usable while the call (owned by the app shell) keeps running.
   const [minimized, setMinimized] = useState(startMinimized);
+  const slot = useCallSlot();
   // The "⋯" menu: voice, thinking depth, model, and the canvas.
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -404,8 +407,10 @@ export function VoiceMode({
   const lastToast = session.toasts[session.toasts.length - 1];
   const pillButton =
     "flex h-11 w-11 flex-none items-center justify-center rounded-full transition-colors";
-  const dockBar = (
-    <div className="rounded-2xl border border-sep bg-surface shadow-sm">
+  // The call's row: status, full screen, mute, end. Drawn inside the chat
+  // card when there is one (call-slot.ts), else in its own floating pill.
+  const callRow = (
+    <>
       {debugOn && (
         <pre
           onClick={() => void navigator.clipboard?.writeText(debugJson).catch(() => {})}
@@ -482,14 +487,19 @@ export function VoiceMode({
           </>
         )}
       </div>
-    </div>
+    </>
   );
+  const dockBar = <div className="rounded-2xl border border-sep bg-surface shadow-sm">{callRow}</div>;
 
   // Minimized: floating pill above EVERY page — the session lives in the app
   // shell (VoiceCallProvider), so browsing tabs never hangs up.
   if (hidden) return null;
   if (minimized)
-    return <div className="fixed inset-x-2 bottom-3 z-50 mx-auto max-w-md">{dockBar}</div>;
+    return slot ? (
+      createPortal(<div data-testid="call-row">{callRow}</div>, slot)
+    ) : (
+      <div className="fixed inset-x-2 bottom-3 z-50 mx-auto max-w-md">{dockBar}</div>
+    );
 
   // A control: the 58px circle with its 12px label; the whole column is the
   // target, so the label taps too.

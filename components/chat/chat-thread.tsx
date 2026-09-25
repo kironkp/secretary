@@ -36,6 +36,7 @@ import { DictationBar } from "./dictation-bar";
 import { useChatModel } from "./model-chip";
 import { CALL_GLOW, CALL_GLOW_SMALL } from "./call-look";
 import { MessageActions } from "./message-actions";
+import { setCallSlot } from "./call-slot";
 import { useVoiceCall } from "./voice-call-provider";
 
 export type DockState = "closed" | "bar" | "full";
@@ -570,7 +571,9 @@ export function ChatThread({
   // finger; with none yet, it raises the keyboard (Gemini does both).
   // touch-none on the pill is what makes this reach us at all: without it
   // iOS takes a vertical swipe as a page scroll and cancels the pointer.
-  const hasConversation = msgs.some((m) => m.role !== "tool");
+  // A live call's row sits where the composer was: one widget (call-slot.ts).
+  const callInDock = !!dock && call.active && !call.hosted;
+  const hasConversation = msgs.some((m) => m.role !== "tool") || callInDock;
   const swipe = useRef<{ y0: number; id: number } | null>(null);
   const onPillDown = (e: React.PointerEvent) => {
     if (dockState !== "bar" || drag.current) return;
@@ -727,7 +730,7 @@ export function ChatThread({
             </div>
           )}
 
-          {msgs.length === 0 && !hasBriefing && (
+          {msgs.length === 0 && !hasBriefing && !call.active && (
             <div className="flex flex-col items-center gap-3 pt-16 text-center">
               <span className="flex h-14 w-14 items-center justify-center rounded-full bg-accent/10 text-accent">
                 <WaveformGlyph size={24} />
@@ -854,6 +857,10 @@ export function ChatThread({
           onPointerUp={onPillUp}
           onPointerCancel={onPillUp}
         >
+          {callInDock ? (
+            <div ref={setCallSlot} data-testid="call-slot" />
+          ) : (
+          <>
           {error && <p className="px-2 pb-1.5 text-xs text-danger">{error}</p>}
           {mode === "dictation" ? (
             <DictationBar
@@ -1011,6 +1018,8 @@ export function ChatThread({
                 )}
               </div>
             </>
+          )}
+          </>
           )}
         </div>
       </div>
