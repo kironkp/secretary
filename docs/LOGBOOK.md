@@ -7,6 +7,29 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 ---
 
+## v0.23 — No more "A voice session is already running" (2026-09-25)
+
+this commit
+
+Kiron hit it again on the iPhone. Heroku's router log: a token at 15:48:25
+(200), then two more 3.4s apart (429). The first call's setup failed after
+the server had opened its session (the OpenAI account was out of credits
+again, so the SDP exchange was refused); nothing closed that session, so
+each "Try again" was refused as a second concurrent call for five minutes.
+
+- connect(): everything after the token is openPeer(), and a fresh call
+  whose setup throws closes its session (`/api/realtime/end`, one second)
+  before the error shows. A reconnect keeps its session for the next try.
+- checkVoiceQuota: a NEW call replaces an open session older than 20s
+  instead of refusing for 5 minutes — one person talks on one device, so a
+  row that old is a call that died without reporting. Two starts within 20s
+  are still refused.
+
+Checked in the browser with the OpenAI call endpoint blocked: the failed
+setup posts /end, and Try again gets a token (200) instead of a 429. 829/829.
+
+---
+
 ## v0.22 — The launcher morphs into the pill, and back (2026-09-25)
 
 this commit

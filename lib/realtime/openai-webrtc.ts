@@ -205,12 +205,30 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
     // Ended while the token was on its way: close the session the server
     // just opened, or it counts as running and refuses the next call.
     if (this.intentionalClose) return this.abandonConnect();
+    try {
+      await this.openPeer(model, token, resuming);
+    } catch (e) {
+      // Setup failed after the server opened a session (SDP refused, the
+      // channel never opened): close that session, or "Try again" is refused
+      // as "a voice session is already running".
+      this.teardownPeer();
+      // A reconnect keeps its session: tryReconnect tries again on the same
+      // row. Only a fresh call's failed setup is a session that never began.
+      if (!resuming) await this.closeSessionRow();
+      throw e;
+    }
+  }
 
+  /** Everything after the token: the peer, the SDP exchange, the channel. */
+  private async openPeer(model: string, token: TokenResponse, resuming: boolean): Promise<void> {
+
+    const mic = this.micStream;
+    if (!mic) throw new Error("no-mic");
     const pc = new RTCPeerConnection();
     this.pc = pc;
-    for (const track of this.micStream.getTracks()) {
+    for (const track of mic.getTracks()) {
       track.enabled = !this.muted;
-      pc.addTrack(track, this.micStream);
+      pc.addTrack(track, mic);
     }
     pc.ontrack = (e) => {
       this.ontrackAt = Date.now();
@@ -486,16 +504,20 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
     this.teardownPeer();
     this.micStream?.getTracks().forEach((t) => t.stop());
     this.micStream = null;
-    if (this.usageId) {
-      const usageId = this.usageId;
-      this.usageId = null;
-      await fetch("/api/realtime/end", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ usageId, conversationId: this.conversationId, seconds: 1, inputTokens: 0, outputTokens: 0 }),
-      }).catch(() => {});
-    }
+    await this.closeSessionRow();
     this.setStatus("ended");
+  }
+
+  /** Report a session that never got going as over (one second, once). */
+  private async closeSessionRow(): Promise<void> {
+    if (!this.usageId) return;
+    const usageId = this.usageId;
+    this.usageId = null;
+    await fetch("/api/realtime/end", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ usageId, conversationId: this.conversationId, seconds: 1, inputTokens: 0, outputTokens: 0 }),
+    }).catch(() => {});
   }
 
   private teardownPeer() {

@@ -57,7 +57,15 @@ export async function checkVoiceQuota(
   // report their end on disconnect and on pagehide; anything still open after
   // 5 minutes is an orphan (crashed tab, killed server) — close it out here
   // rather than blocking the user until a 30-minute window rolls over.
-  const ORPHAN_MS = 5 * 60 * 1000;
+  //
+  // A NEW call (handover returns early above) also replaces a session opened
+  // more than a few seconds ago: one person talks on one device, so a row
+  // that old is a call that died without reporting (a failed setup, a killed
+  // tab) — and refusing the new call for five minutes over it was the
+  // "A voice session is already running" Kiron kept hitting (2026-09-25). The
+  // guard still catches a real double start: two taps within SUPERSEDE_MS.
+  const SUPERSEDE_MS = 20 * 1000;
+  const ORPHAN_MS = SUPERSEDE_MS;
   // seconds: 1 is a sentinel meaning "closed out, real duration unknown" — it
   // only ever lands on rows that never reported one (seconds = 0), so it can
   // no longer destroy a real duration. Spend reporting treats these as
