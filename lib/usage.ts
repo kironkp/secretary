@@ -81,6 +81,9 @@ export async function recordUsage(entry: UsageRecord): Promise<void> {
       costUsd: priced.usd.toFixed(6),
       costEstimated: priced.estimated || !priced.known,
     });
+    // The fail-safe's alert line (lib/spend-guard.ts): checked after every
+    // priced call, pushed at most once a day. Never awaited by the caller.
+    void import("@/lib/spend-guard").then((g) => g.checkSpendAlert(entry.userId)).catch(() => {});
   } catch (e) {
     // A spend row is bookkeeping. Losing one must never break the feature that
     // generated it, but it should be loud in the log so gaps get noticed.

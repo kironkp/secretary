@@ -451,6 +451,21 @@ their own titles or messages; no banned words.
 
 ## 8. Triggers
 
+**Spend fail-safe (2026-09-25).** Every run first asks `backgroundAllowed`
+(lib/spend-guard.ts): past `UNDERSTANDING_DAILY_CAP_USD` (default $5) of
+understanding spend in the last 24 hours, the run skips with reason
+`budget` and the user gets one push that day; nothing done by hand is
+blocked. Any priced call checks total spend against `SPEND_ALERT_USD`
+(default $8) and pushes once a day when it is crossed. A run whose provider
+refused for money (no credits, a spend limit) pushes "<provider> is out of
+credit" once a day. A run no longer falls back to OpenAI when Claude refuses
+mid-flight — background reading waits for Claude; OpenAI serves runs only
+when there is no Claude key or `UNDERSTANDING_PROVIDER` names it. An
+answer's re-read waits until answers to that project have stopped for 90
+seconds (an interview sitting is one read, not one per answer). An id the
+model cut short or mis-dashed is mended by its first sixteen hex digits when
+exactly one known id has them (repair.ts).
+
 There is no dirty table. The design is a **sweep**: every
 `UNDERSTANDING_SWEEP_MINUTES` (default 10) the app gathers every `active`
 project of every user, hashes each bundle (`records.inputs_hash` is over the

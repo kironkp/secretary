@@ -641,13 +641,38 @@ export async function rerunAfterAnswer(
   projectId: string,
   timezone: string
 ): Promise<void> {
-  try {
-    const { runProject } = await import("./run");
-    await runProject(userId, projectId, { timezone });
-  } catch (e) {
-    console.error(
-      `understanding: re-run after answer failed for project ${projectId}:`,
-      e instanceof Error ? e.message : e
+  // Answers come in runs — twelve in an interview sitting — and each re-read
+  // is a full model call on the whole project. So the re-read waits until
+  // the answers have stopped for RERUN_SETTLE_MS: twelve answers, one read.
+  // The answers themselves are written at once; only the re-read waits.
+  const key = `${userId}:${projectId}`;
+  clearTimeout(pendingReruns.get(key));
+  const delay = process.env.VITEST ? 0 : RERUN_SETTLE_MS;
+  await new Promise<void>((resolve) => {
+    pendingReruns.set(
+      key,
+      setTimeout(() => {
+        pendingReruns.delete(key);
+        void (async () => {
+          try {
+            const { runProject } = await import("./run");
+            await runProject(userId, projectId, { timezone });
+          } catch (e) {
+            console.error(
+              `understanding: re-run after answer failed for project ${projectId}:`,
+              e instanceof Error ? e.message : e
+            );
+          }
+        })();
+        resolve();
+      }, delay)
     );
-  }
+    // A later answer replaces this timer: the promise it would have resolved
+    // is settled now so nothing waits on a read that is not coming.
+    if (delay > 0) resolve();
+  });
 }
+
+/** How long answers must stop before the project is re-read. */
+const RERUN_SETTLE_MS = 90_000;
+const pendingReruns = new Map<string, ReturnType<typeof setTimeout>>();

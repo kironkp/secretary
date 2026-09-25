@@ -44,8 +44,26 @@ export function nearestId(id: string, known: Set<string>): string | null {
     if (hit !== null) return null;
     hit = candidate;
   }
+  if (hit !== null) return hit;
+  // A dropped dash or a UUID cut short: on 2026-09-25 Caltrans spent three
+  // attempts twice over on memory ids like "da6ff733-c9ba-419e-bd5b43ac…"
+  // (one dash gone) and "b47d3561-883c-4a80-9908-376f70580" (cut off). No
+  // same-length slip reaches those. Compared as hex alone, an id whose first
+  // PREFIX_HEX digits are those of exactly one known id is that id: sixteen
+  // hex digits are 64 bits, which two real UUIDs never share by chance.
+  const hex = (v: string) => v.toLowerCase().replace(/[^0-9a-f]/g, "");
+  const head = hex(trimmed).slice(0, PREFIX_HEX);
+  if (head.length < PREFIX_HEX) return null;
+  for (const candidate of known) {
+    if (!hex(candidate).startsWith(head)) continue;
+    if (hit !== null) return null;
+    hit = candidate;
+  }
   return hit;
 }
+
+/** How many leading hex digits identify a UUID the model cut short or mis-dashed. */
+const PREFIX_HEX = 16;
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);

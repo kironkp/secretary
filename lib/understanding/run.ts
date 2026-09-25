@@ -8,6 +8,7 @@
 // the fallback. Storage is the only side effect, and it happens only after
 // validation has passed: a failed run leaves the previous record, its
 // questions and its words exactly as they were.
+import { alertProviderOutOfCredit, backgroundAllowed, isOutOfCredit } from "@/lib/spend-guard";
 import { randomUUID } from "node:crypto";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -599,7 +600,17 @@ export async function callByProvider<Input, Output>(
 }
 
 /** The production model for one user: the run's two calls, chosen as callByProvider says. */
-export function modelCallFor(userId: string): Promise<ModelCall | null> {
+export async function modelCallFor(userId: string): Promise<ModelCall | null> {
+  // A run does not fall back to OpenAI when Claude refuses mid-flight: on
+  // 2026-09-25 the Claude key hit its monthly limit at 1 AM and the runs
+  // moved to gpt-5.5 at high effort, failed validation twice over, and cost
+  // about $40 overnight. Background reading can wait for Claude. OpenAI is
+  // still the road when there is no Claude key at all, or when
+  // UNDERSTANDING_PROVIDER names it.
+  if (!process.env.UNDERSTANDING_PROVIDER || process.env.UNDERSTANDING_PROVIDER === "auto") {
+    const claude = await anthropicModelCall(userId);
+    if (claude) return callByProvider(async () => claude, async () => null, "call");
+  }
   return callByProvider(() => anthropicModelCall(userId), () => openaiModelCall(userId), "call");
 }
 
@@ -620,7 +631,7 @@ export type RunResult =
     }
   | {
       status: "skipped";
-      reason: "unchanged" | "no-model" | "disabled" | "no-project" | "backoff" | "queued";
+      reason: "unchanged" | "no-model" | "disabled" | "no-project" | "backoff" | "queued" | "budget";
     }
   | { status: "failed"; errors: string[] }
   | {
@@ -913,6 +924,17 @@ async function runOnce(
     }
   }
 
+  // --- the spend cap (lib/spend-guard.ts) ---------------------------------
+  // Past the day's cap, reading waits: the user is told once, by push, and
+  // nothing they do by hand is blocked. A test's injected model is exempt.
+  if (!opts.dryRun && !opts.model) {
+    const budget = await backgroundAllowed(userId);
+    if (!budget.ok) {
+      await logRun({ id: runId, userId, projectId, startedAt, status: "skipped", reason: "budget", inputsHash });
+      return { status: "skipped", reason: "budget" };
+    }
+  }
+
   // --- the model -----------------------------------------------------------
   const model = opts.model ?? (await modelCallFor(userId));
   if (!model) {
@@ -1035,6 +1057,15 @@ async function runOnce(
     console.error(
       `understanding: ${bundle.project.name} (${projectId}) failed after ${MAX_ATTEMPTS} attempts: ${logged.join("; ")}`
     );
+    // Out of credit is not a bug the next sweep will fix: tell the user once.
+    const money = logged.find((line) => isOutOfCredit(line));
+    if (money) {
+      void alertProviderOutOfCredit(
+        userId,
+        /openai/i.test(money) ? "OpenAI" : "Claude",
+        "Background reading of your projects has stopped."
+      );
+    }
     if (!opts.dryRun) {
       await logRun({
         id: runId,

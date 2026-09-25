@@ -32,8 +32,9 @@ describe("nearestId", () => {
     expect(nearestId("04718334-6af8-480c-89e2-f2d1a1d00cc5", known)).toBe(T1);
     // Three wrong: not a slip.
     expect(nearestId("04718334-6af8-480c-89e2-f2d1a1d00cc6".replace("480c", "481d"), known)).toBeNull();
-    // A different length is never a slip.
-    expect(nearestId("04718334-6af8-480c-86e2-f2d1a1d00cc", known)).toBeNull();
+    // A different length is not a slip — but since 2026-09-25 an id cut
+    // short is mended by its first sixteen hex digits when one id has them.
+    expect(nearestId("04718334-6af8-480c-86e2-f2d1a1d00cc", known)).toBe(T1);
     // Case does not count as a slip.
     expect(nearestId(T1.toUpperCase(), known)).toBe(T1);
   });
@@ -100,5 +101,18 @@ describe("repairIds", () => {
     const { output: mended, repairs } = repairIds(output, bundle);
     expect(mended).toEqual(output);
     expect(repairs).toEqual([]);
+  });
+});
+
+describe("ids cut short or missing a dash (2026-09-25)", () => {
+  const known = new Set(["da6ff733-c9ba-419e-bd5b-43ac91c5e7d0", "b47d3561-883c-4a80-9908-376f70580aa1"]);
+  it("mends a dropped dash and a truncated id by their first sixteen hex digits", () => {
+    expect(nearestId("da6ff733-c9ba-419e-bd5b43ac91c5e7d0", known)).toBe("da6ff733-c9ba-419e-bd5b-43ac91c5e7d0");
+    expect(nearestId("b47d3561-883c-4a80-9908-376f70580", known)).toBe("b47d3561-883c-4a80-9908-376f70580aa1");
+  });
+  it("leaves an id alone when too little of it is left, or when two ids share the head", () => {
+    expect(nearestId("b47d3561-883c", known)).toBeNull();
+    const twins = new Set(["aaaaaaaa-bbbb-cccc-dddd-111111111111", "aaaaaaaa-bbbb-cccc-dddd-222222222222"]);
+    expect(nearestId("aaaaaaaa-bbbb-cccc-dddd-3", twins)).toBeNull();
   });
 });

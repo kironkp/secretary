@@ -7,6 +7,35 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 ---
 
+## v0.24 — A spend fail-safe, and alerts (2026-09-25)
+
+this commit
+
+About $40 went overnight with no one using the app. Heroku's log: the Claude
+API key hit its monthly spend limit at 08:21 UTC; the understanding run
+fell back to OpenAI gpt-5.5 at high effort for the next hour, and Caltrans
+failed validation on all three attempts twice (memory ids the model cut
+short or mis-dashed; a suggested task with no drop answer) — each attempt a
+full, expensive call. OpenAI then ran out of credit too. Earlier the same
+UTC day, a ~34-minute voice interview and twelve answers, each re-reading
+the project on Opus. Kiron: "If an app spends so much we need a fail safe.
+And a way to notify me."
+
+- lib/spend-guard.ts: a 24-hour cap on understanding spend
+  (UNDERSTANDING_DAILY_CAP_USD, default $5) checked before every run (skip
+  reason `budget`); an alert line on total spend (SPEND_ALERT_USD, default
+  $8) checked after every priced call; "<provider> is out of credit" when a
+  run or dictation is refused for money. Each is one push a day (push_log).
+- Runs no longer fall back to OpenAI mid-flight; they wait for Claude.
+- An answer's re-read waits for 90 quiet seconds: an interview sitting is
+  one read.
+- repair.ts mends a cut-short or mis-dashed id by its first 16 hex digits.
+
+Pushes need Settings → Notifications enabled on the device. 835/835 vitest
+(4 new guard tests, 2 new repair tests).
+
+---
+
 ## v0.23 — No more "A voice session is already running" (2026-09-25)
 
 this commit
