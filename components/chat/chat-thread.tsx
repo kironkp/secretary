@@ -70,6 +70,9 @@ const MAX_ATTACHMENTS = 4;
 const MOVE_MS = 340;
 const MOVE_EASE = "cubic-bezier(0.22, 0.9, 0.32, 1)";
 
+/** What a drag reads from a pointer event, React's or the browser's. */
+type DragPoint = { clientY: number; timeStamp: number; pointerId: number; currentTarget: EventTarget | null };
+
 const REDUCED = "(prefers-reduced-motion: reduce)";
 /** prefers-reduced-motion, live. */
 function useReducedMotion(): boolean {
@@ -540,7 +543,7 @@ export function ChatThread({
     e.currentTarget.setPointerCapture(e.pointerId);
     drag.current = { y0: e.clientY, h0: targetH, lastY: e.clientY, lastT: e.timeStamp, v: 0, moved: false };
   };
-  const onHandleMove = (e: React.PointerEvent) => {
+  const onHandleMove = (e: DragPoint) => {
     const d = drag.current;
     if (!d) return;
     const dy = e.clientY - d.y0;
@@ -575,11 +578,11 @@ export function ChatThread({
   const callInDock = !!dock && call.active && !call.hosted;
   const hasConversation = msgs.some((m) => m.role !== "tool") || callInDock;
   const swipe = useRef<{ y0: number; id: number } | null>(null);
-  const onPillDown = (e: React.PointerEvent) => {
+  const onPillDown = (e: DragPoint) => {
     if (dockState !== "bar" || drag.current) return;
     swipe.current = { y0: e.clientY, id: e.pointerId };
   };
-  const onPillMove = (e: React.PointerEvent) => {
+  const onPillMove = (e: DragPoint) => {
     const sw = swipe.current;
     if (!sw || drag.current || !hasConversation) {
       if (drag.current) onHandleMove(e);
@@ -587,12 +590,12 @@ export function ChatThread({
     }
     // Past a small upward threshold, the swipe becomes a drag of the card.
     if (sw.y0 - e.clientY > 10) {
-      e.currentTarget.setPointerCapture(sw.id);
+      (e.currentTarget as Element | null)?.setPointerCapture?.(sw.id);
       drag.current = { y0: sw.y0, h0: 0, lastY: e.clientY, lastT: e.timeStamp, v: 0, moved: true };
       onHandleMove(e);
     }
   };
-  const onPillUp = (e: React.PointerEvent) => {
+  const onPillUp = (e: DragPoint) => {
     const sw = swipe.current;
     swipe.current = null;
     if (drag.current) {
@@ -601,6 +604,34 @@ export function ChatThread({
     }
     if (sw && !hasConversation && sw.y0 - e.clientY > 24) inputRef.current?.focus();
   };
+
+  // Native listeners, not React props: the live call's row is PORTALED into
+  // this pill (call-slot.ts), and React events from a portal bubble through
+  // the call's component tree, never reaching this one. Native events bubble
+  // through the DOM the row actually sits in, so a swipe on the call row
+  // moves the card like a swipe anywhere else on the pill.
+  const pillRef = useRef<HTMLDivElement>(null);
+  const pillHandlers = useRef({ down: onPillDown, move: onPillMove, up: onPillUp });
+  useEffect(() => {
+    pillHandlers.current = { down: onPillDown, move: onPillMove, up: onPillUp };
+  });
+  useEffect(() => {
+    const el = pillRef.current;
+    if (!el) return;
+    const down = (e: PointerEvent) => pillHandlers.current.down(e);
+    const move = (e: PointerEvent) => pillHandlers.current.move(e);
+    const up = (e: PointerEvent) => pillHandlers.current.up(e);
+    el.addEventListener("pointerdown", down);
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", up);
+    el.addEventListener("pointercancel", up);
+    return () => {
+      el.removeEventListener("pointerdown", down);
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", up);
+      el.removeEventListener("pointercancel", up);
+    };
+  }, []);
 
   const canSend = !!input.trim() || pending.some((a) => a.id);
 
@@ -851,11 +882,8 @@ export function ChatThread({
             voice call — or send once there is something to send — and, in
             the pill, x to put the chat away. */}
         <div
+          ref={pillRef}
           className={`flex-none px-2 pb-2 pt-1 ${dockState === "bar" ? "touch-none" : ""}`}
-          onPointerDown={onPillDown}
-          onPointerMove={onPillMove}
-          onPointerUp={onPillUp}
-          onPointerCancel={onPillUp}
         >
           {callInDock ? (
             <div ref={setCallSlot} data-testid="call-slot" />

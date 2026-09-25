@@ -418,8 +418,10 @@ call and a chat are one widget**: while a call is live and minimized, its row
 (status, full screen, the live mic, end) takes the composer's place in the
 same card — same grabber, same drag, and swiping up shows the same
 conversation with the live transcript in it. The card stays up for the whole
-call (Closed reads as the pill). Full screen is the call's own view; its
-Minimize returns to the card. The `?c=` deep link (push receipts) opens the dock in Full on the
+call (Closed reads as the pill). There is no expand button and no Minimize:
+a swipe up anywhere on the pill — the call row included — opens the card,
+with the call row staying at its foot all the way up. The call's separate
+full-screen view is only a fallback for a page with no dock. The `?c=` deep link (push receipts) opens the dock in Full on the
 linked thread.
 
 Tabs (Dashboard · Canvas · Spreadsheet · …) keep a single sliding indicator:

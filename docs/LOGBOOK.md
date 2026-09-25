@@ -7,6 +7,32 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 ---
 
+## v0.20 — Swipe up on the call pill; no expand, no Minimize (2026-09-25)
+
+this commit
+
+On the iPad a swipe up on the pill during a call did nothing. The call's row
+is portaled into the pill (v0.19), and React events from a portal bubble
+through the portal's own component tree — the call — never reaching the
+chat card's handlers; the pill's touch-none meant the browser did not
+scroll either, so nothing moved at all. The pill's swipe now listens with
+native pointer listeners, which bubble through the DOM the row actually sits
+in. Reproduced first with CDP touch events on a live call (swipe on the call
+row stayed "bar"), then fixed: swipe up → full, grabber down → bar, a flick
+up on the row → full.
+
+Kiron: "the full screen button and the minimize should not exist… to make it
+full screen you just swipe up on the bar itself, and the bar stays all the
+way." The call row has no expand button, and with a dock on the page the
+call always lives in the card — the separate full-screen call (and its
+Minimize) is only the no-dock fallback. The voice / thinking / model menu
+lived on that full-screen view; those choices remain in Settings.
+
+Regression run of the non-call gestures (fresh pill → keyboard; send → full;
+drag down → pill; swipe up → full; grabber up → full) all pass. 824/824.
+
+---
+
 ## v0.19 — A call and a chat are one widget (2026-09-25)
 
 this commit

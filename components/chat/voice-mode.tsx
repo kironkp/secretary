@@ -28,7 +28,6 @@ import {
   Ellipsis,
   FolderPlus,
   Hourglass,
-  Maximize2,
   Mic,
   Pencil,
   TriangleAlert,
@@ -462,14 +461,6 @@ export function VoiceMode({
                 </p>
               ) : null}
             </div>
-            <button
-              onClick={() => setMinimized(false)}
-              title="Back to full screen"
-              aria-label="Back to full screen"
-              className={`${pillButton} bg-surface-2 text-ink`}
-            >
-              <Maximize2 size={18} strokeWidth={1.75} />
-            </button>
             <LiveMicButton
               muted={session.muted}
               onToggle={session.toggleMute}
@@ -494,7 +485,10 @@ export function VoiceMode({
   // Minimized: floating pill above EVERY page — the session lives in the app
   // shell (VoiceCallProvider), so browsing tabs never hangs up.
   if (hidden) return null;
-  if (minimized)
+  // With a chat card on the page the call ALWAYS lives in it: no expand
+  // button, no Minimize — a swipe up on the card is how it opens (Kiron,
+  // 2026-09-25). The full-screen view below is only for a page with no dock.
+  if (minimized || slot)
     return slot ? (
       createPortal(<div data-testid="call-row">{callRow}</div>, slot)
     ) : (
