@@ -4,11 +4,13 @@
 // app). Two lines, both per user, both over the last 24 hours, both summed
 // from the same cost column the Settings spend card shows:
 //
-// - a CAP on background reading (understanding runs): past it, runs skip
-//   until the window rolls on — nothing the user does by hand is blocked;
+// - a CAP on understanding runs (the sweep, "Understand now", the
+//   interview's "ask me more", an answer's re-read): past it, runs skip
+//   until the window rolls on. Chat, calls and answering itself are never
+//   blocked; only the re-read an answer starts waits;
 // - an ALERT on total spend: a push the first time a day crosses it.
 //
-// Every alert is sent once (push_log keys by UTC day), so a sweep every ten
+// Every alert is sent once (push_log keys by user and UTC day), so a sweep every ten
 // minutes cannot turn into a push every ten minutes.
 import { and, eq, gte, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
@@ -16,13 +18,24 @@ import { usage } from "@/lib/db/schema";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-const envUsd = (name: string, fallback: number): number => {
-  const v = Number(process.env[name]);
-  return Number.isFinite(v) && v > 0 ? v : fallback;
+/** A dollar amount from the environment; unset, junk or negative is the fallback. 0 only where `zeroOk`. */
+const envUsd = (name: string, fallback: number, zeroOk = false): number => {
+  const raw = process.env[name];
+  const v = raw === undefined || raw.trim() === "" ? NaN : Number(raw);
+  return Number.isFinite(v) && (v > 0 || (zeroOk && v === 0)) ? v : fallback;
 };
 
-/** Background reading may spend this much in 24 hours. */
-export const backgroundCapUsd = () => envUsd("UNDERSTANDING_DAILY_CAP_USD", 5);
+/** Understanding runs may spend this much in 24 hours. 0 turns them off. */
+export const backgroundCapUsd = () => envUsd("UNDERSTANDING_DAILY_CAP_USD", 5, true);
+/**
+ * One understanding run may spend this much, every attempt included
+ * (run.ts stops before an attempt that could pass it), and never more than
+ * the daily cap. It is also what the daily cap counts a run as before it
+ * starts: a Caltrans run that failed three times at 32k output tokens each
+ * cost about $3 on Opus. 0 turns runs off.
+ */
+export const runCapUsd = () =>
+  Math.min(envUsd("UNDERSTANDING_RUN_CAP_USD", 2, true), backgroundCapUsd());
 /** A push when all spend in 24 hours crosses this. */
 export const alertUsd = () => envUsd("SPEND_ALERT_USD", 8);
 
@@ -43,18 +56,30 @@ export async function spentLastDay(userId: string, kind?: string): Promise<numbe
 }
 
 /**
- * Whether background reading may call a model now. Over the cap, the
- * user hears about it once that day.
+ * Whether an understanding run may call a model now: what the last 24 hours
+ * spent, plus `nextUsd` (what the run about to start may cost) and
+ * `inFlightUsd` (what runs still reading may), must not pass the cap.
+ * Checking the spend alone let a run that started just under the cap land a
+ * dollar over it. Over the cap, the user hears about it once that day; a
+ * run that only has to wait for the others in flight is a queue, not a
+ * pause, and says nothing.
  */
-export async function backgroundAllowed(userId: string): Promise<{ ok: boolean; spent: number; cap: number }> {
+export async function backgroundAllowed(
+  userId: string,
+  nextUsd = 0,
+  inFlightUsd = 0
+): Promise<{ ok: boolean; spent: number; cap: number }> {
   const cap = backgroundCapUsd();
+  // Turned off on purpose: nothing to read, nothing to tell.
+  if (cap <= 0) return { ok: false, spent: 0, cap };
   const spent = await spentLastDay(userId, "understanding");
-  if (spent < cap) return { ok: true, spent, cap };
+  if (spent < cap && spent + inFlightUsd + nextUsd <= cap) return { ok: true, spent, cap };
+  if (spent < cap && spent + nextUsd <= cap) return { ok: false, spent, cap };
   await alertOnce(
     userId,
     "understanding-cap",
     "Background reading paused",
-    `It spent $${spent.toFixed(2)} in the last 24 hours, over its $${cap.toFixed(2)} cap. It starts again as that spend rolls off. Chat and calls still work.`
+    `It spent $${spent.toFixed(2)} in the last 24 hours, and another read could take it past its $${cap.toFixed(2)} cap. It starts again as that spend rolls off. Chat and calls still work.`
   );
   return { ok: false, spent, cap };
 }
@@ -96,7 +121,9 @@ async function alertOnce(userId: string, key: string, title: string, body: strin
   try {
     const { claimPush, sendPush } = await import("@/lib/push");
     const day = new Date().toISOString().slice(0, 10);
-    if (!(await claimPush(userId, `${key}:${day}`))) return;
+    // push_log.key is unique across users, so the user is part of it: keyed
+    // by day alone, the first user over a line silenced it for everyone else.
+    if (!(await claimPush(userId, `${key}:${day}:${userId}`))) return;
     console.warn(`spend-guard: ${title} — ${body}`);
     await sendPush(userId, { title, body, url: "/settings" });
   } catch (e) {

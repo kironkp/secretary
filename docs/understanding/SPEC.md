@@ -454,8 +454,7 @@ their own titles or messages; no banned words.
 **Spend fail-safe (2026-09-25).** Every run first asks `backgroundAllowed`
 (lib/spend-guard.ts): past `UNDERSTANDING_DAILY_CAP_USD` (default $5) of
 understanding spend in the last 24 hours, the run skips with reason
-`budget` and the user gets one push that day; nothing done by hand is
-blocked. Any priced call checks total spend against `SPEND_ALERT_USD`
+`budget` and the user gets one push that day. Any priced call checks total spend against `SPEND_ALERT_USD`
 (default $8) and pushes once a day when it is crossed. A run whose provider
 refused for money (no credits, a spend limit) pushes "<provider> is out of
 credit" once a day. A run no longer falls back to OpenAI when Claude refuses
@@ -465,6 +464,25 @@ answer's re-read waits until answers to that project have stopped for 90
 seconds (an interview sitting is one read, not one per answer). An id the
 model cut short or mis-dashed is mended by its first sixteen hex digits when
 exactly one known id has them (repair.ts).
+
+**Spend ceilings (2026-10-04).** The daily cap is asked by every run that
+may call a model: the sweep's (an exemption meant for tests skipped it for
+any run handed a model, which every sweep run is), "Understand now", the
+interview's "ask me more" and an answer's re-read. Chat, calls and the
+answer itself are never blocked. The cap counts a run before it starts: a
+run starts only while the last 24 hours' understanding spend, plus
+`UNDERSTANDING_RUN_CAP_USD` (default $2, never more than the daily cap) for
+this run and for every run still in flight, does not pass the cap. A run's
+hold is taken before the spend is read, so two runs starting together
+cannot both fit on the same spend. The same figure is each run's ceiling:
+no attempt starts whose worst case (its prompt priced uncached at a token
+per three characters, plus a full `max_tokens` answer) could take the run
+past it. Either cap set to 0 turns runs off, with no push. A refused run
+logs one `budget` row per project and inputs, not one per sweep, and a run
+refused only because others are in flight is waiting, not paused: no push.
+The model no longer writes the record's `asked` list: the code owns it and
+the store replaces it, so the run drops any copy the model writes before
+validation.
 
 There is no dirty table. The design is a **sweep**: every
 `UNDERSTANDING_SWEEP_MINUTES` (default 10) the app gathers every `active`
@@ -488,17 +506,19 @@ write site to say the same thing less reliably.
   retire ASR clarifications confirmed by use (§5). One sweep per user at a
   time; a second that starts while one is running returns at once and does
   nothing.
-- **Backoff, for the validator only.** A project whose last run failed on
-  the same inputs is not run again by the sweep for six hours, so a
-  rejection is not paid for six times an hour. Only a run the model
-  answered and the validator refused arms this; a run whose last attempt
-  failed at the provider (a 429, a usage cap, a timeout — logged with the
-  prefix `model: `) says nothing about the inputs and is tried again on the
-  next sweep. A 429 on the first attempt followed by a rejection on the
-  second is a rejection. A failure logged before this process started (an
-  older build, an older dyno) does not back off: a deploy that changes what
-  the validator accepts gets one fresh try per project. "Understand now"
-  and an answer's re-run ignore the backoff.
+- **Backoff, until the inputs change.** A project with a failed run on the
+  same inputs is not run again by the sweep until its inputs change, so a
+  rejection is paid for once, not every six hours. (Until 2026-10-04 the
+  backoff lasted six hours and a restarted process ignored it; Caltrans
+  failed on unchanged inputs about every six and a half hours, at about $3
+  a run.) A run the model answered and the validator refused arms this, and
+  so does a run that was billed, whatever ended it; every failed row on the
+  same inputs counts, not only the latest. A run whose last attempt failed
+  at the provider before anything was billed (a 429, a usage cap — logged
+  with the prefix `model: `) says nothing about the inputs and is tried
+  again on the next sweep. A 429 on the first attempt followed by a
+  rejection on the second is a rejection. "Understand now" and an answer's
+  re-run ignore the backoff.
 
   Built: `lib/understanding/sweep.ts` `sweepUnderstanding`, started from the
   boot hook (`instrumentation.ts`) two minutes after the server starts and

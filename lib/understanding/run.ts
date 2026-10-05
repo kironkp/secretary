@@ -8,7 +8,8 @@
 // the fallback. Storage is the only side effect, and it happens only after
 // validation has passed: a failed run leaves the previous record, its
 // questions and its words exactly as they were.
-import { alertProviderOutOfCredit, backgroundAllowed, isOutOfCredit } from "@/lib/spend-guard";
+import { alertProviderOutOfCredit, backgroundAllowed, isOutOfCredit, runCapUsd } from "@/lib/spend-guard";
+import { priceUsage } from "@/lib/pricing";
 import { randomUUID } from "node:crypto";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -380,6 +381,9 @@ export async function openaiModelCall(userId: string): Promise<ModelCall | null>
       model,
       instructions: system,
       input,
+      // The same ceiling as the Claude call; without it one answer had no
+      // limit at all, and the run's cost ceiling would be a guess.
+      max_output_tokens: MAX_TOKENS,
       reasoning: { effort },
       text: {
         format: {
@@ -662,23 +666,49 @@ export type RunOptions = {
    *  prompt gains one paragraph (prompt.ts INTERVIEW_ADDENDUM). Nothing else
    *  in the run changes: same gather, same validation, same storage. */
   mode?: RunMode;
-  /** The sweep sets this: after a failed run on these same inputs, wait
-   *  FAILED_BACKOFF_MS before calling the model again. A person pressing
-   *  "Understand now" or answering a question is asking to try now. */
+  /** The sweep sets this: after a failed run on these same inputs that the
+   *  model answered, or that was billed, never call the model on them again;
+   *  only a change in the data does. A person pressing "Understand now" or
+   *  answering a question is asking to try now. */
   backoffAfterFailure?: boolean;
 };
 
-/** A failed run stores no record, so without this the hash compare would call
- *  the model again every sweep for a project whose output keeps failing
- *  validation: six calls an hour, about a dollar each, for the same rejection.
- *  The first production sweep did exactly that on the Jazz project. */
-const FAILED_BACKOFF_MS = 6 * 60 * 60_000;
-/**
- * When this process started. A failure logged before that came from an
- * older build or an older process: a deploy that fixes what the validator
- * refused must get one fresh try per project, not wait six hours for it.
+/*
+ * A failed run stores no record, so without the backoff the hash compare
+ * would call the model again every sweep for a project whose output keeps
+ * failing validation: six calls an hour, about a dollar each, for the same
+ * rejection. The first production sweep did exactly that on the Jazz
+ * project. The backoff used to last six hours, and a restarted process
+ * ignored it; Heroku restarts the dyno daily, and from 2026-09-30 to
+ * 2026-10-04 Caltrans failed on the same inputs about every six and a half
+ * hours at about $3 a run. Now it lasts until the inputs change.
  */
-const BOOTED_AT = Date.now() - process.uptime() * 1000;
+
+/**
+ * Dollars held by runs in flight, per user (runCapUsd each). The daily cap
+ * counts them as spent, so two runs that start together cannot both fit
+ * under it on the same spend. Module-level on purpose: one process.
+ */
+const heldUsd = new Map<string, number>();
+
+/**
+ * Characters per token for the estimate. Prose and JSON run nearer four, so
+ * this errs high; a stretch of bare UUIDs can run nearer two and err low.
+ * Either way only the input side is a guess, and the input is the small part:
+ * the output is held to MAX_TOKENS, which is most of an attempt's worst case.
+ */
+const CHARS_PER_TOKEN = 3;
+
+/** The most one more attempt could cost: its prompt, priced uncached, and a full max_tokens answer. */
+function attemptCeilingUsd(model: string | undefined, prompt: string): number {
+  return priceUsage({
+    model,
+    kind: "understanding",
+    inputTokens: Math.ceil(prompt.length / CHARS_PER_TOKEN),
+    outputTokens: MAX_TOKENS,
+    seconds: 0,
+  }).usd;
+}
 
 /**
  * How a failure of the provider's own — the road was closed: a 429, a 400
@@ -702,6 +732,22 @@ export { MODEL_ERROR_PREFIX };
  */
 function failedAtProvider(errors: string[]): boolean {
   return errors.length > 0 && errors.every((e) => e.startsWith(MODEL_ERROR_PREFIX));
+}
+
+/**
+ * The output with any asked list the model wrote taken out of its record.
+ * The code owns `asked` (SPEC §5) and the store replaces it with the stored
+ * list, so the model's copy is not judged either: copied faithfully, one
+ * stored answer of 1,015 characters failed the validator on every Caltrans
+ * attempt it reached (record.asked.51.answer).
+ */
+function withoutAsked(output: unknown): unknown {
+  if (typeof output !== "object" || output === null) return output;
+  const record = (output as { record?: unknown }).record;
+  if (typeof record !== "object" || record === null || !("asked" in record)) return output;
+  const kept: Record<string, unknown> = { ...record };
+  delete kept.asked;
+  return { ...output, record: kept };
 }
 
 type RunLog = {
@@ -828,8 +874,10 @@ async function runProjectNow(
   if (opts.bundle && opts.bundle.project.id !== projectId) {
     return { status: "failed", errors: [`bundle is for project ${opts.bundle.project.id}, not ${projectId}`] };
   }
+  /** What runOnce held against the daily cap; given back however the run ends. */
+  const hold = { usd: 0 };
   try {
-    return await runOnce(userId, projectId, opts, startedAt, now, runId);
+    return await runOnce(userId, projectId, opts, startedAt, now, runId, hold);
   } catch (e) {
     // Nothing is thrown out of a run: one project's trouble must not end the
     // sweep (SPEC §8) or leave it unlogged. A database error in gather, the
@@ -850,6 +898,12 @@ async function runProjectNow(
     // A run that skipped published nothing, or inherited a "queued" entry
     // from the run before it: either way nothing is in flight now.
     if (!opts.dryRun) drop(userId, projectId);
+    // By now what it spent is in the usage table, where the cap reads it.
+    if (hold.usd > 0) {
+      const left = (heldUsd.get(userId) ?? 0) - hold.usd;
+      if (left > 1e-9) heldUsd.set(userId, left);
+      else heldUsd.delete(userId);
+    }
   }
 }
 
@@ -860,7 +914,8 @@ async function runOnce(
   opts: RunOptions,
   startedAt: Date,
   now: Date,
-  runId: string
+  runId: string,
+  hold: { usd: number }
 ): Promise<RunResult> {
   // --- gather and compare --------------------------------------------------
   const bundle =
@@ -893,31 +948,39 @@ async function runOnce(
   }
 
   if (opts.backoffAfterFailure && !opts.force) {
-    const [last] = await db
+    // Every failed run on these inputs, not just the latest row: a budget
+    // skip logged in between must not wipe the memory of the failure.
+    const failures = await db
       .select({
-        status: understandingRuns.status,
-        inputsHash: understandingRuns.inputsHash,
-        finishedAt: understandingRuns.finishedAt,
         errors: understandingRuns.errors,
+        inputTokens: understandingRuns.inputTokens,
+        outputTokens: understandingRuns.outputTokens,
       })
       .from(understandingRuns)
-      .where(and(eq(understandingRuns.userId, userId), eq(understandingRuns.projectId, projectId)))
-      .orderBy(desc(understandingRuns.startedAt))
-      .limit(1);
+      .where(
+        and(
+          eq(understandingRuns.userId, userId),
+          eq(understandingRuns.projectId, projectId),
+          eq(understandingRuns.status, "failed"),
+          eq(understandingRuns.inputsHash, inputsHash)
+        )
+      );
     if (
-      last?.status === "failed" &&
-      last.inputsHash === inputsHash &&
-      last.finishedAt &&
-      Date.now() - last.finishedAt.getTime() < FAILED_BACKOFF_MS &&
-      last.finishedAt.getTime() > BOOTED_AT &&
-      // Only a run the model answered and the validator refused is expected
-      // to fail the same way again on the same inputs. A run whose last
-      // attempt the provider failed (MODEL_ERROR_PREFIX) never got an answer
-      // on them; it tries again. The log keeps every provider failure next
-      // to the LAST attempt's errors, so it is all provider failures exactly
-      // when the last attempt was one: a 429 on the first attempt followed
-      // by a rejection on the second is a rejection, and backs off.
-      !failedAtProvider(last.errors ?? [])
+      failures.some(
+        (f) =>
+          // A run the model answered and the validator refused is expected
+          // to fail the same way again on the same inputs. A run whose last
+          // attempt the provider failed (MODEL_ERROR_PREFIX) never got an
+          // answer on them; it tries again. The log keeps every provider
+          // failure next to the LAST attempt's errors, so it is all provider
+          // failures exactly when the last attempt was one: a 429 on the
+          // first attempt followed by a rejection on the second is a
+          // rejection, and backs off.
+          !failedAtProvider(f.errors ?? []) ||
+          // And a provider failure that was billed (a stream cut off after
+          // earlier attempts answered) is not tried again for full price.
+          f.inputTokens + f.outputTokens > 0
+      )
     ) {
       // Same inputs, same rejection expected; a change in the data tries at once.
       return { status: "skipped", reason: "backoff" };
@@ -925,12 +988,35 @@ async function runOnce(
   }
 
   // --- the spend cap (lib/spend-guard.ts) ---------------------------------
-  // Past the day's cap, reading waits: the user is told once, by push, and
-  // nothing they do by hand is blocked. A test's injected model is exempt.
-  if (!opts.dryRun && !opts.model) {
-    const budget = await backgroundAllowed(userId);
+  // Past the day's cap, reading waits and the user is told once, by push.
+  // That holds for every run, "Understand now" and an answer's re-read
+  // included; chat, calls and the answer itself are never blocked. The run
+  // counts as its own ceiling before it starts, and runs still in flight
+  // count as theirs. Every run that may call a model asks, the sweep's
+  // included: the sweep hands its model down, and an exemption for "a model
+  // was passed in" (meant for tests) let every production run past the cap
+  // from 2026-09-25 on.
+  const ceiling = runCapUsd();
+  if (!opts.dryRun) {
+    // Held before the spend is read, not after: two runs starting in the
+    // same tick would otherwise both read nothing held and both start.
+    const others = heldUsd.get(userId) ?? 0;
+    heldUsd.set(userId, others + ceiling);
+    hold.usd = ceiling;
+    const budget = ceiling > 0 ? await backgroundAllowed(userId, ceiling, others) : { ok: false };
     if (!budget.ok) {
-      await logRun({ id: runId, userId, projectId, startedAt, status: "skipped", reason: "budget", inputsHash });
+      // runProjectNow gives the hold back. One row per project and inputs:
+      // a refused run stores no record, so every sweep until the spend rolls
+      // off would refuse it again and log it again, six rows an hour each.
+      const [last] = await db
+        .select({ reason: understandingRuns.reason, inputsHash: understandingRuns.inputsHash })
+        .from(understandingRuns)
+        .where(and(eq(understandingRuns.userId, userId), eq(understandingRuns.projectId, projectId)))
+        .orderBy(desc(understandingRuns.startedAt))
+        .limit(1);
+      if (!(last?.reason === "budget" && last.inputsHash === inputsHash)) {
+        await logRun({ id: runId, userId, projectId, startedAt, status: "skipped", reason: "budget", inputsHash });
+      }
       return { status: "skipped", reason: "budget" };
     }
   }
@@ -966,6 +1052,26 @@ async function runOnce(
   let outputTokens = 0;
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS && !output; attempt++) {
+    // The run's cost ceiling: no attempt starts that could take the run past
+    // it. Three Caltrans attempts cut at max_tokens cost about $3; with the
+    // ceiling, a prompt that size gets one.
+    const pricedAs = modelId || model.modelName;
+    const spentUsd = priceUsage({
+      model: pricedAs,
+      kind: "understanding",
+      inputTokens,
+      outputTokens,
+      cachedInputTokens,
+      seconds: 0,
+    }).usd;
+    const prompt =
+      UNDERSTANDING_SYSTEM + OUTPUT_FORMAT_TEXT + user + (attempt > 0 ? rejectionAddendum(errors) : "");
+    const nextUsd = attemptCeilingUsd(pricedAs, prompt);
+    if (spentUsd + nextUsd > ceiling) {
+      const line = `run cost ceiling: attempt ${attempt + 1} could cost up to $${nextUsd.toFixed(2)} after $${spentUsd.toFixed(2)} spent, past the $${ceiling.toFixed(2)} a run may spend (UNDERSTANDING_RUN_CAP_USD)`;
+      errors = [...errors, line];
+      break;
+    }
     {
       // The gather is over in a blink, so the counts ride on the reading
       // line, which is the one the screen actually sees for a minute or
@@ -1029,7 +1135,7 @@ async function runOnce(
     outputTokens += result.outputTokens;
     // A UUID copied with a slipped digit is mended to the one id it is that
     // close to before the validator sees it (repair.ts); the log says so.
-    const { output: mended, repairs } = repairIds(result.output, bundle);
+    const { output: mended, repairs } = repairIds(withoutAsked(result.output), bundle);
     if (repairs.length > 0) {
       console.warn(
         `understanding: ${bundle.project.name}: ${repairs.length} id${repairs.length === 1 ? "" : "s"} mended: ${repairs.map(repairLine).join("; ")}`

@@ -7,6 +7,52 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 ---
 
+## v0.25 — The spend cap holds, and a failed read is paid for once (2026-10-04)
+
+this commit
+
+Kiron's Claude key spent $38 on Oct 1, $12 on Oct 2 and 3, and $6 by the
+morning of Oct 4, with the app barely used: "I am not made of money."
+Production's `usage` table: all of it `understanding` on claude-opus-5,
+about $3 a run, every paid run since 09-30 17:08 the Caltrans project, 21
+failed and none stored. Paused first with `UNDERSTANDING_DISABLED=true`
+(Heroku v51, 2026-10-04 11:34 PDT); zero spend after it.
+
+- The $5 daily cap never ran: runOnce asked it only when no model was
+  passed in ("a test's injected model is exempt"), and runAll hands every
+  run its model. Production had no `budget` skip, ever. Every run now asks,
+  counting itself at `UNDERSTANDING_RUN_CAP_USD` (default $2, never more
+  than the daily cap) and runs in flight at theirs; the hold is taken
+  before the spend is read. "Over" means past the cap, so $3 spent leaves
+  room for one more $2 run under $5. "Understand now", "ask me more" and an
+  answer's re-read are capped too; chat, calls and answering are not.
+  Either cap at 0 turns runs off. A refused run logs one row per project
+  and inputs, not one per sweep; a run that only waits for another in
+  flight sends no "paused" push. The spend pushes were keyed by day alone
+  in a table whose key is unique across users; they now carry the user.
+- A failed run backed off six hours, and not at all after a restart (the
+  dyno cycles daily): Caltrans paid $3 on the same inputs every ~6.5 hours.
+  Now any failed run on the same inputs that the model answered, or that
+  was billed, keeps the sweep off them until they change.
+- One run: 3 attempts × 32k output tokens at Opus effort high, each cut at
+  max_tokens or refused. The model was told to copy back the record's
+  `asked` list, which the store then replaces: 25,073 of Caltrans's 50,113
+  record characters, and one stored answer of 1,015 characters failed the
+  validator (`record.asked.51.answer`) on every faithful copy. The prompt
+  and schema no longer ask for it and the run drops any copy before
+  validation. A run stops before any attempt whose worst case could take
+  it past its ceiling: a Caltrans-sized prompt now gets one attempt. The
+  OpenAI call got the same `max_output_tokens`.
+
+Not changed (Kiron's call): Opus at effort high for background reads, and
+MAX_TOKENS. 847 vitest with the API keys blanked: 846 pass, and
+understanding-own-words (7) fails the same way at v0.24 with blank keys
+(it reads key presence) and passes 24/24 with .env.local. 12 new tests in
+tests/understanding-spend.test.ts; each of 13 reverted fixes fails at
+least one of them.
+
+---
+
 ## v0.24 — A spend fail-safe, and alerts (2026-09-25)
 
 this commit

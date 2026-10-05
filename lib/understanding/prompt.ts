@@ -39,7 +39,7 @@ Rules that a machine checks; output that breaks them is rejected:
 
 7. Plain language: address the user as "you", never as "the user"; the real title the first time a thing is named; nickname and number together for anything that has both, like "Lenses (2110)"; days as digits ("42 days late", "the 22nd"); never the words slipped, stale, agenda, leverage, bandwidth, circle back; no shorthand the user has not used in their own titles or messages; say "I" for Secretary; never claim that anything was done, and never promise to do anything either — nothing you write changes the user's list, only an answer they give does, so "I'll clear them" is a promise you cannot keep. Say what is true now, or what you would do if they said so ("I would close the old copy"); call a task Secretary suggested "my suggestion".
 
-8. The record. things are the nouns the project is about, each with its name, aliases, ids such as CPO numbers, its state and what it waits on. rules are what the user has stated about how the work goes. decisions are choices made, with dates. blockers, currentWork, nextAction, attempts and resumePointer only as evidenced. Edit the previous record rather than starting over: keep what is still true, drop what is contradicted, update states. Copy the previous record's asked list unchanged.`;
+8. The record. things are the nouns the project is about, each with its name, aliases, ids such as CPO numbers, its state and what it waits on. rules are what the user has stated about how the work goes. decisions are choices made, with dates. blockers, currentWork, nextAction, attempts and resumePointer only as evidenced. Edit the previous record rather than starting over: keep what is still true, drop what is contradicted, update states. Leave the asked list out: the app keeps it.`;
 
 // --------------------------------------------------------------------------
 // The model-facing schema
@@ -92,15 +92,11 @@ const unknownOut = z.object({
   sources: z.array(sourceOut).describe("May be empty: an unknown is what you cannot point at"),
 });
 
-const askedOut = z.object({
-  questionId: z.string(),
-  question: z.string().optional(),
-  evidence: z.array(z.string()).optional(),
-  askedAt: z.string(),
-  answer: z.string().optional(),
-  answeredAt: z.string().optional(),
-});
-
+// No asked list here: the code owns it (SPEC §5) and replaces whatever a run
+// returns with the stored one. Asking the model to copy it back was half of
+// Caltrans's 50,000-character record, written out and thrown away on every
+// attempt, and the copy failed the validator whenever a stored answer was
+// longer than the schema allows (record.asked.51.answer, 1,015 characters).
 const recordOut = z.object({
   objective: claimOut.optional(),
   things: z.array(thingOut),
@@ -113,7 +109,6 @@ const recordOut = z.object({
   resumePointer: claimOut.optional(),
   contradictions: z.array(contradictionOut),
   unknowns: z.array(unknownOut),
-  asked: z.array(askedOut).describe("The previous record's asked list, copied unchanged"),
   lastActivityAt: z.string().describe("The latest date any input shows activity, YYYY-MM-DD"),
 });
 
