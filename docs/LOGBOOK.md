@@ -11,12 +11,15 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 this commit
 
-Kiron's Claude key spent $38 on Oct 1, $12 on Oct 2 and 3, and $6 by the
-morning of Oct 4, with the app barely used: "I am not made of money."
-Production's `usage` table: all of it `understanding` on claude-opus-5,
-about $3 a run, every paid run since 09-30 17:08 the Caltrans project, 21
-failed and none stored. Paused first with `UNDERSTANDING_DISABLED=true`
-(Heroku v51, 2026-10-04 11:34 PDT); zero spend after it.
+Kiron's Claude console showed $38 on Oct 1, $12 on Oct 2 and 3, and $6 by
+the morning of Oct 4, with the app barely used: "I am not made of money."
+Production's `usage` table (its own figures; about $28 for Oct 1 Pacific
+time): all of it `understanding` on claude-opus-5. From 09-30 17:08 to
+10-04 09:29 PDT, Caltrans was $63.12 of $67.75 (93%): 21 runs at about $3,
+all failed, none stored, and every paid run from 10-01 15:47 PDT on. The
+other $4.63 was nine ok runs of six other projects. Paused first with
+`UNDERSTANDING_DISABLED=true` (Heroku v51, 2026-10-04 11:34 PDT); zero
+spend after it.
 
 - The $5 daily cap never ran: runOnce asked it only when no model was
   passed in ("a test's injected model is exempt"), and runAll hands every
