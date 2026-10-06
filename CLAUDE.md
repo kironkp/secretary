@@ -40,6 +40,21 @@ animation. The model owns the fill."* Judge the Canvas against that, not against
 whether the code runs.
 
 
+## Pushing (Kiron's standing authorization, 2026-10-07)
+- Push work/feature branches to origin whenever a change is committed. It
+  deploys nothing.
+- When Kiron says push (or ship / deploy), that includes main. Do it, don't ask
+  again. main deploys: GitHub Actions runs the checks, then Heroku deploys.
+- Always a fast-forward push. Never --force, never rewrite history, never
+  delete remote branches.
+- After pushing main, watch the CI run (`gh run watch`) and confirm the Heroku
+  release succeeded before saying it's live, with the release number.
+- Keep pushes small and deliberate: `git status` first, commit only the files
+  you changed with a message saying what and why, then
+  `git push origin HEAD:<branch>`. Never push secrets or local data (check
+  `.gitignore` if unsure).
+
+
 ## North star: JARVIS
 - The goal is ONE persistent intelligent system you talk to — it knows the
   user's information, can act on it, and fluidly manipulates a visual
