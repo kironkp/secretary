@@ -728,7 +728,7 @@ function LaneRows({
                       <span
                         aria-hidden
                         onPointerDown={(e) => beginItem(e, item, "start")}
-                        className="h-full w-2.5 flex-none cursor-ew-resize bg-ink/10"
+                        className="hidden h-full w-2.5 flex-none cursor-ew-resize bg-ink/10 sm:block"
                       />
                     )}
                     <span className="min-w-0 flex-1 truncate px-1.5">
@@ -739,7 +739,7 @@ function LaneRows({
                       <span
                         aria-hidden
                         onPointerDown={(e) => beginItem(e, item, "end")}
-                        className="h-full w-2.5 flex-none cursor-ew-resize bg-ink/10"
+                        className="hidden h-full w-2.5 flex-none cursor-ew-resize bg-ink/10 sm:block"
                       />
                     )}
                   </div>
@@ -749,7 +749,7 @@ function LaneRows({
                     <span
                       aria-hidden
                       onPointerDown={(e) => beginItem(e, item, "start")}
-                      className="h-5 w-2.5 cursor-ew-resize rounded-sm bg-ink/10"
+                      className="hidden h-5 w-2.5 cursor-ew-resize rounded-sm bg-ink/10 sm:block"
                     />
                     <span
                       role="button"
