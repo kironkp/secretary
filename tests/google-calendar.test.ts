@@ -273,6 +273,17 @@ describe("a repeating event starts at its next occurrence, in the user's zone (f
     expect(out.read_back).toBe("Standup, every weekday at 8:00 AM, starting Mon, Oct 12. It's on your Google Calendar.");
   });
 
+  it("weekly with no BYDAY keeps the start's weekday: a past Monday rolls to the next Monday", async () => {
+    at("2026-10-07T16:00:00Z"); // Wed 09:00 PDT (sec rev probe P3)
+    const userId = await newUser();
+    await connectCalendar(userId);
+    const out = await create(voice(userId), { title: "Trash out", starts_at: "2026-10-05T08:00:00", recurrence: "FREQ=WEEKLY" });
+    expect((await row(String(out.event_id))).startsAt.toISOString()).toBe("2026-10-12T15:00:00.000Z");
+    expect(google.calls.insert).toHaveLength(1);
+    expect((google.calls.insert[0].body as { start: unknown }).start).toEqual({ dateTime: "2026-10-12T08:00:00", timeZone: TZ });
+    expect(out.read_back).toBe("Trash out, every week at 8:00 AM, starting Mon, Oct 12. It's on your Google Calendar.");
+  });
+
   it("a monthly or yearly start in the past is refused with the reason; nothing is made", async () => {
     at("2026-10-06T16:00:00Z");
     const userId = await newUser();

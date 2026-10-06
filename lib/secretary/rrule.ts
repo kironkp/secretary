@@ -77,13 +77,17 @@ export function firstOccurrence(
       .map((p) => p.split("=") as [string, string])
   );
   const freq = parts.get("FREQ");
-  const days = parts.get("BYDAY")?.split(",").map((d) => d.replace(/^[+-]?\d/, ""));
-  const fits = (local: string) => {
-    if (!days) return true;
-    const [y, m, d] = local.slice(0, 10).split("-").map(Number);
-    return days.includes(DAY_CODES[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]);
-  };
   const startLocal = wallTimeInTz(startsAt, tz);
+  const weekday = (local: string) => {
+    const [y, m, d] = local.slice(0, 10).split("-").map(Number);
+    return DAY_CODES[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
+  };
+  // WEEKLY with no BYDAY repeats on the start's own weekday: "every week"
+  // said about a Monday rolls to the next Monday, never to tomorrow.
+  const days =
+    parts.get("BYDAY")?.split(",").map((d) => d.replace(/^[+-]?\d/, "")) ??
+    (freq === "WEEKLY" ? [weekday(startLocal)] : undefined);
+  const fits = (local: string) => !days || days.includes(weekday(local));
   if (startsAt.getTime() >= now.getTime() && fits(startLocal)) return { ok: true, startsAt };
   if (freq !== "DAILY" && freq !== "WEEKLY") {
     return { ok: false, reason: "recurrence: give the date of the first occurrence; it must not be in the past" };
