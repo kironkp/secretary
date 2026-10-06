@@ -48,7 +48,7 @@ import { describeRecurrence, firstOccurrence, normalizeRecurrence } from "./rrul
 import { findList, findOrCreateList, itemTitle, listFor, parseListPhrase, spokenList } from "./lists";
 import { arrangeDashboard } from "@/lib/layout/arrange";
 import { draftReply, inboxSummary, readMail, searchMail } from "@/lib/google/gmail";
-import { claimProposal, confirmable, markUntrusted, propose, sealProposal, UNTRUSTED_OK } from "./proposals";
+import { carriesMail, claimProposal, confirmable, markUntrusted, placeOf, propose, sealProposal, UNTRUSTED_OK } from "./proposals";
 import { recordUsage } from "@/lib/usage";
 import { paidCallAllowed } from "@/lib/spend-guard";
 import { defaultPlan, sectionKey, type LayoutPlan, type PlanSection } from "@/lib/layout/plan";
@@ -95,6 +95,12 @@ export type ToolContext = {
    * conversation, and by the mail tools themselves mid-turn.
    */
   untrusted?: boolean;
+  /**
+   * A call's turn (the voice tools route): the call's key and the Realtime
+   * item number of this tool call, null when the client couldn't tell. A
+   * proposal on a call is answered only on that call, in item order.
+   */
+  voice?: { session: string | null; seq: number | null };
 };
 
 /**
@@ -1150,7 +1156,7 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
 
   async confirm_pending(ctx) {
     if (!ctx.conversationId) return { result: { error: "There's nothing waiting for a yes." } };
-    const ready = await confirmable(ctx.userId, ctx.conversationId);
+    const ready = await confirmable(ctx.userId, ctx.conversationId, placeOf(ctx));
     if (!ready.ok) return { result: { error: ready.error } };
     // Exactly the stored rows, or nothing: a row changed since it was proposed is refused.
     for (const row of ready.rows) {
@@ -1776,19 +1782,22 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
       .select({
         content: messages.content,
         role: messages.role,
+        origin: messages.origin,
         mode: messages.mode,
         conversationId: messages.conversationId,
         createdAt: messages.createdAt,
         untrustedAt: conversations.untrustedAt,
+        channel: conversations.channel,
       })
       .from(messages)
       .leftJoin(conversations, eq(conversations.id, messages.conversationId))
       .where(and(...conds))
       .orderBy(desc(messages.createdAt))
       .limit(10);
-    // What the secretary said after mail was read may carry mail (SEC-A005):
-    // bringing it here marks this conversation too.
-    if (rows.some((m) => m.role !== "user" && m.untrustedAt && m.createdAt >= m.untrustedAt)) {
+    // A line that may carry mail (what the secretary said after mail was
+    // read, or an intake thread's mail itself): bringing it here marks this
+    // conversation too (SEC-A005 R3, A005b).
+    if (rows.some((m) => carriesMail(m, m))) {
       ctx.untrusted = true;
       if (ctx.conversationId) await markUntrusted(ctx.conversationId);
     }

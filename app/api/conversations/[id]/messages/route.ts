@@ -12,6 +12,9 @@ const bodySchema = z.object({
   role: z.enum(["user", "assistant"]),
   content: z.string().min(1).max(32000),
   mode: z.enum(["voice", "text"]),
+  // A call's line: the call's key and its Realtime item number (SEC-A005 R2).
+  voiceSession: z.string().max(64).optional(),
+  voiceSeq: z.number().int().nonnegative().optional(),
 });
 
 async function ownedConversation(userId: string, id: string) {
@@ -45,7 +48,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   const [message] = await db
     .insert(messages)
-    .values({ userId: user.id, conversationId: id, ...parsed })
+    // The user's own words from the app (a call's transcript): one of the
+    // only two ways an "app" message is written (SEC-A005b).
+    .values({ userId: user.id, conversationId: id, ...parsed, origin: parsed.role === "user" ? "app" : null })
     .returning();
 
   // SPEC §11 fast/slow split: the extractor (brain) runs asynchronously a few

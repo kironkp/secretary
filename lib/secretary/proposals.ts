@@ -15,7 +15,7 @@
 // browser posts each transcript when it is ready, so the words that led to
 // a proposal can land after it, but never after the reply that asked.
 import { createHmac } from "node:crypto";
-import { and, asc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, notInArray, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { conversations, messages, pendingActions } from "@/lib/db/schema";
 
@@ -46,9 +46,22 @@ export const UNTRUSTED_OK: ReadonlySet<string> = new Set([
 
 export const PROPOSAL_TTL_MS = 10 * 60_000;
 
-/** The user saying yes, plainly, at the start of their message. */
-const YES = /^\s*(yes|yeah|yep|yup|sure|ok(ay)?|go ahead|do it|add it|confirm(ed)?|please do|sounds good)\b(?![^.!?]*\b(no|don'?t|not|wait|cancel)\b)/i;
-export const isPlainYes = (text: string) => YES.test(text);
+const CONSENT = "yes|yeah|yep|sure|ok|okay|do it|go ahead|add it|confirm";
+const COURTESY = "please|thanks|thank you|now";
+const ONLY_CONSENT = new RegExp(`^(?:(?:${CONSENT}|${COURTESY})(?: |$))+$`);
+const SOME_CONSENT = new RegExp(`(?:^| )(?:${CONSENT})(?: |$)`);
+
+/**
+ * The whole message is a yes (sec rev R1): once case and punctuation are
+ * gone, nothing is left but consent words ("yes", "yes add it", "okay go
+ * ahead") and courtesy ("please", "thanks", "now"), six words at most.
+ * "Okay, read me the next one" and "do it later" are not a yes: in speech
+ * "okay" often opens a new request.
+ */
+export function isPlainYes(text: string): boolean {
+  const said = text.toLowerCase().replace(/[^a-z' ]+/g, " ").replace(/\s+/g, " ").trim();
+  return said.split(" ").length <= 6 && ONLY_CONSENT.test(said) && SOME_CONSENT.test(said);
+}
 
 /** Keys sorted, so the same arguments always seal the same. */
 function canonical(value: unknown): string {
@@ -78,6 +91,43 @@ export function describeProposal(tool: string, args: unknown): string {
 }
 
 /**
+ * Since when a conversation holds mail: from the first read into it, or,
+ * for an intake thread (channel "email", SEC-A005b), from its start, since
+ * the mail itself is stored there as its first message. Null = clean.
+ */
+export function untrustedSince(conv: { untrustedAt: Date | null; channel: string | null }): Date | null {
+  return conv.untrustedAt ?? (conv.channel === "email" ? new Date(0) : null);
+}
+
+/**
+ * A stored line that may carry mail (SEC-A005 R3): anything but the user's
+ * own words, in a conversation that holds mail, from the time it did. In a
+ * chat that read mail that is the secretary's lines; in an intake thread it
+ * is also the mail itself, stored as a user message without origin "app".
+ */
+export function carriesMail(
+  m: { role: string; origin: string | null; createdAt: Date },
+  conv: { untrustedAt: Date | null; channel: string | null }
+): boolean {
+  const since = untrustedSince(conv);
+  if (!since || m.createdAt < since) return false;
+  if (m.role !== "user") return true;
+  return conv.channel === "email" && m.origin !== "app";
+}
+
+/**
+ * For readers of the user's turns (understanding, layout signals, ASR): the
+ * row is the user's own words, not mail an intake thread stores as a user
+ * message (SEC-A005b). Rows typed or spoken in such a thread still count.
+ */
+export function notIntakeMail() {
+  return or(
+    eq(messages.origin, "app"),
+    notInArray(messages.conversationId, db.select({ id: conversations.id }).from(conversations).where(eq(conversations.channel, "email")))
+  );
+}
+
+/**
  * Mark a conversation as having read mail. The first read sets the time and
  * later ones keep it: everything the secretary said from then on may carry
  * mail (extraction reads by it).
@@ -90,12 +140,21 @@ export async function markUntrusted(conversationId: string): Promise<void> {
     .where(and(eq(conversations.id, conversationId), isNull(conversations.untrustedAt)));
 }
 
+/**
+ * Where a turn happens: a chat turn, or a call with its key and the item
+ * number of the tool call (null when the client couldn't tell).
+ */
+export type Place = { via: "chat" } | { via: "voice"; session: string | null; seq: number | null };
+export const placeOf = (ctx: { voice?: { session: string | null; seq: number | null } }): Place =>
+  ctx.voice ? { via: "voice", ...ctx.voice } : { via: "chat" };
+
 /** Store a write as a proposal. */
 export async function propose(
-  ctx: { userId: string; conversationId?: string; anchorMessageId?: string },
+  ctx: { userId: string; conversationId?: string; anchorMessageId?: string; voice?: { session: string | null; seq: number | null } },
   tool: string,
   args: unknown
 ) {
+  const place = placeOf(ctx);
   const id = crypto.randomUUID();
   const summary = describeProposal(tool, args);
   await db.insert(pendingActions).values({
@@ -106,6 +165,9 @@ export async function propose(
     args: (args ?? {}) as object,
     summary,
     afterMessageId: ctx.anchorMessageId ?? null,
+    via: place.via,
+    voiceSession: place.via === "voice" ? place.session : null,
+    voiceSeq: place.via === "voice" ? place.seq : null,
     digest: sealProposal(id, tool, args ?? {}),
     expiresAt: new Date(Date.now() + PROPOSAL_TTL_MS),
   });
@@ -130,54 +192,120 @@ export async function claimProposal(id: string): Promise<boolean> {
   return Boolean(claimed);
 }
 
-type Said = { id: string; role: string; content: string; createdAt: Date };
+type Said = {
+  id: string;
+  role: string;
+  content: string;
+  origin: string | null;
+  mode: string;
+  voiceSession: string | null;
+  voiceSeq: number | null;
+  createdAt: Date;
+};
 type Pending = typeof pendingActions.$inferSelect;
 
+/** The user, in their own words in the app: never mail stored as a user message. */
+const ownWords = (m: Said) => m.role === "user" && m.origin === "app";
+
 /**
- * The user's answer to a proposal: their first message after the first
- * reply of the secretary's that came after the proposal (the turn that
- * asked). Undefined while that reply, or the answer, hasn't landed.
+ * The lines of one place, in its own order. A chat is the typed thread in
+ * the order the server stored it (it writes each turn whole). A call is
+ * that call's lines in Realtime item order, never arrival time; a line
+ * without a number has no place in it. A call the client couldn't number
+ * has no lines at all, so nothing there can be answered.
+ */
+function linesOf(place: Place, said: Said[]): Said[] {
+  if (place.via === "chat") return said.filter((m) => m.mode === "text" && m.voiceSession === null);
+  if (!place.session) return [];
+  return said
+    .filter((m) => m.voiceSession === place.session && m.voiceSeq !== null)
+    .toSorted((a, b) => a.voiceSeq! - b.voiceSeq!);
+}
+
+const placeOfProposal = (p: Pending): Place =>
+  p.via === "voice" ? { via: "voice", session: p.voiceSession, seq: p.voiceSeq } : { via: "chat" };
+
+/**
+ * The user's answer to a proposal: in the place it was made, their first
+ * line in their own words after the secretary's first line after the
+ * proposal (the turn that asked). Undefined while that line, or the answer,
+ * isn't there.
  */
 export function answerTo(p: Pending, said: Said[]): Said | undefined {
-  const asked = said.find((m) => m.role === "assistant" && m.createdAt > p.createdAt);
-  return asked && said.find((m) => m.role === "user" && m.createdAt > asked.createdAt);
+  const place = placeOfProposal(p);
+  const lines = linesOf(place, said);
+  if (place.via === "voice") {
+    if (place.seq === null) return undefined;
+    const asked = lines.find((m) => m.role === "assistant" && m.voiceSeq! > place.seq!);
+    return asked && lines.find((m) => ownWords(m) && m.voiceSeq! > asked.voiceSeq!);
+  }
+  const asked = lines.find((m) => m.role === "assistant" && m.createdAt > p.createdAt);
+  return asked && lines.find((m) => ownWords(m) && m.createdAt > asked.createdAt);
 }
 
 /**
- * The proposals the user's current message confirms: those it is the answer
- * to, if it says yes. The current message is the user's newest; on a call
- * it can land a moment after the model acts on it, so it is waited for,
- * briefly. A proposal whose answer was anything else is refused for good.
+ * The proposals the user's current words confirm: those made in the same
+ * place (the same chat, or the same call) that the current words are the
+ * answer to, if they say yes. On a call the current words are the user's
+ * last line before the confirming tool call, and can be posted a moment
+ * after it, so they are waited for, briefly. A proposal whose answer was
+ * anything else is refused for good.
  */
-export async function confirmable(userId: string, conversationId: string): Promise<{ ok: true; rows: Pending[] } | { ok: false; error: string }> {
-  const open = await db
-    .select()
-    .from(pendingActions)
-    .where(
-      and(
-        eq(pendingActions.userId, userId),
-        eq(pendingActions.conversationId, conversationId),
-        eq(pendingActions.status, "pending"),
-        gt(pendingActions.expiresAt, new Date())
+export async function confirmable(
+  userId: string,
+  conversationId: string,
+  at: Place
+): Promise<{ ok: true; rows: Pending[] } | { ok: false; error: string }> {
+  if (at.via === "voice" && (!at.session || at.seq === null)) {
+    return { ok: false, error: "I can't tell the order of this call, so I can't take that as a yes. Ask again in the chat." };
+  }
+  const open = (
+    await db
+      .select()
+      .from(pendingActions)
+      .where(
+        and(
+          eq(pendingActions.userId, userId),
+          eq(pendingActions.conversationId, conversationId),
+          eq(pendingActions.status, "pending"),
+          gt(pendingActions.expiresAt, new Date())
+        )
       )
-    );
-  if (open.length === 0) return { ok: false, error: "There's nothing waiting for a yes." };
+  ).filter((p) => (at.via === "voice" ? p.via === "voice" && p.voiceSession === at.session : p.via === "chat"));
+  if (open.length === 0) return { ok: false, error: "There's nothing waiting for a yes here." };
 
-  const conversation = () =>
-    db
-      .select({ id: messages.id, role: messages.role, content: messages.content, createdAt: messages.createdAt })
+  const conversation = async () => {
+    const rows = await db
+      .select({
+        id: messages.id,
+        role: messages.role,
+        content: messages.content,
+        origin: messages.origin,
+        mode: messages.mode,
+        voiceSession: messages.voiceSession,
+        voiceSeq: messages.voiceSeq,
+        createdAt: messages.createdAt,
+      })
       .from(messages)
       .where(and(eq(messages.conversationId, conversationId), eq(messages.userId, userId)))
       .orderBy(asc(messages.createdAt));
+    // On a call, the conversation as of the confirming tool call: nothing after it counts.
+    return at.via === "voice" ? rows.filter((m) => m.voiceSession !== at.session || (m.voiceSeq !== null && m.voiceSeq < at.seq!)) : rows;
+  };
   let said = await conversation();
   const awaitingAnswer = () =>
-    open.some((p) => said.some((m) => m.role === "assistant" && m.createdAt > p.createdAt) && !answerTo(p, said));
+    open.some((p) => {
+      if (p.via === "voice" && p.voiceSeq === null) return false;
+      const lines = linesOf(placeOfProposal(p), said);
+      const asked = p.via === "voice" ? lines.some((m) => m.role === "assistant" && m.voiceSeq! > p.voiceSeq!) : lines.some((m) => m.role === "assistant" && m.createdAt > p.createdAt);
+      return asked && !answerTo(p, said);
+    });
   for (let waited = 0; awaitingAnswer() && waited < 3000; waited += 300) {
     await new Promise((r) => setTimeout(r, 300));
     said = await conversation();
   }
 
-  const current = said.filter((m) => m.role === "user").at(-1);
+  const current = linesOf(at, said).filter(ownWords).at(-1);
   const answered = open.filter((p) => answerTo(p, said));
   const dead = answered.filter((p) => answerTo(p, said)!.id !== current?.id || !isPlainYes(current.content));
   if (dead.length) {

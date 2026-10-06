@@ -27,6 +27,7 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { findDuplicate, findDuplicateEvent, titleSimilarity } from "./dedupe";
 import { parseInTz } from "@/lib/time";
 import { recordUsage } from "@/lib/usage";
+import { untrustedSince } from "./proposals";
 import { paidCallAllowed } from "@/lib/spend-guard";
 
 export const extractionSchema = z.object({
@@ -517,7 +518,9 @@ async function extractOnce(
     // so what was said is read once the cap allows.
     if (!(await paidCallAllowed(userId, "extraction")).ok) return null;
 
-    const transcript = extractionTranscript(rows, conv.untrustedAt);
+    // An intake thread's mail is its user message and stays extracted, as
+    // the intake intends; only the secretary's lines there are left out.
+    const transcript = extractionTranscript(rows, untrustedSince(conv));
 
     const knownTasks = await db
       .select({ title: tasks.title, dueAt: tasks.dueAt })

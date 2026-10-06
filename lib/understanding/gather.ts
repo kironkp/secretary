@@ -22,6 +22,7 @@ import {
   tasks,
   pipelineTemplates,
 } from "@/lib/db/schema";
+import { notIntakeMail } from "@/lib/secretary/proposals";
 import { dayRangeInTz } from "@/lib/time";
 import { resolveBinding } from "@/lib/workspace/bindings";
 import { getBoard } from "@/lib/workspace/store";
@@ -261,6 +262,9 @@ export async function loadMessages(userId: string, now: Date): Promise<MessageRo
       and(
         eq(messages.userId, userId),
         eq(messages.role, "user"),
+        // Forwarded mail an intake thread stores as a user message is not
+        // the user's own words (SEC-A005b).
+        notIntakeMail(),
         gte(messages.createdAt, new Date(now.getTime() - MESSAGE_DAYS * DAY_MS))
       )
     )
