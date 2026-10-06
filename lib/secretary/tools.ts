@@ -1874,6 +1874,7 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     return handlers.create_task(ctx, {
       title: a.title,
       due_at: a.due_at,
+      ...(a.start_at ? { start_at: a.start_at } : {}),
       project: a.project,
       stakes: a.stakes,
     });
@@ -1886,6 +1887,7 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
       ...(a.project !== undefined ? { project: a.project } : {}),
       ...(a.title ? { title: a.title } : {}),
       ...(a.note ? { notes: a.note } : {}),
+      ...(a.start_at ? { start_at: a.start_at } : {}),
     });
   },
 

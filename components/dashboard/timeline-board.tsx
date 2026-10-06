@@ -225,7 +225,12 @@ export function TimelineBoard({
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ id }),
                 });
-                setToast(r.ok ? { text: `"${title}" is on Google now.`, tone: "ok" } : { text: "Google still refused it.", tone: "warn" });
+                const json = (await r.json().catch(() => ({}))) as { result?: { google?: string } };
+                setToast(
+                  r.ok && json.result?.google === "added"
+                    ? { text: `"${title}" is on Google now.`, tone: "ok" }
+                    : { text: "Google still refused it. The move is saved here.", tone: "warn" }
+                );
               },
             }
           : { text: `Moved "${title}" to ${label}`, undo, tone: "ok" }

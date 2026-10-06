@@ -19,7 +19,7 @@ import { isMomentumTap } from "./shared";
 import type { DocRow, EventRow, TaskRow } from "./shared";
 import { AdaptiveView } from "./adaptive-view";
 import { CalendarView } from "./calendar-view";
-import { TimelineView } from "./timeline-view";
+import { TimelineBoard } from "./timeline-board";
 import { BoardView, ListTable } from "./task-views";
 import { PastDueChip, SuggestedZone } from "./zones";
 
@@ -230,7 +230,12 @@ export function DashboardViews({
           )}
           {view === "calendar" && <CalendarView tasks={tasks} events={events} timezone={timezone} />}
           {view === "timeline" && (
-            <TimelineView tasks={tasks} events={events} crossing={crossing} onDone={markDone} timezone={timezone} />
+            <TimelineBoard
+              tasks={tasks}
+              events={events}
+              projects={planProjects.filter((p) => p.kind !== "list" && (p.status ?? "active") === "active")}
+              timezone={timezone}
+            />
           )}
         </>
       )}

@@ -97,11 +97,16 @@ function pressureTone(days: number | null): Tone {
   return "neut";
 }
 
-function pressureLabel(days: number): string {
-  if (days < 0) return `${-days} ${days === -1 ? "day" : "days"} late`;
-  if (days === 0) return "today";
-  if (days === 1) return "tomorrow";
-  return `in ${days}d`;
+/**
+ * A date's colour where the date itself is shown (SPEC §7: dates, never
+ * countdowns): red only when it is actually late, amber within three days.
+ * The 5-week chart keeps its own pressure scale.
+ */
+function dateTone(days: number | null): Tone {
+  if (days === null) return "neut";
+  if (days < 0) return "danger";
+  if (days <= 3) return "warn";
+  return "neut";
 }
 
 function shortDate(d: Date) {
@@ -240,13 +245,13 @@ function computeStats(tasks: TaskRow[], events: EventRow[]) {
     undated: undatedTasks.map((t) => taskRow(t, "no date", "warn")),
   };
 
-  const nextInDays = upcoming.length ? upcoming[0].days : null;
+  const nextLabel = upcoming.length ? upcoming[0].label : null;
   return {
     open: open.length,
     overdue: overdueTasks.length,
     undated: undatedTasks.length,
     projects: projectMap.size,
-    nextInDays,
+    nextLabel,
     details,
   };
 }
@@ -266,11 +271,11 @@ export function StatTiles({ tasks, events }: { tasks: TaskRow[]; events: EventRo
     { id: "projects", value: String(s.projects), label: "active projects", Icon: FolderKanban },
     {
       id: "next",
-      value: s.nextInDays === null ? "—" : String(Math.max(0, s.nextInDays)),
-      unit: s.nextInDays === null ? undefined : "d",
-      label: "to your next commitment",
+      // The date of it, as every screen says dates (SPEC §7): "tomorrow",
+      // "Fri", "Oct 9"; never "1d".
+      value: s.nextLabel ?? "—",
+      label: "your next commitment",
       Icon: CalendarClock,
-      tone: s.nextInDays !== null && s.nextInDays <= 3 ? "text-danger" : undefined,
     },
     {
       id: "overdue",
@@ -390,6 +395,7 @@ export function findNextUp(
   notes: string | null;
   reminders: string[];
   days: number;
+  label: string;
 } | null {
   const now = Date.now();
   const candidates: {
@@ -436,11 +442,11 @@ export function findNextUp(
   ].sort((a, b) => a.at.getTime() - b.at.getTime());
   const first = candidates[0];
   if (!first) return null;
-  const days =
-    first.kind === "task"
-      ? (tasks.find((t) => t.id === first.id)?.dueDays ?? 0)
-      : (events.find((e) => e.id === first.id)?.startDays ?? 0);
-  return { ...first, days };
+  const task = first.kind === "task" ? tasks.find((t) => t.id === first.id) : undefined;
+  const event = first.kind === "event" ? events.find((e) => e.id === first.id) : undefined;
+  const days = task ? (task.dueDays ?? 0) : (event?.startDays ?? 0);
+  const label = task ? task.dueLabel : (event?.startLabel ?? "");
+  return { ...first, days, label };
 }
 
 export function NextUpHero({ tasks, events }: { tasks: TaskRow[]; events: EventRow[] }) {
@@ -479,7 +485,7 @@ export function NextUpHero({ tasks, events }: { tasks: TaskRow[]; events: EventR
           </p>
         )}
       </div>
-      <Pill tone={pressureTone(days)}>{pressureLabel(days)}</Pill>
+      <Pill tone={dateTone(days)}>{next.label}</Pill>
     </div>
   );
 }
@@ -982,6 +988,8 @@ type ProjectCard = {
   doneRecent: TaskRow[];
   doneCount: number;
   earliestDays: number | null;
+  /** How that earliest date reads (lib/due.ts), never a countdown. */
+  earliestLabel: string | null;
   latestSource: TaskRow | null;
   nextEvent: EventRow | null;
 };
@@ -1000,6 +1008,7 @@ export function buildProjects(tasks: TaskRow[], events: EventRow[] = []): Projec
         doneRecent: [],
         doneCount: 0,
         earliestDays: null,
+        earliestLabel: null,
         latestSource: null,
         nextEvent: null,
       };
@@ -1014,7 +1023,10 @@ export function buildProjects(tasks: TaskRow[], events: EventRow[] = []): Projec
       p.open.push(t);
       if (t.dueDays !== null) {
         const d = t.dueDays;
-        if (p.earliestDays === null || d < p.earliestDays) p.earliestDays = d;
+        if (p.earliestDays === null || d < p.earliestDays) {
+          p.earliestDays = d;
+          p.earliestLabel = t.dueLabel;
+        }
       }
     } else if (t.status === "done") {
       p.doneCount++;
@@ -1033,7 +1045,10 @@ export function buildProjects(tasks: TaskRow[], events: EventRow[] = []): Projec
     if (!p.id && e.projectId) p.id = e.projectId;
     if (!p.nextEvent || e.startsAt < p.nextEvent.startsAt) p.nextEvent = e;
     const d = e.startDays;
-    if (p.earliestDays === null || d < p.earliestDays) p.earliestDays = d;
+    if (p.earliestDays === null || d < p.earliestDays) {
+      p.earliestDays = d;
+      p.earliestLabel = e.startLabel;
+    }
   }
   return [...map.values()]
     .filter((p) => p.open.length > 0 || p.doneRecent.length > 0 || p.nextEvent !== null)
@@ -1099,7 +1114,7 @@ export function ProjectGrid({
                     </span>
                   </div>
                   {p.earliestDays !== null ? (
-                    <Pill tone={tone}>{pressureLabel(p.earliestDays)}</Pill>
+                    <Pill tone={dateTone(p.earliestDays)}>{p.earliestLabel}</Pill>
                   ) : (
                     <Pill tone="warn">undated</Pill>
                   )}

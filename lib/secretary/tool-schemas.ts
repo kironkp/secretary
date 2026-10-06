@@ -338,6 +338,7 @@ export const toolSchemas = {
   create_commitment: z.object({
     title: z.string().min(1).describe("Short imperative title"),
     due_at: z.string().optional().describe("ISO 8601 if a deadline was stated"),
+    start_at: z.string().optional().describe("ISO 8601 if the user said when they'll start ('start Monday'); never after due_at"),
     project: z.string().optional().describe("Project name if it belongs to one"),
     stakes: z.string().optional().describe("Named consequence of missing it, if the user stated one"),
   }),
@@ -356,6 +357,10 @@ export const toolSchemas = {
       ),
     title: z.string().optional().describe("New title, if the user renamed it"),
     note: z.string().optional().describe("Detail worth keeping on the task, briefly"),
+    start_at: z
+      .string()
+      .optional()
+      .describe('When work on it starts, ISO 8601 ("start the album cover on the 12th"); "none" clears it. Never after its due date.'),
   }),
   // --- Agent layer (SPEC §11): persona + pipeline templates ---
   update_persona: z.object({
@@ -729,7 +734,7 @@ const toolDescriptions: Record<ToolName, string> = {
   schedule_checkin:
     "Voice: you promised to follow up ('I'll be asking either way') — schedule it in the SAME breath. A user report clears it silently; a miss opens the next session.",
   amend_task:
-    "Voice: the user is changing something about a task that ALREADY exists — 'file that under Caltrans', 'move it to the trip project', 'rename it', 'add a note that the gate code is 4411'. Amends the EXISTING task in place: project (\"none\" unfiles it), title, note. NEVER creates a task — create_commitment is only for a genuinely new to-do.",
+    "Voice: the user is changing something about a task that ALREADY exists — 'file that under Caltrans', 'move it to the trip project', 'rename it', 'add a note that the gate code is 4411'. Amends the EXISTING task in place: project (\"none\" unfiles it), title, note, planned start ('start the album cover on the 12th'; the timeline draws it from there to the due date). A new DUE date is log_status (postponed). NEVER creates a task — create_commitment is only for a genuinely new to-do.",
   update_persona:
     "The user asked you to BE different — sterner, gentler, brisker, more/less follow-up, quiet hours ('I need a nagging secretary', 'stop being so peppy') — or gave you a NAME ('I'll call you Dot'). Store it ONCE here; it applies to every future conversation, the transcript labels, and the nag engine. Never re-ask.",
   queue_clarification:
