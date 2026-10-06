@@ -7,6 +7,7 @@ import { checkinsFor, daysInWords } from "./checkins";
 import { db } from "@/lib/db";
 import { documents, events, expectations, memories, pipelineTemplates, projects, tasks, user } from "@/lib/db/schema";
 import { dayRangeInTz } from "@/lib/time";
+import { carriesMail } from "./proposals";
 import { getRecentConversationTails } from "@/lib/db/queries";
 import { getPlanHead } from "@/lib/layout/plan-store";
 import { boardSectionNames } from "@/lib/layout/arrange";
@@ -29,6 +30,7 @@ const PRIOR_SESSION_COUNT = 3;
 const PRIOR_SESSION_TAIL = 10;
 const PRIOR_SESSIONS_CHAR_CAP = 3000;
 const PRIOR_LINE_CHAR_CAP = 200;
+export const MAIL_WITHHELD_NOTE = "(email was read here; details not carried over)";
 // OPEN QUESTIONS (docs/understanding/SPEC.md §6, §9): the top of the ranked
 // queue rides along so the model can ask the first at a pause and has the
 // next two if the user asks for more. Three, not the whole queue: the
@@ -526,14 +528,24 @@ export async function buildBriefing(
           conv.endedAt ? ` – ${fmt(conv.endedAt, timezone)}` : ""
         }]`,
       ];
+      // Where mail was read (or this is an intake thread), only the user's
+      // own lines come over: what the secretary said there, or the mail
+      // itself, could carry instructions into a session that never saw mail
+      // (SEC-A005 R3). A note keeps the gap honest.
+      let withheld = false;
       for (const m of tail) {
         if (m.role === "tool") continue;
+        if (carriesMail(m, conv)) {
+          withheld = true;
+          continue;
+        }
         const text =
           m.content.length > PRIOR_LINE_CHAR_CAP
             ? `${m.content.slice(0, PRIOR_LINE_CHAR_CAP)}…`
             : m.content;
         block.push(`${m.role === "user" ? "USER" : "SECRETARY"}: ${text}`);
       }
+      if (withheld) block.push(MAIL_WITHHELD_NOTE);
       const size = block.join("\n").length;
       if (used > 0 && used + size > PRIOR_SESSIONS_CHAR_CAP) break;
       lines.push(...block);

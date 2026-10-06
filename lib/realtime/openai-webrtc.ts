@@ -2,6 +2,7 @@
 // Flow: POST /api/realtime/token (auth-gated, rate-limited, briefing baked into
 // the session server-side) → ephemeral client secret → SDP exchange with
 // api.openai.com → audio tracks + "oai-events" data channel.
+import { ItemOrder } from "./item-order";
 import { ElevenLabsMouth } from "./el-mouth";
 import { IDLE_GOODBYE, MAX_GOODBYE, nextLimitAction, WARN_LINE } from "./session-limits";
 import { EL_MOUTH_VOICE } from "@/lib/elevenlabs";
@@ -577,18 +578,29 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
 
   private persistedIds = new Set<string>();
 
-  private persistOnce(key: string, role: "user" | "assistant", content: string) {
+  // Where each item sits in the Realtime conversation (SEC-A005 R2): the
+  // call's key, and item numbers in conversation order (./item-order.ts).
+  private readonly voiceSession = crypto.randomUUID();
+  private itemOrder = new ItemOrder();
+
+  /** The call's key and an item's number, for the server; only the key when the number is unknown. */
+  private placeOf(itemId: unknown): { voiceSession: string; voiceSeq?: number } {
+    const seq = this.itemOrder.numberOf(itemId);
+    return seq === undefined ? { voiceSession: this.voiceSession } : { voiceSession: this.voiceSession, voiceSeq: seq };
+  }
+
+  private persistOnce(key: string, role: "user" | "assistant", content: string, itemId?: unknown) {
     if (!this.conversationId || !content.trim()) return;
     if (this.persistedIds.has(key)) return; // duplicate event name for the same item
     this.persistedIds.add(key);
     fetch(`/api/conversations/${this.conversationId}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ role, content, mode: "voice" }),
+      body: JSON.stringify({ role, content, mode: "voice", ...this.placeOf(itemId) }),
     }).catch(() => {});
   }
 
-  private async handleToolCall(callId: string, name: string, argsJson: string) {
+  private async handleToolCall(callId: string, name: string, argsJson: string, itemId?: unknown) {
     let args: unknown = {};
     try {
       args = JSON.parse(argsJson || "{}");
@@ -611,6 +623,7 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
           args,
           conversationId: this.conversationId,
           ...(this.flavor ? { surface: this.flavor } : {}),
+          ...this.placeOf(itemId),
         }),
       });
       if (res.ok) body = await res.json();
@@ -654,6 +667,11 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
       // drop it silently either.
       this.lastErrorEvent = event;
       console.warn("[realtime] error event:", JSON.stringify(event).slice(0, 500));
+      return;
+    }
+    // GA name conversation.item.added, beta conversation.item.created.
+    if (t === "conversation.item.added" || t === "conversation.item.created") {
+      this.itemOrder.add(event);
       return;
     }
     if (t === "input_audio_buffer.speech_started") {
@@ -720,7 +738,7 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
       const id = String(event.item_id ?? "user-live");
       const text = String(event.transcript ?? "");
       this.emit("userTranscript", id, text, true);
-      this.persistOnce(`user:${id}`, "user", text);
+      this.persistOnce(`user:${id}`, "user", text, event.item_id);
       return;
     }
     // Assistant audio transcript (GA name response.output_audio_transcript.*, beta response.audio_transcript.*)
@@ -734,7 +752,7 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
       const text = String(event.transcript ?? "");
       this.emit("assistantTranscript", id, text, true);
       // GA + beta names can BOTH fire for the same item — persist exactly once.
-      this.persistOnce(`assistant:${id}`, "assistant", text);
+      this.persistOnce(`assistant:${id}`, "assistant", text, event.item_id);
       return;
     }
     // EL mouth mode: the session emits TEXT; the mouth speaks it.
@@ -750,14 +768,15 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
       const text = String(event.text ?? "");
       this.mouth.flushFinal();
       this.emit("assistantTranscript", id, text, true);
-      this.persistOnce(`assistant:${id}`, "assistant", text);
+      this.persistOnce(`assistant:${id}`, "assistant", text, event.item_id);
       return;
     }
     if (t === "response.function_call_arguments.done") {
       this.handleToolCall(
         String(event.call_id),
         String(event.name),
-        String(event.arguments ?? "{}")
+        String(event.arguments ?? "{}"),
+        event.item_id
       );
       return;
     }

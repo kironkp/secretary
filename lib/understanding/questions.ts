@@ -15,6 +15,7 @@ import { createHash } from "node:crypto";
 import { and, asc, desc, eq, gte, inArray, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { clarifications, entities, expectations, messages, projects, tasks } from "@/lib/db/schema";
+import { notIntakeMail } from "@/lib/secretary/proposals";
 import { isAlreadyRuledOn, settledEvidence } from "./supersede";
 import { termMatcher } from "./terms";
 import {
@@ -690,6 +691,8 @@ export async function retireAsrClarifications(
         and(
           eq(messages.userId, userId),
           eq(messages.role, "user"),
+          // What the user said, not forwarded mail stored as theirs (SEC-A005b).
+          notIntakeMail(),
           gte(messages.createdAt, new Date(now.getTime() - ASR_MESSAGE_DAYS * DAY_MS))
         )
       ));

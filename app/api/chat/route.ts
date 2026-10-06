@@ -12,6 +12,7 @@ import { loadHistoryWindow } from "@/lib/db/queries";
 import { buildBriefing } from "@/lib/secretary/briefing";
 import { buildInstructionParts } from "@/lib/secretary/persona";
 import { openAIToolDefs } from "@/lib/secretary/tool-schemas";
+import { untrustedSince } from "@/lib/secretary/proposals";
 import { executeTool, liveTurnContext, type ToolOutcome } from "@/lib/secretary/tools";
 import { runExtraction } from "@/lib/secretary/extraction";
 import { openaiClientFor, TEXT_MODEL } from "@/lib/openai";
@@ -69,6 +70,9 @@ export async function POST(req: Request) {
   // Conversation: reuse if owned, else create (text mode).
   let conversationId = parsed.conversationId ?? null;
   let storedResponseId: string | null = null;
+  // Mail has been read into this conversation, or it is an intake thread
+  // (SEC-A005/b): writes need a yes.
+  let readMail = false;
   if (conversationId) {
     const [owned] = await db
       .select()
@@ -76,7 +80,10 @@ export async function POST(req: Request) {
       .where(and(eq(conversations.id, conversationId), eq(conversations.userId, user.id)))
       .limit(1);
     if (!owned) conversationId = null;
-    else storedResponseId = owned.lastResponseId;
+    else {
+      storedResponseId = owned.lastResponseId;
+      readMail = untrustedSince(owned) !== null;
+    }
   }
   if (!conversationId) {
     const [conv] = await db
@@ -104,6 +111,7 @@ export async function POST(req: Request) {
       role: "user",
       content: storedText,
       mode: "text",
+      origin: "app",
       attachments: attachRows.length
         ? attachRows.map((a) => ({ id: a.id, mime: a.mime, name: a.name }))
         : null,
@@ -171,6 +179,7 @@ export async function POST(req: Request) {
     conversationId,
     anchorMessageId: userMessage.id,
     attachmentCount: attachRows.length,
+    untrusted: readMail,
   });
   const canChain = Boolean(storedResponseId) && prior.length > 0 && prior[prior.length - 1].mode === "text";
   let input: InputItem[] = canChain

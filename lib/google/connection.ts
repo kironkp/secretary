@@ -23,6 +23,23 @@ import { alertOnce } from "@/lib/spend-guard";
 /** Events on calendars the user owns, the primary among them; nothing shared with them (developers.google.com/workspace/calendar/api/auth). */
 export const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.events.owned";
 
+/**
+ * Gmail (SEC-A005): read, and write drafts. Both are restricted scopes; no
+ * Gmail scope allows drafts without sending, so "never sends" is the code's
+ * promise: GoogleHttp below has no way to send, and a test checks no request
+ * ever reaches a send endpoint.
+ */
+export const GMAIL_READ_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
+export const GMAIL_DRAFT_SCOPE = "https://www.googleapis.com/auth/gmail.compose";
+
+/** What each Settings button asks Google for. */
+export const FEATURE_SCOPES = {
+  calendar: [CALENDAR_SCOPE],
+  gmail: [GMAIL_READ_SCOPE, GMAIL_DRAFT_SCOPE],
+} as const;
+export type GoogleFeature = keyof typeof FEATURE_SCOPES;
+
+export const GMAIL_NOT_CONNECTED_LINE = "Gmail isn't connected. Connect it in Settings.";
 export const NOT_CONNECTED_LINE = "Google Calendar isn't connected. Connect it in Settings.";
 export const DISCONNECTED_LINE = "Google Calendar is disconnected. Reconnect it in Settings.";
 export const MISSING_SCOPE_LINE =
@@ -69,6 +86,21 @@ export class GoogleUnavailable extends Error {
 
 export type CalendarEventBody = Record<string, unknown>;
 
+/** A Gmail message as the API returns it (the fields we read). */
+export type GmailMessage = {
+  id: string;
+  threadId: string;
+  snippet?: string;
+  internalDate?: string;
+  payload?: GmailPart;
+};
+export type GmailPart = {
+  mimeType?: string;
+  headers?: { name: string; value: string }[];
+  body?: { data?: string };
+  parts?: GmailPart[];
+};
+
 export type GoogleHttp = {
   exchangeCode(code: string, redirectUri: string): Promise<TokenSet>;
   refresh(refreshToken: string): Promise<TokenSet>;
@@ -77,6 +109,11 @@ export type GoogleHttp = {
   patchEvent(accessToken: string, eventId: string, body: CalendarEventBody): Promise<void>;
   /** A 404 or 410 (already gone) is success. */
   deleteEvent(accessToken: string, eventId: string): Promise<void>;
+  /** Gmail: ids matching a search. No method sends mail; none ever will. */
+  listMessages(accessToken: string, q: string, max: number): Promise<{ id: string; threadId: string }[]>;
+  getMessage(accessToken: string, id: string, format: "metadata" | "full"): Promise<GmailMessage>;
+  /** A draft in `threadId` from an RFC 822 message (base64url). It is not sent. */
+  createDraft(accessToken: string, raw: string, threadId: string): Promise<{ id: string }>;
 };
 
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -124,6 +161,8 @@ async function apiRequest(method: string, url: string, accessToken: string, body
   throw new GoogleHttpError(res.status, json.error?.message ?? `HTTP ${res.status}`);
 }
 
+const GMAIL_URL = "https://gmail.googleapis.com/gmail/v1/users/me";
+
 const httpGoogle: GoogleHttp = {
   exchangeCode: (code, redirectUri) => {
     const { clientId, clientSecret } = clientCredentials();
@@ -163,6 +202,22 @@ const httpGoogle: GoogleHttp = {
       throw e;
     }
   },
+  listMessages: async (accessToken, q, max) => {
+    const url = `${GMAIL_URL}/messages?${new URLSearchParams({ q, maxResults: String(max) })}`;
+    const json = (await (await apiRequest("GET", url, accessToken)).json()) as { messages?: { id: string; threadId: string }[] };
+    return json.messages ?? [];
+  },
+  getMessage: async (accessToken, id, format) => {
+    const params = new URLSearchParams({ format });
+    if (format === "metadata") {
+      for (const h of ["From", "Subject", "Date", "Message-ID", "References"]) params.append("metadataHeaders", h);
+    }
+    return (await (await apiRequest("GET", `${GMAIL_URL}/messages/${encodeURIComponent(id)}?${params}`, accessToken)).json()) as GmailMessage;
+  },
+  createDraft: async (accessToken, raw, threadId) => {
+    const res = await apiRequest("POST", `${GMAIL_URL}/drafts`, accessToken, { message: { raw, threadId } });
+    return { id: ((await res.json()) as { id: string }).id };
+  },
 };
 
 let testHttp: GoogleHttp | null = null;
@@ -184,16 +239,18 @@ export function googleHttp(): GoogleHttp {
 
 export type ConnectionStatus =
   | { state: "not-connected" }
-  | { state: "connected"; calendar: boolean; connectedAt: string }
-  | { state: "disconnected"; reason: string | null; calendar: boolean };
+  | { state: "connected"; calendar: boolean; gmail: boolean; connectedAt: string }
+  | { state: "disconnected"; reason: string | null; calendar: boolean; gmail: boolean };
 
 /** What Settings shows; no token in it. */
 export async function connectionStatus(userId: string): Promise<ConnectionStatus> {
   const [row] = await db.select().from(googleConnection).where(eq(googleConnection.userId, userId));
   if (!row) return { state: "not-connected" };
-  const calendar = row.scopes.split(" ").includes(CALENDAR_SCOPE);
-  if (row.status === "disconnected") return { state: "disconnected", reason: row.lastError, calendar };
-  return { state: "connected", calendar, connectedAt: row.connectedAt.toISOString() };
+  const granted = row.scopes.split(" ");
+  const calendar = granted.includes(CALENDAR_SCOPE);
+  const gmail = FEATURE_SCOPES.gmail.every((s) => granted.includes(s));
+  if (row.status === "disconnected") return { state: "disconnected", reason: row.lastError, calendar, gmail };
+  return { state: "connected", calendar, gmail, connectedAt: row.connectedAt.toISOString() };
 }
 
 /**
