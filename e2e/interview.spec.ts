@@ -229,17 +229,19 @@ test.describe("the Interview", () => {
     expect(body.lastRunAt === null || typeof body.lastRunAt === "string").toBeTruthy();
   });
 
-  test("the tab bar has Interview second, lit here and not on Today", async ({ page }) => {
-    const interview = tabs(page).nth(1);
-    await expect(interview).toHaveText("Interview");
-    await expect(interview).toHaveAttribute("href", "/interview");
-    await expect(interview).toHaveAttribute("aria-current", "page");
-    await expect(tabs(page).nth(0)).not.toHaveAttribute("aria-current", "page");
+  test("the tab bar is in order, with Interview lit here and not on Today", async ({ page }) => {
+    // The one place the order is pinned (SEC-A006, Kiron: "make it make sense").
+    await expect(tabs(page)).toHaveText(["Today", "Dashboard", "Projects", "Interview", "Memory", "Settings"]);
+    // Each tab by where it goes, never by position.
+    const tab = (href: string) => page.locator(`nav[aria-label="Sections"] a[href="${href}"]`);
+    await expect(tab("/interview")).toHaveText("Interview");
+    await expect(tab("/interview")).toHaveAttribute("aria-current", "page");
+    await expect(tab("/today")).not.toHaveAttribute("aria-current", "page");
 
     await page.goto("/today");
     await expect(page.getByRole("heading", { name: "Today", level: 1 })).toBeVisible();
-    await expect(tabs(page).nth(1)).not.toHaveAttribute("aria-current", "page");
-    await expect(tabs(page).nth(0)).toHaveAttribute("aria-current", "page");
+    await expect(tab("/interview")).not.toHaveAttribute("aria-current", "page");
+    await expect(tab("/today")).toHaveAttribute("aria-current", "page");
   });
 
   test("on a phone the Interview does not scroll sideways", async ({ page }) => {
