@@ -1,6 +1,6 @@
 {
   "name": "secretary",
-  "version": "0.31.1",
+  "version": "0.31.3",
   "private": true,
   "scripts": {
     "dev": "next dev",

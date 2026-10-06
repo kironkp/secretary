@@ -7,6 +7,31 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 ---
 
+## v0.31.3 — A public privacy policy and terms (2026-10-06)
+
+this commit
+
+Kiron is publishing the Google OAuth app, and Google's Branding page needs a
+privacy policy and terms at public addresses; /privacy and /terms were 404.
+
+- Both are plain pages outside the signed-in group (its layout is the only
+  sign-in gate; there is no middleware), with no scripts and no tracking,
+  readable on a phone. The sign-in pages link them.
+- What they say is what the code does: what is stored (connected-account
+  tokens encrypted with AES-GCM), Google Calendar events created, changed
+  and deleted on request, Gmail read, searched and drafted on request and
+  never sent, no email stored in the database, the services that process
+  data (Anthropic and OpenAI, ElevenLabs for voice, Resend, Heroku, browser
+  push), disconnecting in Settings (tokens deleted, access revoked at
+  Google) and revoking at myaccount.google.com/permissions, and Google's own
+  Limited Use sentence from its Workspace API user data policy, word for
+  word with its links.
+- The contact address is Kiron's to publish: PUBLIC_CONTACT_EMAIL, read per
+  request. Unset, the pages point to the developer contact on the Google
+  consent screen.
+
+---
+
 ## v0.31.1 — Reading: a button that reads wrong is dropped, not the whole read; most-used projects first (2026-10-06)
 
 this commit
