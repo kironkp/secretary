@@ -36,7 +36,8 @@ import {
 import { openDetail, type EventRow, type TaskRow } from "./shared";
 
 const ROW = 36;
-const NAME_W = 168;
+/** The sticky name column: narrower on a phone, where the chart needs the room. */
+const NAME_W = { wide: 168, phone: 112 };
 const DAY = 86_400_000;
 const LONG_PRESS_MS = 350;
 
@@ -90,7 +91,19 @@ function useSettings(): [Settings, (next: Settings) => void] {
 const dayLabel = (iso: string, tz: string) =>
   new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: tz }).format(new Date(iso));
 
-const isPhone = () => typeof window !== "undefined" && window.matchMedia("(max-width: 639px)").matches;
+const PHONE = "(max-width: 639px)";
+const isPhone = () => typeof window !== "undefined" && window.matchMedia(PHONE).matches;
+function usePhone(): boolean {
+  return useSyncExternalStore(
+    (cb) => {
+      const mq = window.matchMedia(PHONE);
+      mq.addEventListener("change", cb);
+      return () => mq.removeEventListener("change", cb);
+    },
+    isPhone,
+    () => false
+  );
+}
 
 // --- the board ---------------------------------------------------------------
 
@@ -114,6 +127,7 @@ export function TimelineBoard({
   const [settings, save] = useSettings();
   const { zoom, filters } = settings;
   const px = PX_PER_DAY[zoom];
+  const nameW = usePhone() ? NAME_W.phone : NAME_W.wide;
   const now = useMemo(() => new Date(), []);
   const today = localDay(now, timezone);
 
@@ -329,7 +343,7 @@ export function TimelineBoard({
     const rect = el.getBoundingClientRect();
     // Only a drop on the board itself gives a date.
     if (clientY < rect.top || clientY > rect.bottom || clientX > rect.right) return null;
-    const x = clientX - rect.left + el.scrollLeft - NAME_W;
+    const x = clientX - rect.left + el.scrollLeft - nameW;
     if (x < 0) return null;
     return span.from + Math.floor(x / px);
   };
@@ -421,11 +435,12 @@ export function TimelineBoard({
     const el = scroller.current;
     if (!el || placedFor.current === zoom) return;
     placedFor.current = zoom;
-    el.scrollLeft = Math.max(0, (today - span.from) * px - el.clientWidth / 3);
-  }, [zoom, today, span.from, px]);
+    // A third into the chart: the sticky name column covers the first nameW px.
+    el.scrollLeft = Math.max(0, (today - span.from) * px - (el.clientWidth - nameW) / 3);
+  }, [zoom, today, span.from, px, nameW]);
   const scrollToToday = () => {
     const el = scroller.current;
-    if (el) el.scrollTo({ left: Math.max(0, xOf(today) - el.clientWidth / 3), behavior: "smooth" });
+    if (el) el.scrollTo({ left: Math.max(0, xOf(today) - (el.clientWidth - nameW) / 3), behavior: "smooth" });
   };
 
   const scale = useMemo(() => {
@@ -528,10 +543,10 @@ export function TimelineBoard({
         className="relative overflow-x-auto rounded-2xl border border-edge bg-surface"
         style={{ touchAction: drag?.lifted ? "none" : "pan-x pan-y" }}
       >
-        <div className="relative" style={{ width: NAME_W + days * px }}>
+        <div className="relative" style={{ width: nameW + days * px }}>
           {/* The date scale */}
           <div className="sticky top-0 z-20 flex h-10 border-b border-edge bg-surface">
-            <div className="sticky left-0 z-30 flex-none border-r border-edge bg-surface" style={{ width: NAME_W }} />
+            <div className="sticky left-0 z-30 flex-none border-r border-edge bg-surface" style={{ width: nameW }} />
             <div className="relative flex-1">
               {scale.map((t) => (
                 <div key={t.day} className="absolute top-0 h-full border-l border-edge/50 pl-1 text-[10px] text-faint" style={{ left: xOf(t.day) }}>
@@ -546,7 +561,7 @@ export function TimelineBoard({
           <div
             aria-hidden
             className="pointer-events-none absolute bottom-0 top-0 z-10 w-0.5 bg-danger"
-            style={{ left: NAME_W + xOf(today) + px / 2 }}
+            style={{ left: nameW + xOf(today) + px / 2 }}
           />
 
           {lanes.length === 0 && <p className="px-4 py-6 text-sm text-muted">Nothing on the timeline for these filters.</p>}
@@ -555,6 +570,7 @@ export function TimelineBoard({
             <LaneRows
               key={lane.id}
               lane={lane}
+              nameW={nameW}
               open={!collapsed.has(lane.id)}
               onToggle={() => toggleLane(lane.id)}
               xOf={xOf}
@@ -571,7 +587,7 @@ export function TimelineBoard({
             <div
               aria-hidden
               className="pointer-events-none absolute top-10 bottom-0 z-10 bg-accent/10"
-              style={{ left: NAME_W + xOf(drag.day), width: px }}
+              style={{ left: nameW + xOf(drag.day), width: px }}
             />
           )}
         </div>
@@ -616,6 +632,7 @@ export function TimelineBoard({
 
 function LaneRows({
   lane,
+  nameW,
   open,
   onToggle,
   xOf,
@@ -626,6 +643,7 @@ function LaneRows({
   dragging,
 }: {
   lane: Lane;
+  nameW: number;
   open: boolean;
   onToggle: () => void;
   xOf: (day: number) => number;
@@ -643,7 +661,7 @@ function LaneRows({
           onClick={onToggle}
           aria-expanded={open}
           className="sticky left-0 z-20 flex flex-none items-center gap-1.5 border-r border-edge bg-surface px-2 text-left text-sm font-semibold"
-          style={{ width: NAME_W }}
+          style={{ width: nameW }}
         >
           <ChevronRight size={13} className={`flex-none transition-transform ${open ? "rotate-90" : ""}`} />
           <span className="h-2 w-2 flex-none rounded-full" style={{ background: lane.color ?? "var(--color-accent)" }} />
@@ -657,10 +675,16 @@ function LaneRows({
               style={{ left: xOf(lane.from), width: Math.max(px, xOf(lane.to + 1) - xOf(lane.from)) }}
             >
               <div className={`h-full ${lane.late ? "bg-danger/40" : "bg-accent/40"}`} style={{ width: `${pct}%` }} />
-              <span className="absolute inset-y-0 left-1.5 flex items-center text-[10px] font-semibold text-ink">
-                {lane.done}/{lane.total} done
-              </span>
             </div>
+          )}
+          {lane.from !== null && lane.to !== null && (
+            // Beside the bar, so a short project still reads in full.
+            <span
+              className="absolute top-2 flex h-5 items-center whitespace-nowrap text-[10px] font-semibold text-muted"
+              style={{ left: Math.max(xOf(lane.from) + px, xOf(lane.to + 1)) + 6 }}
+            >
+              {lane.done}/{lane.total} done
+            </span>
           )}
           {lane.deadline && (
             <div
@@ -682,7 +706,7 @@ function LaneRows({
             <div key={item.id} className="relative flex" style={{ height: ROW }}>
               <div
                 className="sticky left-0 z-20 flex flex-none items-center truncate border-r border-edge bg-surface px-2 pl-6 text-xs text-muted"
-                style={{ width: NAME_W }}
+                style={{ width: nameW }}
               >
                 <span className="truncate">{item.title}</span>
               </div>

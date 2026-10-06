@@ -61,6 +61,9 @@ test("a tap opens the task instead of moving it", async ({ page }) => {
   await page.goto("/dashboard?view=timeline");
   const item = page.locator(`[data-item="${taskId}"]`);
   await item.scrollIntoViewIfNeeded();
+  // A tap within 150 ms of a scroll is a scroll-stop, not a request
+  // (isMomentumTap in components/dashboard/shared.tsx): let the scroll settle.
+  await page.waitForTimeout(300);
   await item.click();
   await expect(page.getByRole("dialog")).toContainText(TITLE);
   expect(await storedDue(page)).toBe(dueAt);
