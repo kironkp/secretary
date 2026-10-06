@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
@@ -18,6 +19,16 @@ export default async function AuthLayout({
       </div>
       <p className="mt-6 max-w-sm text-center text-xs text-faint">
         A genius secretary you talk to.
+      </p>
+      {/* The public home page links its privacy policy and terms (SEC-A010). */}
+      <p className="mt-3 text-xs">
+        <Link href="/privacy" className="inline-flex min-h-11 items-center px-2 text-accent">
+          Privacy
+        </Link>
+        <span className="text-faint">·</span>
+        <Link href="/terms" className="inline-flex min-h-11 items-center px-2 text-accent">
+          Terms
+        </Link>
       </p>
     </div>
   );
