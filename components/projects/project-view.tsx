@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { RefreshOnFocus } from "@/components/shell/refresh-on-focus";
 import { openDetail } from "@/components/dashboard/shared";
+import { isOpenWork, isWaitingSuggestion } from "@/lib/due";
 
 const COLORS = ["#4a6fe8", "#15803d", "#b45309", "#dc2626", "#7e22ce", "#0e7490", "#be185d"];
 
@@ -31,6 +32,10 @@ export type ProjectTask = {
   stages: { name: string; done: boolean }[];
   recurrence: string | null;
   source: string;
+  /** How the due date reads, the same as on every screen (lib/due.ts), worked out on the server. */
+  dueLabel: string;
+  /** Due on a day before today, and open. */
+  pastDue: boolean;
 };
 export type ProjectEvent = {
   id: string;
@@ -41,7 +46,6 @@ export type ProjectEvent = {
 };
 export type ProjectDoc = { id: string; title: string; updatedAt: string; sectionCount: number };
 
-const OPEN = new Set(["inbox", "todo", "in_progress", "blocked"]);
 
 /** Upcoming = starts less than an hour ago or later (helper keeps render pure). */
 function upcomingOf(events: ProjectEvent[]): ProjectEvent[] {
@@ -129,7 +133,10 @@ export function ProjectView({
     if (res.ok) router.refresh();
   };
 
-  const openTasks = tasks.filter((t) => OPEN.has(t.status) && !doneIds.has(t.id));
+  // Open work, counted as the Dashboard counts it (SEC-A006): a suggestion
+  // still waiting to be taken up is not one of the project's open tasks.
+  const openTasks = tasks.filter((t) => isOpenWork(t) && !doneIds.has(t.id));
+  const waiting = tasks.filter((t) => isWaitingSuggestion(t) && !doneIds.has(t.id));
   const doneTasks = tasks.filter((t) => t.status === "done" || doneIds.has(t.id));
   const upcomingEvents = upcomingOf(events);
 
@@ -188,6 +195,7 @@ export function ProjectView({
         )}
         <span className="ml-auto text-xs text-faint">
           {openTasks.length} open · {doneTasks.length} done
+          {waiting.length ? ` · ${waiting.length} suggestion${waiting.length > 1 ? "s" : ""} waiting` : ""}
           {upcomingEvents.length ? ` · ${upcomingEvents.length} event${upcomingEvents.length > 1 ? "s" : ""}` : ""}
         </span>
       </div>
@@ -304,7 +312,11 @@ export function ProjectView({
                   {t.stages.filter((s) => s.done).length}/{t.stages.length}
                 </span>
               )}
-              {t.dueAt && <span className="flex-none text-xs text-muted">{fmt(t.dueAt, false)}</span>}
+              {t.dueAt && (
+                <span className={`flex-none text-xs ${t.pastDue ? "font-semibold text-danger" : "text-muted"}`}>
+                  {t.dueLabel}
+                </span>
+              )}
               {t.reminders.length > 0 && (
                 <AlarmClock size={11} strokeWidth={2} className="flex-none text-warn" />
               )}

@@ -74,7 +74,9 @@ afterAll(async () => {
   for (const id of users) await db.delete(user).where(eq(user.id, id));
 });
 
-describe("extraction: one paid read per burst, never two of the same words", () => {
+// The first test pays runExtraction's lazy imports on a cold start; under load
+// that crossed vitest's 5 s default. An explicit ceiling, not a flake.
+describe("extraction: one paid read per burst, never two of the same words", { timeout: 30_000 }, () => {
   it("three utterances in a burst start one extraction, not three", async () => {
     const { userId, conversationId } = await userWithConversation();
     await say(userId, conversationId, "Remind me to call the dentist");
@@ -110,7 +112,7 @@ describe("extraction: one paid read per burst, never two of the same words", () 
   });
 });
 
-describe("suggestions: at most once a day, even when the answer is an empty list", () => {
+describe("suggestions: at most once a day, even when the answer is an empty list", { timeout: 30_000 }, () => {
   it("a second extraction the same day makes no second suggestions call", async () => {
     const { userId, conversationId } = await userWithConversation();
     // Enough to predict from (suggestions skips a near-empty board).
@@ -126,7 +128,7 @@ describe("suggestions: at most once a day, even when the answer is an empty list
   });
 });
 
-describe("suggestions: the day stays closed across a restart and after a failure", () => {
+describe("suggestions: the day stays closed across a restart and after a failure", { timeout: 30_000 }, () => {
   async function busyUser() {
     const u = await userWithConversation();
     for (const title of ["Renew passport", "File taxes", "Service the boat"]) {
@@ -161,7 +163,7 @@ describe("suggestions: the day stays closed across a restart and after a failure
   });
 });
 
-describe("the voicetest token is a development tool", () => {
+describe("the voicetest token is a development tool", { timeout: 30_000 }, () => {
   it("refuses in production: no quota, no usage row, so no house-key session", async () => {
     const { userId } = await userWithConversation();
     session.user = { id: userId, email: `${userId}@sec-a004.test`, name: "Cuts", timezone: TZ };

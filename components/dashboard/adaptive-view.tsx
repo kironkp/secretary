@@ -16,7 +16,7 @@ import {
   FiveWeekTimeline,
   NextUpHero,
   OpenLoopsTable,
-  OverdueCallout,
+  PastDueChip,
   ProcrastinationZone,
   ProjectGrid,
   StatTiles,
@@ -103,7 +103,7 @@ export function AdaptiveView({
   const render = (component: LayoutComponent) => {
     switch (component) {
       case "overdue_callout":
-        return <OverdueCallout tasks={tasks} />;
+        return <PastDueChip tasks={tasks} />;
       case "stat_tiles":
         return <StatTiles tasks={tasks} events={events} />;
       case "focus_card":

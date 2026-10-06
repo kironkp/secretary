@@ -149,9 +149,15 @@ export type Drop = { path: string; why: string };
  * a presentational rule. Returns a copy and what was dropped; the input is
  * not touched. Anything malformed is left for the schema to refuse.
  */
-export function dropUnfitPresentation(output: unknown): { output: unknown; drops: Drop[] } {
+export function dropUnfitPresentation(output: unknown): {
+  output: unknown;
+  drops: Drop[];
+  /** Questions dropped whole: the model still asked them, so a standing one with the same identity stays open (run.ts). */
+  droppedQuestions: Record<string, unknown>[];
+} {
   const drops: Drop[] = [];
-  if (!isRecord(output)) return { output, drops };
+  const droppedQuestions: Record<string, unknown>[] = [];
+  if (!isRecord(output)) return { output, drops, droppedQuestions };
   const out: Record<string, unknown> = { ...output };
 
   if (Array.isArray(output.questions)) {
@@ -170,6 +176,7 @@ export function dropUnfitPresentation(output: unknown): { output: unknown; drops
       ];
       if (own.length) {
         drops.push({ path, why: own.join("; ") });
+        droppedQuestions.push(q);
         return;
       }
       if (!Array.isArray(q.answers)) return void kept.push(q);
@@ -181,6 +188,7 @@ export function dropUnfitPresentation(output: unknown): { output: unknown; drops
       });
       if (answers.length === 0 && q.answers.length > 0) {
         drops.push({ path, why: "no answer left" });
+        droppedQuestions.push(q);
         return;
       }
       kept.push(answers.length === q.answers.length ? q : { ...q, answers });
@@ -214,7 +222,7 @@ export function dropUnfitPresentation(output: unknown): { output: unknown; drops
     }
     out.words = words;
   }
-  return { output: out, drops };
+  return { output: out, drops, droppedQuestions };
 }
 
 /** One log line per drop. */

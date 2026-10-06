@@ -22,7 +22,7 @@ import {
   user,
 } from "@/lib/db/schema";
 import { QUESTION_KINDS } from "./types";
-import { failedLines, okLines } from "./progress";
+import { failedLines, okLines, type FailedLines, type FailReason } from "./progress";
 import { parseLoggedFailure } from "./provider-health";
 import { healDuplicates, healEvidence, retireAsrClarifications } from "./questions";
 import { backfillAsked } from "./record";
@@ -331,7 +331,10 @@ export function errorsForScreen(projectName: string, errors: string[]): string[]
 
 /** The newest run of the user's that did something, worded as the progress channel words a finish. */
 export type LastRun = {
+  projectId: string;
   projectName: string;
+  /** Why a failed run failed (progress.ts FailReason); null for an ok run. */
+  reason: FailReason | null;
   status: "ok" | "failed";
   line: string;
   detail: string | null;
@@ -353,6 +356,7 @@ export async function lastRunFor(userId: string): Promise<LastRun | null> {
       status: understandingRuns.status,
       errors: understandingRuns.errors,
       finishedAt: understandingRuns.finishedAt,
+      projectId: understandingRuns.projectId,
       projectName: projects.name,
       created: sql<number>`(select count(*) from ${clarifications} where ${clarifications.createdByRun} = ${understandingRuns.id})`.mapWith(
         Number
@@ -371,7 +375,10 @@ export async function lastRunFor(userId: string): Promise<LastRun | null> {
       ? okLines(row.projectName, { created: row.created })
       : failedLines(row.projectName, row.errors ?? []);
   return {
+    // The inner join on projects means a run row here always has one.
+    projectId: row.projectId ?? "",
     projectName: row.projectName,
+    reason: row.status === "ok" ? null : (lines as FailedLines).reason,
     status: row.status === "ok" ? "ok" : "failed",
     line: lines.line,
     detail: lines.detail,

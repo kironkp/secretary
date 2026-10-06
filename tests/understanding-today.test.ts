@@ -329,7 +329,8 @@ describe("buildToday on the duplicate-CPO scenario", () => {
         userId: U.id,
         projectId: ids.caltrans,
         title: "Compile the prior-art results into a memo",
-        status: "todo",
+        // Waiting to be taken up: where every suggestion starts.
+        status: "inbox",
         source: "suggested",
         dueAt: at(-3),
       })
@@ -341,6 +342,15 @@ describe("buildToday on the duplicate-CPO scenario", () => {
     expect(data.counts.pastDueSuggested).toBe(1);
     // The mechanical line is about today, and a suggestion changes nothing there.
     expect(data.todayLine).toBe("Nothing is due today.");
+
+    // Taken up ("todo", the source stays "suggested"), it is the user's work
+    // like any other, on Today as on the board (SEC-A006, lib/due.ts).
+    await db.update(tasks).set({ status: "todo" }).where(eq(tasks.id, suggested.id));
+    const taken = await today();
+    expect(taken.pastDue.map((r) => r.id)).toContain(suggested.id);
+    expect(taken.counts.pastDue).toBe(4);
+    expect(taken.counts.pastDueSuggested).toBe(0);
+    await db.update(tasks).set({ status: "inbox" }).where(eq(tasks.id, suggested.id));
   });
 
   it("(6) the Today line comes from the project that owns the nearest dated item, else it is mechanical (§7)", async () => {
@@ -416,7 +426,7 @@ describe("buildToday on the duplicate-CPO scenario", () => {
         userId: U.id,
         projectId: ids.album,
         title: "Another idea of mine",
-        status: "todo" as const,
+        status: "inbox" as const,
         source: "suggested" as const,
         dueAt: at(-2),
       },

@@ -12,30 +12,18 @@ import { and, asc, desc, eq, gte, ilike, inArray, isNotNull, isNull, lt, lte, or
 import { db } from "@/lib/db";
 import { checkins, documents, events, projects, tasks } from "@/lib/db/schema";
 import { dayRangeInTz } from "@/lib/time";
+import { dueLabel } from "@/lib/due";
 import type { BindingQuery, BoundRow } from "./types";
 
 const OPEN_STATUSES = ["inbox", "todo", "in_progress", "blocked"] as const;
 const DEFAULT_LIMIT = 12;
 
 /** Short, scannable, and in the user's own day: "Fri", "Sep 3", "2 days late".
- *  Days as digits and words, never "2d" (docs/understanding/SPEC.md §7).
- *  floor, not round: a task due at 5 PM today is 0.7 days from the day's
- *  start and is "today", and one due at 11:59 PM yesterday is "1 day late",
- *  not "today". */
+ *  The one due-date truth (lib/due.ts, SEC-A006): calendar days in the
+ *  user's zone, so a task due at 5 PM today is "today" and one due at
+ *  11:59 PM yesterday is "1 day late", on both sides of a DST change. */
 function formatDue(due: Date | null, tz: string, now: Date): string {
-  if (!due) return "";
-  const { start } = dayRangeInTz(tz, now);
-  const days = Math.floor((due.getTime() - start.getTime()) / 86_400_000);
-  if (days < 0) {
-    const late = Math.abs(days);
-    return `${late} ${late === 1 ? "day" : "days"} late`;
-  }
-  if (days === 0) return "today";
-  if (days === 1) return "tomorrow";
-  if (days < 7) {
-    return new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: tz }).format(due);
-  }
-  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: tz }).format(due);
+  return dueLabel(due, tz, now);
 }
 
 function formatTime(at: Date | null, tz: string): string {
@@ -47,6 +35,10 @@ function formatTime(at: Date | null, tz: string): string {
     timeZone: tz,
   }).format(at);
 }
+
+/** A task row that is a suggestion still waiting to be taken up (lib/due.ts isWaitingSuggestion). */
+export const isWaitingSuggestionRow = (f: Record<string, string>): boolean =>
+  f.source === "suggested" && f.status === STATUS_LABEL.inbox;
 
 const STATUS_LABEL: Record<string, string> = {
   inbox: "Inbox",
@@ -237,21 +229,35 @@ async function resolveProjects(userId: string, q: BindingQuery, tz: string, now:
   if (q.where?.open !== false) conds.push(eq(projects.status, "active"));
 
   const rows = await db
-    .select({
-      id: projects.id,
-      name: projects.name,
-      status: projects.status,
-      deadline: projects.deadline,
-      open: sql<number>`(
-        select count(*) from ${tasks}
-        where ${tasks.projectId} = ${projects.id}
-          and ${tasks.status} in ('inbox','todo','in_progress','blocked')
-      )`,
-    })
+    .select({ id: projects.id, name: projects.name, status: projects.status, deadline: projects.deadline })
     .from(projects)
     .where(and(...conds))
     .orderBy(asc(projects.name))
     .limit(q.limit ?? DEFAULT_LIMIT);
+
+  // Open work per project, counted the way every screen counts it (SEC-A006):
+  // open, and not a suggestion still waiting to be taken up. A correlated
+  // subquery here counted 0 for every project: in a one-table select Drizzle
+  // writes its columns unqualified, so "project_id = id" compared a task
+  // with itself.
+  const counts = rows.length
+    ? await db
+        .select({ projectId: tasks.projectId, open: sql<number>`count(*)`.mapWith(Number) })
+        .from(tasks)
+        .where(
+          and(
+            eq(tasks.userId, userId),
+            inArray(
+              tasks.projectId,
+              rows.map((r) => r.id)
+            ),
+            inArray(tasks.status, [...OPEN_STATUSES]),
+            sql`not (${tasks.source} = 'suggested' and ${tasks.status} = 'inbox')`
+          )
+        )
+        .groupBy(tasks.projectId)
+    : [];
+  const openBy = new Map(counts.map((c) => [c.projectId, c.open]));
 
   return rows.map((r) => ({
     id: r.id,
@@ -259,7 +265,7 @@ async function resolveProjects(userId: string, q: BindingQuery, tz: string, now:
       name: r.name,
       status: r.status,
       deadline: formatDue(r.deadline, tz, now),
-      open: String(r.open ?? 0),
+      open: String(openBy.get(r.id) ?? 0),
     },
   }));
 }

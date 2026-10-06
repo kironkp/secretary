@@ -1,12 +1,16 @@
 "use client";
 
-// Dashboard orchestrator: Overview / Board / List / Calendar / Timeline, one
-// shared cross-off handler. Server props stay authoritative (router.refresh()
+// Dashboard orchestrator: Overview / Board / List / Calendar / Timeline /
+// Canvas, one shared cross-off handler. Canvas is a view here since SEC-A006
+// (Kiron: "make it make sense"): one tap from the Dashboard tab, the Canvas
+// itself unchanged. The view is kept in the URL (?view=), so /canvas and a
+// link can open one directly. Server props stay authoritative (router.refresh()
 // re-sends them); optimistic done-marks are overlaid, never copied — so live
 // updates from the secretary flow straight through, with an entrance
 // animation on tasks that appear mid-session.
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { CanvasView } from "@/components/canvas/canvas-view";
 import type { LayoutSpec } from "@/lib/layout/spec";
 import type { LayoutPlan } from "@/lib/layout/plan";
 import { PlanView, type PlanProject } from "./plan-view";
@@ -17,7 +21,7 @@ import { AdaptiveView } from "./adaptive-view";
 import { CalendarView } from "./calendar-view";
 import { TimelineView } from "./timeline-view";
 import { BoardView, ListTable } from "./task-views";
-import { OverdueCallout, SuggestedZone } from "./zones";
+import { PastDueChip, SuggestedZone } from "./zones";
 
 export type { EventRow, TaskRow } from "./shared";
 
@@ -27,8 +31,10 @@ const VIEWS = [
   { key: "list", label: "List" },
   { key: "calendar", label: "Calendar" },
   { key: "timeline", label: "Timeline" },
+  { key: "canvas", label: "Canvas" },
 ] as const;
 type View = (typeof VIEWS)[number]["key"];
+const isView = (v: string | null): v is View => VIEWS.some((x) => x.key === v);
 
 export function DashboardViews({
   tasks: serverTasks,
@@ -45,6 +51,7 @@ export function DashboardViews({
   planProjects = [],
   planDynamicHtml = {},
   compact = false,
+  timezone,
 }: {
   tasks: TaskRow[];
   suggestions: TaskRow[];
@@ -60,9 +67,21 @@ export function DashboardViews({
   planProjects?: PlanProject[];
   planDynamicHtml?: Record<string, string>;
   compact?: boolean;
+  /** The user's IANA zone: the Calendar and Timeline lay days out in it (lib/due.ts). */
+  timezone: string;
 }) {
   const router = useRouter();
-  const [view, setView] = useState<View>("adaptive");
+  const asked = useSearchParams().get("view");
+  const [view, setViewState] = useState<View>(isView(asked) ? asked : "adaptive");
+  const setView = (v: View) => {
+    setViewState(v);
+    // The page's own URL only; the chat split pane keeps the chat's.
+    if (compact) return;
+    const url = new URL(window.location.href);
+    if (v === "adaptive") url.searchParams.delete("view");
+    else url.searchParams.set("view", v);
+    window.history.replaceState(null, "", url);
+  };
   const [doneIds, setDoneIds] = useState<Set<string>>(new Set());
   const [crossing, setCrossing] = useState<Set<string>>(new Set());
 
@@ -139,14 +158,22 @@ export function DashboardViews({
   return (
     <div className={`space-y-4 ${compact ? "py-5" : "py-6"}`}>
       <RefreshOnFocus />
-      <div className="flex items-center gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         {!compact && <h1 className="text-lg font-bold">Dashboard</h1>}
-        <div className="ml-auto flex overflow-x-auto rounded-lg border border-edge bg-surface p-0.5 text-xs">
+        {/* Every view stays on screen at any width (SEC-A006): three to a
+            row on a phone, one row from sm up. Each a 44 px target. */}
+        <div
+          role="tablist"
+          aria-label="Dashboard views"
+          className="grid grid-cols-3 rounded-lg border border-edge bg-surface p-0.5 text-xs sm:ml-auto sm:flex"
+        >
           {VIEWS.map((v) => (
             <button
               key={v.key}
+              role="tab"
+              aria-selected={view === v.key}
               onClick={() => setView(v.key)}
-              className={`rounded-md px-3 py-1.5 font-semibold transition-colors ${
+              className={`min-h-11 rounded-md px-3 font-semibold transition-colors ${
                 view === v.key ? "bg-card text-ink" : "text-muted hover:text-ink"
               }`}
             >
@@ -189,9 +216,11 @@ export function DashboardViews({
             fresh={fresh}
           />
         )
+      ) : view === "canvas" ? (
+        <CanvasView />
       ) : (
         <>
-          <OverdueCallout tasks={tasks} />
+          <PastDueChip tasks={tasks} />
           <SuggestedZone suggestions={suggestions} />
           {view === "list" && (
             <ListTable tasks={tasks} crossing={crossing} onDone={markDone} fresh={fresh} />
@@ -199,9 +228,9 @@ export function DashboardViews({
           {view === "board" && (
             <BoardView tasks={tasks} crossing={crossing} onDone={markDone} fresh={fresh} />
           )}
-          {view === "calendar" && <CalendarView tasks={tasks} events={events} />}
+          {view === "calendar" && <CalendarView tasks={tasks} events={events} timezone={timezone} />}
           {view === "timeline" && (
-            <TimelineView tasks={tasks} events={events} crossing={crossing} onDone={markDone} />
+            <TimelineView tasks={tasks} events={events} crossing={crossing} onDone={markDone} timezone={timezone} />
           )}
         </>
       )}

@@ -40,6 +40,34 @@ animation. The model owns the fill."* Judge the Canvas against that, not against
 whether the code runs.
 
 
+## Pushing (Kiron's standing authorization, 2026-10-07)
+- Push work/feature branches to origin whenever a change is committed. It
+  deploys nothing.
+- Push main without asking Kiron whenever a round is finished. A round is
+  finished when the reviewer has PASSed it AND the suite passes the way
+  GitHub runs it: without `.env.local` (move it aside or unset its variables;
+  include CI's throwaway VAPID keypair), so no test can lean on Kiron's local
+  settings. main deploys: GitHub Actions runs the checks, then Heroku deploys.
+- Only commits inside a PASSed range, named by SHA in the reviewer's VERDICT,
+  ever reach main. Push that exact SHA: `git push origin <PASSed-sha>:main`.
+  Git refuses it if it isn't a fast-forward, and it can never carry later,
+  unreviewed commits the way `git push origin main` from a local main that is
+  ahead can. Never --force, never rewrite history, never delete remote
+  branches.
+- Then watch it through: `gh run watch` on the CI run, then confirm the Heroku
+  release succeeded. "Live" means released on Heroku. Tell Kiron the release
+  number in one plain line.
+- If CI fails, don't wait for Kiron: fix it on a branch, have the reviewer
+  check the fix, and push again. Tell him what broke and what changed.
+- Still ask Kiron first only if a push would delete data, run a destructive
+  migration, or change billing or payments.
+- Keep pushes small and deliberate: `git status` first, commit only the files
+  you changed with a message saying what and why. Never push secrets or local
+  data (check `.gitignore` if unsure).
+- This file is edited only by the Planner, on a branch, reviewed like code. The
+  Executor proposes rule changes to the Planner (Kiron agreed, 2026-10-06).
+
+
 ## North star: JARVIS
 - The goal is ONE persistent intelligent system you talk to — it knows the
   user's information, can act on it, and fluidly manipulates a visual
@@ -103,7 +131,12 @@ whether the code runs.
 ## The Workspace (proposed, not built)
 - `docs/workspace/SPEC.md` is the plan for the surface that replaces the Canvas:
   a board of draggable, resizable widgets bound to LIVE data, driven equally by
-  voice and touch. The Canvas stays on its own tab, untouched, until it wins.
+  voice and touch. The Canvas itself stays untouched until the Workspace wins,
+  but since 2026-10-06 it is a view inside Dashboard (next to Overview, Board,
+  List, Calendar and Timeline), not its own tab-bar tab. Tab bar: Today ·
+  Dashboard · Projects · Interview · Memory · Settings (Kiron, asked about the
+  tabs: "make it make sense"). Dashboard and Workspace merge into one board in
+  SEC-A008 (Kiron: yes).
 - The decision that makes it possible: **widgets render inline in the app
   document, not one iframe per widget.** Nearly every Canvas defect — no drag,
   the measure loop, remount-on-reorder, the tap delay, whole-canvas repaints —

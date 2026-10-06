@@ -89,6 +89,22 @@ zones (`documents`, `coming_up`, `kanban`, `procrastination_zone`,
 `suggested_zone`), props-less; v0's `overdue_callout` retires into
 `focus_banner`.
 
+**SEC-A006 (2026-10-06, Kiron: "make it make sense"):** the Dashboard is on
+the tab bar (Today · Dashboard · Projects · Interview · Memory · Settings),
+and the Canvas is one of its views (Overview, Board, List, Calendar,
+Timeline, Canvas; `?view=` opens one, `/canvas` lands on it). The Canvas
+itself is unchanged. Every date the views show comes from one place,
+`lib/due.ts`, worked out on the server in the user's timezone by calendar
+day: the same "past due" and "N days late" as Today and the Workspace. On
+Board, List, Calendar and Timeline the old red box is `PastDueChip`, "N
+past due", which opens the list and can be hidden until something new goes
+past due; `suggested_zone` shows one suggestion at a time (Add, Not now)
+and folds to "See suggestions (N)" until a new one arrives. Nothing that
+looks tappable is a dead end: a project card's header, a stat tile's rows,
+the Needs-a-date chips and the procrastination rows each open what they
+name, at 44 px or more. The 5-week chart is untouched (SEC-A007/A009
+replace it).
+
 **v1.3 refinements (Phase 3 implementation):** (a) the wishlist lives in a
 `wishlist` DB table (not a .jsonl file) — same dedupe-by-need + tombstone
 semantics, but durable, user-scoped, and included in the nightly Heroku

@@ -7,7 +7,7 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 ---
 
-## v0.31.5 — Google sign-in's tokens encrypted at rest (2026-10-06)
+## v0.32.1 — Google sign-in's tokens encrypted at rest (2026-10-06)
 
 this commit
 
@@ -27,6 +27,56 @@ had to say so.
   pointed at: locally that encrypts the dev database's Google sign-in rows
   with the test's placeholder secret. Nothing reads them there; a fresh
   sign-in writes new ones.
+
+---
+
+## v0.32 — One truth, no dead ends, no nagging (2026-10-06)
+
+this commit
+
+Kiron on the iPad: "useless", "disorienting", "so confusing", and "make it
+make sense". sec rev's audit (~/code/sec-review/ux/PLAN.md, SEC-A006) found
+the screens disagreeing with each other and things that looked tappable
+doing nothing.
+
+- The tab bar: Today · Dashboard · Projects · Interview · Memory · Settings.
+  The Dashboard, the board he uses, was not on it at all; it now lights for
+  every one of its views. Projects is a new plain list of projects, each
+  opening its page. The Canvas is a view inside the Dashboard, one tap from
+  the tab, unchanged; /canvas lands on it. The Workspace moved to Settings ›
+  More screens. On a phone the six views wrap to two rows, so none is cut
+  off.
+- One due-date truth (`lib/due.ts`): calendar days in his timezone, used by
+  Today, every Dashboard view, the Workspace and the project page. The
+  Dashboard counted from this instant in the browser's zone, so a task due
+  at 9 AM read "yesterday" at noon and the board said 10 past due where
+  Today said 7. Now both say the same number, each item reads the same "N
+  days late" everywhere, and Nov 1 (a 25-hour day) counts as one.
+- Open counts leave out a suggestion still waiting to be taken up, on every
+  screen; one he took up is his work, on Today as on the board (Today used
+  to leave those out). The Workspace's project counts were 0 for every
+  project: in a one-table select Drizzle writes columns unqualified, so the
+  subquery compared each task with itself.
+- No dead ends: a project card's whole header (name, "N open", the date)
+  opens the project; a stat tile's rows open what they name; the Needs-a-date
+  chips and the procrastination rows open their task. Each at least 44 px.
+- The red "Overdue (10)" box is a "N past due" chip. A tap opens the list;
+  Hide keeps it away until something new goes past due (his pick).
+- Suggestions come one at a time, in large text, with Add and Not now ("Not
+  now" is the old dismiss). Hide suggestions folds them to "See suggestions
+  (N)" until a new one arrives.
+- Today never says "the model's answer did not check out": a failed read
+  says "I couldn't update my notes on Caltrans; I'll try again when something
+  changes", with Try now (that one project, the same quota and caps) when it
+  is under a day old, and nothing at all after that.
+- Left alone on purpose: the 5-week chart (SEC-A007/A009 replace it).
+  Hiding the chip or the suggestions is per device.
+
+Two follow-ups to v0.31.1 ride along (sec rev): a question the run still
+asked but that was dropped for how it read now keeps its standing copy open
+(it was being dismissed as "resolved by a change in the data"), and CI's
+WebKit install step fails after 10 minutes instead of hanging (a hung
+download held the eb3a5d3 deploy for 18).
 
 ---
 

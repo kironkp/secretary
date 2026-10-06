@@ -292,20 +292,22 @@ const REASON_OF: Record<Exclude<FailureState, "other">, FailReason> = {
 };
 
 /**
- * "Could not read Caltrans" with why, from a failed run's logged errors: a
+ * What a failed read says, in plain words (SEC-A006): "I couldn't update my
+ * notes on Caltrans", and never "the model's answer did not check out" (the
+ * validator's business, not the user's). The why, from the logged errors: a
  * log that is provider failures only (every line carries
  * MODEL_ERROR_PREFIX; run.ts failedAtProvider says the same) is the
  * provider's own trouble, worded per provider — "the Claude limit resets on
  * October 1 and OpenAI has no credits" — or as "the model" when only one is
- * named; anything else is the validator's, and reads as "the model's answer
- * did not check out".
+ * named; anything else reads as a retry to come.
  */
+export const RETRY_LATER = "I'll try again when something changes";
 export function failedLines(projectName: string, errors: string[]): FailedLines {
-  const line = `Could not read ${projectName}`;
-  if (errors.length === 0) return { line, detail: "something went wrong", reason: "other" };
+  const line = `I couldn't update my notes on ${projectName}`;
+  if (errors.length === 0) return { line, detail: RETRY_LATER, reason: "other" };
   const failures = errors.map(parseLoggedFailure);
   if (failures.some((f) => f === null)) {
-    return { line, detail: "the model's answer did not check out", reason: "validation" };
+    return { line, detail: RETRY_LATER, reason: "validation" };
   }
   // The last word per provider, in provider order; the reason is the first
   // failure logged that says anything (the call that finally threw).
@@ -333,5 +335,5 @@ export function failedLines(projectName: string, errors: string[]): FailedLines 
 
 /** A run that threw before it could say anything else (a database error in gather or the store). */
 export function failedOtherLines(projectName: string): FailedLines {
-  return { line: `Could not read ${projectName}`, detail: "something went wrong", reason: "other" };
+  return { line: `I couldn't update my notes on ${projectName}`, detail: RETRY_LATER, reason: "other" };
 }

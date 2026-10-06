@@ -11,7 +11,7 @@ import {
   RepeatChip,
   STATUS_LABEL,
   StageDots,
-  fmtDue,
+  dueText,
   isOverdue,
   openDetail,
   type TaskRow,
@@ -139,7 +139,7 @@ export function ListTable({
                 <td
                   className={`px-4 py-2.5 ${isOverdue(t) ? "font-semibold text-danger" : "text-muted"}`}
                 >
-                  {done ? "—" : fmtDue(t.dueAt)}
+                  {done ? "—" : dueText(t)}
                 </td>
                 <td className="px-4 py-2.5 text-muted">{STATUS_LABEL[t.status]}</td>
                 <td className="px-4 py-2.5 text-faint">
@@ -241,7 +241,7 @@ export function BoardView({
                           )}
                           {t.dueAt && !done && (
                             <span className={isOverdue(t) ? "text-danger" : ""}>
-                              {fmtDue(t.dueAt)}
+                              {dueText(t)}
                             </span>
                           )}
                           {t.postponedCount > 1 && (

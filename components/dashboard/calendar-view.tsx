@@ -1,39 +1,50 @@
 "use client";
 
-// Phase 9: month-grid calendar over real events + task due dates.
-import { useState } from "react";
+// Phase 9: month-grid calendar over real events + task due dates. Days are
+// the user's calendar days in their timezone (lib/due.ts, SEC-A006), the
+// same days every other screen counts, not the browser's.
+import { useMemo, useState } from "react";
+import { localDay } from "@/lib/due";
 import { isOverdue, openDetail, type EventRow, type TaskRow } from "./shared";
 
-export function CalendarView({ tasks, events }: { tasks: TaskRow[]; events: EventRow[] }) {
-  const today = new Date();
-  const [cursor, setCursor] = useState({ y: today.getFullYear(), m: today.getMonth() });
+const DAY = 86_400_000;
 
-  const first = new Date(cursor.y, cursor.m, 1);
-  const startWeekday = first.getDay(); // 0 = Sunday
-  const daysInMonth = new Date(cursor.y, cursor.m + 1, 0).getDate();
+export function CalendarView({ tasks, events, timezone }: { tasks: TaskRow[]; events: EventRow[]; timezone: string }) {
+  const todayN = localDay(new Date(), timezone);
+  const todayAt = new Date(todayN * DAY);
+  const [cursor, setCursor] = useState({ y: todayAt.getUTCFullYear(), m: todayAt.getUTCMonth() });
+
+  // A cell is a day number (days since 1970-01-01 of a calendar date); the
+  // Date it carries is that date at UTC midnight, read with UTC getters only.
+  const first = new Date(Date.UTC(cursor.y, cursor.m, 1));
+  const startWeekday = first.getUTCDay(); // 0 = Sunday
+  const daysInMonth = new Date(Date.UTC(cursor.y, cursor.m + 1, 0)).getUTCDate();
   const cells: (Date | null)[] = [
     ...Array.from({ length: startWeekday }, () => null),
-    ...Array.from({ length: daysInMonth }, (_, i) => new Date(cursor.y, cursor.m, i + 1)),
+    ...Array.from({ length: daysInMonth }, (_, i) => new Date(Date.UTC(cursor.y, cursor.m, i + 1))),
   ];
 
+  const byDay = useMemo(() => {
+    const evs = new Map<number, EventRow[]>();
+    for (const e of events) {
+      const n = localDay(new Date(e.startsAt), timezone);
+      evs.set(n, [...(evs.get(n) ?? []), e]);
+    }
+    const tks = new Map<number, TaskRow[]>();
+    for (const t of tasks) {
+      if (!t.dueAt || ["done", "dropped"].includes(t.status)) continue;
+      const n = localDay(new Date(t.dueAt), timezone);
+      tks.set(n, [...(tks.get(n) ?? []), t]);
+    }
+    return { evs, tks };
+  }, [tasks, events, timezone]);
+
   const itemsOn = (d: Date) => {
-    const next = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
-    const dayEvents = events.filter((e) => {
-      const t = new Date(e.startsAt);
-      return t >= d && t < next;
-    });
-    const dayTasks = tasks.filter((t) => {
-      if (!t.dueAt || ["done", "dropped"].includes(t.status)) return false;
-      const due = new Date(t.dueAt);
-      return due >= d && due < next;
-    });
-    return { dayEvents, dayTasks };
+    const n = d.getTime() / DAY;
+    return { dayEvents: byDay.evs.get(n) ?? [], dayTasks: byDay.tks.get(n) ?? [] };
   };
 
-  const isToday = (d: Date) =>
-    d.getFullYear() === today.getFullYear() &&
-    d.getMonth() === today.getMonth() &&
-    d.getDate() === today.getDate();
+  const isToday = (d: Date) => d.getTime() / DAY === todayN;
 
   return (
     <div className="rounded-xl border border-edge bg-surface p-3">
@@ -48,7 +59,7 @@ export function CalendarView({ tasks, events }: { tasks: TaskRow[]; events: Even
           ‹
         </button>
         <p className="text-sm font-bold">
-          {new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" }).format(first)}
+          {new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric", timeZone: "UTC" }).format(first)}
         </p>
         <button
           onClick={() =>
@@ -80,12 +91,12 @@ export function CalendarView({ tasks, events }: { tasks: TaskRow[]; events: Even
                 className={`mb-1 text-right text-[11px] ${
                   isToday(d)
                     ? "font-bold text-accent"
-                    : d.getDay() === 0 || d.getDay() === 6
+                    : d.getUTCDay() === 0 || d.getUTCDay() === 6
                       ? "text-faint"
                       : "text-muted"
                 }`}
               >
-                {d.getDate()}
+                {d.getUTCDate()}
               </p>
               {dayEvents.slice(0, 2).map((e) => (
                 <p

@@ -209,7 +209,7 @@ test.describe("before answering", () => {
                     projectId: "e2e",
                     projectName: "E2E Project",
                     status: "failed",
-                    line: "Could not read E2E Project",
+                    line: "I couldn't update my notes on E2E Project",
                     detail: "the model has no credits",
                     reason: "no-credits",
                     finishedAt: new Date(answeredAt + 2_500).toISOString(),
@@ -218,7 +218,7 @@ test.describe("before answering", () => {
                 lastRun: {
                   projectName: "E2E Project",
                   status: "failed",
-                  line: "Could not read E2E Project",
+                  line: "I couldn't update my notes on E2E Project",
                   detail: "the model has no credits",
                   finishedAt: new Date(answeredAt + 2_500).toISOString(),
                 },
@@ -268,13 +268,13 @@ test.describe("before answering", () => {
     // The reading failed: the strip says so in the warn tone, why, and what
     // to do about it, as a link to the Model row in Settings.
     await expect(strip(page)).toHaveAttribute("data-phase", "failed");
-    await expect(stripLine(page)).toHaveAttribute("data-line", "Could not read E2E Project");
+    await expect(stripLine(page)).toHaveAttribute("data-line", "I couldn't update my notes on E2E Project");
     await expect(strip(page).locator("[data-detail]")).toHaveAttribute("data-detail", "the model has no credits");
     const fix = strip(page).locator("[data-action]");
     await expect(fix).toHaveText("Add credits, raise the limit, or connect your own key in Settings.");
     await expect(fix).toHaveAttribute("href", "/settings#understanding");
     expect((await fix.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
-    await expectShownInFull(page, "[data-thinking-strip] [data-line]", "Could not read E2E Project");
+    await expectShownInFull(page, "[data-thinking-strip] [data-line]", "I couldn't update my notes on E2E Project");
     // The bars are still: nothing is under way.
     expect(await strip(page).locator(".thinking-live").count()).toBe(0);
     // The answer never left the browser.

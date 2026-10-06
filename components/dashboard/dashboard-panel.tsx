@@ -14,6 +14,7 @@ import { sanitizeCanvasMarkup } from "@/lib/canvas/sanitize";
 import type { PlanProject } from "./plan-view";
 import type { DocRow } from "./shared";
 import { DashboardViews, type EventRow, type TaskRow } from "./dashboard-views";
+import { daysFromToday, dueLabel } from "@/lib/due";
 
 // SPEC Phase 1 feature flag: "plan" = LayoutPlan v2 pipeline (registry v2,
 // rules planner, validator); unset/other = the v0 arranger, untouched.
@@ -34,18 +35,19 @@ export async function DashboardPanel({
     getDocumentsWithProject(userId),
     getCurrentLayout(userId),
     ADAPTIVE_V2 ? computeCurrentPlan(userId) : Promise.resolve(null),
-    ADAPTIVE_V2
-      ? db
-          .select({
-            id: projectsTable.id,
-            name: projectsTable.name,
-            color: projectsTable.color,
-            parentId: projectsTable.parentId,
-            kind: projectsTable.kind,
-          })
-          .from(projectsTable)
-          .where(eq(projectsTable.userId, userId))
-      : Promise.resolve([] as PlanProject[]),
+    // Always, not only for the plan: which projects are lists is how every
+    // view leaves a list's items out of the work (SEC-A003), and the counts
+    // must match Today's whichever layout engine is on (SEC-A006).
+    db
+      .select({
+        id: projectsTable.id,
+        name: projectsTable.name,
+        color: projectsTable.color,
+        parentId: projectsTable.parentId,
+        kind: projectsTable.kind,
+      })
+      .from(projectsTable)
+      .where(eq(projectsTable.userId, userId)) as Promise<PlanProject[]>,
   ]);
 
   // Approved dynamic components (SPEC v1.3): interpolate + sanitize on the
@@ -66,6 +68,8 @@ export async function DashboardPanel({
     after(() => maybeRegenerateLayout(userId));
   }
 
+  // One clock for the whole render, so every row is measured against the same day.
+  const now = new Date();
   const allTasks: TaskRow[] = rows.map(({ task, projectName, projectColor, fromConversationAt }) => ({
     id: task.id,
     title: task.title,
@@ -93,6 +97,8 @@ export async function DashboardPanel({
           day: "numeric",
         }).format(fromConversationAt)}'s conversation`
       : null,
+    dueDays: task.dueAt ? daysFromToday(task.dueAt, timezone, now) : null,
+    dueLabel: dueLabel(task.dueAt, timezone, now),
   }));
 
   // Pending suggestions live in their own zone, never in the main views.
@@ -111,6 +117,8 @@ export async function DashboardPanel({
     projectName,
     source: e.source,
     createdAt: e.createdAt.toISOString(),
+    startDays: daysFromToday(e.startsAt, timezone, now),
+    startLabel: dueLabel(e.startsAt, timezone, now),
   }));
 
   const docs: DocRow[] = docRows.map(({ doc, projectName }) => ({
@@ -139,6 +147,7 @@ export async function DashboardPanel({
       planProjects={projectRows}
       planDynamicHtml={dynamicHtml}
       compact={compact}
+      timezone={timezone}
     />
   );
 }
