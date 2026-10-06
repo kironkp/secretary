@@ -103,7 +103,12 @@ whether the code runs.
 ## The Workspace (proposed, not built)
 - `docs/workspace/SPEC.md` is the plan for the surface that replaces the Canvas:
   a board of draggable, resizable widgets bound to LIVE data, driven equally by
-  voice and touch. The Canvas stays on its own tab, untouched, until it wins.
+  voice and touch. The Canvas itself stays untouched until the Workspace wins,
+  but since 2026-10-06 it is a view inside Dashboard (next to Overview, Board,
+  List, Calendar and Timeline), not its own tab-bar tab. Tab bar: Today ·
+  Dashboard · Projects · Interview · Memory · Settings (Kiron, asked about the
+  tabs: "make it make sense"). Dashboard and Workspace merge into one board in
+  SEC-A008 (Kiron: yes).
 - The decision that makes it possible: **widgets render inline in the app
   document, not one iframe per widget.** Nearly every Canvas defect — no drag,
   the measure loop, remount-on-reorder, the tap delay, whole-canvas repaints —
