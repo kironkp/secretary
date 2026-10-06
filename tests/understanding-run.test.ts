@@ -76,11 +76,14 @@ const questionRows = () =>
     .where(and(eq(clarifications.userId, U.id), inArray(clarifications.kind, [...QUESTION_KINDS])))
     .orderBy(clarifications.createdAt);
 
+// Oldest first: tests read the newest as the last row, and without an order
+// Postgres returns heap order, which reuses space freed by deleted rows.
 const usageRows = () =>
   db
     .select()
     .from(usage)
-    .where(and(eq(usage.userId, U.id), eq(usage.kind, "understanding")));
+    .where(and(eq(usage.userId, U.id), eq(usage.kind, "understanding")))
+    .orderBy(usage.createdAt);
 
 const runRows = () =>
   db
