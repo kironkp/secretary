@@ -4,14 +4,18 @@
 // back a refresh token; a state cookie ties the callback to the browser that
 // started it.
 import { randomBytes, timingSafeEqual } from "node:crypto";
+import { publicOrigin } from "@/lib/public-origin";
 
 export const STATE_COOKIE = "google_oauth_state";
 export const CALLBACK_PATH = "/api/google/calendar/callback";
 
-/** The callback URL Google redirects to; it must be registered in the Google Cloud console exactly. */
+/**
+ * The callback URL Google redirects to; it must be registered in the Google
+ * Cloud console exactly, and the token exchange must send the same string.
+ * On the public origin (lib/public-origin.ts), never the dyno's own.
+ */
 export function redirectUri(requestUrl: string): string {
-  const base = process.env.BETTER_AUTH_URL ?? new URL(requestUrl).origin;
-  return `${base.replace(/\/$/, "")}${CALLBACK_PATH}`;
+  return `${publicOrigin(requestUrl)}${CALLBACK_PATH}`;
 }
 
 export function newState(): string {
