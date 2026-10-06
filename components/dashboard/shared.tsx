@@ -190,13 +190,20 @@ export function CheckButton({
       }}
       title="Mark done"
       aria-label="Mark done"
-      className={`flex h-5 w-5 flex-none items-center justify-center rounded-full border transition-colors ${
-        done
-          ? "border-ok/50 bg-ok/20 text-ok"
-          : "border-edge text-transparent hover:border-ok hover:text-ok"
-      }`}
+      // A 44 px target around the 20 px circle (SEC-A003b): CLAUDE.md records
+      // an 18 px target on a link row turning near-misses into navigations.
+      // The negative margin keeps the row's layout where the circle had it.
+      className="group -m-3 flex h-11 w-11 flex-none items-center justify-center"
     >
-      <Check size={12} strokeWidth={2.5} />
+      <span
+        className={`flex h-5 w-5 items-center justify-center rounded-full border transition-colors ${
+          done
+            ? "border-ok/50 bg-ok/20 text-ok"
+            : "border-edge text-transparent group-hover:border-ok group-hover:text-ok"
+        }`}
+      >
+        <Check size={12} strokeWidth={2.5} />
+      </span>
     </button>
   );
 }

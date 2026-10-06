@@ -7,6 +7,28 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 ---
 
+## v0.29 — The board by touch: tap targets, "Arranged by you", show puts it back (2026-10-06)
+
+this commit
+
+Polish on v0.27 from review in a real browser.
+
+- Every tick on the dashboard is a 44 px target around its 20 px circle
+  (CheckButton), and a list card ticks an item by its whole row. CLAUDE.md
+  records an 18 px target on a link row turning near-misses into
+  navigations; the list card's tick measured 20 px.
+- A board the user arranged says "Arranged by you", and carries no planner's
+  reason over it.
+- "Show" puts a hidden section back where it was hidden from, not at the
+  bottom: the hide_section preference keeps its place.
+- A test that words fitting two sections ("Personal" the project and
+  "Personal" the list) are a question, not a guess.
+
+Not covered by a test: the 44 px targets and the header wording (no
+component tests in this repo; tsc and next build).
+
+---
+
 ## v0.28, part 2 — Spend you can see, a net under all of it, and what Kiron feels kept (2026-10-06)
 
 this commit

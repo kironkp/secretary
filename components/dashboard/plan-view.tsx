@@ -55,15 +55,18 @@ function ListCard({
       {open.length > 0 && (
         <ul className="grid gap-1">
           {open.map((t) => (
-            <li key={t.id} className="flex items-baseline gap-2 text-sm">
+            <li key={t.id}>
+              {/* The whole row ticks the item: a 44 px tall target, the 20 px box its look. */}
               <button
                 type="button"
                 aria-label={`Got ${t.title}`}
                 onClick={() => onDone(t.id)}
-                className="h-5 w-5 flex-none rounded-md border border-edge"
-              />
-              <span className={crossing.has(t.id) ? "text-faint line-through" : undefined}>{t.title}</span>
-              {t.notes && <span className="text-xs text-faint">{t.notes}</span>}
+                className="flex min-h-11 w-full items-center gap-2 text-left text-sm"
+              >
+                <span className="h-5 w-5 flex-none rounded-md border border-edge" aria-hidden />
+                <span className={crossing.has(t.id) ? "text-faint line-through" : undefined}>{t.title}</span>
+                {t.notes && <span className="text-xs text-faint">{t.notes}</span>}
+              </button>
             </li>
           ))}
         </ul>
@@ -390,7 +393,8 @@ export function PlanView({
         <div className="flex items-center justify-between text-xs text-muted">
           <span className="inline-flex items-center gap-1.5">
             <Sparkles size={12} className="text-accent" aria-hidden />
-            {plan.reason_summary ?? "Arranged for you"}
+            {/* A board the user arranged says so (SEC-A003b), not "for you". */}
+            {/^(user|chat)-/.test(plan.plan_id) ? "Arranged by you" : (plan.reason_summary ?? "Arranged for you")}
             {updatedAt && <span>· v{version}</span>}
           </span>
           <button

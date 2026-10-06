@@ -113,7 +113,12 @@ export async function arrangeDashboard(userId: string, ops: ArrangeOp[]): Promis
   const hide: string[] = [];
   const unhide: string[] = [];
   const changed: string[] = [];
-  const hiddenNow = new Set(prefs.filter((p) => p.kind === "hide_section").map((p) => p.value.section));
+  // Hidden sections and where each was when it was hidden, so "show" puts it back there.
+  const hiddenAt = new Map(
+    prefs.filter((p) => p.kind === "hide_section").map((p) => [p.value.section, Number(p.value.at ?? NaN)])
+  );
+  const hiddenNow = new Set(hiddenAt.keys());
+  const hideAt = new Map<string, number>();
 
   for (const op of ops) {
     let hit: Named;
@@ -122,11 +127,13 @@ export async function arrangeDashboard(userId: string, ops: ArrangeOp[]): Promis
     else if (op.op === "hide") return { ok: false, error: onBoard.error };
     else {
       // "Show the timeline", or "put the shopping list at the top" when it
-      // isn't on the board yet: bring it onto the board first.
+      // isn't on the board yet: bring it onto the board first, where it was
+      // when it was hidden if it was.
       const away = pick(op.section, offBoard());
       if (!("hit" in away)) return { ok: false, error: onBoard.error };
       hit = away.hit;
-      sections.push(hit.section);
+      const was = hiddenAt.get(hit.key);
+      sections.splice(was !== undefined && Number.isFinite(was) ? Math.min(was, sections.length) : sections.length, 0, hit.section);
     }
     if (hiddenNow.has(hit.key) && op.op !== "hide") unhide.push(hit.key);
 
@@ -134,6 +141,7 @@ export async function arrangeDashboard(userId: string, ops: ArrangeOp[]): Promis
     if (op.op === "hide") {
       sections.splice(idx, 1);
       hide.push(hit.key);
+      hideAt.set(hit.key, idx);
       pins.delete(hit.key);
       changed.push(`hid ${hit.names[0]}`);
       continue;
@@ -162,7 +170,8 @@ export async function arrangeDashboard(userId: string, ops: ArrangeOp[]): Promis
 
   const candidate: LayoutPlan = {
     plan_id: `user-${Date.now().toString(36)}`,
-    reason_summary: current.reason_summary ?? null,
+    // The user's own arrangement: no planner's reason over it (SEC-A003b).
+    reason_summary: null,
     sections,
   };
   // User-initiated: no movement rationing, no pins against the user's own
@@ -185,7 +194,9 @@ export async function arrangeDashboard(userId: string, ops: ArrangeOp[]): Promis
   }
   for (const key of hide) {
     if (!hiddenNow.has(key)) {
-      await db.insert(layoutPreferences).values({ userId, kind: "hide_section", value: { section: key } });
+      await db
+        .insert(layoutPreferences)
+        .values({ userId, kind: "hide_section", value: { section: key, at: String(hideAt.get(key) ?? "") } });
     }
   }
   const version = await savePlanAsHead(userId, v.plan, [...pins]);

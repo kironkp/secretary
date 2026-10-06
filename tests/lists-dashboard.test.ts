@@ -9,7 +9,7 @@ process.env.TZ = "UTC";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { conversations, layoutPreferences, projects, tasks, user } from "@/lib/db/schema";
+import { conversations, layoutPreferences, layoutSpecs, projects, tasks, user } from "@/lib/db/schema";
 import { computeCurrentPlan, getPlanHead } from "@/lib/layout/plan-store";
 import { sectionKey, type LayoutPlan } from "@/lib/layout/plan";
 import { buildInstructions, CHAT_ONLY_IN_PERSONA, VOICE_MODALITY_RULES } from "@/lib/secretary/persona";
@@ -204,6 +204,41 @@ describe("arrange_dashboard: 'can you put the shopping list at the top of the da
     expect(
       await db.select().from(layoutPreferences).where(and(eq(layoutPreferences.userId, userId), eq(layoutPreferences.kind, "hide_section")))
     ).toEqual([]);
+  });
+
+  it("show puts a section back where it was hidden from, and the board says the user arranged it", async () => {
+    const userId = await newUser(["Caltrans"]);
+    // Pin the board first, so its order is the user's and stable.
+    await executeTool(call(userId), "arrange_dashboard", { operations: [{ op: "move_down", section: "stats" }] });
+    const pinned = (await getPlanHead(userId))!;
+    const before = keys(pinned.spec as LayoutPlan);
+    const at = before.indexOf("timeline");
+    // As if the planner had written its reason over the board since.
+    await db
+      .update(layoutSpecs)
+      .set({ spec: { ...(pinned.spec as LayoutPlan), reason_summary: "Arranged for a busy week" } })
+      .where(eq(layoutSpecs.id, pinned.id));
+    await executeTool(call(userId), "arrange_dashboard", { operations: [{ op: "hide", section: "timeline" }] });
+    await executeTool(call(userId), "arrange_dashboard", { operations: [{ op: "show", section: "timeline" }] });
+    const head = (await getPlanHead(userId))!;
+    const after = keys(head.spec as LayoutPlan);
+    expect(after.indexOf("timeline")).toBe(at);
+    expect(after).toEqual(before);
+    expect((head.spec as LayoutPlan).plan_id).toMatch(/^user-/);
+    expect((head.spec as LayoutPlan).reason_summary).toBeNull();
+  });
+
+  it("words that fit two sections are a question, not a guess (sec rev C14)", async () => {
+    const userId = await newUser(["Personal"]);
+    await executeTool(call(userId), "add_to_list", { items: ["stamps"], list: "personal" });
+    await executeTool(call(userId), "arrange_dashboard", { operations: [{ op: "move_down", section: "stats" }] });
+    const before = (await getPlanHead(userId))!.version;
+    const out = await executeTool(call(userId), "arrange_dashboard", { operations: [{ op: "move_to_top", section: "personal" }] });
+    const error = String((out.result as { error: string }).error);
+    expect(error).toMatch(/could be/);
+    expect(error).toContain("Personal list");
+    expect(error).toMatch(/\bPersonal\b(?! list)/);
+    expect((await getPlanHead(userId))!.version).toBe(before);
   });
 
   it("a section that isn't there is said, and nothing changes", async () => {
