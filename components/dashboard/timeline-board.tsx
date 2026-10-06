@@ -461,7 +461,7 @@ export function TimelineBoard({
   }, [span, zoom]);
 
   const chip = (on: boolean) =>
-    `inline-flex min-h-11 items-center rounded-full border px-3.5 text-xs font-semibold whitespace-nowrap ${
+    `inline-flex min-h-11 flex-none items-center rounded-full border px-3.5 text-xs font-semibold whitespace-nowrap ${
       on ? "border-accent bg-accent/10 text-accent" : "border-edge text-muted hover:text-ink"
     }`;
 
@@ -469,8 +469,9 @@ export function TimelineBoard({
     <div className="space-y-3" onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onCancel}>
       <ProjectProgressStrip lanes={allLanes} active={filters.project} onPick={(id) => setFilters({ project: filters.project === id ? "all" : id })} />
 
-      <div className="flex flex-wrap items-center gap-2">
-        <div role="tablist" aria-label="Zoom" className="flex rounded-lg border border-edge bg-surface p-0.5 text-xs">
+      {/* One row that scrolls sideways on a phone, so the board stays near the top. */}
+      <div className="-mx-1 flex items-center gap-2 overflow-x-auto px-1 pb-1 sm:flex-wrap sm:overflow-visible">
+        <div role="tablist" aria-label="Zoom" className="flex flex-none rounded-lg border border-edge bg-surface p-0.5 text-xs">
           {ZOOMS.map((z) => (
             <button
               key={z.key}
@@ -483,6 +484,11 @@ export function TimelineBoard({
             </button>
           ))}
         </div>
+        {filters.project !== "all" && (
+          <button onClick={() => setFilters({ project: "all" })} className={chip(true)}>
+            {allLanes.find((l) => l.id === filters.project)?.name ?? "One project"} ✕
+          </button>
+        )}
         <button onClick={scrollToToday} className={chip(false)}>
           Today
         </button>
@@ -496,22 +502,12 @@ export function TimelineBoard({
         </button>
         <button
           onClick={() => save({ ...settings, collapsed: collapsed.size ? [] : lanes.map((l) => l.id) })}
-          className={`${chip(false)} ml-auto`}
+          className={`${chip(false)} sm:ml-auto`}
         >
           {collapsed.size ? "Expand all" : "Collapse all"}
         </button>
       </div>
 
-      <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
-        <button onClick={() => setFilters({ project: "all" })} className={chip(filters.project === "all")}>
-          All
-        </button>
-        {allLanes.map((l) => (
-          <button key={l.id} onClick={() => setFilters({ project: l.id })} className={chip(filters.project === l.id)}>
-            {l.name}
-          </button>
-        ))}
-      </div>
 
       {toast && (
         <div
@@ -798,7 +794,10 @@ export function ProjectProgressStrip({
   const shown = lanes.filter((l) => l.total > 0);
   if (shown.length === 0) return null;
   return (
-    <div data-testid="progress-strip" className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+    <div
+      data-testid="progress-strip"
+      className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 sm:grid sm:grid-cols-2 sm:overflow-visible xl:grid-cols-3"
+    >
       {shown.map((l) => {
         const pct = Math.round((l.done / l.total) * 100);
         return (
@@ -806,7 +805,7 @@ export function ProjectProgressStrip({
             key={l.id}
             onClick={() => onPick(l.id)}
             aria-pressed={active === l.id}
-            className={`flex min-h-11 items-center gap-3 rounded-xl border px-3 py-2 text-left ${
+            className={`flex min-h-11 w-[78%] flex-none items-center gap-3 rounded-xl border px-3 py-2 text-left sm:w-auto ${
               active === l.id ? "border-accent bg-accent/5" : "border-edge bg-surface hover:border-faint"
             }`}
           >

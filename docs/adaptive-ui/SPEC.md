@@ -116,9 +116,10 @@ with a planned start (`tasks.start_at`, new) is a bar from start to due; a
 task with only a due date is a diamond; a one-off event is a bar; a
 repeating event is locked (tap to edit; v1 moves repeats by asking). A red
 Today line and a Today button; Week / Month (default) / Quarter. Filters:
-project chips (and the progress strip above, which is also a filter), Open
-/ Late / Done / All, and events on or off; zoom, filters and folded lanes
-are remembered per device. Open tasks with no date wait in a No date (N)
+the progress strip above picks a project (its chip clears it), Open / Late
+/ Done / All, and events on or off; zoom, filters and folded lanes are
+remembered per device. On a phone the strip swipes and the controls scroll
+sideways in one row, so the board stays near the top. Open tasks with no date wait in a No date (N)
 tray. Moves: drag a bar's body (both dates and every reminder shift by the
 same whole calendar days, keeping the time of day across DST), its left
 edge (the start), its right edge (the due), a diamond's small left handle
