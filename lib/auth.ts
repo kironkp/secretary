@@ -64,6 +64,9 @@ export const auth = betterAuth({
   secret: process.env.BETTER_AUTH_SECRET,
   ...(trustedOrigins.length ? { trustedOrigins } : {}),
   database: drizzleAdapter(db, { provider: "pg", schema }),
+  // Google sign-in's access, refresh and ID tokens are encrypted at rest
+  // (SEC-A013); rows from before are encrypted at boot (lib/auth-tokens.ts).
+  account: { encryptOAuthTokens: true },
   emailAndPassword: {
     enabled: true,
     requireEmailVerification: true,

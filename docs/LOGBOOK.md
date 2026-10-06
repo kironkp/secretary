@@ -48,6 +48,29 @@ start dates, due dates". It was a read-only vertical list.
 
 ---
 
+## v0.32.1 — Google sign-in's tokens encrypted at rest (2026-10-06)
+
+this commit
+
+sec rev found that better-auth kept Google sign-in's access, refresh and ID
+tokens in the `account` table as plaintext, and the privacy page (v0.31.3)
+had to say so.
+
+- better-auth's `account.encryptOAuthTokens` is on: every new write is
+  encrypted (XChaCha20-Poly1305, keyed by BETTER_AUTH_SECRET) and decrypted on
+  read.
+- Rows from before are encrypted in place at boot (`lib/auth-tokens.ts`,
+  from `instrumentation.ts`), once: a value that already looks encrypted is
+  left alone. better-auth reads a plaintext value straight through, so
+  nobody is locked out before, during or after.
+- The privacy page now says the sign-in tokens are encrypted too.
+- The migration's test runs over every account row of the database it is
+  pointed at: locally that encrypts the dev database's Google sign-in rows
+  with the test's placeholder secret. Nothing reads them there; a fresh
+  sign-in writes new ones.
+
+---
+
 ## v0.32 — One truth, no dead ends, no nagging (2026-10-06)
 
 this commit

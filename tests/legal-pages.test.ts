@@ -56,7 +56,7 @@ describe("what the privacy policy says", () => {
     for (const fact of [
       "for their own use",
       "the tokens of a Google Calendar and Gmail connection, and any AI provider key you connect. These are encrypted (AES-GCM)",
-      "the sign-in tokens Google issues for that (an access token and an ID token, which allow reading your basic profile) are stored with your account. These are not encrypted today.",
+      "the sign-in tokens Google issues for that (an access token and an ID token, which allow reading your basic profile) are stored with your account. These are encrypted too (XChaCha20-Poly1305).",
       "creates, changes and deletes events",
       "It never sends email",
       "Email messages are not stored in the app's database",

@@ -29,7 +29,8 @@ export default function PrivacyPage() {
         </li>
         <li>
           If you sign in with Google, the sign-in tokens Google issues for that (an access token and an ID token,
-          which allow reading your basic profile) are stored with your account. These are not encrypted today.
+          which allow reading your basic profile) are stored with your account. These are encrypted too
+          (XChaCha20-Poly1305).
         </li>
       </ul>
       <p>It is stored in a database hosted on Heroku. It is kept until you delete it or the account is removed.</p>

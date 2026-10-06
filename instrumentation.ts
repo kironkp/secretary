@@ -5,6 +5,18 @@
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
   if (process.env.VITEST || process.env.npm_lifecycle_event === "build") return;
+  // Sign-in tokens written before encryption was on are encrypted before the
+  // first request (SEC-A013). Idempotent; a failure is logged, never fatal.
+  try {
+    const { encryptLegacySignInTokens } = await import("@/lib/auth-tokens");
+    const changed = await encryptLegacySignInTokens();
+    if (changed) console.log(`auth: encrypted the sign-in tokens of ${changed} account(s)`);
+  } catch (e) {
+    // A fixed line and the database's error code only: a failed query's
+    // message carries its parameters, which here are token values (sec rev).
+    const code = (e as { cause?: { code?: string } })?.cause?.code ?? "unknown";
+    console.error(`auth: encrypting legacy sign-in tokens failed (code ${code})`);
+  }
   const { scanDueReminders } = await import("@/lib/push");
   const { kickQueue } = await import("@/lib/shop/shop");
   const { scanInbox } = await import("@/lib/email-intake");
