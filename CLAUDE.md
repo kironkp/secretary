@@ -40,15 +40,24 @@ animation. The model owns the fill."* Judge the Canvas against that, not against
 whether the code runs.
 
 
-## Pushing (Kiron's standing authorization, 2026-10-07)
+## Pushing (Kiron's standing authorization, updated 2026-10-07)
 - Push work/feature branches to origin whenever a change is committed. It
   deploys nothing.
-- When Kiron says push (or ship / deploy), that includes main. Do it, don't ask
-  again. main deploys: GitHub Actions runs the checks, then Heroku deploys.
-- Always a fast-forward push. Never --force, never rewrite history, never
-  delete remote branches.
-- After pushing main, watch the CI run (`gh run watch`) and confirm the Heroku
-  release succeeded before saying it's live, with the release number.
+- Push main yourself whenever a round is finished. Kiron does not need to say
+  "push main". A round is finished when the reviewer has PASSed it AND the
+  test suite passes the way GitHub runs it: without `.env.local` (move it
+  aside or unset its variables for the run), so no test can lean on Kiron's
+  local settings. main deploys: GitHub Actions runs the checks, then Heroku
+  deploys.
+- How: `git checkout main && git merge --ff-only <reviewed branch>`, then
+  `git push origin main`. Never --force, never rewrite history, never delete
+  remote branches.
+- Then watch it through: `gh run watch` on the CI run, then confirm the Heroku
+  release succeeded. Tell Kiron the release number in one plain line.
+- If CI fails, don't wait for Kiron: fix it on a branch, have the reviewer
+  check the fix, and push main again. Tell him what broke and what changed.
+- Still ask Kiron first only if a push would delete data, run a destructive
+  migration, or change billing or payments.
 - Keep pushes small and deliberate: `git status` first, commit only the files
   you changed with a message saying what and why, then
   `git push origin HEAD:<branch>`. Never push secrets or local data (check
