@@ -59,7 +59,7 @@ import {
   type SyncResult,
 } from "./questions";
 import type { Bundle, ProjectRecord, RunOutput } from "./types";
-import { repairIds, repairLine } from "./repair";
+import { dropLine, dropUnfitPresentation, repairIds, repairLine } from "./repair";
 import { datedOutput } from "./dates";
 import { validateRunOutput } from "./validate";
 
@@ -1161,7 +1161,16 @@ async function runOnce(
         `understanding: ${bundle.project.name}: ${repairs.length} id${repairs.length === 1 ? "" : "s"} mended: ${repairs.map(repairLine).join("; ")}`
       );
     }
-    const validated = validateRunOutput(mended, bundle);
+    // A button, a question, the Today line or a lede that reads wrong is
+    // dropped rather than costing the whole run (repair.ts, F1); the log
+    // says what went.
+    const { output: tidy, drops } = dropUnfitPresentation(mended);
+    if (drops.length > 0) {
+      console.warn(
+        `understanding: ${bundle.project.name}: ${drops.length} piece${drops.length === 1 ? "" : "s"} dropped for how ${drops.length === 1 ? "it reads" : "they read"}: ${drops.map(dropLine).join("; ")}`
+      );
+    }
+    const validated = validateRunOutput(tidy, bundle);
     if (validated.ok) output = validated.value;
     else {
       errors = validated.errors;
@@ -1337,6 +1346,38 @@ export function runInFlight(userId: string): boolean {
   return inFlight.has(userId);
 }
 
+/**
+ * When the user last did something about a project, from their own signals
+ * only: their messages about it, the tasks they asked for by voice or chat
+ * (source spoken or typed), and their answers to its questions. Nothing the
+ * app writes on its own counts (an extracted or suggested task, an
+ * understanding run's record), so the order cannot feed itself. Null when
+ * there is none.
+ */
+export function lastUserActivity(bundle: Bundle): number | null {
+  const times = [
+    ...bundle.messages.map((m) => m.createdAt),
+    ...[...bundle.tasksOpen, ...bundle.tasksDone]
+      .filter((t) => t.source === "spoken" || t.source === "typed")
+      .map((t) => t.createdAt),
+    ...(bundle.previousRecord?.asked ?? []).flatMap((a) => (a.answeredAt ? [a.answeredAt] : [])),
+  ]
+    .map((iso) => new Date(iso).getTime())
+    .filter((t) => !Number.isNaN(t));
+  return times.length ? Math.max(...times) : null;
+}
+
+/** Newest user activity first; never-touched projects last, by name. */
+export function byRecentUse(bundles: Bundle[]): Bundle[] {
+  const at = new Map(bundles.map((b) => [b.project.id, lastUserActivity(b)]));
+  return bundles.toSorted((a, b) => {
+    const x = at.get(a.project.id) ?? null;
+    const y = at.get(b.project.id) ?? null;
+    if (x !== y) return x === null ? 1 : y === null ? -1 : y - x;
+    return a.project.name.localeCompare(b.project.name);
+  });
+}
+
 export async function runAll(
   userId: string,
   opts: {
@@ -1355,7 +1396,10 @@ export async function runAll(
     const now = opts.now ?? new Date();
     // gatherAll reads the board, the memories and the messages once for every
     // project; the model is resolved once for the same reason.
-    const bundles = await gatherAll(userId, { now, timezone: opts.timezone });
+    // Most recently used first (2026-10-06): the daily cap is spent in this
+    // order, and alphabetical spent it on Caltrans, DAW and Find It before
+    // Jazz or Personal were reached.
+    const bundles = byRecentUse(await gatherAll(userId, { now, timezone: opts.timezone }));
     const model = opts.model ?? (await modelCallFor(userId)) ?? undefined;
 
     const results: Record<string, RunResult> = {};

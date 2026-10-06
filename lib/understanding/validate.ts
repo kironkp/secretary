@@ -357,6 +357,66 @@ function writeKey(w: Write): string {
   }
 }
 
+// --------------------------------------------------------------------------
+// Presentational rules: how a piece of text reads, not what it claims. Each
+// returns its problems (empty when fine). The validator reports them; on a
+// question, an answer, the Today line or a lede, repair.ts drops the piece
+// instead (2026-10-06, sec plan F1), because dropping never invents and a
+// rejection costs the whole run. On the record's own texts they still
+// reject: a claim carries a sourced fact, and there is nothing to drop it to.
+// --------------------------------------------------------------------------
+
+/** Plain language on any text: no banned word, days as digits, no promise. */
+export function wordingProblems(text: string): string[] {
+  const out: string[] = [];
+  const banned = bannedWordIn(text);
+  if (banned) out.push(`banned word "${banned}"`);
+  const day = spelledDayIn(text);
+  if (day) out.push(`days as digits, not "${day}"`);
+  const promise = promiseIn(text);
+  if (promise) {
+    out.push(
+      `"${promise}" promises something you cannot do. Nothing here changes the user's list; only an answer they give does. Say what is true now, or what you would do if they said so.`
+    );
+  }
+  return out;
+}
+
+/** A question said out loud in one breath (SPEC §7). */
+export function questionProblems(question: string): string[] {
+  const out: string[] = [];
+  if (!/[?.]["')]*$/.test(question.trim())) out.push("must end with ? or .");
+  // Said out loud in one breath (SPEC §7; the user could not read
+  // "Should I clean up the CPO 2073 / Production monitor tasks that still
+  // say blocked even though the notes and finished task say the FY2027
+  // work is done?"). Words, not characters: numbers and names are words.
+  const words = question.trim().split(/\s+/).length;
+  if (words > MAX_QUESTION_WORDS) {
+    out.push(`${words} words; say it in at most ${MAX_QUESTION_WORDS}, naming the thing by its nickname and number, not its title`);
+  }
+  if (question.includes("/")) out.push("contains a slash; that is a pasted title, name the thing instead");
+  return out;
+}
+
+/** An answer label is a button: an action in plain words. */
+export function labelProblems(label: string): string[] {
+  const out: string[] = [];
+  const words = label.trim().split(/\s+/).length;
+  if (words > MAX_LABEL_WORDS || label.length > MAX_LABEL_CHARS) {
+    out.push(
+      `"${label}" is not an action in plain words; at most ${MAX_LABEL_WORDS} words and ${MAX_LABEL_CHARS} characters, like "Close the old one" or "Keep them"`
+    );
+  }
+  if (/\/|\b[A-Z]{2,}\d{2,}\b|\b[A-Z]{3}-\d{3,}\b/.test(label)) {
+    out.push(`"${label}" carries a code or a slash; say the action in plain words`);
+  }
+  return out;
+}
+
+export const MAX_WHY_SENTENCES = 2;
+export const MAX_TODAY_LINE_SENTENCES = 2;
+export const MAX_LEDE_SENTENCES = 3;
+
 export function validateRunOutput(output: unknown, bundle: Bundle): ValidationResult {
   const parsed = runOutputSchema.safeParse(output);
   if (!parsed.success) {
@@ -398,16 +458,7 @@ export function validateRunOutput(output: unknown, bundle: Bundle): ValidationRe
 
   // --- step 4: plain language, on every text the output carries ------------
   const checkText = (text: string, path: string) => {
-    const banned = bannedWordIn(text);
-    if (banned) errors.push(`${path}: banned word "${banned}"`);
-    const day = spelledDayIn(text);
-    if (day) errors.push(`${path}: days as digits, not "${day}"`);
-    const promise = promiseIn(text);
-    if (promise) {
-      errors.push(
-        `${path}: "${promise}" promises something you cannot do. Nothing here changes the user's list; only an answer they give does. Say what is true now, or what you would do if they said so.`
-      );
-    }
+    for (const problem of wordingProblems(text)) errors.push(`${path}: ${problem}`);
   };
 
   const r = value.record;
@@ -500,34 +551,11 @@ export function validateRunOutput(output: unknown, bundle: Bundle): ValidationRe
     // every sentence about it uses; both were checked for nothing.
     q.answers.forEach((a, ai) => checkText(a.label, `${path}.answers[${ai}].label`));
     checkText(q.why, `${path}.why`);
-    if (!/[?.]["')]*$/.test(q.question.trim())) {
-      errors.push(`${path}.question: must end with ? or .`);
-    }
-    // Said out loud in one breath (SPEC §7; the user could not read
-    // "Should I clean up the CPO 2073 / Production monitor tasks that still
-    // say blocked even though the notes and finished task say the FY2027
-    // work is done?"). Words, not characters: numbers and names are words.
-    const questionWords = q.question.trim().split(/\s+/).length;
-    if (questionWords > MAX_QUESTION_WORDS) {
-      errors.push(
-        `${path}.question: ${questionWords} words; say it in at most ${MAX_QUESTION_WORDS}, naming the thing by its nickname and number, not its title`
-      );
-    }
-    if (q.question.includes("/")) {
-      errors.push(`${path}.question: contains a slash; that is a pasted title, name the thing instead`);
-    }
+    for (const problem of questionProblems(q.question)) errors.push(`${path}.question: ${problem}`);
     for (const [ai, a] of q.answers.entries()) {
-      const words = a.label.trim().split(/\s+/).length;
-      if (words > MAX_LABEL_WORDS || a.label.length > MAX_LABEL_CHARS) {
-        errors.push(
-          `${path}.answers[${ai}].label: "${a.label}" is not an action in plain words; at most ${MAX_LABEL_WORDS} words and ${MAX_LABEL_CHARS} characters, like "Close the old one" or "Keep them"`
-        );
-      }
-      if (/\/|\b[A-Z]{2,}\d{2,}\b|\b[A-Z]{3}-\d{3,}\b/.test(a.label)) {
-        errors.push(`${path}.answers[${ai}].label: "${a.label}" carries a code or a slash; say the action in plain words`);
-      }
+      for (const problem of labelProblems(a.label)) errors.push(`${path}.answers[${ai}].label: ${problem}`);
     }
-    if (countSentences(q.why) > 2) errors.push(`${path}.why: more than 2 sentences`);
+    if (countSentences(q.why) > MAX_WHY_SENTENCES) errors.push(`${path}.why: more than ${MAX_WHY_SENTENCES} sentences`);
     if (!referencesEvidence(q.why, q.evidence, texts)) {
       errors.push(
         `${path}.why: does not name any of its evidence items. Name one: its title, four or more of its words in a row, a number it carries, or a name it carries.${evidenceHint(q.evidence, texts)}`
@@ -582,8 +610,8 @@ export function validateRunOutput(output: unknown, bundle: Bundle): ValidationRe
   // what lands tomorrow. A third sentence is a paragraph.
   if (value.words.todayLine !== undefined) {
     checkText(value.words.todayLine, "words.todayLine");
-    if (countSentences(value.words.todayLine) > 2) {
-      errors.push("words.todayLine: more than 2 sentences");
+    if (countSentences(value.words.todayLine) > MAX_TODAY_LINE_SENTENCES) {
+      errors.push(`words.todayLine: more than ${MAX_TODAY_LINE_SENTENCES} sentences`);
     }
   }
 
@@ -597,7 +625,7 @@ export function validateRunOutput(output: unknown, bundle: Bundle): ValidationRe
       continue;
     }
     checkText(lede, path);
-    if (countSentences(lede) > 3) errors.push(`${path}: more than 3 sentences`);
+    if (countSentences(lede) > MAX_LEDE_SENTENCES) errors.push(`${path}: more than ${MAX_LEDE_SENTENCES} sentences`);
 
     const exempt = new Set([...CALENDAR_WORDS, ...projectWords, ...wordsOf(widget.title)]);
     // Every word of every row title and of the project name, so a name is

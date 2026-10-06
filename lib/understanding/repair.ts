@@ -13,7 +13,16 @@
 // in practice, and an id that matches nothing that closely is left for the
 // validator to refuse. Every repair is reported so the run's log says so.
 import { SOURCE_TYPES, type Bundle, type SourceType } from "./types";
-import { idIndex } from "./validate";
+import {
+  countSentences,
+  idIndex,
+  labelProblems,
+  MAX_LEDE_SENTENCES,
+  MAX_TODAY_LINE_SENTENCES,
+  MAX_WHY_SENTENCES,
+  questionProblems,
+  wordingProblems,
+} from "./validate";
 
 /** How many characters may differ for an unknown id to count as a slip. */
 export const MAX_SLIP = 2;
@@ -112,4 +121,103 @@ export function repairIds(output: unknown, bundle: Bundle): { output: unknown; r
 /** One log line per repair: what was copied wrong, and what it was. */
 export function repairLine(r: Repair): string {
   return `${r.path}: ${r.type} id "${r.from}" read as "${r.to}"`;
+}
+
+// --------------------------------------------------------------------------
+// Presentation, mended by dropping (2026-10-06, sec plan F1)
+// --------------------------------------------------------------------------
+//
+// Caltrans failed in production on `questions[0].answers[1].label "Not yet,
+// do it Friday"`: five words where a button takes four. The run ceiling
+// ($1.50) leaves no room for a second attempt, so every change to Caltrans
+// paid about $0.81 for a record that was then thrown away over one button.
+//
+// A rule about how something reads (validate.ts: wordingProblems,
+// questionProblems, labelProblems and the sentence counts) is now mended
+// here, before validation, by DROPPING the piece that breaks it: an answer
+// option, a question (when its own words break a rule, or no answer is
+// left), the Today line, a lede. Never shortened: "Not yet" with writes that
+// set Friday would be a button doing what it does not say. Never rewritten,
+// never a model call, never a quote touched. Everything else the validator
+// checks (sources, ids, evidence, writes, the record's own texts) still
+// rejects, as before.
+
+export type Drop = { path: string; why: string };
+
+/**
+ * Walk the model's output (after repairIds) and drop every piece that breaks
+ * a presentational rule. Returns a copy and what was dropped; the input is
+ * not touched. Anything malformed is left for the schema to refuse.
+ */
+export function dropUnfitPresentation(output: unknown): { output: unknown; drops: Drop[] } {
+  const drops: Drop[] = [];
+  if (!isRecord(output)) return { output, drops };
+  const out: Record<string, unknown> = { ...output };
+
+  if (Array.isArray(output.questions)) {
+    const kept: unknown[] = [];
+    output.questions.forEach((q, qi) => {
+      const path = `questions[${qi}]`;
+      if (!isRecord(q)) return void kept.push(q);
+      const own = [
+        ...(typeof q.question === "string" ? [...questionProblems(q.question), ...wordingProblems(q.question)] : []),
+        ...(typeof q.why === "string"
+          ? [
+              ...wordingProblems(q.why),
+              ...(countSentences(q.why) > MAX_WHY_SENTENCES ? [`why: more than ${MAX_WHY_SENTENCES} sentences`] : []),
+            ]
+          : []),
+      ];
+      if (own.length) {
+        drops.push({ path, why: own.join("; ") });
+        return;
+      }
+      if (!Array.isArray(q.answers)) return void kept.push(q);
+      const answers = q.answers.filter((a, ai) => {
+        if (!isRecord(a) || typeof a.label !== "string") return true;
+        const problems = [...labelProblems(a.label), ...wordingProblems(a.label)];
+        if (problems.length) drops.push({ path: `${path}.answers[${ai}]`, why: problems.join("; ") });
+        return problems.length === 0;
+      });
+      if (answers.length === 0 && q.answers.length > 0) {
+        drops.push({ path, why: "no answer left" });
+        return;
+      }
+      kept.push(answers.length === q.answers.length ? q : { ...q, answers });
+    });
+    out.questions = kept;
+  }
+
+  if (isRecord(output.words)) {
+    const words: Record<string, unknown> = { ...output.words };
+    if (typeof words.todayLine === "string") {
+      const problems = [
+        ...wordingProblems(words.todayLine),
+        ...(countSentences(words.todayLine) > MAX_TODAY_LINE_SENTENCES ? [`more than ${MAX_TODAY_LINE_SENTENCES} sentences`] : []),
+      ];
+      if (problems.length) {
+        drops.push({ path: "words.todayLine", why: problems.join("; ") });
+        delete words.todayLine;
+      }
+    }
+    if (isRecord(words.ledes)) {
+      const ledes: Record<string, unknown> = {};
+      for (const [id, lede] of Object.entries(words.ledes)) {
+        const problems =
+          typeof lede === "string"
+            ? [...wordingProblems(lede), ...(countSentences(lede) > MAX_LEDE_SENTENCES ? [`more than ${MAX_LEDE_SENTENCES} sentences`] : [])]
+            : [];
+        if (problems.length) drops.push({ path: `words.ledes.${id}`, why: problems.join("; ") });
+        else ledes[id] = lede;
+      }
+      words.ledes = ledes;
+    }
+    out.words = words;
+  }
+  return { output: out, drops };
+}
+
+/** One log line per drop. */
+export function dropLine(d: Drop): string {
+  return `${d.path} dropped: ${d.why}`;
 }
