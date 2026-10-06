@@ -390,7 +390,7 @@ export async function syncQuestions(
     );
 
   for (const row of standing) {
-    if (row.identity && identities.has(row.identity)) continue;
+    if (row.identity && (identities.has(row.identity) || opts.keep?.has(row.identity))) continue;
     if (!row.evidence.some((s) => evidenceMoved(s, row.createdAt))) continue;
     const hit = await db
       .update(clarifications)
@@ -420,6 +420,13 @@ export type SyncOptions = {
    * points at the run that made it.
    */
   createdBy?: string;
+  /**
+   * Identities of questions the run still asked but that were dropped for
+   * how they read (repair.ts, F1): a standing question with one of these is
+   * the same question asked again, so it stays open, as a re-proposed one
+   * would, instead of being dismissed as resolved by a change in the data.
+   */
+  keep?: ReadonlySet<string>;
 };
 
 export type SyncResult = {

@@ -49,6 +49,12 @@ doing nothing.
 - Left alone on purpose: the 5-week chart (SEC-A007/A009 replace it).
   Hiding the chip or the suggestions is per device.
 
+Two follow-ups to v0.31.1 ride along (sec rev): a question the run still
+asked but that was dropped for how it read now keeps its standing copy open
+(it was being dismissed as "resolved by a change in the data"), and CI's
+WebKit install step fails after 10 minutes instead of hanging (a hung
+download held the eb3a5d3 deploy for 18).
+
 ---
 
 ## v0.31.1 — Reading: a button that reads wrong is dropped, not the whole read; most-used projects first (2026-10-06)

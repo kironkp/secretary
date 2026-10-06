@@ -113,6 +113,45 @@ describe("F1: a piece that reads wrong is dropped; the run lands on one call", (
   });
 });
 
+describe("F1 follow-up: a question dropped for how it reads is still asked, so it stays open", () => {
+  /** Run 1 stores the scenario's questions; then their first question's evidence is finished. */
+  async function askedThenMoved(tag: string) {
+    const userId = await newUser(tag);
+    const ids = await seedCpoScenario(userId, CPO_NOW);
+    let first: RunOutput | null = null;
+    const once = fakeModel((bundle) => (first = validOutputFor(bundle, ids)));
+    expect((await runProject(userId, ids.caltrans, { timezone: CPO_TZ, now: CPO_NOW, model: once, force: true })).status).toBe("ok");
+    const standing = (await db.select().from(clarifications).where(eq(clarifications.userId, userId))).find(
+      (q) => q.question === first!.questions[0].question
+    )!;
+    expect(standing.status).toBe("open");
+    // The evidence moves: every task it rests on is finished now.
+    const evidenced = first!.questions[0].evidence.filter((e) => e.type === "task").map((e) => e.id);
+    for (const id of evidenced) await db.update(tasks).set({ status: "done", completedAt: new Date() }).where(eq(tasks.id, id));
+    return { userId, ids, first: first!, standingId: standing.id };
+  }
+
+  it("re-asked but dropped for its wording: the standing question is kept open", async () => {
+    const { userId, ids, first, standingId } = await askedThenMoved("keep");
+    const again = fakeModel((bundle) => {
+      const out = validOutputFor(bundle, ids);
+      out.questions = [{ ...first.questions[0], question: `${first.questions[0].question} And is that the whole story for all of these?` }];
+      return out;
+    });
+    expect((await runProject(userId, ids.caltrans, { timezone: CPO_TZ, now: CPO_NOW, model: again, force: true })).status).toBe("ok");
+    const [row] = await db.select().from(clarifications).where(eq(clarifications.id, standingId));
+    expect(row.status).toBe("open");
+  });
+
+  it("not asked at all, with its evidence moved: dismissed as before", async () => {
+    const { userId, ids, standingId } = await askedThenMoved("gone");
+    const without = fakeModel((bundle) => ({ ...validOutputFor(bundle, ids), questions: [] }));
+    expect((await runProject(userId, ids.caltrans, { timezone: CPO_TZ, now: CPO_NOW, model: without, force: true })).status).toBe("ok");
+    const [row] = await db.select().from(clarifications).where(eq(clarifications.id, standingId));
+    expect(row).toMatchObject({ status: "dismissed", resolution: "resolved by a change in the data" });
+  });
+});
+
 describe("F1: what is dropped, and that nothing is ever added", () => {
   const base = (): Record<string, unknown> => ({
     record: { objective: { text: "Keep the record", sources: [{ type: "task", id: "t1", quote: "Close the old one" }] } },

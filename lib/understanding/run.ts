@@ -58,10 +58,10 @@ import {
   syncQuestions,
   type SyncResult,
 } from "./questions";
-import type { Bundle, ProjectRecord, RunOutput } from "./types";
+import type { Bundle, ProjectRecord, RunOutput, Source } from "./types";
 import { dropLine, dropUnfitPresentation, repairIds, repairLine } from "./repair";
 import { datedOutput } from "./dates";
-import { validateRunOutput } from "./validate";
+import { idIndex, validateRunOutput } from "./validate";
 
 // --------------------------------------------------------------------------
 // The model
@@ -1057,6 +1057,8 @@ async function runOnce(
 
   const user = renderBundle(bundle, { mode: opts.mode });
   let output: RunOutput | null = null;
+  /** Identities of questions the accepted attempt still asked but had dropped for how they read (F1 follow-up). */
+  let keptIdentities: Set<string> = new Set();
   let errors: string[] = [];
   /** Every attempt the provider itself failed, kept apart from the validator's errors (see MODEL_ERROR_PREFIX). */
   const providerErrors: string[] = [];
@@ -1164,14 +1166,17 @@ async function runOnce(
     // A button, a question, the Today line or a lede that reads wrong is
     // dropped rather than costing the whole run (repair.ts, F1); the log
     // says what went.
-    const { output: tidy, drops } = dropUnfitPresentation(mended);
+    const { output: tidy, drops, droppedQuestions } = dropUnfitPresentation(mended);
     if (drops.length > 0) {
       console.warn(
         `understanding: ${bundle.project.name}: ${drops.length} piece${drops.length === 1 ? "" : "s"} dropped for how ${drops.length === 1 ? "it reads" : "they read"}: ${drops.map(dropLine).join("; ")}`
       );
     }
     const validated = validateRunOutput(tidy, bundle);
-    if (validated.ok) output = validated.value;
+    if (validated.ok) {
+      output = validated.value;
+      keptIdentities = new Set(droppedQuestions.flatMap((q) => storedIdentity(q, bundle) ?? []));
+    }
     else {
       errors = validated.errors;
       // The final refusal is logged with the failure below; the earlier
@@ -1279,6 +1284,7 @@ async function runOnce(
 
   const questions = await syncQuestions(userId, projectId, output.questions, bundle, {
     createdBy: runId,
+    keep: keptIdentities,
   });
   await recordUsage({
     userId,
@@ -1376,6 +1382,32 @@ export function byRecentUse(bundles: Bundle[]): Bundle[] {
     if (x !== y) return x === null ? 1 : y === null ? -1 : y - x;
     return a.project.name.localeCompare(b.project.name);
   });
+}
+
+/**
+ * The identity a dropped question would have been stored under
+ * (questions.ts questionIdentity): its kind and evidence, plus the write
+ * targets the validator adds to evidence when they are rows the bundle has.
+ * Null when the dropped piece is not shaped like a question.
+ */
+export function storedIdentity(q: Record<string, unknown>, bundle: Bundle): string | null {
+  if (typeof q.kind !== "string" || !Array.isArray(q.evidence)) return null;
+  const known = idIndex(bundle);
+  const evidence = q.evidence.flatMap((e) =>
+    e && typeof e === "object" && typeof (e as Source).type === "string" && typeof (e as Source).id === "string"
+      ? [{ type: (e as Source).type, id: (e as Source).id }]
+      : []
+  );
+  for (const a of Array.isArray(q.answers) ? q.answers : []) {
+    for (const w of (a as { writes?: unknown[] })?.writes ?? []) {
+      const write = w as { taskId?: unknown; expectationId?: unknown };
+      if (typeof write.taskId === "string" && known.task.has(write.taskId)) evidence.push({ type: "task", id: write.taskId });
+      if (typeof write.expectationId === "string" && known.expectation.has(write.expectationId)) {
+        evidence.push({ type: "expectation", id: write.expectationId });
+      }
+    }
+  }
+  return questionIdentity({ kind: q.kind, evidence });
 }
 
 export async function runAll(
