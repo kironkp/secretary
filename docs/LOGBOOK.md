@@ -23,6 +23,10 @@ had to say so.
   left alone. better-auth reads a plaintext value straight through, so
   nobody is locked out before, during or after.
 - The privacy page now says the sign-in tokens are encrypted too.
+- The migration's test runs over every account row of the database it is
+  pointed at: locally that encrypts the dev database's Google sign-in rows
+  with the test's placeholder secret. Nothing reads them there; a fresh
+  sign-in writes new ones.
 
 ---
 

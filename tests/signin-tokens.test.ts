@@ -101,6 +101,8 @@ describe("Google sign-in tokens, encrypted at rest", () => {
     expect(looksEncrypted(PLAIN.accessToken)).toBe(false);
     expect(looksEncrypted(PLAIN.idToken)).toBe(false);
     expect(looksEncrypted("0a1b2c3d")).toBe(true);
+    // Odd-length hex is not a ciphertext: encrypted like any plaintext (sec rev F2).
+    expect(looksEncrypted("abc")).toBe(false);
     expect(looksEncrypted("$ba$1$abcd")).toBe(true);
   });
 });

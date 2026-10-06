@@ -12,7 +12,10 @@ export async function register() {
     const changed = await encryptLegacySignInTokens();
     if (changed) console.log(`auth: encrypted the sign-in tokens of ${changed} account(s)`);
   } catch (e) {
-    console.error("auth: encrypting legacy sign-in tokens failed:", e instanceof Error ? e.message : e);
+    // A fixed line and the database's error code only: a failed query's
+    // message carries its parameters, which here are token values (sec rev).
+    const code = (e as { cause?: { code?: string } })?.cause?.code ?? "unknown";
+    console.error(`auth: encrypting legacy sign-in tokens failed (code ${code})`);
   }
   const { scanDueReminders } = await import("@/lib/push");
   const { kickQueue } = await import("@/lib/shop/shop");
