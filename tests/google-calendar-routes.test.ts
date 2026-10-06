@@ -66,6 +66,12 @@ import { GET as callback } from "@/app/api/google/calendar/callback/route";
 import { GET as status } from "@/app/api/google/calendar/route";
 import { connectCalendar, fakeGoogle, FAKE_ACCESS_PREFIX, FAKE_REFRESH, type FakeGoogle } from "./fixtures/google";
 
+// The OAuth client the connect route needs, the test's own: CI has no
+// .env.local, and a test must not lean on the real one. Google itself is
+// the fake (tests/fixtures/google.ts), so these are never sent anywhere.
+process.env.GOOGLE_CLIENT_ID = "test-client-id.apps.googleusercontent.com";
+process.env.GOOGLE_CLIENT_SECRET = "test-client-secret";
+
 const TZ = "America/Los_Angeles";
 const U = { id: `test-gcal-routes-${crypto.randomUUID()}`, email: `gcal-routes-${Date.now()}@sec-a002.test`, name: "Routes", timezone: TZ };
 let google: FakeGoogle;
