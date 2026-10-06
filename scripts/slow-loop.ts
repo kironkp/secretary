@@ -30,10 +30,16 @@ async function buildWish(wishId: string): Promise<void> {
   }
   const brief = assembleBrief(wish);
   console.log(`building "${wish.need}" via ${CLAUDE_BIN} -p …`);
+  // Without the API key, headless Claude Code runs on the claude.ai login,
+  // as the shop's runner does (scripts/shop.ts); with it, every build billed
+  // the API and no usage row ever recorded it (SEC-A004).
+  const env = { ...process.env };
+  delete env.ANTHROPIC_API_KEY;
+  delete env.ANTHROPIC_AUTH_TOKEN;
   const { stdout } = await exec(
     CLAUDE_BIN,
     ["-p", brief, "--output-format", "text", "--allowedTools", ""],
-    { timeout: GENERATION_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 }
+    { timeout: GENERATION_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024, env }
   );
   const proposal = parseProposal(stdout);
   if (!proposal) {

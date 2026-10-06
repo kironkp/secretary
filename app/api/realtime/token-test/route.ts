@@ -9,6 +9,11 @@ import { REALTIME_MODEL_DEFAULT, REALTIME_VOICE } from "@/lib/openai";
 export async function POST() {
   const user = await requireSession();
   if (isErrorResponse(user)) return user;
+  // A development tool: no quota and no usage row, so never in production
+  // (SEC-A004). REALTIME_TEST_TOKEN=true turns it on deliberately.
+  if (process.env.NODE_ENV === "production" && process.env.REALTIME_TEST_TOKEN !== "true") {
+    return NextResponse.json({ error: "Not available" }, { status: 404 });
+  }
 
   const res = await fetch("https://api.openai.com/v1/realtime/client_secrets", {
     method: "POST",

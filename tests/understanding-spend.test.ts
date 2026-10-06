@@ -106,12 +106,12 @@ const refusedOutput = (bundle: Parameters<typeof minimalOutputFor>[0]) => {
 describe("2a: the daily cap holds for every run", () => {
   it("a sweep run, which is handed its model, is refused when the day's spend plus the run's ceiling passes the cap", async () => {
     const { userId, projectIds } = await seedUser(1);
-    // $3.50 spent: under the $5 cap on its own, over it with a $2 run on top.
+    // $2.00 spent: under the $3 cap on its own, over it with a $1.50 run on top.
     await db.insert(usage).values({
       userId,
       kind: "understanding",
       model: "claude-opus-5",
-      costUsd: "3.500000",
+      costUsd: "2.000000",
       createdAt: new Date(Date.now() - 3600_000),
     });
     const model = fakeModel((bundle) => minimalOutputFor(bundle));
@@ -128,7 +128,7 @@ describe("2a: the daily cap holds for every run", () => {
     expect(rows.map((r) => [r.status, r.reason])).toEqual([["skipped", "budget"]]);
   });
 
-  it("a sweep across four projects spends at most the cap: three $1.50 runs, the fourth refused, and the next sweep calls nothing", async () => {
+  it("a sweep across four projects spends at most the cap: two $1.50 runs, the rest refused, and the next sweep calls nothing", async () => {
     const { userId, projectIds } = await seedUser(4);
     const calls: string[] = [];
     // Opus 5: 140k input tokens at $5/M and 32k output at $25/M is $1.50 a run.
@@ -152,23 +152,22 @@ describe("2a: the daily cap holds for every run", () => {
         )
       );
 
-    // $0, $1.50, $3.00 each leave room for a $2 run under $5; $4.50 does not.
+    // $0 and $1.50 each leave room for a $1.50 run under $3; $3.00 does not.
     const first = await sweep();
-    expect(first).toMatchObject({ users: 1, ran: 3, skipped: 1, failed: 0 });
-    expect(calls).toHaveLength(3);
+    expect(first).toMatchObject({ users: 1, ran: 2, skipped: 2, failed: 0 });
+    expect(calls).toHaveLength(2);
     const spent = await db.select({ usd: usage.costUsd }).from(usage).where(eq(usage.userId, userId));
-    expect(spent.reduce((n, r) => n + Number(r.usd), 0)).toBeCloseTo(4.5);
+    expect(spent.reduce((n, r) => n + Number(r.usd), 0)).toBeCloseTo(3);
 
     // Straight after: three unchanged, the fourth still over; no call at all.
     const second = await sweep();
     expect(second).toMatchObject({ users: 1, ran: 0, skipped: 4, failed: 0 });
-    expect(calls).toHaveLength(3);
+    expect(calls).toHaveLength(2);
     const refused = projectIds.filter((p) => !calls.includes(p));
-    expect(refused).toHaveLength(1);
+    expect(refused).toHaveLength(2);
     // Refused twice, logged once: a sweep every ten minutes over the cap
     // must not write a row per project per sweep.
-    const rows = await runRowsFor(userId, refused[0]);
-    expect(rows.map((r) => r.reason)).toEqual(["budget"]);
+    for (const p of refused) expect((await runRowsFor(userId, p)).map((r) => r.reason)).toEqual(["budget"]);
     // Over the cap on what was really spent: the user is told, once.
     expect(await capPushes(userId)).toHaveLength(1);
   });
@@ -181,7 +180,7 @@ describe("2a: the daily cap holds for every run", () => {
     const bundles = await Promise.all(
       projectIds.map((p) => gatherProject(userId, p, { now: NOW, timezone: TZ }))
     );
-    const results = await withEnv("UNDERSTANDING_DAILY_CAP_USD", "3", () =>
+    const results = await withEnv("UNDERSTANDING_DAILY_CAP_USD", "2", () =>
       withEnv("UNDERSTANDING_RUN_CAP_USD", undefined, () =>
         Promise.all(
           projectIds.map((p, i) =>
@@ -243,8 +242,8 @@ describe("2a: the daily cap holds for every run", () => {
     });
     const other = fakeModel((bundle) => minimalOutputFor(bundle));
 
-    // A $3 cap holds one $2 run, not two. Nothing spent yet.
-    await withEnv("UNDERSTANDING_DAILY_CAP_USD", "3", () =>
+    // A $2 cap holds one $1.50 run, not two. Nothing spent yet.
+    await withEnv("UNDERSTANDING_DAILY_CAP_USD", "2", () =>
       withEnv("UNDERSTANDING_RUN_CAP_USD", undefined, async () => {
         const first = runProject(userId, projectIds[0], { timezone: TZ, now: NOW, model: slow });
         await inside;
@@ -372,16 +371,28 @@ describe("2c: one run has a cost ceiling", () => {
       );
       expect(result.status).toBe("failed");
       if (result.status !== "failed") return;
-      // About $0.85 an attempt: two fit under $2, a third could not.
-      expect(model.calls).toEqual([0, 1]);
-      expect(result.errors.some((e) => e.startsWith("run cost ceiling: attempt 3"))).toBe(true);
+      // About $0.85 an attempt: one fits under $1.50, a second could not.
+      expect(model.calls).toEqual([0]);
+      expect(result.errors.some((e) => e.startsWith("run cost ceiling: attempt 2"))).toBe(true);
       const [row] = await db.select().from(usage).where(eq(usage.userId, userId));
-      expect(row.outputTokens).toBe(64_000);
+      expect(row.outputTokens).toBe(32_000);
       expect(Number(row.costUsd)).toBeLessThanOrEqual(runCapUsd());
     } finally {
       errorSpy.mockRestore();
       warnSpy.mockRestore();
     }
+  });
+
+  it("a model the rate card doesn't know still gets its attempt: the gate prices it as the default model", async () => {
+    const { userId, projectIds } = await seedUser(1);
+    // Unknown models are priced at the card's ceiling ($50/M out): one
+    // worst-case attempt alone would pass the $1.50 run ceiling.
+    const novel = Object.assign(fakeModel((bundle) => minimalOutputFor(bundle)), { modelName: "claude-next-9" });
+    const result = await withEnv("UNDERSTANDING_RUN_CAP_USD", undefined, () =>
+      runProject(userId, projectIds[0], { timezone: TZ, now: NOW, model: novel })
+    );
+    expect(result.status).toBe("ok");
+    expect(novel.calls).toHaveLength(1);
   });
 
   it("a run whose first attempt alone could pass the ceiling never calls the model", async () => {

@@ -8,7 +8,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { clarifications, entities, records, understandingRuns, user } from "@/lib/db/schema";
+import { clarifications, entities, records, tasks, understandingRuns, user } from "@/lib/db/schema";
 import { checkUnderstandNowQuota } from "@/lib/rate-limit";
 import {
   describeProvider,
@@ -106,11 +106,12 @@ describe("sweepUnderstanding", () => {
         : minimalOutputFor(bundle);
     });
 
-    // A day later, so the local date in the hash changes and both run again.
-    const tomorrow = new Date(NOW.getTime() + 86_400_000);
-    const inFlight = sweepUnderstanding({ now: tomorrow, model: slow, userIds: [U.id] });
+    // New data in both projects, so both run again. (A day passing no longer
+    // does on its own: only an item crossing a date line does, SEC-A004.)
+    await db.update(tasks).set({ updatedAt: new Date(NOW.getTime() + 60_000) }).where(eq(tasks.userId, U.id));
+    const inFlight = sweepUnderstanding({ now: NOW, model: slow, userIds: [U.id] });
     await enteredOnce;
-    const second = await sweepUnderstanding({ now: tomorrow, model: slow, userIds: [U.id] });
+    const second = await sweepUnderstanding({ now: NOW, model: slow, userIds: [U.id] });
     expect(second).toEqual({ users: 0, ran: 0, skipped: 0, failed: 0, retiredAsr: 0, healed: 0, repaired: 0, restored: 0 });
     expect(slow.calls).toHaveLength(1);
 

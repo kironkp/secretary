@@ -6,7 +6,7 @@
 import { z } from "zod";
 import { and, desc, eq, gte } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { events, memories, tasks } from "@/lib/db/schema";
+import { events, memories, tasks, usage } from "@/lib/db/schema";
 import { openai, TEXT_MODEL } from "@/lib/openai";
 import { recordUsage } from "@/lib/usage";
 import { findDuplicate } from "./dedupe";
@@ -34,18 +34,42 @@ Rules: only suggest things with a concrete basis in the data — never generic a
 
 const MIN_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
-/** Generate + store suggestions, at most once per 24h per user. Never throws. */
+/** The last attempt per user in this process, whatever it produced or however it failed. */
+const lastAttempt = new Map<string, number>();
+
+/** Tests only: what a restart forgets. */
+export function forgetSuggestionAttemptsForTests(): void {
+  lastAttempt.clear();
+}
+
+/**
+ * Generate + store suggestions, at most once per 24h per user. Never throws.
+ * The 24 hours count from the last ATTEMPT (SEC-A004): keyed on the last
+ * suggestion inserted, the gate never closed on the most common answer, an
+ * empty list, and gpt-5.5 ran after every extraction.
+ */
 export async function generateSuggestions(userId: string, timezone: string): Promise<void> {
   try {
     if (!process.env.OPENAI_API_KEY) return;
+    const since = Date.now() - MIN_INTERVAL_MS;
+    if ((lastAttempt.get(userId) ?? 0) > since) return;
 
+    // Across restarts: a suggestions call in the last 24h is in the usage
+    // table (kind "other" on TEXT_MODEL; search_web is "other" on its own model).
+    const [recent] = await db
+      .select({ id: usage.id })
+      .from(usage)
+      .where(
+        and(eq(usage.userId, userId), eq(usage.kind, "other"), eq(usage.model, TEXT_MODEL), gte(usage.createdAt, new Date(since)))
+      )
+      .limit(1);
     const [lastSuggested] = await db
       .select({ createdAt: tasks.createdAt })
       .from(tasks)
       .where(and(eq(tasks.userId, userId), eq(tasks.source, "suggested")))
       .orderBy(desc(tasks.createdAt))
       .limit(1);
-    if (lastSuggested && Date.now() - lastSuggested.createdAt.getTime() < MIN_INTERVAL_MS) return;
+    if (recent || (lastSuggested && lastSuggested.createdAt.getTime() > since)) return;
 
     const now = new Date();
     const allTasks = await db
@@ -97,6 +121,9 @@ export async function generateSuggestions(userId: string, timezone: string): Pro
       ...facts.map((f) => `- ${f.fact}`),
     ].join("\n");
 
+    // The attempt is what counts, from here: an empty list, a duplicate or a
+    // failure all close the day.
+    lastAttempt.set(userId, Date.now());
     const response = await openai.responses.create({
       model: TEXT_MODEL,
       instructions: SUGGESTION_PROMPT,

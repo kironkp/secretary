@@ -699,15 +699,26 @@ const heldUsd = new Map<string, number>();
  */
 const CHARS_PER_TOKEN = 3;
 
-/** The most one more attempt could cost: its prompt, priced uncached, and a full max_tokens answer. */
+/**
+ * The most one more attempt could cost: its prompt, priced uncached, and a
+ * full max_tokens answer. A model with no rate card entry is priced here at
+ * DEFAULT_MODEL's rate: the rate card prices an unknown model at its
+ * ceiling ($50/M out), so one worst-case attempt would pass a $1.50 run
+ * ceiling and every run of a model added by UNDERSTANDING_MODEL would be
+ * refused before it started. What it really costs is still recorded at the
+ * ceiling rate, where the daily cap sees it.
+ */
 function attemptCeilingUsd(model: string | undefined, prompt: string): number {
-  return priceUsage({
-    model,
-    kind: "understanding",
-    inputTokens: Math.ceil(prompt.length / CHARS_PER_TOKEN),
-    outputTokens: MAX_TOKENS,
-    seconds: 0,
-  }).usd;
+  const priced = (m: string | undefined) =>
+    priceUsage({
+      model: m,
+      kind: "understanding",
+      inputTokens: Math.ceil(prompt.length / CHARS_PER_TOKEN),
+      outputTokens: MAX_TOKENS,
+      seconds: 0,
+    });
+  const own = priced(model);
+  return own.known ? own.usd : priced(DEFAULT_MODEL).usd;
 }
 
 /**

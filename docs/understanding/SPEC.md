@@ -452,7 +452,8 @@ their own titles or messages; no banned words.
 ## 8. Triggers
 
 **Spend fail-safe (2026-09-25).** Every run first asks `backgroundAllowed`
-(lib/spend-guard.ts): past `UNDERSTANDING_DAILY_CAP_USD` (default $5) of
+(lib/spend-guard.ts): past `UNDERSTANDING_DAILY_CAP_USD` (default $3 since
+2026-10-06; it was $5) of
 understanding spend in the last 24 hours, the run skips with reason
 `budget` and the user gets one push that day. Any priced call checks total spend against `SPEND_ALERT_USD`
 (default $8) and pushes once a day when it is crossed. A run whose provider
@@ -471,7 +472,7 @@ any run handed a model, which every sweep run is), "Understand now", the
 interview's "ask me more" and an answer's re-read. Chat, calls and the
 answer itself are never blocked. The cap counts a run before it starts: a
 run starts only while the last 24 hours' understanding spend, plus
-`UNDERSTANDING_RUN_CAP_USD` (default $2, never more than the daily cap) for
+`UNDERSTANDING_RUN_CAP_USD` (default $1.50 since 2026-10-06, never more than the daily cap) for
 this run and for every run still in flight, does not pass the cap. A run's
 hold is taken before the spend is read, so two runs starting together
 cannot both fit on the same spend. The same figure is each run's ceiling:
@@ -487,7 +488,7 @@ validation.
 There is no dirty table. The design is a **sweep**: every
 `UNDERSTANDING_SWEEP_MINUTES` (default 10) the app gathers every `active`
 project of every user, hashes each bundle (`records.inputs_hash` is over the
-bundle's ids, `updated_at`s and the local date, never its text — §3), and
+bundle's ids, `updated_at`s and each dated item's place from today, never its text — §3), and
 calls the model only for a project whose hash differs from the stored one.
 A project nothing touched costs a handful of indexed reads and a hash
 compare, and nothing else. The earlier draft of this section had every write
@@ -537,10 +538,14 @@ write site to say the same thing less reliably.
   defaults `gpt-5.5`, `medium`). Settings shows the provider, the model, the
   cadence and the last run per project, and its "Understand now" button runs
   `runAll` for the signed-in user (one per minute).
-- **Once a day regardless.** The local calendar date is part of the hash,
-  so the first sweep after midnight in the user's timezone re-runs every
-  active project even when no row moved, because a day passing changes what
-  "today" and "tomorrow" mean.
+- **When a date crosses a line, not once a day (2026-10-06, SEC-A004).** The
+  hash holds, for every open task with a due date and every event, where it
+  sits from today in the user's zone (`later` beyond three days, `soon`,
+  `tomorrow`, `today`, `past`), never the date itself. A day passing re-reads
+  a project only when one of its items moves bucket (due in three days →
+  tomorrow → today → late; an event becoming today or past), which is when
+  "today" and "tomorrow" in its words actually change. It used to re-read
+  every project with anything near-dated every day, at Opus prices.
 - **Answering a question** (§6) runs that project immediately, so the next
   screen reflects the answer; it does not wait for the sweep.
 - **The interview run** (`mode: "interview"`, `POST /api/interview/more`,

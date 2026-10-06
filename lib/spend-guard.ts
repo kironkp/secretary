@@ -25,8 +25,8 @@ const envUsd = (name: string, fallback: number, zeroOk = false): number => {
   return Number.isFinite(v) && (v > 0 || (zeroOk && v === 0)) ? v : fallback;
 };
 
-/** Understanding runs may spend this much in 24 hours. 0 turns them off. */
-export const backgroundCapUsd = () => envUsd("UNDERSTANDING_DAILY_CAP_USD", 5, true);
+/** Understanding runs may spend this much in 24 hours ($3 since SEC-A004; it was $5). 0 turns them off. */
+export const backgroundCapUsd = () => envUsd("UNDERSTANDING_DAILY_CAP_USD", 3, true);
 /**
  * One understanding run may spend this much, every attempt included
  * (run.ts stops before an attempt that could pass it), and never more than
@@ -35,7 +35,7 @@ export const backgroundCapUsd = () => envUsd("UNDERSTANDING_DAILY_CAP_USD", 5, t
  * cost about $3 on Opus. 0 turns runs off.
  */
 export const runCapUsd = () =>
-  Math.min(envUsd("UNDERSTANDING_RUN_CAP_USD", 2, true), backgroundCapUsd());
+  Math.min(envUsd("UNDERSTANDING_RUN_CAP_USD", 1.5, true), backgroundCapUsd());
 /** A push when all spend in 24 hours crosses this. */
 export const alertUsd = () => envUsd("SPEND_ALERT_USD", 8);
 

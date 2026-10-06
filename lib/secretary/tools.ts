@@ -17,7 +17,6 @@ import {
   pipelineTemplates,
   projects,
   tasks,
-  usage,
   user as userTable,
   type DocSection,
 } from "@/lib/db/schema";
@@ -48,6 +47,7 @@ import { connectionStatus, GoogleUnavailable, NOT_CONNECTED_LINE } from "@/lib/g
 import { describeRecurrence, firstOccurrence, normalizeRecurrence } from "./rrule";
 import { findList, findOrCreateList, itemTitle, listFor, parseListPhrase, spokenList } from "./lists";
 import { arrangeDashboard } from "@/lib/layout/arrange";
+import { recordUsage } from "@/lib/usage";
 import { defaultPlan, sectionKey, type LayoutPlan, type PlanSection } from "@/lib/layout/plan";
 import { getPlanHead, getPreferences, savePlanAsHead } from "@/lib/layout/plan-store";
 import { REGISTRY_COMPONENTS, REGISTRY_VERSION } from "@/lib/layout/registry";
@@ -1496,7 +1496,6 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
   async search_web(ctx, args) {
     const a = toolSchemas.search_web.parse(args);
     const { openai, SEARCH_MODEL } = await import("@/lib/openai");
-    const { recordUsage } = await import("@/lib/usage");
     try {
       const response = await openai.responses.create({
         model: SEARCH_MODEL,
@@ -1579,7 +1578,8 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
       .map((b) => b.text)
       .join("")
       .slice(0, 1600);
-    await db.insert(usage).values({
+    // Priced (a bare insert left cost_usd null, read as $0 everywhere).
+    await recordUsage({
       userId: ctx.userId,
       kind: "consult",
       model,

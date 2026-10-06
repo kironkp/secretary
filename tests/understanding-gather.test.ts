@@ -517,6 +517,28 @@ describe("hashBundle", () => {
     if (today!.events.length) expect(nearDated(soon(today!))).toBe(true);
   });
 
+  it("a day passing re-reads only when an item crosses a line (SEC-A004: no daily re-read)", async () => {
+    const today = await gather();
+    const tomorrow = await gather(ids.caltrans, daysFromNow(1));
+    type B = NonNullable<Awaited<ReturnType<typeof gather>>>;
+    const due = (b: B, at: Date, events: B["events"] = []): B => ({
+      ...b,
+      tasksOpen: [{ ...b.tasksOpen[0], dueAt: at.toISOString() }, ...b.tasksOpen.slice(1).map((t) => ({ ...t, dueAt: null }))],
+      events,
+    });
+    // Due in 3 days, then in 2: both "soon", no new read.
+    expect(hashBundle(due(tomorrow!, daysFromNow(3)))).toBe(hashBundle(due(today!, daysFromNow(3))));
+    // Late, then a day later: both "past", no new read (it used to re-run daily for a day).
+    expect(hashBundle(due(tomorrow!, daysFromNow(-1)))).toBe(hashBundle(due(today!, daysFromNow(-1))));
+    // Due tomorrow, then today: it crossed, so it is read again.
+    expect(hashBundle(due(tomorrow!, daysFromNow(1)))).not.toBe(hashBundle(due(today!, daysFromNow(1))));
+    // An event becoming today crosses too.
+    if (today!.events.length) {
+      const ev = (b: B) => [{ ...b.events[0], startsAt: daysFromNow(1).toISOString() }];
+      expect(hashBundle(due(tomorrow!, daysFromNow(30), ev(tomorrow!)))).not.toBe(hashBundle(due(today!, daysFromNow(30), ev(today!))));
+    }
+  });
+
   it("changes when a task's updated_at changes", async () => {
     const before = await gather();
     const touch = (updatedAt: Date) =>

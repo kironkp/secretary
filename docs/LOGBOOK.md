@@ -7,6 +7,40 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 ---
 
+## v0.28 — No stupid spending, part 1: background calls that paid for nothing (2026-10-06)
+
+this commit
+
+Kiron: "Spend should be minimal but the program should still be smart. No
+stupid spending." An inventory of every paid call (code plus 30 days of
+production usage: $159.08, $139.37 of it understanding) found work that paid
+twice for the same thing, and spend nobody could see.
+
+- Understanding re-reads a project only when its data changes or one of its
+  dated items crosses a line (later → soon → tomorrow → today → past); the
+  hash no longer carries the date, so nothing near-dated re-reads every day.
+  Defaults: $3 a day, $1.50 a run (were $5 and $2). The model stays Opus. A
+  model missing from the rate card is priced at the default model's rate by
+  the run's attempt gate, or a $1.50 ceiling would refuse every run of it.
+- Extraction: one run per conversation at a time after a 10-second settle,
+  with one follow-up for whatever was said meanwhile. It started after every
+  voice utterance and chat turn and read the same words two and three times
+  in the same minute (production, 10-06 05:30 and 09-24 23:52). Its cost is
+  now recorded through recordUsage: 101 of 130 extraction rows in 30 days had
+  no price, which every reader counts as $0.
+- Suggestions run at most once a day from the attempt, not the last insert:
+  the gate never closed on "an empty list is the right answer most days", so
+  gpt-5.5 ran after every extraction.
+- consult_brain is priced. The slow loop's headless Claude Code no longer
+  inherits the API key (it billed the API with no usage row; the shop already
+  stripped it). /api/realtime/token-test (no quota, no usage row) is off in
+  production.
+
+Not tested: the slow loop's spawn (a script); consult_brain's pricing (it
+needs a live Claude client).
+
+---
+
 ## v0.27 — Lists, a dashboard you can rearrange by voice, and no "let me" before it's done (2026-10-06)
 
 this commit

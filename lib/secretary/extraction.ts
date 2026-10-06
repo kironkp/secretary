@@ -12,7 +12,6 @@ import {
   events,
   memories,
   tasks,
-  usage,
   user,
 } from "@/lib/db/schema";
 import { crossReferenceMentions } from "./entities";
@@ -27,6 +26,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { findDuplicate, findDuplicateEvent, titleSimilarity } from "./dedupe";
 import { parseInTz } from "@/lib/time";
+import { recordUsage } from "@/lib/usage";
 
 export const extractionSchema = z.object({
   tasks: z.array(
@@ -396,7 +396,46 @@ export type ExtractionSummary = {
   savedFacts: number;
 };
 
-export async function runExtraction(
+/**
+ * One extraction per conversation at a time, after a short settle (SEC-A004).
+ * It is started after every voice utterance and every chat turn, and the
+ * high-water mark only moves when the model returns, so runs started a few
+ * seconds apart read the same words and each paid for them: production shows
+ * two and three Opus runs in the same minute. Now a call during the settle
+ * or a run is covered by one follow-up pass over whatever is new.
+ */
+const EXTRACTION_SETTLE_MS = process.env.VITEST ? 0 : 10_000;
+const extractions = new Map<string, { promise: Promise<ExtractionSummary | null>; again: boolean }>();
+
+export function runExtraction(
+  userId: string,
+  conversationId: string,
+  timezone: string
+): Promise<ExtractionSummary | null> {
+  const queued = extractions.get(conversationId);
+  if (queued) {
+    queued.again = true;
+    return queued.promise;
+  }
+  const entry = { promise: Promise.resolve<ExtractionSummary | null>(null), again: false };
+  entry.promise = (async () => {
+    try {
+      await new Promise((resolve) => setTimeout(resolve, EXTRACTION_SETTLE_MS));
+      let summary: ExtractionSummary | null = null;
+      do {
+        entry.again = false;
+        summary = await extractOnce(userId, conversationId, timezone);
+      } while (entry.again);
+      return summary;
+    } finally {
+      extractions.delete(conversationId);
+    }
+  })();
+  extractions.set(conversationId, entry);
+  return entry.promise;
+}
+
+async function extractOnce(
   userId: string,
   conversationId: string,
   timezone: string
@@ -463,13 +502,9 @@ export async function runExtraction(
       .update(conversations)
       .set({ extractedAt: markerTime })
       .where(eq(conversations.id, conversationId));
-    await db.insert(usage).values({
-      userId,
-      kind: "extraction",
-      model,
-      inputTokens,
-      outputTokens,
-    });
+    // Priced, so the spend line and the alert see it (a bare insert left
+    // cost_usd null, which every reader counts as $0).
+    await recordUsage({ userId, kind: "extraction", model, inputTokens, outputTokens });
 
     // Piggyback the predictive pass (P-2) — it self-limits to once per day.
     const { generateSuggestions } = await import("./suggestions");

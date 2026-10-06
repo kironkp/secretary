@@ -587,16 +587,35 @@ export function nearDated(bundle: Bundle): boolean {
   return bundle.tasksOpen.some((t) => within(t.dueAt)) || bundle.events.some((e) => within(e.startsAt));
 }
 
+/** Where a date sits from today, in the user's zone; the hash keeps only this, never the date itself. */
+export type DatePhase = "past" | "today" | "tomorrow" | "soon" | "later";
+
+export function datePhase(iso: string, clock: Bundle["clock"]): DatePhase {
+  const day = (local: string) => {
+    const [y, m, d] = local.split("-").map(Number);
+    return Date.UTC(y, m - 1, d) / DAY_MS;
+  };
+  const diff = day(localDateInTz(clock.timezone, new Date(iso))) - day(clock.localDate);
+  return diff < 0 ? "past" : diff === 0 ? "today" : diff === 1 ? "tomorrow" : diff <= 3 ? "soon" : "later";
+}
+
 /**
  * sha256 of the bundle's identity: which rows are in it, when they last
- * changed, and, for a project with something dated near now, the local date.
- * Never the text, never the previous record, and never the terms — so a
- * re-run on unchanged data is a hash compare and nothing else, and the order
- * rows came back in cannot cause a run.
+ * changed, and where each dated item sits from today. Never the text, never
+ * the previous record, never the terms, and never the date itself: a day
+ * passing re-reads a project only when one of its items crosses a line (due
+ * in three days → tomorrow → today → late, an event becoming today or past),
+ * not every day something is near (SEC-A004; the Today line and "due
+ * tomorrow" still turn over when they should). So a re-run on unchanged
+ * data is a hash compare and nothing else, and the order rows came back in
+ * cannot cause a run.
  */
 export function hashBundle(bundle: Bundle): string {
   const canonical = {
-    localDate: nearDated(bundle) ? bundle.clock.localDate : null,
+    phases: byId([
+      ...bundle.tasksOpen.flatMap((t) => (t.dueAt ? [{ id: t.id, at: t.dueAt }] : [])),
+      ...bundle.events.map((e) => ({ id: e.id, at: e.startsAt })),
+    ]).map((x) => [x.id, datePhase(x.at, bundle.clock)]),
     tasks: byId([...bundle.tasksOpen, ...bundle.tasksDone]).map((t) => [
       t.id,
       t.status,
