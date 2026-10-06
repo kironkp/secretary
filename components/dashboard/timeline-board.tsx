@@ -149,9 +149,13 @@ export function TimelineBoard({
   );
 
   // Optimistic moves until the server's rows come back.
-  const [pending, setPending] = useState<Map<string, Partial<TlTask> & { startsAt?: string; endsAt?: string | null }>>(new Map());
-  const shownTasks = useMemo(() => tlTasks.map((t) => ({ ...t, ...(pending.get(t.id) ?? {}) }) as TlTask), [tlTasks, pending]);
-  const shownEvents = useMemo(() => tlEvents.map((e) => ({ ...e, ...(pending.get(e.id) ?? {}) })), [tlEvents, pending]);
+  // A moved item stays where it was dropped until the server's rows arrive
+  // (router.refresh hands new props), so it never snaps back in between.
+  type Optimistic = Partial<TlTask> & { startsAt?: string; endsAt?: string | null };
+  const [pending, setPending] = useState<{ base: TaskRow[]; map: Map<string, Optimistic> }>({ base: tasks, map: new Map() });
+  const live = pending.base === tasks ? pending.map : null;
+  const shownTasks = useMemo(() => tlTasks.map((t) => ({ ...t, ...(live?.get(t.id) ?? {}) }) as TlTask), [tlTasks, live]);
+  const shownEvents = useMemo(() => tlEvents.map((e) => ({ ...e, ...(live?.get(e.id) ?? {}) })), [tlEvents, live]);
 
   const lanes = useMemo(
     () => buildLanes(tlProjects, shownTasks, shownEvents, timezone, now, filters),
@@ -207,23 +211,24 @@ export function TimelineBoard({
       title: string,
       body: Record<string, unknown>,
       before: Record<string, unknown>,
-      optimistic: Partial<TlTask> & { startsAt?: string; endsAt?: string | null },
+      optimistic: Optimistic,
       label: string
     ) => {
-      setPending((p) => new Map(p).set(id, optimistic));
+      setPending((p) => ({ base: tasks, map: new Map(p.base === tasks ? p.map : []).set(id, optimistic) }));
       const { ok, result } = await send(body);
       if (!ok) {
         setPending((p) => {
-          const n = new Map(p);
-          n.delete(id);
-          return n;
+          const map = new Map(p.map);
+          map.delete(id);
+          return { ...p, map };
         });
         setToast({ text: String(result.error ?? "That move didn't save."), tone: "warn" });
         return;
       }
       const undo = async () => {
         setToast(null);
-        await send(before);
+        const back = await send(before);
+        if (!back.ok) setToast({ text: String(back.result.error ?? "Undo didn't save."), tone: "warn" });
         router.refresh();
       };
       const problem = typeof result.google_problem === "string" ? result.google_problem : null;
@@ -250,17 +255,8 @@ export function TimelineBoard({
           : { text: `Moved "${title}" to ${label}`, undo, tone: "ok" }
       );
       router.refresh();
-      setTimeout(
-        () =>
-          setPending((p) => {
-            const n = new Map(p);
-            n.delete(id);
-            return n;
-          }),
-        1500
-      );
     },
-    [router, send]
+    [router, send, tasks]
   );
 
   const moveItem = useCallback(
@@ -327,10 +323,12 @@ export function TimelineBoard({
   );
 
   // --- pointer handling: mouse drags at once; touch after a long press -------
-  const dayUnderPointer = (clientX: number): number | null => {
+  const dayUnderPointer = (clientX: number, clientY: number): number | null => {
     const el = scroller.current;
     if (!el) return null;
     const rect = el.getBoundingClientRect();
+    // Only a drop on the board itself gives a date.
+    if (clientY < rect.top || clientY > rect.bottom || clientX > rect.right) return null;
     const x = clientX - rect.left + el.scrollLeft - NAME_W;
     if (x < 0) return null;
     return span.from + Math.floor(x / px);
@@ -375,7 +373,7 @@ export function TimelineBoard({
     }
     e.preventDefault();
     if (drag.kind === "item") setDrag({ ...drag, days: Math.round((e.clientX - drag.startX) / px) });
-    else setDrag({ ...drag, x: e.clientX, y: e.clientY, day: dayUnderPointer(e.clientX) });
+    else setDrag({ ...drag, x: e.clientX, y: e.clientY, day: dayUnderPointer(e.clientX, e.clientY) });
   };
   // The browser took the touch for a scroll: nothing moves, nothing opens.
   const onCancel = () => {
@@ -416,6 +414,15 @@ export function TimelineBoard({
     else next.add(id);
     save({ ...settings, collapsed: [...next] });
   };
+  // Open on today (a third in from the left), once per zoom; never again on
+  // its own, so a move never scrolls the board out from under the finger.
+  const placedFor = useRef<Zoom | null>(null);
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el || placedFor.current === zoom) return;
+    placedFor.current = zoom;
+    el.scrollLeft = Math.max(0, (today - span.from) * px - el.clientWidth / 3);
+  }, [zoom, today, span.from, px]);
   const scrollToToday = () => {
     const el = scroller.current;
     if (el) el.scrollTo({ left: Math.max(0, xOf(today) - el.clientWidth / 3), behavior: "smooth" });
@@ -684,6 +691,7 @@ function LaneRows({
                   <div
                     role="button"
                     tabIndex={0}
+                    data-item={item.id}
                     aria-label={`${item.title}${locked ? ", repeats (tap to edit)" : ", drag to move"}`}
                     onPointerDown={(e) => beginItem(e, item, "body")}
                     onKeyDown={(e) => {
@@ -726,6 +734,7 @@ function LaneRows({
                     <span
                       role="button"
                       tabIndex={0}
+                      data-item={item.id}
                       aria-label={`${item.title}, drag to move`}
                       onPointerDown={(e) => beginItem(e, item, "body")}
                       onKeyDown={(e) => {

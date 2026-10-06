@@ -78,6 +78,13 @@ export default defineConfig({
       testMatch: /today\.spec\.ts/,
       use: { ...devices["iPhone 15"] },
     },
+    {
+      // Dashboard › Timeline (SEC-A009): dragging is for the iPad and the
+      // desktop; a phone shows the board and taps to edit.
+      name: "timeline",
+      testMatch: /timeline\.spec\.ts/,
+      use: { ...devices["iPad Pro 11 landscape"] },
+    },
   ],
 
   webServer: {

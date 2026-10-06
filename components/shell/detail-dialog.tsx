@@ -227,6 +227,8 @@ export function DetailDialog() {
       className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 p-4 backdrop-blur-[2px] sm:items-center"
     >
       <div
+        role="dialog"
+        aria-modal="true"
         onClick={(e) => e.stopPropagation()}
         className="animate-rise-in max-h-[85dvh] w-full max-w-md overflow-y-auto rounded-2xl border border-edge bg-surface p-5 shadow-xl"
       >
