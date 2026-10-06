@@ -11,6 +11,7 @@ import { spendAllTime, spendReport, spendWindow } from "@/lib/spend";
 import { CalmModeToggle } from "@/components/settings/calm-mode-toggle";
 import { ConnectedAccounts } from "@/components/settings/connected-accounts";
 import { GoogleCalendarSection } from "@/components/settings/google-calendar";
+import { GmailSection } from "@/components/settings/gmail";
 import { NotificationsSection } from "@/components/settings/notifications";
 import { LayoutPreferences } from "@/components/settings/layout-preferences";
 import { ProposalReview } from "@/components/settings/proposal-review";
@@ -147,6 +148,16 @@ export default async function SettingsPage() {
           it made, and changes made in Google don&apos;t come back here.
         </p>
         <GoogleCalendarSection />
+      </section>
+
+      <section className="rounded-xl border border-edge bg-surface p-5">
+        <h2 className="mb-1 text-sm font-bold">Gmail</h2>
+        <p className="mb-4 text-xs text-muted">
+          Ask what&apos;s new, find an email, or have a reply drafted. Drafts wait in Gmail
+          for you to send; the secretary never sends anything. Once it has read mail in a
+          conversation, it asks before changing anything there.
+        </p>
+        <GmailSection />
       </section>
 
       <section className="rounded-xl border border-edge bg-surface p-5">

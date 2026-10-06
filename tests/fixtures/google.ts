@@ -3,12 +3,37 @@
 // real client refuses to run without it (lib/google/connection.ts).
 import {
   CALENDAR_SCOPE,
+  FEATURE_SCOPES,
   GoogleAuthError,
   GoogleHttpError,
   saveConnection,
   type CalendarEventBody,
+  type GmailMessage,
   type GoogleHttp,
 } from "@/lib/google/connection";
+
+/** A message in the fake mailbox, as the test writes it. */
+export type FakeMail = { id: string; threadId?: string; from: string; subject: string; date: string; body: string; messageId?: string };
+
+const b64url = (s: string) => Buffer.from(s, "utf8").toString("base64url");
+
+function toGmail(m: FakeMail, format: "metadata" | "full"): GmailMessage {
+  const headers = [
+    { name: "From", value: m.from },
+    { name: "Subject", value: m.subject },
+    { name: "Date", value: m.date },
+    { name: "Message-ID", value: m.messageId ?? `<${m.id}@mail.test>` },
+  ];
+  return {
+    id: m.id,
+    threadId: m.threadId ?? `t-${m.id}`,
+    snippet: m.body.slice(0, 100),
+    payload:
+      format === "metadata"
+        ? { headers }
+        : { mimeType: "multipart/alternative", headers, parts: [{ mimeType: "text/plain", body: { data: b64url(m.body) } }] },
+  };
+}
 
 /** Tokens the fake hands out; a test greps results and rows for these to prove none leaked. */
 export const FAKE_REFRESH = "fake-refresh-secret-7f3a";
@@ -24,11 +49,16 @@ export function fakeGoogle() {
     insert: [] as { token: string; body: CalendarEventBody }[],
     patch: [] as { token: string; eventId: string; body: CalendarEventBody }[],
     delete: [] as { token: string; eventId: string }[],
+    gmailList: [] as { q: string; max: number }[],
+    gmailGet: [] as { id: string; format: string }[],
+    draft: [] as { raw: string; threadId: string; decoded: string }[],
   };
+  /** The fake mailbox, newest first. */
+  const mailbox: FakeMail[] = [];
   /** Change these mid-test to make Google misbehave. */
   const behave = {
     refresh: "ok" as "ok" | "invalid_grant",
-    grantedScope: CALENDAR_SCOPE,
+    grantedScope: CALENDAR_SCOPE as string,
     /** HTTP status the next calls of each kind fail with, one entry per failing call. */
     insertFails: [] as number[],
     patchFails: [] as number[],
@@ -65,8 +95,22 @@ export function fakeGoogle() {
       calls.delete.push({ token, eventId });
       fail(behave.deleteFails);
     },
+    async listMessages(_token, q, max) {
+      calls.gmailList.push({ q, max });
+      return mailbox.slice(0, max).map((m) => ({ id: m.id, threadId: m.threadId ?? `t-${m.id}` }));
+    },
+    async getMessage(_token, id, format) {
+      calls.gmailGet.push({ id, format });
+      const m = mailbox.find((x) => x.id === id);
+      if (!m) throw new GoogleHttpError(404, "Not Found");
+      return toGmail(m, format);
+    },
+    async createDraft(_token, raw, threadId) {
+      calls.draft.push({ raw, threadId, decoded: Buffer.from(raw, "base64url").toString("utf8") });
+      return { id: `draft-${calls.draft.length}` };
+    },
   };
-  return { http, calls, behave };
+  return { http, calls, behave, mailbox };
 }
 
 /** A user who connected Google Calendar a moment ago (as the callback would store it). */
@@ -76,5 +120,15 @@ export async function connectCalendar(userId: string, opts: { accessExpired?: bo
     expiresIn: opts.accessExpired ? -60 : 3600,
     refreshToken: FAKE_REFRESH,
     scope: `openid ${CALENDAR_SCOPE}`,
+  });
+}
+
+/** A user who connected Gmail (and Calendar) a moment ago. */
+export async function connectGmail(userId: string): Promise<void> {
+  await saveConnection(userId, {
+    accessToken: `${FAKE_ACCESS_PREFIX}0`,
+    expiresIn: 3600,
+    refreshToken: FAKE_REFRESH,
+    scope: [CALENDAR_SCOPE, ...FEATURE_SCOPES.gmail].join(" "),
   });
 }

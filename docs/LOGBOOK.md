@@ -7,6 +7,50 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 ---
 
+## v0.30 — Gmail: what's new, find, read, draft; never sends; mail can't act (2026-10-06)
+
+this commit
+
+Kiron said yes to all three: a summary of what's new on demand, finding mail
+mid-conversation, and replies drafted into Gmail. It never sends; he does,
+from Gmail.
+
+- Connect Gmail in Settings: the same Google grant as Calendar, adding
+  gmail.readonly and gmail.compose (both restricted; a personal-use app runs
+  unverified behind Google's warning). The feature rides in the OAuth state,
+  so the callback already registered serves both.
+- email_summary, search_email, read_email, draft_email_reply, by voice and
+  chat, on demand only; Gmail calls are free and the turn's own model does
+  the summarizing. Mail text comes back fenced as data (a forged end marker
+  is defused), cut at 4,000 characters, and nothing from it is stored here.
+  The Gmail client has no send method; a draft goes to the original sender's
+  From address alone, with no Cc or Bcc, whatever the mail or the body says.
+- The gate: reading mail marks the conversation (the first time, by the
+  database clock). From then on every write a tool would make there (tasks,
+  events, Google Calendar, memories, lists, the dashboard, a web search) is
+  a proposal, sealed with an HMAC; the server shows "Needs your yes: …" in
+  its own words, and the reply asks. Only the user's next message after the
+  reply that asked, within ten minutes, can confirm it by saying yes
+  plainly, and what runs is the stored row, unchanged, claimed so a second
+  confirm finds it taken. A yes in the same turn, a yes from before, any
+  other answer first, a changed row and an expired one are all refused.
+  "Next" is read from the conversation's stored order, so a call whose
+  transcript is posted after the tool fired still works. Reading, looking
+  and drafting stay open; mail is read only inside a conversation.
+- Around the gate: extraction no longer reads what the secretary said after
+  mail was read in a conversation (the user's own words still count), and
+  search_history bringing such lines into another conversation marks that
+  one too.
+
+Known limits: email text a tool returns stays in OpenAI's stored response
+chain (previous_response_id) for that conversation, as any tool result
+does. The yes answers the reply that asked; if the model words that reply
+falsely, the server's "Needs your yes" line is what tells the truth. Chat
+inside an INBOUND_EMAIL intake thread (?c=) is unchanged: that mail is
+stored as the user's message there, as before. Not covered by a test: the Settings Gmail section (no component tests).
+
+---
+
 ## v0.29 — The board by touch: tap targets, "Arranged by you", show puts it back (2026-10-06)
 
 this commit

@@ -56,7 +56,7 @@ vi.mock("@/lib/anthropic", async (importOriginal) => {
 });
 
 import { db } from "@/lib/db";
-import { attachments, events, googleConnection, user } from "@/lib/db/schema";
+import { attachments, conversations, events, googleConnection, messages, user } from "@/lib/db/schema";
 import { CALENDAR_SCOPE, setGoogleHttpForTests } from "@/lib/google/connection";
 import { STATE_COOKIE } from "@/lib/google/oauth";
 import { POST as voiceTool } from "@/app/api/secretary/tools/route";
@@ -141,6 +141,40 @@ describe("voice and chat reach Google Calendar through the same create_event", (
   });
 });
 
+describe("Gmail through the real routes (SEC-A005)", () => {
+  it("Connect Gmail asks for exactly the two Gmail scopes, keeping what was granted", async () => {
+    const res = await connect(new Request("http://localhost/api/google/calendar/connect?feature=gmail"));
+    const to = new URL(res.headers.get("location")!);
+    expect(to.searchParams.get("scope")).toBe(
+      "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.compose"
+    );
+    expect(to.searchParams.get("include_granted_scopes")).toBe("true");
+    expect(res.cookies.get(STATE_COOKIE)?.value).toBe(`${to.searchParams.get("state")}.gmail`);
+  });
+
+  it("the callback refuses a Gmail grant missing one of its scopes", async () => {
+    cookieJar.set(STATE_COOKIE, "issued-state.gmail");
+    google.behave.grantedScope = `${CALENDAR_SCOPE} https://www.googleapis.com/auth/gmail.readonly`;
+    const res = await callback(new Request("http://localhost/api/google/calendar/callback?state=issued-state&code=g1"));
+    expect(res.headers.get("location")).toMatch(/\/settings\?gmail=scope-missing$/);
+  });
+
+  it("on a call, a conversation that read mail proposes instead of writing", async () => {
+    const [conv] = await db.insert(conversations).values({ userId: U.id, mode: "voice", untrustedAt: new Date() }).returning();
+    await db.insert(messages).values({ userId: U.id, conversationId: conv.id, role: "user", content: "add that party", mode: "voice" });
+    const res = await voiceTool(
+      post("http://localhost/api/secretary/tools", {
+        name: "create_event",
+        args: { title: "Party from the email", starts_at: "2026-10-31T16:00:00" },
+        conversationId: conv.id,
+      })
+    );
+    expect(((await res.json()) as { result: Record<string, unknown> }).result).toMatchObject({ proposed: true });
+    expect(google.calls.insert).toHaveLength(0);
+    expect((await eventRows()).some((e) => e.title === "Party from the email")).toBe(false);
+  });
+});
+
 describe("Connect Google Calendar", () => {
   it("connect sends the user to Google for the one Calendar scope, offline, with consent, and sets the state cookie", async () => {
     const res = await connect(new Request("http://localhost/api/google/calendar/connect"));
@@ -153,7 +187,8 @@ describe("Connect Google Calendar", () => {
     expect(to.searchParams.get("prompt")).toBe("consent");
     expect(to.searchParams.get("redirect_uri")).toMatch(/\/api\/google\/calendar\/callback$/);
     const state = to.searchParams.get("state");
-    expect(res.cookies.get(STATE_COOKIE)?.value).toBe(state);
+    // "<state>.<feature>" (SEC-A005): which button started the round trip.
+    expect(res.cookies.get(STATE_COOKIE)?.value).toBe(`${state}.calendar`);
   });
 
   it("the callback refuses a state it did not issue, and makes no token exchange", async () => {

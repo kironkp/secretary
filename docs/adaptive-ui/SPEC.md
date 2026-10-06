@@ -726,6 +726,15 @@ claude.ai session used as a fixture (docs/adaptive-ui/transcript-2026-08-18).
   These are the same tools chat uses, through the same `executeTool`; the
   only difference a turn makes is `ToolContext.calendarSync`
   (`liveTurnContext`): a turn with an attachment asks before Google.
+  **Mail by voice (2026-10-06, SEC-A005).** The mouth also carries
+  `email_summary`, `search_email`, `read_email`, `draft_email_reply` and
+  `confirm_pending`. Reading mail marks the conversation
+  (`conversations.untrusted_at`); from then on `executeTool` turns every
+  write there into a proposal (`pending_actions`, HMAC-sealed), confirmable
+  only by the user's own next message after the proposing turn, within ten
+  minutes, and run exactly as stored. Reading, looking and drafting stay
+  open (`UNTRUSTED_OK`); a draft goes only to the original sender and is
+  never sent.
 - **capture never depends on external apps**: the store is the system of
   record; Reminders/Calendar are optional exports. An export failure becomes a
   visible pending item, disclosed once — capture itself cannot fail on a
