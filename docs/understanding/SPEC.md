@@ -174,6 +174,17 @@ Validation, in order, all mechanical:
    the errors of the attempt before it. An answer that is not JSON at all
    is the same kind of rejection, retried with the same model. Last
    failure → keep the previous record, log, move on.
+   How a piece READS is mended by dropping it, never by rejecting the run
+   (2026-10-06): an answer whose label breaks a label rule (more than four
+   words or 28 characters, a code or a slash, a banned word, a spelled day,
+   a promise) is dropped; a question whose own words or why break a rule
+   (too long, a slash, no ending, more than two sentences in the why, the
+   same wording rules), or that is left with no answer, is dropped; so is a
+   Today line or a lede that breaks a wording or sentence rule
+   (`repair.ts` `dropUnfitPresentation`, logged). Never shortened or
+   rewritten: a shortened button would do what it does not say. The
+   record's own texts are never dropped (each carries a sourced fact), and
+   every rule about sources, ids, evidence and writes still rejects.
 2. Every `Claim.sources` is non-empty.
 3. Every `QuestionDraft.answers[].writes[]` uses an op from the closed list in
    §5 and ids from the bundle.
@@ -512,7 +523,11 @@ write site to say the same thing less reliably.
   read once and shared), compare hashes, run the ones that changed, then
   retire ASR clarifications confirmed by use (§5). One sweep per user at a
   time; a second that starts while one is running returns at once and does
-  nothing.
+  nothing. Projects are read most recently used first (2026-10-06), so the
+  daily cap goes to what the user is working on: by the user's own signals
+  only (their messages about the project, tasks they asked for by voice or
+  chat, their answers to its questions; never what the app wrote), then by
+  name (`run.ts` `byRecentUse`).
 - **Backoff, until the inputs change.** A project with a failed run on the
   same inputs is not run again by the sweep until its inputs change, so a
   rejection is paid for once, not every six hours. (Until 2026-10-04 the

@@ -7,6 +7,31 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 ---
 
+## v0.31.1 — Reading: a button that reads wrong is dropped, not the whole read; most-used projects first (2026-10-06)
+
+this commit
+
+sec rev's production check after the unpause (v53):
+
+- Caltrans still failed, now on one answer label, `"Not yet, do it
+  Friday"` (five words where a button takes four). The $1.50 run ceiling
+  leaves no room for a second attempt, so each change to Caltrans paid
+  about $0.81 for a record that was then thrown away. A rule about how a
+  piece reads now drops that piece instead: the answer option, a question
+  that reads wrong or has no answer left, the Today line, a lede. Dropped,
+  never shortened ("Not yet" with writes that set Friday would be a button
+  doing what it does not say), never rewritten, never a second call. The
+  record's own claims are never dropped, and every rule about sources,
+  ids, evidence and writes still rejects as before.
+- The sweep read projects alphabetically, so the $3 day went to Caltrans,
+  DAW and Find It before Jazz or Personal. It now reads the most recently
+  used first, judged only by the user's own signals: their messages about
+  a project, the tasks they asked for by voice or chat, and their answers
+  to its questions. What the app writes itself (extracted or suggested
+  tasks, records) never counts, so the order cannot feed itself.
+
+---
+
 ## v0.31 — Gmail, round 2: a yes is a yes, on a call it goes by the call's order, mail stays where it was read (2026-10-06)
 
 this commit
