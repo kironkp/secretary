@@ -5,7 +5,15 @@
 // database; no Google.
 process.env.TZ = "UTC";
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+
+// Google sign-in exists in lib/auth.ts only when a client is configured, and
+// it reads the env when it loads: set a fake one before any import (CI has no
+// .env.local). Google itself is never called: the token here is unexpired.
+vi.hoisted(() => {
+  process.env.GOOGLE_CLIENT_ID = "test-client-id.apps.googleusercontent.com";
+  process.env.GOOGLE_CLIENT_SECRET = "test-client-secret";
+});
 import { eq } from "drizzle-orm";
 import { symmetricDecrypt } from "better-auth/crypto";
 import { db } from "@/lib/db";
