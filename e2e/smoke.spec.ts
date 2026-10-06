@@ -2,6 +2,7 @@
 // deploys. Everything asserted here is something vitest structurally cannot
 // see — a real layout, at a real phone width, in a real browser.
 import { test, expect } from "@playwright/test";
+import { TEST_USER } from "./global-setup";
 
 test.describe("signed in, on a phone", () => {
   // If the saved session did not survive into the browser context, every test
@@ -65,5 +66,58 @@ test.describe("signed out", () => {
     await page.goto("/dashboard");
     await expect(page).toHaveURL(/\/sign-in/);
     await expect(page.getByLabel(/email/i)).toBeVisible();
+  });
+});
+
+test.describe("signed out (SEC-A010)", () => {
+  // No session at all: the privacy policy and terms Google links to must be
+  // public, not a redirect to sign-in.
+  test.use({ storageState: { cookies: [], origins: [] } });
+
+  for (const [path, heading] of [
+    ["/privacy", "Privacy policy"],
+    ["/terms", "Terms of use"],
+  ] as const) {
+    test(`${path} is public`, async ({ page }) => {
+      const res = await page.goto(path);
+      expect(res?.status()).toBe(200);
+      await expect(page).toHaveURL(new RegExp(`${path}$`));
+      await expect(page.getByRole("heading", { level: 1 })).toContainText(heading);
+    });
+  }
+});
+
+test.describe("remember me (SEC-A012)", () => {
+  // A fresh browser, signed in through the real form: what the box says is
+  // what the session cookie does.
+  test.use({ storageState: { cookies: [], origins: [] } });
+
+  const signInThroughTheForm = async (page: import("@playwright/test").Page, remember: boolean) => {
+    await page.goto("/sign-in");
+    const box = page.locator("#remember");
+    await expect(box).toBeChecked(); // ticked by default
+    if (!remember) await box.uncheck();
+    await page.locator("#email").fill(TEST_USER.email);
+    await page.locator("#password").fill(TEST_USER.password);
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    await page.waitForURL((url) => !url.pathname.startsWith("/sign-in"));
+  };
+  const sessionCookie = async (page: import("@playwright/test").Page) =>
+    (await page.context().cookies()).find((c) => c.name.endsWith("better-auth.session_token"));
+
+  test("ticked: the session cookie lasts about 60 days", async ({ page }) => {
+    await signInThroughTheForm(page, true);
+    const cookie = await sessionCookie(page);
+    expect(cookie, "no session cookie after signing in").toBeTruthy();
+    const days = (cookie!.expires * 1000 - Date.now()) / 86_400_000;
+    expect(days).toBeGreaterThan(59);
+    expect(days).toBeLessThan(61);
+  });
+
+  test("unticked: the session cookie ends with the browser", async ({ page }) => {
+    await signInThroughTheForm(page, false);
+    const cookie = await sessionCookie(page);
+    expect(cookie, "no session cookie after signing in").toBeTruthy();
+    expect(cookie!.expires).toBe(-1);
   });
 });

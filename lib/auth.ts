@@ -45,8 +45,22 @@ const baseURL = process.env.BETTER_AUTH_URL ?? {
   fallback: "http://localhost:3000",
 };
 
+/**
+ * "Remember me" (SEC-A012, Kiron: "add remember me functionality"). A
+ * remembered sign-in lasts 60 days and slides: each use after a day renews
+ * it to 60 days from then. Not remembered (the box unticked, email and
+ * password only), better-auth sets a cookie with no expiry, so it ends when
+ * the browser or the home-screen app is closed, and the session itself
+ * lasts at most a day and is not renewed. Google and passkey sign-in cannot
+ * be told otherwise and are always remembered. The cookies' secure,
+ * httpOnly and sameSite attributes are better-auth's defaults, unchanged.
+ */
+export const SESSION_EXPIRES_IN = 60 * 24 * 60 * 60;
+export const SESSION_UPDATE_AGE = 24 * 60 * 60;
+
 export const auth = betterAuth({
   baseURL,
+  session: { expiresIn: SESSION_EXPIRES_IN, updateAge: SESSION_UPDATE_AGE },
   secret: process.env.BETTER_AUTH_SECRET,
   ...(trustedOrigins.length ? { trustedOrigins } : {}),
   database: drizzleAdapter(db, { provider: "pg", schema }),

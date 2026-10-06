@@ -59,6 +59,7 @@ import { db } from "@/lib/db";
 import { attachments, conversations, events, googleConnection, messages, pendingActions, user } from "@/lib/db/schema";
 import { CALENDAR_SCOPE, setGoogleHttpForTests } from "@/lib/google/connection";
 import { STATE_COOKIE } from "@/lib/google/oauth";
+import { publicOrigin } from "@/lib/public-origin";
 import { POST as voiceTool } from "@/app/api/secretary/tools/route";
 import { POST as postMessage } from "@/app/api/conversations/[id]/messages/route";
 import { POST as chat } from "@/app/api/chat/route";
@@ -258,6 +259,81 @@ describe("Gmail through the real routes (SEC-A005)", () => {
     expect(((await res.json()) as { result: Record<string, unknown> }).result).toMatchObject({ proposed: true });
     expect(google.calls.insert).toHaveLength(0);
     expect((await eventRows()).some((e) => e.title === "Party from the email")).toBe(false);
+  });
+});
+
+describe("behind the Heroku router: every redirect and redirect_uri is on the public origin (SEC-A011)", () => {
+  // On Heroku a request's own URL is the dyno's (https://localhost:$PORT). In
+  // these tests it was the same as the public one, which is how A002 missed it.
+  const PUBLIC = "https://public.example";
+  const INTERNAL = "http://localhost:35386";
+  const saved = { auth: process.env.BETTER_AUTH_URL, app: process.env.NEXT_PUBLIC_APP_URL };
+  beforeEach(() => {
+    process.env.BETTER_AUTH_URL = PUBLIC;
+    delete process.env.NEXT_PUBLIC_APP_URL;
+  });
+  afterEach(() => {
+    if (saved.auth === undefined) delete process.env.BETTER_AUTH_URL;
+    else process.env.BETTER_AUTH_URL = saved.auth;
+    if (saved.app === undefined) delete process.env.NEXT_PUBLIC_APP_URL;
+    else process.env.NEXT_PUBLIC_APP_URL = saved.app;
+  });
+  // A forwarded host a client could forge: never believed.
+  const internal = (path: string) => new Request(`${INTERNAL}${path}`, { headers: { "x-forwarded-host": "evil.example" } });
+  const origin = (res: Response) => new URL(res.headers.get("location")!).origin;
+
+  it("the callback's every outcome goes back to Settings on the public origin, Calendar and Gmail", async () => {
+    const outcomes: [string, string, string][] = [
+      ["issued-state", "/api/google/calendar/callback?state=issued-state&code=p1", "/settings?calendar=connected"],
+      ["issued-state", "/api/google/calendar/callback?state=issued-state&error=access_denied", "/settings?calendar=denied"],
+      ["issued-state", "/api/google/calendar/callback?state=forged&code=p2", "/settings?calendar=failed"],
+      ["issued-state.gmail", "/api/google/calendar/callback?state=issued-state&code=p3", "/settings?gmail=scope-missing"],
+    ];
+    for (const [cookie, path, to] of outcomes) {
+      cookieJar.set(STATE_COOKIE, cookie);
+      const res = await callback(internal(path));
+      expect(res.headers.get("location"), path).toBe(`${PUBLIC}${to}`);
+      expect(origin(res)).toBe(PUBLIC);
+    }
+  });
+
+  it("the token exchange and the consent page carry the public callback, byte for byte", async () => {
+    cookieJar.set(STATE_COOKIE, "issued-state");
+    await callback(internal("/api/google/calendar/callback?state=issued-state&code=p4"));
+    expect(google.calls.exchange.at(-1)?.redirectUri).toBe(`${PUBLIC}/api/google/calendar/callback`);
+    for (const path of ["/api/google/calendar/connect", "/api/google/calendar/connect?feature=gmail"]) {
+      const consent = new URL((await connect(internal(path))).headers.get("location")!);
+      expect(consent.searchParams.get("redirect_uri"), path).toBe(`${PUBLIC}/api/google/calendar/callback`);
+    }
+  });
+
+  it("connect without a configured Google client also goes back on the public origin", async () => {
+    const id = process.env.GOOGLE_CLIENT_ID;
+    delete process.env.GOOGLE_CLIENT_ID;
+    try {
+      const res = await connect(internal("/api/google/calendar/connect"));
+      expect(res.headers.get("location")).toBe(`${PUBLIC}/settings?calendar=unavailable&gmail=unavailable`);
+    } finally {
+      process.env.GOOGLE_CLIENT_ID = id;
+    }
+  });
+
+  it("the order: BETTER_AUTH_URL, then NEXT_PUBLIC_APP_URL, then (nothing configured) the request's own origin", () => {
+    expect(publicOrigin(`${INTERNAL}/x`)).toBe(PUBLIC);
+    // Both set and different: BETTER_AUTH_URL wins (it is what sign-in uses).
+    process.env.NEXT_PUBLIC_APP_URL = "https://app.example";
+    expect(publicOrigin(`${INTERNAL}/x`)).toBe(PUBLIC);
+    delete process.env.NEXT_PUBLIC_APP_URL;
+    process.env.BETTER_AUTH_URL = "https://public.example/some/path/";
+    expect(publicOrigin(`${INTERNAL}/x`)).toBe(PUBLIC);
+    delete process.env.BETTER_AUTH_URL;
+    process.env.NEXT_PUBLIC_APP_URL = "https://app.example";
+    expect(publicOrigin(`${INTERNAL}/x`)).toBe("https://app.example");
+    process.env.BETTER_AUTH_URL = "not a url";
+    expect(publicOrigin(`${INTERNAL}/x`)).toBe("https://app.example");
+    delete process.env.BETTER_AUTH_URL;
+    delete process.env.NEXT_PUBLIC_APP_URL;
+    expect(publicOrigin(`${INTERNAL}/x`)).toBe(INTERNAL);
   });
 });
 

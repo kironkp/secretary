@@ -15,6 +15,8 @@ export function SignInForm({ google, apple }: { google: boolean; apple: boolean 
   const [notice, setNotice] = useState("");
   const [needsVerification, setNeedsVerification] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Remember me, ticked by default (SEC-A012): 60 days, renewed on use.
+  const [remember, setRemember] = useState(true);
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -22,7 +24,7 @@ export function SignInForm({ google, apple }: { google: boolean; apple: boolean 
     setNotice("");
     setNeedsVerification(false);
     setBusy(true);
-    const { error } = await authClient.signIn.email({ email, password });
+    const { error } = await authClient.signIn.email({ email, password, rememberMe: remember });
     setBusy(false);
     if (error) {
       if (error.status === 403) {
@@ -86,6 +88,24 @@ export function SignInForm({ google, apple }: { google: boolean; apple: boolean 
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
+        </div>
+        <div>
+          <label htmlFor="remember" className="flex min-h-11 cursor-pointer items-center gap-2.5 text-sm">
+            <input
+              id="remember"
+              type="checkbox"
+              checked={remember}
+              onChange={(e) => setRemember(e.target.checked)}
+              className="h-5 w-5 flex-none accent-[var(--color-accent)]"
+            />
+            Remember me
+          </label>
+          <p className="text-xs text-faint">
+            {remember
+              ? "Stay signed in on this device for 60 days, renewed each time you use it."
+              : "You'll be signed out when you close the browser or the app."}{" "}
+            Google and passkey sign-in always keep you signed in.
+          </p>
         </div>
         <ErrorNote>{error}</ErrorNote>
         <SuccessNote>{notice}</SuccessNote>

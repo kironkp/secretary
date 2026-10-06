@@ -8,12 +8,13 @@ import { NextResponse } from "next/server";
 import { isErrorResponse, requireSession } from "@/lib/api";
 import { FEATURE_SCOPES, type GoogleFeature } from "@/lib/google/connection";
 import { consentUrl, newState, redirectUri, STATE_COOKIE } from "@/lib/google/oauth";
+import { publicUrl } from "@/lib/public-origin";
 
 export async function GET(req: Request) {
   const user = await requireSession();
   if (isErrorResponse(user)) return user;
   if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
-    return NextResponse.redirect(new URL("/settings?calendar=unavailable&gmail=unavailable", req.url));
+    return NextResponse.redirect(publicUrl("/settings?calendar=unavailable&gmail=unavailable", req.url));
   }
   const feature: GoogleFeature = new URL(req.url).searchParams.get("feature") === "gmail" ? "gmail" : "calendar";
   const state = newState();

@@ -57,6 +57,82 @@ download held the eb3a5d3 deploy for 18).
 
 ---
 
+## v0.31.4 — Remember me (2026-10-06)
+
+this commit
+
+Kiron: "add remember me functionality". Sign-in kept the better-auth default
+(7 days, renewed daily) with no choice.
+
+- Sign-in has a Remember me box, ticked by default. Ticked: 60 days, and
+  every use after a day renews it to 60 days from then, so a phone or the
+  home-screen app in use stays signed in. Unticked: the session cookie has
+  no expiry, so it ends when the browser closes (on the iPhone home-screen
+  app, when the app is closed from the app switcher or iOS ends it), and
+  the session itself lasts at most a day and is never renewed.
+- Email and password follow the box. Google and passkey sign-in have no
+  way to be told and are always remembered; the line under the box says so.
+- The cookies' secure, httpOnly and sameSite attributes are unchanged
+  (better-auth's defaults).
+
+Also: both extraction test files carry an explicit 30 s ceiling (a loaded
+machine hit the 5 s default).
+
+---
+
+## v0.31.3 — A public privacy policy and terms (2026-10-06)
+
+this commit
+
+Kiron is publishing the Google OAuth app, and Google's Branding page needs a
+privacy policy and terms at public addresses; /privacy and /terms were 404.
+
+- Both are plain pages outside the signed-in group (its layout is the only
+  sign-in gate; there is no middleware), with no scripts and no tracking,
+  readable on a phone. The sign-in pages link them.
+- What they say is what the code does: what is stored (the Calendar and
+  Gmail connection's tokens and connected AI keys encrypted with AES-GCM;
+  the Google sign-in tokens better-auth keeps, said plainly to be not
+  encrypted today, until SEC-A013), Google Calendar events created, changed
+  and deleted on request, Gmail read, searched and drafted on request and
+  never sent, no email stored in the database, the services that process
+  data (Anthropic and OpenAI, ElevenLabs for voice, Resend, Heroku, browser
+  push), disconnecting in Settings (tokens deleted, access revoked at
+  Google) and revoking at myaccount.google.com/permissions, and Google's own
+  Limited Use sentence from its Workspace API user data policy, word for
+  word with its links.
+- No one is named: the operator is "the app's owner", and there is no
+  contact address on the pages (the owner's choice); they point to the
+  developer contact on the Google consent screen. PUBLIC_CONTACT_EMAIL can
+  print one if that ever changes.
+
+---
+
+## v0.31.2 — Back from Google on the app's own address, not the dyno's (2026-10-06)
+
+this commit
+
+Kiron connected Google Calendar on v55. Google's consent went through and
+the connection was stored (12:41 PDT), but his browser ended at
+https://localhost:35386, "This site can't be reached". Behind the Heroku
+router a request's own URL is the dyno's (https://localhost:$PORT), and the
+callback built its way back to Settings from it. The token exchange was
+right only because BETTER_AUTH_URL happened to be set.
+
+- One helper, `lib/public-origin.ts`: BETTER_AUTH_URL, then
+  NEXT_PUBLIC_APP_URL, then, only when neither is set (local development),
+  the request's own origin. x-forwarded-host is not trusted: any client can
+  set it.
+- It builds the Google redirect_uri (the consent page and the token
+  exchange, the same string) and every redirect back to Settings, Calendar
+  and Gmail alike. Nothing else in the app builds a URL from the request's
+  origin; the rest only read its query.
+- Tested from http://localhost:35386 with a forged x-forwarded-host: every
+  outcome lands on the public origin (the tests used to run where the two
+  were the same, which is how this was missed).
+
+---
+
 ## v0.31.1 — Reading: a button that reads wrong is dropped, not the whole read; most-used projects first (2026-10-06)
 
 this commit

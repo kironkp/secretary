@@ -72,7 +72,9 @@ async function line(conversationId: string, role: "user" | "assistant", content:
   await tick();
 }
 
-describe("what extraction is shown once mail is in a conversation", () => {
+// Database work plus a mocked model: well under a second here, but sec rev's
+// loaded Mac hit vitest's 5 s default. An explicit ceiling, not a flake.
+describe("what extraction is shown once mail is in a conversation", { timeout: 30_000 }, () => {
   it("a chat that read mail: the user's words, and the secretary's only from before", async () => {
     await db.insert(user).values({ id: U.id, name: "Mail", email: U.email, timezone: "America/Los_Angeles" });
     const [conv] = await db.insert(conversations).values({ userId: U.id, mode: "text" }).returning();

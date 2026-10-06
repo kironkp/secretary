@@ -56,7 +56,9 @@ afterAll(async () => {
   await db.delete(user).where(eq(user.id, U.id));
 });
 
-describe("a cut extraction is paid for once, recorded, and its fallback has a ceiling", () => {
+// Database work plus a mocked model: well under a second here, but sec rev's
+// loaded Mac hit vitest's 5 s default. An explicit ceiling, not a flake.
+describe("a cut extraction is paid for once, recorded, and its fallback has a ceiling", { timeout: 30_000 }, () => {
   it("records the cut Sonnet pass, priced, then the capped gpt-5.5 fallback", async () => {
     await db.insert(user).values({ id: U.id, name: "Bill", email: U.email, timezone: "America/Los_Angeles" });
     const [conv] = await db.insert(conversations).values({ userId: U.id, mode: "voice" }).returning();
