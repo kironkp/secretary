@@ -90,17 +90,17 @@ export async function backgroundAllowed(
 
 /**
  * What runs with no one asking: understanding, extraction, the dashboard
- * planner, the slow loop, and suggestions (kind "other" on TEXT_MODEL;
- * search_web is "other" too, on its own model, and is not background).
+ * planner, the slow loop, inbound email, and suggestions (kind "other" on
+ * TEXT_MODEL; search_web is "other" too, on its own model, and is not
+ * background).
  */
-const BACKGROUND_KINDS = ["understanding", "extraction", "layout", "slow_loop"] as const;
+const BACKGROUND_KINDS = ["understanding", "extraction", "layout", "slow_loop", "email"] as const;
 const SUGGESTIONS_MODEL = () => process.env.TEXT_MODEL ?? "gpt-5.5";
 
 /** Every kind of paid call, as the guard sorts them. */
 export type PaidKind =
   | (typeof BACKGROUND_KINDS)[number]
   | "suggestions"
-  | "email"
   | "consult"
   | "paint"
   | "search"

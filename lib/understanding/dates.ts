@@ -3,8 +3,9 @@
 // dated item crosses a line, not every day. "Due in 3 days" written on Monday
 // is wrong on Tuesday; "due Thu, Oct 22" is right every day, and the app
 // shows how far off a date is from the date itself. The prompt asks for
-// dates; this turns any countdown the model writes anyway into its date,
-// from the run's own clock, before the output is checked and stored.
+// dates; this turns any countdown the model writes anyway in the on-screen
+// words into its date, from the run's own clock, before the output is
+// checked and stored.
 // "Today" and "tomorrow" stay: a project is re-read when they turn over.
 import type { Bundle } from "./types";
 
@@ -53,18 +54,39 @@ export function absoluteDates(text: string, clock: Bundle["clock"]): { text: str
   return { text: out, changed };
 }
 
-/** Every string in a model output, countdowns made dates. */
+/**
+ * The words that go stale on screen, countdowns made dates: words.todayLine,
+ * every lede, and each question's one-line question. Not the record: a
+ * rule's "arrive in 30 days" is a duration, not a countdown, and a quote must
+ * stay exactly what its source says. Not a question's why either: it must
+ * name its evidence (validate.ts referencesEvidence, by a four-word run or a
+ * number it shares), and rewriting a countdown it quotes could turn a good
+ * answer into a rejected one, and a paid retry. Those are left to the
+ * prompt (review finding R1 on v0.28).
+ */
 export function datedOutput(output: unknown, clock: Bundle["clock"]): { output: unknown; changed: number } {
   let changed = 0;
-  const walk = (v: unknown): unknown => {
-    if (typeof v === "string") {
-      const r = absoluteDates(v, clock);
-      changed += r.changed;
-      return r.text;
-    }
-    if (Array.isArray(v)) return v.map(walk);
-    if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x)]));
-    return v;
+  const fix = (v: unknown): unknown => {
+    if (typeof v !== "string") return v;
+    const r = absoluteDates(v, clock);
+    changed += r.changed;
+    return r.text;
   };
-  return { output: walk(output), changed };
+  if (!output || typeof output !== "object") return { output, changed };
+  const out = { ...(output as Record<string, unknown>) };
+  const words = out.words;
+  if (words && typeof words === "object") {
+    const w = { ...(words as Record<string, unknown>) };
+    if ("todayLine" in w) w.todayLine = fix(w.todayLine);
+    if (w.ledes && typeof w.ledes === "object" && !Array.isArray(w.ledes)) {
+      w.ledes = Object.fromEntries(Object.entries(w.ledes as Record<string, unknown>).map(([k, v]) => [k, fix(v)]));
+    }
+    out.words = w;
+  }
+  if (Array.isArray(out.questions)) {
+    out.questions = out.questions.map((q) =>
+      q && typeof q === "object" ? { ...(q as Record<string, unknown>), question: fix((q as { question?: unknown }).question) } : q
+    );
+  }
+  return { output: out, changed };
 }

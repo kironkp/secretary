@@ -119,6 +119,17 @@ const EXTRACTION_MODEL = process.env.EXTRACTION_MODEL ?? "claude-sonnet-5";
 const EXTRACTION_EFFORT: BrainSettings["effort"] = "low";
 const EXTRACTION_MAX_TOKENS = 3000;
 
+/** A Claude answer that came back unusable (a max_tokens cut, a refusal): it was billed all the same. */
+class BilledExtractionError extends Error {
+  constructor(
+    message: string,
+    readonly usage: { model: string; inputTokens: number; outputTokens: number }
+  ) {
+    super(message);
+    this.name = "BilledExtractionError";
+  }
+}
+
 async function claudeExtract(
   client: Anthropic,
   context: string
@@ -133,8 +144,11 @@ async function claudeExtract(
       format: zodOutputFormat(extractionSchema),
     },
   });
-  if (response.stop_reason === "refusal") throw new Error("claude refusal");
-  if (!response.parsed_output) throw new Error("claude structured output missing");
+  const billed = { model: EXTRACTION_MODEL, inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens };
+  if (response.stop_reason === "refusal") throw new BilledExtractionError("claude refusal", billed);
+  if (!response.parsed_output) {
+    throw new BilledExtractionError(`claude structured output missing (stop_reason ${response.stop_reason})`, billed);
+  }
   return {
     result: extractionSchema.parse(response.parsed_output),
     inputTokens: response.usage.input_tokens,
@@ -155,6 +169,8 @@ export async function extractFromTranscript(opts: {
   brain?: BrainSettings;
   /** Per-user client (connected account or house key) — null skips Claude. */
   claude?: Anthropic | null;
+  /** A Claude answer that was billed and then thrown away: record it (review finding R3 on v0.28). */
+  onWasted?: (usage: { model: string; inputTokens: number; outputTokens: number }) => Promise<void>;
 }): Promise<{ result: ExtractionResult; inputTokens: number; outputTokens: number; model: string }> {
   const fmt = (d: Date) =>
     new Intl.DateTimeFormat("en-US", {
@@ -189,6 +205,7 @@ export async function extractFromTranscript(opts: {
         "claude extraction failed, falling back to openai:",
         e instanceof Error ? e.message : e
       );
+      if (e instanceof BilledExtractionError) await opts.onWasted?.(e.usage);
       if (!process.env.OPENAI_API_KEY) throw e;
     }
   }
@@ -197,6 +214,8 @@ export async function extractFromTranscript(opts: {
     model: TEXT_MODEL,
     instructions: EXTRACTION_PROMPT,
     input: context,
+    // The same ceiling as the Claude pass: a cut there must not buy an unbounded second answer.
+    max_output_tokens: EXTRACTION_MAX_TOKENS,
     text: {
       format: {
         type: "json_schema",
@@ -509,6 +528,7 @@ async function extractOnce(
       knownEvents,
       brain: claude ? await brainSettings(userId) : undefined,
       claude,
+      onWasted: (u) => recordUsage({ userId, kind: "extraction", ...u }),
     });
 
     const summary = await applyExtraction(userId, conversationId, result);

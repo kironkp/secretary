@@ -65,6 +65,13 @@ stays Fable, the painter and consult_brain unchanged).
 Not covered by a test: the voice limits' wiring in the browser session class
 (the rules are tested; the class needs WebRTC), the Interview tab's wording.
 
+Review fixes (on ee9fd24): the countdown rewrite touches only what goes
+stale on screen (the Today line, the ledes, a question's one line), never
+the record or a quote, where "arrive in 30 days" is a duration and a quote
+must match its source; inbound email counts as background work under the
+$4 cap; a Sonnet extraction cut at max_tokens is recorded and priced before
+the fallback, and the gpt-5.5 fallback has the same 3,000-token ceiling.
+
 ---
 
 ## v0.28 — No stupid spending, part 1: background calls that paid for nothing (2026-10-06)

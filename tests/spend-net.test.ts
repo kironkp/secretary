@@ -44,7 +44,7 @@ async function newUser(): Promise<string> {
   await db.insert(user).values({ id, name: "Net", email: `${id}@sec-a004.test`, timezone: TZ });
   return id;
 }
-const spend = (userId: string, kind: "understanding" | "extraction" | "other" | "chat", usd: number, model = "claude-opus-5") =>
+const spend = (userId: string, kind: "understanding" | "extraction" | "other" | "chat" | "email", usd: number, model = "claude-opus-5") =>
   db.insert(usage).values({ userId, kind, model, costUsd: usd.toFixed(6), createdAt: new Date(Date.now() - 3600_000) });
 const pushes = (userId: string, key: string) =>
   db.select().from(pushLog).where(and(eq(pushLog.userId, userId), like(pushLog.key, `${key}:%`)));
@@ -89,6 +89,14 @@ describe("BACKGROUND_DAILY_CAP_USD: all background work together, $4 a day by de
     const result = await runProject(userId, p.id, { timezone: TZ, model });
     expect(result).toEqual({ status: "skipped", reason: "budget" });
     expect(model.calls).toHaveLength(0);
+  });
+
+  it("inbound email is background too: it counts toward the cap and stops at it (sec rev R2)", async () => {
+    const userId = await newUser();
+    await spend(userId, "email", 4, "claude-sonnet-5");
+    expect((await paidCallAllowed(userId, "email")).ok).toBe(false);
+    expect((await paidCallAllowed(userId, "extraction")).ok).toBe(false);
+    expect((await paidCallAllowed(userId, "chat")).ok).toBe(true);
   });
 
   it("set to 0, background work is off", async () => {

@@ -45,7 +45,7 @@ describe("dates, not countdowns", () => {
     expect(kept).toEqual({ text: "Due tomorrow; the meeting is today.", changed: 0 });
   });
 
-  it("a run's stored words and record carry no countdown, whatever the model wrote", async () => {
+  it("on-screen words carry no countdown, whatever the model wrote; the record and its quotes stay verbatim (sec rev P8)", async () => {
     const counting = fakeModel((bundle) => {
       const out = minimalOutputFor(bundle);
       const [widget] = Object.keys(out.words.ledes);
@@ -53,8 +53,13 @@ describe("dates, not countdowns", () => {
         ...out,
         record: {
           ...out.record,
-          decisions: [
-            { text: "You chose to send it in 2 days.", sources: [{ type: "task", id: bundle.tasksOpen[0].id }], confidence: "high" },
+          // A standing rule quoting its source: "in 30 days" is a duration here.
+          rules: [
+            {
+              text: "Reimbursements arrive in 30 days after the CPO is approved.",
+              sources: [{ type: "task", id: bundle.tasksOpen[0].id }],
+              confidence: "high",
+            },
           ],
         },
         words: {
@@ -72,9 +77,8 @@ describe("dates, not countdowns", () => {
     }
     expect(counting.calls).toHaveLength(1);
     const [row] = await db.select().from(records).where(and(eq(records.userId, U.id), eq(records.projectId, projectId)));
-    const stored = JSON.stringify([row.body, row.words]);
-    expect(stored).not.toMatch(COUNTDOWN);
+    expect(JSON.stringify(row.words)).not.toMatch(COUNTDOWN);
     expect(row.words.todayLine).toBe("The CPO is due on Fri, Sep 25.");
-    expect(row.body.decisions[0].text).toBe("You chose to send it on Thu, Sep 24.");
+    expect(row.body.rules[0].text).toBe("Reimbursements arrive in 30 days after the CPO is approved.");
   });
 });
