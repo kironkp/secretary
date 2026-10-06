@@ -69,6 +69,24 @@ test.describe("signed out", () => {
   });
 });
 
+test.describe("signed out (SEC-A010)", () => {
+  // No session at all: the privacy policy and terms Google links to must be
+  // public, not a redirect to sign-in.
+  test.use({ storageState: { cookies: [], origins: [] } });
+
+  for (const [path, heading] of [
+    ["/privacy", "Privacy policy"],
+    ["/terms", "Terms of use"],
+  ] as const) {
+    test(`${path} is public`, async ({ page }) => {
+      const res = await page.goto(path);
+      expect(res?.status()).toBe(200);
+      await expect(page).toHaveURL(new RegExp(`${path}$`));
+      await expect(page.getByRole("heading", { level: 1 })).toContainText(heading);
+    });
+  }
+});
+
 test.describe("remember me (SEC-A012)", () => {
   // A fresh browser, signed in through the real form: what the box says is
   // what the session cookie does.
