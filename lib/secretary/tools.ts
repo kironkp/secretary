@@ -45,7 +45,7 @@ import {
 import { dayRangeInTz, parseInTz } from "@/lib/time";
 import { deleteGoogleEvent, insertGoogleEvent, patchGoogleEvent } from "@/lib/google/calendar";
 import { connectionStatus, GoogleUnavailable, NOT_CONNECTED_LINE } from "@/lib/google/connection";
-import { describeRecurrence, normalizeRecurrence } from "./rrule";
+import { describeRecurrence, firstOccurrence, normalizeRecurrence } from "./rrule";
 import { defaultPlan, sectionKey, type LayoutPlan, type PlanSection } from "@/lib/layout/plan";
 import { getPlanHead, getPreferences, savePlanAsHead } from "@/lib/layout/plan-store";
 import { REGISTRY_COMPONENTS, REGISTRY_VERSION } from "@/lib/layout/registry";
@@ -222,6 +222,15 @@ async function sendToGoogle(userId: string, event: typeof events.$inferSelect): 
   }
 }
 
+/** An instant moved along with a rolled-forward start. */
+function shiftedDate(d: Date | undefined, shiftMs: number): Date | undefined {
+  return d && shiftMs ? new Date(d.getTime() + shiftMs) : d;
+}
+
+function shiftedIsos(list: string[], shiftMs: number): string[] {
+  return shiftMs ? list.map((iso) => new Date(new Date(iso).getTime() + shiftMs).toISOString()) : list;
+}
+
 /** Where a new event goes besides the app, by who is asking (ToolContext.calendarSync). */
 async function googleForNewEvent(ctx: ToolContext, event: typeof events.$inferSelect): Promise<GoogleOutcome> {
   if (!ctx.calendarSync) return { state: "app-only", line: null };
@@ -250,7 +259,9 @@ function eventReadBack(event: typeof events.$inferSelect, tz: string, google: Go
         : google.line
           ? `It's saved in Secretary only. ${google.line}`
           : "It's saved in Secretary.";
-  return `${event.title}, ${when}. ${where}`;
+  // A one-off set in the past is kept (it may be a log), but never silently.
+  const past = !repeats && event.startsAt.getTime() < Date.now() ? " That time has already passed." : "";
+  return `${event.title}, ${when}. ${where}${past}`;
 }
 
 async function findTask(userId: string, ref: string) {
@@ -784,8 +795,13 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
 
   async create_event(ctx, args) {
     const a = toolSchemas.create_event.parse(args);
-    const startsAt = parseWhen(a.starts_at, ctx.timezone)!;
+    const asked = parseWhen(a.starts_at, ctx.timezone)!;
     const recurrence = normalizeRecurrence(a.recurrence);
+    // A repeating event starts at its next occurrence, never at one already past.
+    const first = firstOccurrence(asked, recurrence, ctx.timezone, new Date());
+    if (!first.ok) return { result: { error: first.reason } };
+    const startsAt = first.startsAt;
+    const shift = startsAt.getTime() - asked.getTime();
     // Same idempotency guard as create_task.
     const upcomingNow = await db
       .select()
@@ -806,7 +822,7 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         },
       };
     }
-    const reminders = parseReminders(a.reminders, ctx.timezone) ?? [];
+    const reminders = shiftedIsos(parseReminders(a.reminders, ctx.timezone) ?? [], shift);
     const { project, matched } = await resolveProject(ctx.userId, a.project);
     const [event] = await db
       .insert(events)
@@ -815,7 +831,7 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         title: a.title,
         projectId: project?.id,
         startsAt,
-        endsAt: parseWhen(a.ends_at, ctx.timezone),
+        endsAt: shiftedDate(parseWhen(a.ends_at, ctx.timezone), shift),
         location: a.location,
         notes: a.notes,
         reminders,
@@ -871,10 +887,24 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
       movedTo = res.project?.name ?? null;
       projectMatch = res.matched;
     }
-    const newReminders = parseReminders(a.reminders, ctx.timezone);
+    let newReminders = parseReminders(a.reminders, ctx.timezone);
     if (newReminders !== undefined) updates.reminders = newReminders;
     if (Object.keys(updates).length === 0) {
       return { result: { error: "Nothing to change — give a field to update" } };
+    }
+    // A new start or a new rule for a repeating event: its next occurrence, as in create_event.
+    const repeats = updates.recurrence ?? event.recurrence;
+    if ((a.starts_at || a.recurrence !== undefined) && repeats.length) {
+      const base = updates.startsAt ?? event.startsAt;
+      const first = firstOccurrence(base, repeats, event.timeZone ?? ctx.timezone, new Date());
+      if (!first.ok) return { result: { error: first.reason } };
+      const shift = first.startsAt.getTime() - base.getTime();
+      if (shift !== 0) {
+        updates.startsAt = first.startsAt;
+        updates.endsAt = shiftedDate(updates.endsAt ?? event.endsAt ?? undefined, shift) ?? null;
+        newReminders = shiftedIsos(newReminders ?? event.reminders, shift);
+        updates.reminders = newReminders;
+      }
     }
 
     const [updated] = await db

@@ -141,7 +141,8 @@ describe("Connect Google Calendar", () => {
     expect(res.status).toBe(307);
     const to = new URL(res.headers.get("location")!);
     expect(to.origin).toBe("https://accounts.google.com");
-    expect(to.searchParams.get("scope")).toBe(CALENDAR_SCOPE);
+    // The one scope, as a literal: a wider CALENDAR_SCOPE must fail here.
+    expect(to.searchParams.get("scope")).toBe("https://www.googleapis.com/auth/calendar.events.owned");
     expect(to.searchParams.get("access_type")).toBe("offline");
     expect(to.searchParams.get("prompt")).toBe("consent");
     expect(to.searchParams.get("redirect_uri")).toMatch(/\/api\/google\/calendar\/callback$/);

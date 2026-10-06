@@ -10,7 +10,7 @@ import { and, eq, like } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { conversations, events, googleConnection, pushLog, user } from "@/lib/db/schema";
 import { googleEventBody } from "@/lib/google/calendar";
-import { DISCONNECTED_LINE, NOT_CONNECTED_LINE, setGoogleHttpForTests } from "@/lib/google/connection";
+import { CALENDAR_SCOPE, DISCONNECTED_LINE, NOT_CONNECTED_LINE, setGoogleHttpForTests } from "@/lib/google/connection";
 import { applyExtraction } from "@/lib/secretary/extraction";
 import { describeRecurrence, normalizeRecurrence } from "@/lib/secretary/rrule";
 import { executeTool, liveTurnContext, type ToolContext } from "@/lib/secretary/tools";
@@ -45,6 +45,12 @@ beforeEach(() => {
 afterEach(() => setGoogleHttpForTests(null));
 afterAll(async () => {
   for (const id of users) await db.delete(user).where(eq(user.id, id));
+});
+
+describe("the grant asks for exactly one Calendar scope", () => {
+  it("events on calendars the user owns, nothing wider", () => {
+    expect(CALENDAR_SCOPE).toBe("https://www.googleapis.com/auth/calendar.events.owned");
+  });
 });
 
 describe("time: the user's wall clock, not the server's", () => {
@@ -196,6 +202,97 @@ describe("a plain voice or chat turn writes Google Calendar at once", () => {
     const [conn] = await db.select().from(googleConnection).where(eq(googleConnection.userId, userId));
     expect(JSON.stringify(conn)).not.toContain(FAKE_REFRESH);
     expect(JSON.stringify(conn)).not.toContain(FAKE_ACCESS_PREFIX);
+  });
+});
+
+describe("a repeating event starts at its next occurrence, in the user's zone (fake clock)", () => {
+  // "Add a daily reminder at 8" carries whatever date the model picked; the
+  // server moves a start that already passed to the next 8:00 local.
+  const at = (iso: string) => vi.setSystemTime(new Date(iso));
+  beforeEach(() => vi.useFakeTimers({ toFake: ["Date"] }));
+  afterEach(() => vi.useRealTimers());
+
+  it("at 07:00 PDT, 8:00 today stays today, and yesterday's 8:00 becomes today's", async () => {
+    at("2026-10-06T14:00:00Z"); // Tue 07:00 PDT
+    const userId = await newUser();
+    await connectCalendar(userId);
+    const today = await create(voice(userId), { title: "Vitamins", starts_at: "2026-10-06T08:00:00", recurrence: "FREQ=DAILY" });
+    const fromYesterday = await create(voice(userId), { title: "Water the plants", starts_at: "2026-10-05T08:00:00", recurrence: "FREQ=DAILY" });
+    expect((await row(String(today.event_id))).startsAt.toISOString()).toBe("2026-10-06T15:00:00.000Z");
+    expect((await row(String(fromYesterday.event_id))).startsAt.toISOString()).toBe("2026-10-06T15:00:00.000Z");
+    expect(google.calls.insert).toHaveLength(2);
+    expect(google.calls.insert.map((c) => (c.body as { start: unknown }).start)).toEqual([
+      { dateTime: "2026-10-06T08:00:00", timeZone: TZ },
+      { dateTime: "2026-10-06T08:00:00", timeZone: TZ },
+    ]);
+    expect(fromYesterday.read_back).toBe("Water the plants, every day at 8:00 AM, starting Tue, Oct 6. It's on your Google Calendar.");
+  });
+
+  it("at 09:00 PDT, today's 8:00 has passed: it starts tomorrow, reminders moved with it", async () => {
+    at("2026-10-06T16:00:00Z"); // Tue 09:00 PDT
+    const userId = await newUser();
+    await connectCalendar(userId);
+    const out = await create(voice(userId), {
+      title: "Daily Reminder",
+      starts_at: "2026-10-06T08:00:00",
+      recurrence: "FREQ=DAILY",
+      reminders: ["2026-10-06T07:55:00"],
+    });
+    const stored = await row(String(out.event_id));
+    expect(stored.startsAt.toISOString()).toBe("2026-10-07T15:00:00.000Z");
+    expect(stored.reminders).toEqual(["2026-10-07T14:55:00.000Z"]);
+    expect(google.calls.insert).toHaveLength(1);
+    expect(google.calls.insert[0].body).toMatchObject({
+      start: { dateTime: "2026-10-07T08:00:00", timeZone: TZ },
+      reminders: { useDefault: false, overrides: [{ method: "popup", minutes: 5 }] },
+    });
+  });
+
+  it("Oct 31 at 09:00 PDT: the next 8:00 is Nov 1, 8:00 PST, sent to Google as wall time plus the zone", async () => {
+    at("2026-10-31T16:00:00Z"); // Sat 09:00 PDT
+    const userId = await newUser();
+    await connectCalendar(userId);
+    const out = await create(voice(userId), { title: "Daily Reminder", starts_at: "2026-10-31T08:00:00", recurrence: "FREQ=DAILY" });
+    expect((await row(String(out.event_id))).startsAt.toISOString()).toBe("2026-11-01T16:00:00.000Z");
+    expect(google.calls.insert).toHaveLength(1);
+    expect((google.calls.insert[0].body as { start: unknown }).start).toEqual({ dateTime: "2026-11-01T08:00:00", timeZone: TZ });
+  });
+
+  it("weekdays, said on a Friday after 8: it starts Monday at 8", async () => {
+    at("2026-10-09T16:00:00Z"); // Fri 09:00 PDT
+    const userId = await newUser();
+    await connectCalendar(userId);
+    const out = await create(voice(userId), {
+      title: "Standup",
+      starts_at: "2026-10-09T08:00:00",
+      recurrence: "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR",
+    });
+    expect((await row(String(out.event_id))).startsAt.toISOString()).toBe("2026-10-12T15:00:00.000Z");
+    expect(google.calls.insert).toHaveLength(1);
+    expect((google.calls.insert[0].body as { start: unknown }).start).toEqual({ dateTime: "2026-10-12T08:00:00", timeZone: TZ });
+    expect(out.read_back).toBe("Standup, every weekday at 8:00 AM, starting Mon, Oct 12. It's on your Google Calendar.");
+  });
+
+  it("a monthly or yearly start in the past is refused with the reason; nothing is made", async () => {
+    at("2026-10-06T16:00:00Z");
+    const userId = await newUser();
+    await connectCalendar(userId);
+    const out = await executeTool(voice(userId), "create_event", { title: "Rent", starts_at: "2026-10-01T09:00:00", recurrence: "FREQ=MONTHLY" });
+    expect(String((out.result as { error: string }).error)).toMatch(/first occurrence/);
+    expect(google.calls.insert).toHaveLength(0);
+    expect(await db.select().from(events).where(eq(events.userId, userId))).toEqual([]);
+  });
+
+  it("update_event that makes a past event repeat moves it to the next occurrence, and Google gets that", async () => {
+    at("2026-10-06T16:00:00Z"); // Tue 09:00 PDT
+    const userId = await newUser();
+    await connectCalendar(userId);
+    const made = await create(voice(userId), { title: "Stretch", starts_at: "2026-10-06T08:00:00" });
+    expect(made.read_back).toBe("Stretch, Tue, Oct 6 at 8:00 AM. It's on your Google Calendar. That time has already passed.");
+    await executeTool(voice(userId), "update_event", { event: made.event_id, recurrence: "FREQ=DAILY" });
+    expect((await row(String(made.event_id))).startsAt.toISOString()).toBe("2026-10-07T15:00:00.000Z");
+    expect(google.calls.patch).toHaveLength(1);
+    expect((google.calls.patch[0].body as { start: unknown }).start).toEqual({ dateTime: "2026-10-07T08:00:00", timeZone: TZ });
   });
 });
 

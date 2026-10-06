@@ -46,8 +46,21 @@ the app only through the extractor, as an inferred row.
 - Reminder results told the model "logged-only", long after lib/push.ts began
   ringing the phone at each one; they now say so.
 
+- A repeating event starts at its next occurrence (rrule.ts
+  firstOccurrence): "a daily reminder at 8" said at 9 starts tomorrow at 8,
+  in the user's zone and across a DST change; a weekday rule starts on a
+  weekday; a monthly or yearly start in the past is refused with the reason.
+  The end and the reminders move with the start. A one-off in the past is
+  kept, but the read-back says the time has passed. (Review finding R1.)
+
 Known limits: the app's own agenda and month view show only the first
-occurrence of a recurring event; edits made in Google do not come back.
+occurrence of a recurring event; edits made in Google do not come back. The
+attachment gate is per turn: a flyer's text stays in the conversation, so a
+later plain turn could still act on it (read-back and the persona mitigate
+it; SEC-A005 gates on untrusted content anywhere in the conversation).
+Disconnect revokes the refresh token, and Google sign-in shares the OAuth
+client, so the next Google sign-in may ask for consent again. The first
+occurrence of a repeating event gets both the app's push and Google's popup.
 Whether `calendar.events.owned` covers the primary calendar is proven only by
 the live test; the fallback is `calendar.events`. 871 vitest with the keys
 blanked and TZ=UTC: 870 pass, and understanding-own-words (7) fails as it does

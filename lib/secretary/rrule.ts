@@ -4,6 +4,8 @@
 // BYDAY, BYMONTHDAY, BYMONTH, COUNT, UNTIL); anything else is refused with
 // the reason, so the model fixes it rather than Google rejecting the event.
 
+import { parseInTz, wallTimeInTz } from "@/lib/time";
+
 const FREQS = ["DAILY", "WEEKLY", "MONTHLY", "YEARLY"] as const;
 type Day = "MO" | "TU" | "WE" | "TH" | "FR" | "SA" | "SU";
 const DAY_NAMES: Record<Day, string> = {
@@ -48,6 +50,60 @@ export function normalizeRecurrence(input: string | undefined): string[] {
   }
   if (parts.has("COUNT") && parts.has("UNTIL")) throw new Error("recurrence: COUNT and UNTIL together");
   return [`RRULE:${[...parts].map(([k, v]) => `${k}=${v}`).join(";")}`];
+}
+
+const DAY_CODES = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"] as const;
+
+/**
+ * Where a recurring event really starts: its first occurrence at or after
+ * `now`, at the same wall-clock time in `tz`. "Add a daily reminder at 8"
+ * said at 9 starts tomorrow at 8, not at an 8 that already passed, and a
+ * weekday rule starts on a weekday. A start already in the future that fits
+ * the rule is kept. MONTHLY and YEARLY are not rolled: the model is asked
+ * for the date instead. One-offs are returned as they are.
+ */
+export function firstOccurrence(
+  startsAt: Date,
+  recurrence: string[],
+  tz: string,
+  now: Date
+): { ok: true; startsAt: Date } | { ok: false; reason: string } {
+  const line = recurrence.find((l) => l.startsWith("RRULE:"));
+  if (!line) return { ok: true, startsAt };
+  const parts = new Map(
+    line
+      .slice("RRULE:".length)
+      .split(";")
+      .map((p) => p.split("=") as [string, string])
+  );
+  const freq = parts.get("FREQ");
+  const days = parts.get("BYDAY")?.split(",").map((d) => d.replace(/^[+-]?\d/, ""));
+  const fits = (local: string) => {
+    if (!days) return true;
+    const [y, m, d] = local.slice(0, 10).split("-").map(Number);
+    return days.includes(DAY_CODES[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]);
+  };
+  const startLocal = wallTimeInTz(startsAt, tz);
+  if (startsAt.getTime() >= now.getTime() && fits(startLocal)) return { ok: true, startsAt };
+  if (freq !== "DAILY" && freq !== "WEEKLY") {
+    return { ok: false, reason: "recurrence: give the date of the first occurrence; it must not be in the past" };
+  }
+  const time = startLocal.slice(11);
+  const [y, m, d] = startLocal.slice(0, 10).split("-").map(Number);
+  // A day at a time, at the same wall time, so 8:00 stays 8:00 across a DST change.
+  for (let i = 0; i <= 400; i++) {
+    const day = new Date(Date.UTC(y, m - 1, d + i)).toISOString().slice(0, 10);
+    const local = `${day}T${time}`;
+    const at = parseInTz(local, tz);
+    if (at && at.getTime() >= now.getTime() && fits(local)) {
+      const until = parts.get("UNTIL");
+      if (until && until.slice(0, 8) < day.replaceAll("-", "")) {
+        return { ok: false, reason: `recurrence: it ends (UNTIL ${until}) before its next occurrence` };
+      }
+      return { ok: true, startsAt: at };
+    }
+  }
+  return { ok: false, reason: "recurrence: no occurrence within a year" };
 }
 
 function ordinal(n: number): string {
