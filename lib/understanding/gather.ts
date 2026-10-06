@@ -100,7 +100,7 @@ export async function loadProjectNames(userId: string): Promise<string[]> {
   const rows = await db
     .select({ name: projects.name })
     .from(projects)
-    .where(and(eq(projects.userId, userId), ne(projects.status, "archived")))
+    .where(and(eq(projects.userId, userId), ne(projects.status, "archived"), ne(projects.kind, "list")))
     .orderBy(asc(projects.name));
   return rows.map((r) => r.name);
 }
@@ -338,12 +338,15 @@ export async function gatherProject(
   const now = opts.now ?? new Date();
   const tz = opts.timezone;
 
-  const [project] = await db
-    .select({ id: projects.id, name: projects.name, status: projects.status })
+  const [row] = await db
+    .select({ id: projects.id, name: projects.name, status: projects.status, kind: projects.kind })
     .from(projects)
     .where(and(eq(projects.id, projectId), eq(projects.userId, userId)))
     .limit(1);
-  if (!project) return null;
+  // A list (Shopping) is not work to understand: reading it would be a paid
+  // run every time an item goes on it (SEC-A003).
+  if (!row || row.kind === "list") return null;
+  const project = { id: row.id, name: row.name, status: row.status };
 
   const [prev] = await db
     .select({ body: records.body })
@@ -635,7 +638,7 @@ export async function gatherAll(userId: string, opts: GatherOptions): Promise<Bu
   const active = await db
     .select({ id: projects.id })
     .from(projects)
-    .where(and(eq(projects.userId, userId), eq(projects.status, "active")))
+    .where(and(eq(projects.userId, userId), eq(projects.status, "active"), ne(projects.kind, "list")))
     .orderBy(asc(projects.name));
 
   const bundles: Bundle[] = [];

@@ -4,7 +4,7 @@
 // cheap enough to run at every session start).
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { tasks } from "@/lib/db/schema";
+import { projects, tasks } from "@/lib/db/schema";
 
 const OPEN_STATUSES = ["inbox", "todo", "in_progress", "blocked"] as const;
 const DAY = 86400000;
@@ -56,8 +56,20 @@ export async function refreshProcrastinationScores(userId: string, now: Date = n
     .select()
     .from(tasks)
     .where(and(eq(tasks.userId, userId), inArray(tasks.status, [...OPEN_STATUSES])));
+  // Nobody procrastinates on a shopping list: list items score nothing (SEC-A003).
+  const lists = new Set(
+    (
+      await db
+        .select({ id: projects.id })
+        .from(projects)
+        .where(and(eq(projects.userId, userId), eq(projects.kind, "list")))
+    ).map((p) => p.id)
+  );
 
-  const scored = open.map((t) => ({ task: t, score: procrastinationScore(t, now) }));
+  const scored = open.map((t) => ({
+    task: t,
+    score: t.projectId && lists.has(t.projectId) ? 0 : procrastinationScore(t, now),
+  }));
   await Promise.all(
     scored
       .filter(({ task, score }) => Math.abs(task.procrastinationScore - score) > 0.01)

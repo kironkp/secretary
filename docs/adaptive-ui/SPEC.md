@@ -44,7 +44,10 @@ CHI'09, Lavie & Meyer IJHCS'10, Google A2UI's declarative-over-codegen design):
    Color meaning (deadline pressure) is fixed by the design system, never by the planner.
 6. **Model output is data, never markup.** No planner string may reach
    `innerHTML`/JSX children unescaped. Unknown components/props are rejected.
-7. **User overrides beat the planner:** pinned sections keep position+variant;
+7. **User overrides beat the planner:** pinned sections keep position+variant
+   against every PLANNER; the user's own edit may move them (putting one section
+   at the top shifts a pinned one down a place, and refusing that broke
+   invariant 3's "apply immediately, always");
    `calm_mode` renders DEFAULT_PLAN unconditionally; one-tap revert to previous plan.
    Every revert is logged (it's a labeled wrong prediction — our accuracy metric).
 8. **Mid-session mutation is diff-shaped.** While the dashboard is open, new plans
@@ -257,6 +260,17 @@ Selection: `plan = validate(await planFromLLM(s)) ?? validate(planFromRules(s)) 
 secretary's chat agent gets layout tools. Two tiers, and the split is the point:
 
 **Tier 1 — seconds (it's data).** Most requests land here.
+- `arrange_dashboard(operations)` (2026-10-06, SEC-A003) → the voice-safe
+  way to rearrange: flat ops `move_to_top | move_up | move_down |
+  move_to_bottom | hide | show`, each naming a section in the user's words
+  ("shopping list", "Caltrans", "the timeline"). The server maps words to
+  section keys with no model call, validates as user-initiated, saves the head
+  and pins what it placed (so the background planner cannot move it back);
+  `hide` stores `{hide_section}`, `show` removes it. It is on the call
+  (VOICE_TOOL_NAMES) and in chat; the briefing's DASHBOARD line names the
+  sections top to bottom. Kiron asked by voice to put the shopping list at the
+  top and heard "Sure, let me move that", then "I can't move the dashboard
+  sections with the tools I have right now".
 - `get_current_plan()` → LayoutPlan + registry version + active preferences.
 - `edit_layout_plan(patch)` → edits the live plan. Validated by the SAME
   validator as planner output; applies immediately (invariant 3, user-initiated),
@@ -264,7 +278,8 @@ secretary's chat agent gets layout tools. Two tiers, and the split is the point:
 - `set_layout_preference(pref)` → durable constraints, stored, injected into
   every future planner call, and enforced by the validator:
   `{ban_component}`, `{pin_section}`, `{default_variant_for}`,
-  `{accent_policy: "never"|"auto"}`.
+  `{accent_policy: "never"|"auto"}`, `{hide_section}` (one section kept off
+  the board until the user shows it; applied wherever bans are).
   "Stop showing me people" → ban `people_index`. "I hate the glowing ring" →
   `accent_policy: never`. Preferences are listed and removable in Settings, so a
   dislike stated once never has to be re-stated — and never re-annoys.

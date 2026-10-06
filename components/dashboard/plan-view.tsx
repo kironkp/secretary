@@ -29,7 +29,48 @@ export type PlanProject = {
   name: string;
   color: string | null;
   parentId: string | null;
+  /** "list": a list like Shopping, shown as one checklist card (SEC-A003). */
+  kind?: "project" | "list";
 };
+
+/** A list (Shopping) on the board: its open items, each tickable, with what it is for. */
+function ListCard({
+  project,
+  items,
+  crossing,
+  onDone,
+}: {
+  project: PlanProject;
+  items: TaskRow[];
+  crossing: Set<string>;
+  onDone: (id: string) => void;
+}) {
+  const open = items.filter((t) => !["done", "dropped"].includes(t.status));
+  return (
+    <div className="rounded-2xl border border-edge bg-surface px-4 py-3">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-sm font-semibold">{project.name} list</span>
+        <span className="text-xs text-muted">{open.length ? `${open.length} to get` : "empty"}</span>
+      </div>
+      {open.length > 0 && (
+        <ul className="grid gap-1">
+          {open.map((t) => (
+            <li key={t.id} className="flex items-baseline gap-2 text-sm">
+              <button
+                type="button"
+                aria-label={`Got ${t.title}`}
+                onClick={() => onDone(t.id)}
+                className="h-5 w-5 flex-none rounded-md border border-edge"
+              />
+              <span className={crossing.has(t.id) ? "text-faint line-through" : undefined}>{t.title}</span>
+              {t.notes && <span className="text-xs text-faint">{t.notes}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 function WhyChip({ why }: { why?: string }) {
   if (!why) return null;
@@ -196,6 +237,7 @@ export function PlanView({
   updatedAt,
   projects,
   tasks,
+  listTasks = [],
   suggestions,
   events,
   docs,
@@ -210,6 +252,8 @@ export function PlanView({
   updatedAt: string | null;
   projects: PlanProject[];
   tasks: TaskRow[];
+  /** The items of the user's lists, shown only on their list cards. */
+  listTasks?: TaskRow[];
   suggestions: TaskRow[];
   events: EventRow[];
   docs: DocRow[];
@@ -262,7 +306,18 @@ export function PlanView({
         return <NextUpHero tasks={tasks} events={events} />;
       case "stat_row":
         return <StatTiles tasks={tasks} events={events} />;
-      case "project_card":
+      case "project_card": {
+        const list = projects.find((p) => p.id === section.props?.project_id && p.kind === "list");
+        if (list) {
+          return (
+            <ListCard
+              project={list}
+              items={listTasks.filter((t) => t.projectId === list.id)}
+              crossing={crossing}
+              onDone={onDone}
+            />
+          );
+        }
         return (
           <ProjectCardSection
             section={section}
@@ -274,6 +329,7 @@ export function PlanView({
             fresh={fresh}
           />
         );
+      }
       case "timeline": {
         const expanded = section.props?.expanded === true;
         return (

@@ -200,7 +200,8 @@ describe("the shop is parked unless SHOP_VISIBLE=true", () => {
     expect(anthropicToolDefs().some((t) => t.name === "review_capability")).toBe(false);
     const instructions = buildInstructions("BRIEFING", { persona: null });
     expect(instructions).not.toContain("request_capability");
-    expect(instructions.toLowerCase()).not.toContain("shop");
+    // The Shop, as a word: "shopping list" (SEC-A003) is not the Shop.
+    expect(instructions.toLowerCase()).not.toMatch(/\bshop\b/);
     vi.unstubAllEnvs();
   });
 });

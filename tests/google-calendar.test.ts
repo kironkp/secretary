@@ -273,6 +273,26 @@ describe("a repeating event starts at its next occurrence, in the user's zone (f
     expect(out.read_back).toBe("Standup, every weekday at 8:00 AM, starting Mon, Oct 12. It's on your Google Calendar.");
   });
 
+  it("a rolled start takes its end along: the event keeps its length (sec rev B6)", async () => {
+    at("2026-10-06T16:00:00Z"); // Tue 09:00 PDT
+    const userId = await newUser();
+    await connectCalendar(userId);
+    const out = await create(voice(userId), {
+      title: "Morning walk",
+      starts_at: "2026-10-06T08:00:00",
+      ends_at: "2026-10-06T08:45:00",
+      recurrence: "FREQ=DAILY",
+    });
+    const stored = await row(String(out.event_id));
+    expect(stored.startsAt.toISOString()).toBe("2026-10-07T15:00:00.000Z");
+    expect(stored.endsAt?.toISOString()).toBe("2026-10-07T15:45:00.000Z");
+    expect(google.calls.insert).toHaveLength(1);
+    expect(google.calls.insert[0].body).toMatchObject({
+      start: { dateTime: "2026-10-07T08:00:00", timeZone: TZ },
+      end: { dateTime: "2026-10-07T08:45:00", timeZone: TZ },
+    });
+  });
+
   it("weekly with no BYDAY keeps the start's weekday: a past Monday rolls to the next Monday", async () => {
     at("2026-10-07T16:00:00Z"); // Wed 09:00 PDT (sec rev probe P3)
     const userId = await newUser();

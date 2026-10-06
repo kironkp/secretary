@@ -195,14 +195,21 @@ export async function persistPlan(userId: string, bundle: PlanBundle): Promise<v
  * Stamped with the CURRENT signals hash so the durable cache serves it until
  * the situation actually changes — the planner can't immediately undo the user.
  */
-export async function savePlanAsHead(userId: string, plan: LayoutPlan): Promise<number> {
+export async function savePlanAsHead(
+  userId: string,
+  plan: LayoutPlan,
+  /** Section keys to pin with it: what the user just placed stays where they put it. */
+  pin: string[] = []
+): Promise<number> {
   const [head, signals] = await Promise.all([getPlanHead(userId), computeSignals(userId)]);
   const version = (head?.version ?? 0) + 1;
+  const present = new Set(plan.sections.map((s) => sectionKey(s)));
   await db.insert(layoutSpecs).values({
     userId,
     version,
     spec: plan,
-    pinned: head?.pinned ?? [],
+    // A pin on a section that left the plan has nothing to hold.
+    pinned: [...new Set([...(head?.pinned ?? []), ...pin])].filter((k) => present.has(k)),
     kind: "plan",
     signalsHash: signalsHash(signals, REGISTRY_VERSION),
     reasonSummary: plan.reason_summary ?? null,

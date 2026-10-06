@@ -41,6 +41,7 @@ export async function DashboardPanel({
             name: projectsTable.name,
             color: projectsTable.color,
             parentId: projectsTable.parentId,
+            kind: projectsTable.kind,
           })
           .from(projectsTable)
           .where(eq(projectsTable.userId, userId))

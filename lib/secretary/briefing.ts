@@ -9,6 +9,9 @@ import { documents, events, expectations, memories, pipelineTemplates, projects,
 import { dayRangeInTz } from "@/lib/time";
 import { getRecentConversationTails } from "@/lib/db/queries";
 import { getPlanHead } from "@/lib/layout/plan-store";
+import { boardSectionNames } from "@/lib/layout/arrange";
+import type { LayoutPlan } from "@/lib/layout/plan";
+import { listsSummary } from "./lists";
 import { listQuestions } from "@/lib/understanding/questions";
 import { markSurfaced } from "@/lib/understanding/today";
 import { questionLine } from "./interview-voice";
@@ -695,13 +698,18 @@ export async function buildBriefing(
 
   // Morning layout note (SPEC §9 Phase 2): if the dashboard was rearranged,
   // the secretary knows why and can say so — or change it on request.
+  // The board's sections by the names people use, so "put the shopping list
+  // at the top" is one arrange_dashboard call, by voice too (SEC-A003).
   const planHead = await getPlanHead(userId);
   const planReason = planHead?.reasonSummary;
-  if (planReason) {
-    lines.push(
-      "",
-      `DASHBOARD: currently arranged for the situation — "${planReason}". If the user asks about the layout or wants it changed, use get_current_plan / edit_layout_plan / set_layout_preference.`
-    );
+  const board = planHead ? await boardSectionNames(userId, planHead.spec as LayoutPlan) : [];
+  lines.push(
+    "",
+    `DASHBOARD${board.length ? ` (top to bottom): ${board.join(" · ")}` : ""}. To move, hide or show a section when the user asks, call arrange_dashboard with its name; it applies at once.${planReason ? ` Arranged for the situation: "${planReason}".` : ""}`
+  );
+  const lists = await listsSummary(userId);
+  if (lists.length) {
+    lines.push("", `LISTS (add_to_list / list_items): ${lists.join(" | ")}`);
   }
   lines.push(
     "",

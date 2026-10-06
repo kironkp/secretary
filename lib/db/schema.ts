@@ -237,6 +237,10 @@ export const projects = pgTable("projects", {
   name: text("name").notNull(),
   color: text("color"),
   status: projectStatus("status").notNull().default("active"),
+  // "list" (SEC-A003, 2026-10-06): a list like Shopping, whose tasks are its
+  // items. Lists are not work: understanding never reads them, they score no
+  // procrastination, and the dashboard shows them as one checklist card.
+  kind: text("kind").$type<"project" | "list">().notNull().default("project"),
   // SPEC §4: a project-level deadline. "committed" = the user said so (set via
   // chat tools); when null, signals infer one from the earliest dated open
   // task/event and report deadline_type "inferred".
@@ -822,7 +826,7 @@ export const layoutPreferences = pgTable("layout_preferences", {
     .notNull()
     .references(() => user.id, { onDelete: "cascade" }),
   kind: text("kind")
-    .$type<"ban_component" | "pin_section" | "default_variant_for" | "accent_policy">()
+    .$type<"ban_component" | "pin_section" | "default_variant_for" | "accent_policy" | "hide_section">()
     .notNull(),
   value: jsonb("value").$type<Record<string, string>>().notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

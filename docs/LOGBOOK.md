@@ -7,6 +7,46 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 ---
 
+## v0.27 — Lists, a dashboard you can rearrange by voice, and no "let me" before it's done (2026-10-06)
+
+this commit
+
+Kiron's screenshot from a call: "Please add lotion to my shopping list for
+the boat" became a task "buy lotion for the boat" under Personal. "Can you put
+the shopping list at the top of the dashboard?" got "Sure, let me move that
+so it's easier to reach", then "I can't move the dashboard sections with the
+tools I have right now." The voice had no dashboard tool at all, the app had
+no lists, and nothing stopped the assistant promising before it checked.
+
+- Lists are projects with `kind` "list" (lib/secretary/lists.ts). add_to_list
+  puts nouns on a named list, Shopping by default, with what they are for as
+  the item's note ("Lotion", "for the boat"); list_items reads one back. A
+  list phrase ("my shopping list for the boat") resolves to the list in
+  resolveProject too, so no tool makes a Boat project out of it. Lists are not
+  work: understanding never reads one (no paid run per item), procrastination
+  scores its items 0, and the dashboard keeps its items off every other view
+  and shows the list as one tickable checklist card.
+- arrange_dashboard (lib/layout/arrange.ts), on the call and in chat: "put the
+  shopping list at the top", "move Caltrans down", "hide the timeline", "show
+  it again". Words map to sections with no model call; the edit is
+  user-initiated, saved as the head and pinned, and "hide" is a hide_section
+  preference, so no planner brings the section back. The validator's pin rule
+  (invariant 7) no longer refuses the user's own move. The briefing names the
+  board's sections top to bottom, and the lists with their items.
+- Never announce before it's done (shared persona): no "let me move that" or
+  "I'll add it"; make the call and say its result, or say up front, once, that
+  it can't be done. The slow-lookup filler is "one sec" and names no action.
+  The voice rules say documents and project surgery are chat-only, and a test
+  fails if the persona ever names a tool the call lacks without that.
+- Review follow-up from v0.26: a test that a rolled-forward start takes its
+  end with it.
+
+Not covered by a test: the dashboard UI (the list card, and keeping list items
+out of the other views) has no component test in this repo; checked by tsc
+and next build only.
+
+---
+
 ## v0.26 — Events by voice, and onto Google Calendar (2026-10-06)
 
 this commit

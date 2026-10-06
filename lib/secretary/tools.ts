@@ -46,6 +46,8 @@ import { dayRangeInTz, parseInTz } from "@/lib/time";
 import { deleteGoogleEvent, insertGoogleEvent, patchGoogleEvent } from "@/lib/google/calendar";
 import { connectionStatus, GoogleUnavailable, NOT_CONNECTED_LINE } from "@/lib/google/connection";
 import { describeRecurrence, firstOccurrence, normalizeRecurrence } from "./rrule";
+import { findList, findOrCreateList, itemTitle, listFor, parseListPhrase, spokenList } from "./lists";
+import { arrangeDashboard } from "@/lib/layout/arrange";
 import { defaultPlan, sectionKey, type LayoutPlan, type PlanSection } from "@/lib/layout/plan";
 import { getPlanHead, getPreferences, savePlanAsHead } from "@/lib/layout/plan-store";
 import { REGISTRY_COMPONENTS, REGISTRY_VERSION } from "@/lib/layout/registry";
@@ -296,8 +298,8 @@ async function findTask(userId: string, ref: string) {
 
 export type ProjectResolution = {
   project: typeof projects.$inferSelect | null;
-  /** How the name landed: exact/normalized/fuzzy match, freshly created, or null. */
-  matched: "exact" | "normalized" | "fuzzy" | "created" | null;
+  /** How the name landed: exact/normalized/fuzzy match, freshly created, a list (lists.ts), or null. */
+  matched: "exact" | "normalized" | "fuzzy" | "created" | "list" | null;
 };
 
 /**
@@ -318,6 +320,13 @@ export async function resolveProject(
     return { project: null, matched: null };
   }
   const create = opts.create ?? true;
+  // "my shopping list for the boat" is the Shopping list, never a new project
+  // called "Shopping list" or "Boat" (SEC-A003).
+  const listPhrase = parseListPhrase(name);
+  if (listPhrase) {
+    const { list } = await findOrCreateList(userId, listPhrase.name);
+    return { project: list, matched: "list" };
+  }
 
   const all = await db
     .select()
@@ -982,6 +991,80 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
       ...(google.state === "added"
         ? { toast: { icon: "📅", text: `${event.title} — on Google Calendar` } }
         : {}),
+    };
+  },
+
+  async add_to_list(ctx, args) {
+    const a = toolSchemas.add_to_list.parse(args);
+    const { name, purpose } = listFor(a.list);
+    const note = a.note?.trim() || purpose || null;
+    const { list, created } = await findOrCreateList(ctx.userId, name);
+    const open = await db
+      .select({ title: tasks.title })
+      .from(tasks)
+      .where(and(eq(tasks.userId, ctx.userId), eq(tasks.projectId, list.id), inArray(tasks.status, [...OPEN_STATUSES])));
+    const onList = new Set(open.map((t) => t.title.toLowerCase()));
+    const added: string[] = [];
+    const already: string[] = [];
+    for (const raw of a.items) {
+      const title = itemTitle(raw);
+      if (!title) continue;
+      if (onList.has(title.toLowerCase())) {
+        already.push(title);
+        continue;
+      }
+      await db.insert(tasks).values({
+        userId: ctx.userId,
+        title,
+        notes: note,
+        projectId: list.id,
+        status: "todo",
+        source: ctx.conversationId ? "spoken" : "typed",
+        createdFromConversationId: ctx.conversationId,
+        createdFromMessageId: ctx.anchorMessageId,
+      });
+      onList.add(title.toLowerCase());
+      added.push(title);
+    }
+    const said = [
+      added.length ? `Added ${spokenList(added)} to your ${list.name} list${note ? ` (${note})` : ""}.` : "",
+      already.length ? `${spokenList(already)} ${already.length === 1 ? "is" : "are"} already on it.` : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+    return {
+      result: { list: list.name, list_created: created, added, already_on_list: already, note, read_back: said },
+      ...(added.length ? { toast: { icon: "🛒", text: `${list.name}: ${added.join(", ")}` } } : {}),
+    };
+  },
+
+  async list_items(ctx, args) {
+    const a = toolSchemas.list_items.parse(args);
+    const { name } = listFor(a.list);
+    const list = await findList(ctx.userId, name);
+    if (!list) return { result: { list: name, items: [], read_back: `You don't have a ${name} list yet.` } };
+    const items = await db
+      .select({ title: tasks.title, notes: tasks.notes })
+      .from(tasks)
+      .where(and(eq(tasks.userId, ctx.userId), eq(tasks.projectId, list.id), inArray(tasks.status, [...OPEN_STATUSES])))
+      .orderBy(tasks.createdAt);
+    const spoken = items.map((i) => (i.notes ? `${i.title} (${i.notes})` : i.title));
+    return {
+      result: {
+        list: list.name,
+        items: items.map((i) => ({ item: i.title, note: i.notes })),
+        read_back: items.length ? `${list.name}: ${spokenList(spoken)}.` : `Your ${list.name} list is empty.`,
+      },
+    };
+  },
+
+  async arrange_dashboard(ctx, args) {
+    const a = toolSchemas.arrange_dashboard.parse(args);
+    const r = await arrangeDashboard(ctx.userId, a.operations);
+    if (!r.ok) return { result: { error: r.error } };
+    return {
+      result: { applied: true, order: r.sections, read_back: `Done: ${r.changed.join(", ")}.` },
+      toast: { icon: "layout", text: "Dashboard rearranged" },
     };
   },
 

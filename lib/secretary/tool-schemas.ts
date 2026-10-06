@@ -169,6 +169,41 @@ export const toolSchemas = {
   add_event_to_google: z.object({
     event: z.string().min(1).describe("The event_id create_event returned"),
   }),
+  add_to_list: z.object({
+    items: z
+      .array(z.string().min(1).max(120))
+      .min(1)
+      .max(20)
+      .describe("What goes on the list, as nouns: 'lotion', 'paper towels' (not 'buy lotion')"),
+    list: z
+      .string()
+      .max(80)
+      .optional()
+      .describe("The list's name: 'shopping' (the default), 'packing'. 'My shopping list for the boat' is the shopping list"),
+    note: z
+      .string()
+      .max(200)
+      .optional()
+      .describe("What the items are for, kept on each: 'for the boat'"),
+  }),
+  list_items: z.object({
+    list: z.string().max(80).optional().describe("The list's name; shopping when omitted"),
+  }),
+  arrange_dashboard: z.object({
+    operations: z
+      .array(
+        z.object({
+          op: z.enum(["move_to_top", "move_up", "move_down", "move_to_bottom", "hide", "show"]),
+          section: z
+            .string()
+            .min(1)
+            .max(80)
+            .describe("The section in the user's words: 'shopping list', 'timeline', 'Caltrans', 'stats'"),
+        })
+      )
+      .min(1)
+      .max(8),
+  }),
   create_document: z.object({
     title: z.string().min(1),
     project: z.string().optional().describe("Project it belongs to (fuzzy-matched)"),
@@ -614,6 +649,11 @@ const toolDescriptions: Record<ToolName, string> = {
     "Edit an EXISTING event: retitle, move its time, set location, add notes (e.g. an East-Coast time conversion), set reminder times, or change how it repeats; its Google Calendar copy changes too. When the user says 'add X to that meeting', use THIS — don't create a task about it.",
   delete_event:
     "Remove an event that was cancelled or logged by mistake, from Google Calendar too. For 'undo that' right after create_event, pass the event_id it returned.",
+  add_to_list:
+    "Add items to one of the user's lists: shopping by default, or a list they name ('packing list'). 'Add lotion to my shopping list for the boat' is items ['lotion'], note 'for the boat', on the shopping list. Never a task called 'buy lotion', never a new project. Say back read_back.",
+  list_items: "What is on one of the user's lists right now (shopping by default), to read back when asked.",
+  arrange_dashboard:
+    "Rearrange the user's dashboard the moment they ask: move a section to the top or bottom, up or down a place, hide it, or show it again ('put the shopping list at the top', 'hide the timeline'). Name sections in the user's words; the server finds them. Applies at once and stays put. If it returns an error, say that error; don't say you moved anything before this returns.",
   add_event_to_google:
     "Put an event that is still only in Secretary onto the user's Google Calendar. Only after the user says yes to adding it (create_event asks when the request came with an attachment), or after they reconnect Google.",
   create_document:
@@ -691,7 +731,7 @@ const toolDescriptions: Record<ToolName, string> = {
   set_layout_preference:
     "Store a durable layout preference: ban_component ('stop showing me people' → component: people_index), pin_section (freeze a section), default_variant_for (a project always compact/full/nested), accent_policy: never ('I hate the glowing ring'). remove: true deletes it. Enforced on every future plan until removed in Settings.",
   search_web:
-    "Look something up on the live web: current facts, policies, prices, hours, phone numbers, who provides what, news, 'google it', 'search for'. You CAN search the web with this — never say you can't. On a call: say a brief 'one sec, looking that up' first, then give the answer in a sentence or two and name the site it came from. Takes a few seconds.",
+    "Look something up on the live web: current facts, policies, prices, hours, phone numbers, who provides what, news, 'google it', 'search for'. You CAN search the web with this — never say you can't. On a call: say only a brief 'one sec' first, never what you're about to do, then give the answer in a sentence or two and name the site it came from. Takes a few seconds.",
   consult_brain:
     "Ask the deep-reasoning brain (Claude) a question that needs genuine analysis — tricky planning, weighing tradeoffs, drafting something hard, math beyond arithmetic. NOT for quick recall or anything your other tools already answer. On a call: say a brief 'give me a second' first, then relay the answer in your own words and register. Takes a few seconds.",
   request_capability:
@@ -780,6 +820,14 @@ export const VOICE_TOOL_NAMES = [
   "update_event",
   "delete_event",
   "add_event_to_google",
+  // Lists and the dashboard by voice (SEC-A003, 2026-10-06). Kiron asked
+  // "Can you put the shopping list at the top of the dashboard?" on a call and
+  // was told "Sure, let me move that", then "I can't move the dashboard
+  // sections with the tools I have right now." arrange_dashboard is flat
+  // (Realtime rejects edit_layout_plan's oneOf) and needs no model call.
+  "add_to_list",
+  "list_items",
+  "arrange_dashboard",
 ] as const satisfies readonly ToolName[];
 
 export function openAIVoiceToolDefs() {

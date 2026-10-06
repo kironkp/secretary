@@ -16,7 +16,8 @@ import type { Signals } from "./signals";
 export const ABOVE_THE_FOLD = 8;
 
 export type LayoutPreference = {
-  kind: "ban_component" | "pin_section" | "default_variant_for" | "accent_policy";
+  /** hide_section: { section } — the user said "hide Z"; that one section stays off the board until they show it. */
+  kind: "ban_component" | "pin_section" | "default_variant_for" | "accent_policy" | "hide_section";
   value: Record<string, string>;
 };
 
@@ -63,11 +64,15 @@ export type ValidationResult =
 const bannedComponents = (prefs: LayoutPreference[]) =>
   new Set(prefs.filter((p) => p.kind === "ban_component").map((p) => p.value.component));
 
-/** Strip banned components out of a fallback plan so a fallback can't reintroduce them. */
+/**
+ * Strip banned components, and sections the user hid, out of a plan, so no
+ * planner or fallback can bring them back.
+ */
 export function applyBans(plan: LayoutPlan, prefs: LayoutPreference[]): LayoutPlan {
   const banned = bannedComponents(prefs);
-  if (!banned.size) return plan;
-  const sections = plan.sections.filter((s) => !banned.has(s.component));
+  const hidden = new Set(prefs.filter((p) => p.kind === "hide_section").map((p) => p.value.section));
+  if (!banned.size && !hidden.size) return plan;
+  const sections = plan.sections.filter((s) => !banned.has(s.component) && !hidden.has(sectionKey(s)));
   return sections.length ? { ...plan, sections } : plan;
 }
 
@@ -235,8 +240,11 @@ export function validatePlan(input: unknown, ctx: ValidationContext): Validation
     }
   }
 
-  // Invariant 7 — pinned sections keep position + variant vs the previous plan.
-  if (ctx.previousPlan) {
+  // Invariant 7 — pinned sections keep position + variant vs the previous
+  // plan, against the PLANNERS. The user's own request moves what it moves:
+  // "put the shopping list at the top" shifts a pinned section down a place,
+  // and refusing that broke "user-initiated changes apply immediately".
+  if (ctx.previousPlan && !ctx.userInitiated) {
     const pinKeys = new Set([
       ...ctx.pinnedSections,
       ...ctx.preferences.filter((p) => p.kind === "pin_section").map((p) => p.value.section),

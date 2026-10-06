@@ -67,13 +67,22 @@ export function DashboardViews({
   const [crossing, setCrossing] = useState<Set<string>>(new Set());
 
   // Optimistic done-marks overlaid on the authoritative server rows.
-  const tasks = useMemo(
+  const allTasks = useMemo(
     () =>
       serverTasks.map((t) =>
         doneIds.has(t.id) && t.status !== "done" ? { ...t, status: "done" as const } : t
       ),
     [serverTasks, doneIds]
   );
+  // A list's items (Shopping) live on the list's own card, not in every view
+  // of the work (SEC-A003): they are not tasks to schedule, count or chase.
+  const [tasks, listTasks] = useMemo(() => {
+    const lists = new Set(planProjects.filter((p) => p.kind === "list").map((p) => p.id));
+    return [
+      allTasks.filter((t) => !lists.has(t.projectId ?? "")),
+      allTasks.filter((t) => lists.has(t.projectId ?? "")),
+    ];
+  }, [allTasks, planProjects]);
 
   // Entrance animation: ids (tasks AND events) that appeared after this
   // component mounted — i.e. the secretary logged them live. `seen` absorbs
@@ -157,6 +166,7 @@ export function DashboardViews({
             projects={planProjects}
             dynamicHtml={planDynamicHtml}
             tasks={tasks}
+            listTasks={listTasks}
             suggestions={suggestions}
             events={events}
             docs={docs}
