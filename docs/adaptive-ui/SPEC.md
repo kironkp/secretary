@@ -738,6 +738,9 @@ claude.ai session used as a fixture (docs/adaptive-ui/transcript-2026-08-18).
   `lib/realtime/item-order.ts`), never arrival time, and a call's proposal
   is answered only on that call. An intake thread (channel "email") holds
   mail from its start; only lines with origin "app" are the user's words.
+  The intake still files what is forwarded to it (decided 2026-10-06: the
+  forward from the user's own authenticated address is the consent); what
+  it files stays local, never synced to Google without a yes in the app.
   Reading, looking and drafting stay open (`UNTRUSTED_OK`); a draft goes
   only to the original sender and is never sent.
 - **capture never depends on external apps**: the store is the system of

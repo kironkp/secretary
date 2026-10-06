@@ -12,7 +12,7 @@ import { db } from "@/lib/db";
 import { clarifications, conversations, events, messages, pendingActions, tasks, user } from "@/lib/db/schema";
 import { setGoogleHttpForTests, FEATURE_SCOPES, type GoogleHttp } from "@/lib/google/connection";
 import { EMAIL_END, replyTo } from "@/lib/google/gmail";
-import { extractionTranscript } from "@/lib/secretary/extraction";
+import { applyExtraction, extractionTranscript } from "@/lib/secretary/extraction";
 import { ingestEmail } from "@/lib/email-intake";
 import { computeSignals, isScheduleShaped } from "@/lib/layout/signals";
 import { ItemOrder } from "@/lib/realtime/item-order";
@@ -491,6 +491,27 @@ describe("intake threads (SEC-A005b): mail forwarded to the intake address is ma
     expect(ctx.untrusted).toBe(true);
     const [bNow] = await db.select().from(conversations).where(eq(conversations.id, b.id));
     expect(bNow.untrustedAt).not.toBeNull();
+  });
+
+  it("what the intake files stays local: no Google, no outward call, until the user says so in the app (decision a)", async () => {
+    const t = await intakeThread("Block party Oct 31 at 4. Bring chairs.");
+    // What runExtraction would file from the forwarded mail (the model's part is faked here).
+    const summary = await applyExtraction(t.userId, t.conversationId, {
+      tasks: [{ title: "Bring chairs to the block party", notes: null, due_at: null, project: null }],
+      events: [{ title: "Block party", starts_at: "2026-10-31T16:00:00", ends_at: null, location: null, project: null }],
+      status_updates: [],
+      facts: [],
+      mentions: [],
+      ambiguities: [],
+    });
+    expect(summary).toMatchObject({ createdTasks: 1, createdEvents: 1 });
+    const [party] = await db.select().from(events).where(eq(events.userId, t.userId));
+    expect(party.googleSync).toBeNull();
+    // Nothing reached Google: no event write, no mail call of any kind.
+    expect(google.calls.insert).toHaveLength(0);
+    expect(google.calls.patch).toHaveLength(0);
+    expect(google.calls.draft).toHaveLength(0);
+    expect(google.calls.gmailList).toHaveLength(0);
   });
 
   it("extraction in an intake thread still files the forwarded mail, but not the secretary's retelling", () => {

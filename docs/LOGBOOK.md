@@ -42,6 +42,10 @@ sec rev found three ways around v0.30's gate; sec plan folded in SEC-A005b.
   message never can. Understanding, the layout signals and the ASR check
   read the user's own words, not that mail. The intake itself is unchanged:
   it still files what Kiron forwards. It is not configured on Heroku.
+  Decided (sec plan, 2026-10-06): keep it. Forwarding from his own
+  DMARC-authenticated address is his deliberate act. What it files stays
+  local: no Google sync and no other outward action until he says yes in
+  the app (tested).
 
 Every reader of stored messages, and what it does with mail:
 - briefing PRIOR SESSIONS (getRecentConversationTails): the user's own lines
