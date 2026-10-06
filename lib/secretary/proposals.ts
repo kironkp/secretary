@@ -226,22 +226,32 @@ const placeOfProposal = (p: Pending): Place =>
   p.via === "voice" ? { via: "voice", session: p.voiceSession, seq: p.voiceSeq } : { via: "chat" };
 
 /**
- * The user's answer to a proposal: in the place it was made, their first
- * line in their own words after the secretary's first line after the
- * proposal (the turn that asked). Undefined while that line, or the answer,
- * isn't there.
+ * After a proposal, in the place it was made: the secretary's first line
+ * after it (the one that asked), and the line that came next from either
+ * side. The user's answer is that next line, if it is theirs; if the
+ * secretary spoke again first (a second question, or the answer's
+ * transcript never arrived), the question went unanswered and a later yes
+ * can't stand in for it (sec rev, round 2).
  */
-export function answerTo(p: Pending, said: Said[]): Said | undefined {
+function afterQuestion(p: Pending, said: Said[]): { asked?: Said; next?: Said } {
   const place = placeOfProposal(p);
   const lines = linesOf(place, said);
-  if (place.via === "voice") {
-    if (place.seq === null) return undefined;
-    const asked = lines.find((m) => m.role === "assistant" && m.voiceSeq! > place.seq!);
-    return asked && lines.find((m) => ownWords(m) && m.voiceSeq! > asked.voiceSeq!);
-  }
-  const asked = lines.find((m) => m.role === "assistant" && m.createdAt > p.createdAt);
-  return asked && lines.find((m) => ownWords(m) && m.createdAt > asked.createdAt);
+  const after = (m: Said, than: Said | Pending) =>
+    place.via === "voice" ? m.voiceSeq! > (than as { voiceSeq: number | null }).voiceSeq! : m.createdAt > than.createdAt;
+  if (place.via === "voice" && place.seq === null) return {};
+  const asked = lines.find((m) => m.role === "assistant" && after(m, p));
+  const next = asked && lines.find((m) => (m.role === "assistant" || ownWords(m)) && after(m, asked));
+  return { asked, next };
 }
+
+/** The user's answer to a proposal: their own words, right after the line that asked. */
+export function answerTo(p: Pending, said: Said[]): Said | undefined {
+  const { next } = afterQuestion(p, said);
+  return next && ownWords(next) ? next : undefined;
+}
+
+/** The secretary spoke again before the user answered: the question lapsed. */
+const lapsed = (p: Pending, said: Said[]) => afterQuestion(p, said).next?.role === "assistant";
 
 /**
  * The proposals the user's current words confirm: those made in the same
@@ -295,10 +305,8 @@ export async function confirmable(
   let said = await conversation();
   const awaitingAnswer = () =>
     open.some((p) => {
-      if (p.via === "voice" && p.voiceSeq === null) return false;
-      const lines = linesOf(placeOfProposal(p), said);
-      const asked = p.via === "voice" ? lines.some((m) => m.role === "assistant" && m.voiceSeq! > p.voiceSeq!) : lines.some((m) => m.role === "assistant" && m.createdAt > p.createdAt);
-      return asked && !answerTo(p, said);
+      const { asked, next } = afterQuestion(p, said);
+      return Boolean(asked) && !next;
     });
   for (let waited = 0; awaitingAnswer() && waited < 3000; waited += 300) {
     await new Promise((r) => setTimeout(r, 300));
@@ -307,12 +315,18 @@ export async function confirmable(
 
   const current = linesOf(at, said).filter(ownWords).at(-1);
   const answered = open.filter((p) => answerTo(p, said));
-  const dead = answered.filter((p) => answerTo(p, said)!.id !== current?.id || !isPlainYes(current.content));
+  const dead = [
+    ...answered.filter((p) => answerTo(p, said)!.id !== current?.id || !isPlainYes(current.content)),
+    ...open.filter((p) => lapsed(p, said)),
+  ];
   if (dead.length) {
     await db.update(pendingActions).set({ status: "refused" }).where(inArray(pendingActions.id, dead.map((p) => p.id)));
   }
   const rows = answered.filter((p) => !dead.includes(p));
   if (rows.length) return { ok: true, rows };
+  if (answered.length === 0 && dead.length) {
+    return { ok: false, error: "That question went unanswered before something else was said, so nothing was done. If it's still wanted, propose it again and ask." };
+  }
   if (answered.length === 0) return { ok: false, error: "Nothing is confirmed until the user has heard the question and answered. Ask them." };
   if (current && answered.some((p) => answerTo(p, said)!.id === current.id)) {
     return { ok: false, error: "The user didn't say yes. Nothing was done." };
