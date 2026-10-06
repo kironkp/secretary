@@ -310,6 +310,7 @@ export type ProjectResolution = {
 export async function resolveProject(
   userId: string,
   name: string | undefined,
+  /** create: false never makes anything, a list included. */
   opts: { create?: boolean } = {}
 ): Promise<ProjectResolution> {
   if (!name) return { project: null, matched: null };
@@ -324,8 +325,8 @@ export async function resolveProject(
   // called "Shopping list" or "Boat" (SEC-A003).
   const listPhrase = parseListPhrase(name);
   if (listPhrase) {
-    const { list } = await findOrCreateList(userId, listPhrase.name);
-    return { project: list, matched: "list" };
+    const found = await findList(userId, listPhrase.name);
+    if (found) return { project: found, matched: "list" };
   }
 
   const all = await db
@@ -336,7 +337,18 @@ export async function resolveProject(
   // The matching itself is shared with the understanding validator
   // (lib/project-names.ts), so a set_project name it accepts lands here.
   const hit = matchProjectName(name, all.map((p) => p.name));
-  if (hit) return { project: all[hit.index], matched: hit.matched };
+  // A list phrase takes only a project with exactly that name ("Mailing
+  // list"); a near one ("Boat" for "boat list") is not what was said.
+  if (hit && (!listPhrase || hit.matched !== "fuzzy")) return { project: all[hit.index], matched: hit.matched };
+
+  if (listPhrase) {
+    // Only a caller that may create makes the list; the extractor, the
+    // understanding answers and the project tools pass create: false, and a
+    // background guess must never make one.
+    if (!create) return { project: null, matched: null };
+    const { list } = await findOrCreateList(userId, listPhrase.name);
+    return { project: list, matched: "list" };
+  }
 
   if (!create) return { project: null, matched: null };
   const [created] = await db.insert(projects).values({ userId, name }).returning();
@@ -700,6 +712,7 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
           project_id: existing.project.id,
           name: existing.project.name,
           already_existed: true,
+          ...(existing.project.kind === "list" ? { note: `${existing.project.name} is one of the user's lists` } : {}),
         },
       };
     }

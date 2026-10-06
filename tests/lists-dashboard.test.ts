@@ -9,10 +9,11 @@ process.env.TZ = "UTC";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { layoutPreferences, projects, tasks, user } from "@/lib/db/schema";
+import { conversations, layoutPreferences, projects, tasks, user } from "@/lib/db/schema";
 import { computeCurrentPlan, getPlanHead } from "@/lib/layout/plan-store";
 import { sectionKey, type LayoutPlan } from "@/lib/layout/plan";
 import { buildInstructions, CHAT_ONLY_IN_PERSONA, VOICE_MODALITY_RULES } from "@/lib/secretary/persona";
+import { applyExtraction } from "@/lib/secretary/extraction";
 import { itemTitle, listFor, parseListPhrase } from "@/lib/secretary/lists";
 import { refreshProcrastinationScores } from "@/lib/secretary/procrastination";
 import { openAIToolDefs, openAIVoiceToolDefs, VOICE_TOOL_NAMES } from "@/lib/secretary/tool-schemas";
@@ -78,6 +79,53 @@ describe("lists: 'add lotion to my shopping list for the boat'", () => {
       .from(tasks)
       .where(and(eq(tasks.userId, userId), eq(tasks.projectId, resolved.project!.id)));
     expect(onShopping.map((t) => t.title).sort()).toEqual(["Sunscreen", "Towels"]);
+  });
+
+  it("a caller that may not create never makes a list (sec rev P4, P5, P6)", async () => {
+    const userId = await newUser(["Personal"]);
+    // P4: a lookup.
+    expect(await resolveProject(userId, "grocery list", { create: false })).toEqual({ project: null, matched: null });
+    // P5: a background guess from the extractor.
+    const [conv] = await db.insert(conversations).values({ userId, mode: "text" }).returning();
+    await applyExtraction(userId, conv.id, {
+      tasks: [{ title: "Buy eggs", notes: null, due_at: null, project: "grocery list" }],
+      events: [],
+      status_updates: [],
+      facts: [],
+      mentions: [],
+      ambiguities: [],
+    });
+    // P6: asked for a project, it is a project, made now, not "already existed".
+    const made = await executeTool(call(userId), "create_project", { name: "Reading list" });
+    expect(made.result).toMatchObject({ name: "Reading list" });
+    expect(made.result).not.toHaveProperty("already_existed");
+    // A merge into a list that doesn't exist is refused and makes nothing.
+    const merged = await executeTool(call(userId), "update_project", { project: "Personal", merge_into: "camping list" });
+    expect(merged.result).toHaveProperty("error");
+    expect((await projectsOf(userId)).map((p) => [p.name, p.kind]).sort()).toEqual([
+      ["Personal", "project"],
+      ["Reading list", "project"],
+    ]);
+  });
+
+  it("a named list is not a near project: 'my boat list' is a Boat list, not the Boat project", async () => {
+    const userId = await newUser(["Boat"]);
+    await executeTool(call(userId), "create_task", { title: "Life jackets", project: "my boat list" });
+    const rows = await projectsOf(userId);
+    expect(rows.map((p) => [p.name, p.kind]).sort()).toEqual([
+      ["Boat", "list"],
+      ["Boat", "project"],
+    ]);
+    const list = rows.find((p) => p.kind === "list")!;
+    const [item] = await db.select().from(tasks).where(eq(tasks.userId, userId));
+    expect(item.projectId).toBe(list.id);
+  });
+
+  it("a project really named like a list keeps its items", async () => {
+    const userId = await newUser(["Mailing list"]);
+    const out = await executeTool(call(userId), "create_task", { title: "Send the October issue", project: "mailing list" });
+    expect((out.result as { project: string }).project).toBe("Mailing list");
+    expect((await projectsOf(userId)).map((p) => [p.name, p.kind])).toEqual([["Mailing list", "project"]]);
   });
 
   it("names: shopping is the default; a list he names is its own", () => {
