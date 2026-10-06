@@ -39,6 +39,7 @@ import type { QuestionView } from "./today";
 import { flatToWrite, writeOut } from "./prompt";
 import { nearestId } from "./repair";
 import { writeSchema, type BundleProcess, type Write } from "./types";
+import { paidCallAllowed } from "@/lib/spend-guard";
 
 export type Interpretation = {
   /** One of the question's answer ids, or null when the words mean none of them. */
@@ -374,6 +375,8 @@ async function openaiInterpretCall(userId: string): Promise<InterpretCall | null
  * is the provider's (no key, or every key refused), so the user hears why.
  */
 async function defaultInterpretCall(userId: string): Promise<InterpretCall> {
+  const gate = await paidCallAllowed(userId, "interpret");
+  if (!gate.ok) throw new InterpretError(UNREADABLE, { detail: gate.line });
   if (process.env.VITEST) {
     throw new InterpretError(UNREADABLE, { detail: "no interpret model under vitest; pass a call" });
   }

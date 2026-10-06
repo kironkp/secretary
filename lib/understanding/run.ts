@@ -8,7 +8,7 @@
 // the fallback. Storage is the only side effect, and it happens only after
 // validation has passed: a failed run leaves the previous record, its
 // questions and its words exactly as they were.
-import { alertProviderOutOfCredit, backgroundAllowed, isOutOfCredit, runCapUsd } from "@/lib/spend-guard";
+import { alertProviderOutOfCredit, backgroundAllowed, isOutOfCredit, paidCallAllowed, runCapUsd } from "@/lib/spend-guard";
 import { priceUsage } from "@/lib/pricing";
 import { randomUUID } from "node:crypto";
 import { and, desc, eq, sql } from "drizzle-orm";
@@ -60,6 +60,7 @@ import {
 } from "./questions";
 import type { Bundle, ProjectRecord, RunOutput } from "./types";
 import { repairIds, repairLine } from "./repair";
+import { datedOutput } from "./dates";
 import { validateRunOutput } from "./validate";
 
 // --------------------------------------------------------------------------
@@ -1014,7 +1015,9 @@ async function runOnce(
     const others = heldUsd.get(userId) ?? 0;
     heldUsd.set(userId, others + ceiling);
     hold.usd = ceiling;
-    const budget = ceiling > 0 ? await backgroundAllowed(userId, ceiling, others) : { ok: false };
+    // The global net first (SPEND_KILL, the all-background cap), then this loop's own caps.
+    const net = await paidCallAllowed(userId, "understanding");
+    const budget = !net.ok ? { ok: false } : ceiling > 0 ? await backgroundAllowed(userId, ceiling, others) : { ok: false };
     if (!budget.ok) {
       // runProjectNow gives the hold back. One row per project and inputs:
       // a refused run stores no record, so every sweep until the spend rolls
@@ -1146,7 +1149,13 @@ async function runOnce(
     outputTokens += result.outputTokens;
     // A UUID copied with a slipped digit is mended to the one id it is that
     // close to before the validator sees it (repair.ts); the log says so.
-    const { output: mended, repairs } = repairIds(withoutAsked(result.output), bundle);
+    // Countdowns become dates first ("in 3 days" → "on Thu, Oct 22"): the
+    // words are kept until the next read, which may be days away (dates.ts).
+    const dated = datedOutput(withoutAsked(result.output), bundle.clock);
+    if (dated.changed > 0) {
+      console.warn(`understanding: ${bundle.project.name}: ${dated.changed} countdown${dated.changed === 1 ? "" : "s"} written as dates`);
+    }
+    const { output: mended, repairs } = repairIds(dated.output, bundle);
     if (repairs.length > 0) {
       console.warn(
         `understanding: ${bundle.project.name}: ${repairs.length} id${repairs.length === 1 ? "" : "s"} mended: ${repairs.map(repairLine).join("; ")}`

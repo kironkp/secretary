@@ -32,13 +32,16 @@ export async function POST() {
   const quota = checkUnderstandNowQuota(user.id);
   if (!quota.ok) return NextResponse.json({ error: quota.message }, { status: quota.status });
 
+  // Only projects whose data changed since their last read (SEC-A004): it
+  // was forced past the hash, so every press re-read every project at Opus
+  // prices whether or not anything had moved. The open questions already
+  // asked stay on the Interview tab either way.
   const { results, busy } = await runAll(user.id, {
     timezone: user.timezone,
-    force: true,
     mode: "interview",
   });
   if (busy) return NextResponse.json(BUSY, { status: 409 });
-  const { ran, failed } = tallyResults(results);
+  const { ran, failed, skipped } = tallyResults(results);
   // A reopened question (a closed identity back with new evidence) is a new
   // card to the user, so it counts with the created ones.
   const questionsCreated = Object.values(results).reduce(
@@ -61,5 +64,5 @@ export async function POST() {
       });
     }
   }
-  return NextResponse.json({ ran, failed, questionsCreated });
+  return NextResponse.json({ ran, failed, questionsCreated, unchanged: skipped });
 }

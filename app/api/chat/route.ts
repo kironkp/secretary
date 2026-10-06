@@ -10,7 +10,7 @@ import { inArray } from "drizzle-orm";
 import { isErrorResponse, parseBody, requireSession } from "@/lib/api";
 import { loadHistoryWindow } from "@/lib/db/queries";
 import { buildBriefing } from "@/lib/secretary/briefing";
-import { buildInstructions } from "@/lib/secretary/persona";
+import { buildInstructionParts } from "@/lib/secretary/persona";
 import { openAIToolDefs } from "@/lib/secretary/tool-schemas";
 import { executeTool, liveTurnContext, type ToolOutcome } from "@/lib/secretary/tools";
 import { runExtraction } from "@/lib/secretary/extraction";
@@ -129,7 +129,8 @@ export async function POST(req: Request) {
     .select({ persona: userTable.persona })
     .from(userTable)
     .where(eq(userTable.id, user.id));
-  const instructions = buildInstructions(briefing.text, { persona: userRow?.persona });
+  const instructionParts = buildInstructionParts(briefing.text, { persona: userRow?.persona });
+  const instructions = `${instructionParts.stable}\n\n${instructionParts.live}`;
 
   // Composer chip: which model answers, at what effort. Claude models need a
   // key — the user's connected account first, then the house key; without
@@ -196,7 +197,7 @@ export async function POST(req: Request) {
         client: claudeClient,
         model: chip.model,
         effort: chip.effort,
-        instructions,
+        instructions: instructionParts,
         history: prior
           .filter((m): m is typeof m & { role: "user" | "assistant" } => m.role !== "tool")
           .map((m) => ({ role: m.role, content: m.content })),

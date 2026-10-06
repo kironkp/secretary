@@ -26,7 +26,8 @@ export async function runClaudeChat(opts: {
   client: Anthropic;
   model: string;
   effort: string;
-  instructions: string;
+  /** The stable part (persona, directives) and the live part (the briefing), cached as two blocks. */
+  instructions: { stable: string; live: string };
   /** Prior turns, text-only (oldest first, tool rows already filtered). */
   history: { role: "user" | "assistant"; content: string }[];
   message: string;
@@ -69,8 +70,14 @@ export async function runClaudeChat(opts: {
       ? { ...tool, cache_control: { type: "ephemeral" as const } }
       : tool
   ) as Anthropic.Tool[];
+  // Three breakpoints: the tools, the stable instructions, then the live
+  // briefing. As one block, the briefing's per-minute clock line made the
+  // whole system prompt a fresh cache write every turn (SEC-A004); split,
+  // the persona and directives are a cache read from the second turn on,
+  // and rounds 2..N of a turn read the briefing too.
   const cachedSystem: Anthropic.TextBlockParam[] = [
-    { type: "text", text: opts.instructions, cache_control: { type: "ephemeral" } },
+    { type: "text", text: opts.instructions.stable, cache_control: { type: "ephemeral" } },
+    { type: "text", text: opts.instructions.live, cache_control: { type: "ephemeral" } },
   ];
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {

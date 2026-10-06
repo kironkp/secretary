@@ -79,6 +79,10 @@ const CARD_2026_09: RateCard = {
     "gpt-4o-transcribe": { kind: "per_minute", perMinute: 0.006 },
     "gpt-live-transcribe": { kind: "per_minute", perMinute: 0.017 },
 
+    // OpenAI speech (read-aloud): OpenAI's own per-minute estimate for it.
+    // Added 2026-10-06 (SEC-A004); before this every read-aloud row cost $0.
+    "gpt-4o-mini-tts": { kind: "per_minute", perMinute: 0.015 },
+
     // Anthropic
     "claude-fable-5": { kind: "per_token", input: 10, output: 50, cachedInput: 1.0 },
     "claude-opus-5": { kind: "per_token", input: 5, output: 25, cachedInput: 0.5 },
@@ -196,6 +200,48 @@ export function priceUsage(row: PricedInput): Priced {
     estimated: !known,
     note: known ? undefined : `no rate for "${row.model ?? "unknown"}" — priced at the ceiling`,
   };
+}
+
+/** One realtime session's usage as OpenAI reports it, split every way it is billed. */
+export type RealtimeUsage = {
+  textIn: number;
+  audioIn: number;
+  /** Of textIn / audioIn, what was served from the cache. */
+  cachedTextIn: number;
+  cachedAudioIn: number;
+  textOut: number;
+  audioOut: number;
+};
+
+/**
+ * A realtime session priced from its own split (SEC-A004). A call re-sends
+ * its conversation on every reply, so most input is cached: cached audio is
+ * $0.40/M against $32/M fresh, and pricing the input as all fresh audio
+ * overstated a call many times over.
+ */
+export function priceRealtime(model: string | null | undefined, u: RealtimeUsage, at: Date = new Date()): Priced {
+  const { rate, known } = rateFor(model, at);
+  if (rate.kind !== "realtime") {
+    return priceUsage({
+      model,
+      kind: "voice",
+      inputTokens: u.textIn + u.audioIn,
+      cachedInputTokens: u.cachedTextIn + u.cachedAudioIn,
+      outputTokens: u.textOut + u.audioOut,
+      seconds: 0,
+      at,
+    });
+  }
+  const fresh = (all: number, cached: number) => Math.max(0, all - cached);
+  const usd =
+    (fresh(u.textIn, u.cachedTextIn) * rate.text.input +
+      u.cachedTextIn * (rate.text.cachedInput ?? rate.text.input) +
+      fresh(u.audioIn, u.cachedAudioIn) * rate.audio.input +
+      u.cachedAudioIn * (rate.audio.cachedInput ?? rate.audio.input) +
+      u.textOut * rate.text.output +
+      u.audioOut * rate.audio.output) /
+    PER_M;
+  return { usd, known, estimated: !known };
 }
 
 export function formatUsd(usd: number): string {

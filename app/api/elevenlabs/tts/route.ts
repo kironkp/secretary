@@ -3,8 +3,6 @@
 // offer the ElevenLabs mouth at all.
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { db } from "@/lib/db";
-import { usage } from "@/lib/db/schema";
 import { isErrorResponse, parseBody, requireSession } from "@/lib/api";
 import {
   EL_TTS_MODEL,
@@ -12,6 +10,7 @@ import {
   ELEVENLABS_VOICE_ID,
   elevenLabsConfigured,
 } from "@/lib/elevenlabs";
+import { recordUsage } from "@/lib/usage";
 
 export async function GET() {
   const user = await requireSession();
@@ -47,11 +46,14 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "TTS failed" }, { status: 502 });
   }
 
-  await db.insert(usage).values({
+  // "speech", priced per character, which is how ElevenLabs bills (SEC-A004):
+  // filed as "voice" with seconds and no characters, every sentence cost $0
+  // and used up a voice-call slot of the daily quota.
+  await recordUsage({
     userId: user.id,
-    kind: "voice",
+    kind: "speech",
     model: `elevenlabs/${EL_TTS_MODEL}`,
-    seconds: Math.max(1, Math.round(parsed.text.length / 15)), // rough speech-time estimate
+    characters: parsed.text.length,
   });
 
   return new Response(res.body, {

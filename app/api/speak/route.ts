@@ -3,10 +3,9 @@
 // secretary on a call. The key never reaches the browser.
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { db } from "@/lib/db";
-import { usage } from "@/lib/db/schema";
 import { isErrorResponse, parseBody, requireSession } from "@/lib/api";
 import { openai, REALTIME_VOICE, TTS_MODEL, TTS_VOICES } from "@/lib/openai";
+import { recordUsage } from "@/lib/usage";
 
 const bodySchema = z.object({ text: z.string().trim().min(1).max(4000), voice: z.string().max(40).optional() });
 
@@ -26,9 +25,11 @@ export async function POST(req: Request) {
       input: parsed.text,
       response_format: "mp3",
     });
-    await db.insert(usage).values({
+    // "speech", priced per minute (SEC-A004): filed as "voice" with no price,
+    // it cost $0 in Settings and used up a voice-call slot of the daily quota.
+    await recordUsage({
       userId: user.id,
-      kind: "voice",
+      kind: "speech",
       model: TTS_MODEL,
       seconds: Math.max(1, Math.round(parsed.text.length / 15)), // rough speech-time estimate
     });

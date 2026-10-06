@@ -361,11 +361,7 @@ export async function buildBriefing(
       overdueRows.length + dueTodayRows.length + todayEvents.length + stalledRows.length > 0,
   };
 
-  const lines: string[] = [
-    `CURRENT DATE & TIME (server truth — never guess dates): ${card.dateLabel} (${timezone})`,
-    "",
-    "=== TODAY'S BRIEFING ===",
-  ];
+  const lines: string[] = ["=== TODAY'S BRIEFING ==="];
   if (overdueRows.length) {
     lines.push("Overdue:");
     for (const t of overdueRows)
@@ -716,5 +712,8 @@ export async function buildBriefing(
     `Nudge budget this session: at most ${MAX_NUDGES}, and only items not marked [already nudged today]. Lead with the single most important one.`
   );
 
+  // Last, not first (SEC-A004): it changes every minute, and everything above
+  // it is a prefix the model provider can cache from one turn to the next.
+  lines.push("", `CURRENT DATE & TIME (server truth — never guess dates): ${card.dateLabel} (${timezone})`);
   return { text: lines.join("\n"), card };
 }

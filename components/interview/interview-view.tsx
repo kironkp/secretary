@@ -107,10 +107,12 @@ function EvidenceRow({ item }: { item: EvidenceView }) {
 }
 
 /** What a reading came back with, in words, for the line above the pills. */
-function readInWords(body: { ran?: number; failed?: number; questionsCreated?: number }): string {
+function readInWords(body: { ran?: number; failed?: number; questionsCreated?: number; unchanged?: number }): string {
   const ran = body.ran ?? 0;
   const failed = body.failed ?? 0;
   const made = body.questionsCreated ?? 0;
+  // Only changed projects are read (SEC-A004); say so rather than "Read 0".
+  if (ran === 0 && failed === 0 && (body.unchanged ?? 0) > 0) return "Nothing has changed since I last read your projects.";
   const parts = [`Read ${ran} ${ran === 1 ? "project" : "projects"}`];
   if (made > 0) parts.push(`${made} new ${made === 1 ? "question" : "questions"}`);
   else parts.push("nothing new to ask");
@@ -353,7 +355,7 @@ export function InterviewView({
     try {
       const res = await fetch("/api/interview/more", { method: "POST" });
       const body = (await res.json().catch(() => null)) as
-        | { ran?: number; failed?: number; questionsCreated?: number; error?: string }
+        | { ran?: number; failed?: number; questionsCreated?: number; unchanged?: number; error?: string }
         | null;
       if (res.ok && body && !body.error) {
         answered = true;

@@ -27,6 +27,7 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { findDuplicate, findDuplicateEvent, titleSimilarity } from "./dedupe";
 import { parseInTz } from "@/lib/time";
 import { recordUsage } from "@/lib/usage";
+import { paidCallAllowed } from "@/lib/spend-guard";
 
 export const extractionSchema = z.object({
   tasks: z.array(
@@ -106,18 +107,29 @@ const OPEN_STATUSES = ["inbox", "todo", "in_progress", "blocked"] as const;
  * schema, structured output enforced by the API. Throws on refusal/mismatch so
  * the caller can fall back to OpenAI.
  */
+/**
+ * Extraction is a parsing pass over a few minutes of talk, run in the
+ * background after every turn: Sonnet at low effort, not the user's brain
+ * model (Opus at high, max_tokens 16000) as it was until SEC-A004.
+ * EXTRACTION_MAX_TOKENS is sized from production: 322 extraction calls had a
+ * p99 of 1,984 output tokens (max 2,739, thinking included), and 3,000 is
+ * about 1.5 times the p99.
+ */
+const EXTRACTION_MODEL = process.env.EXTRACTION_MODEL ?? "claude-sonnet-5";
+const EXTRACTION_EFFORT: BrainSettings["effort"] = "low";
+const EXTRACTION_MAX_TOKENS = 3000;
+
 async function claudeExtract(
   client: Anthropic,
-  context: string,
-  brain: BrainSettings
+  context: string
 ): Promise<{ result: ExtractionResult; inputTokens: number; outputTokens: number; model: string }> {
   const response = await client.messages.parse({
-    model: brain.model,
-    max_tokens: 16000,
+    model: EXTRACTION_MODEL,
+    max_tokens: EXTRACTION_MAX_TOKENS,
     system: EXTRACTION_PROMPT,
     messages: [{ role: "user", content: context }],
     output_config: {
-      effort: brain.effort,
+      effort: EXTRACTION_EFFORT,
       format: zodOutputFormat(extractionSchema),
     },
   });
@@ -127,7 +139,7 @@ async function claudeExtract(
     result: extractionSchema.parse(response.parsed_output),
     inputTokens: response.usage.input_tokens,
     outputTokens: response.usage.output_tokens,
-    model: brain.model,
+    model: EXTRACTION_MODEL,
   };
 }
 
@@ -171,7 +183,7 @@ export async function extractFromTranscript(opts: {
 
   if (opts.brain && opts.claude && claudeBrainEnabled()) {
     try {
-      return await claudeExtract(opts.claude, context, opts.brain);
+      return await claudeExtract(opts.claude, context);
     } catch (e) {
       console.error(
         "claude extraction failed, falling back to openai:",
@@ -463,6 +475,9 @@ async function extractOnce(
       .orderBy(asc(messagesTable.createdAt));
     // Nothing new, or no user speech to extract from.
     if (!rows.some((m) => m.role === "user")) return null;
+    // Background work under the global net; the high-water mark stays put,
+    // so what was said is read once the cap allows.
+    if (!(await paidCallAllowed(userId, "extraction")).ok) return null;
 
     const transcript = rows
       .filter((m) => m.role !== "tool")

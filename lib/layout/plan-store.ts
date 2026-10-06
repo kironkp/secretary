@@ -7,7 +7,7 @@ import { db } from "@/lib/db";
 import { layoutPreferences, layoutSpecs } from "@/lib/db/schema";
 import { REGISTRY_VERSION } from "./registry";
 import { defaultPlan, sectionKey, type LayoutPlan } from "./plan";
-import { planWithFallback } from "./plan-from-llm";
+import { planWithFallback, type PlannerCall } from "./plan-from-llm";
 import { computeSignals, signalsHash, type Signals } from "./signals";
 import { listDynamicComponents, openPriorityWishes } from "./slow-loop";
 import { applyBans, type LayoutPreference } from "./validator";
@@ -94,8 +94,7 @@ export async function computeCurrentPlan(userId: string): Promise<PlanBundle> {
   // A plan is "new" when its content differs — sections or reason. plan_id
   // embeds the signals hash, which drifts with time; comparing it would write
   // a new history row on every render.
-  const content = (p: LayoutPlan) => JSON.stringify([p.sections, p.reason_summary ?? null]);
-  const changed = !previousPlan || content(previousPlan) !== content(plan);
+  const changed = !previousPlan || planContent(previousPlan) !== planContent(plan);
   return {
     plan,
     signals,
@@ -107,16 +106,60 @@ export async function computeCurrentPlan(userId: string): Promise<PlanBundle> {
   };
 }
 
-const planContent = (p: LayoutPlan) => JSON.stringify([p.sections, p.reason_summary ?? null]);
+/**
+ * A plan's content, the same however its keys are ordered. A stored plan comes
+ * back from jsonb with its object keys reordered, so a plain JSON.stringify
+ * called it different from the identical plan in memory (SEC-A004): every new
+ * situation wrote a new version row and asked the planner again.
+ */
+function canonical(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([, v]) => v !== undefined)
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([k, v]) => [k, canonical(v)])
+    );
+  }
+  return value;
+}
+const planContent = (p: LayoutPlan) => JSON.stringify(canonical([p.sections, p.reason_summary ?? null]));
 
 /**
  * Persist a newly-computed plan as the head, then (when signals changed) let
  * the LLM refine it in the background — the refined plan becomes the head the
  * NEXT open serves from the durable cache. Never throws (background job).
  */
-export async function persistPlan(userId: string, bundle: PlanBundle): Promise<void> {
+/**
+ * The Claude planner (SEC-A004): Sonnet, not the user's brain model. It runs
+ * in the background after a dashboard render, and its prose is never read.
+ */
+const PLANNER_CLAUDE_MODEL = process.env.PLANNER_CLAUDE_MODEL ?? "claude-sonnet-5";
+
+export async function persistPlan(
+  userId: string,
+  bundle: PlanBundle,
+  /** Tests: the planner to call instead of a live model. */
+  opts: { call?: PlannerCall } = {}
+): Promise<void> {
   try {
     const hash = signalsHash(bundle.signals, REGISTRY_VERSION);
+    // Planned for these signals already (another render got here first).
+    const before = await getPlanHead(userId);
+    const alreadyPlanned = before?.signalsHash === hash;
+    /**
+     * The head IS the plan for these signals: stamp it so the next render,
+     * in this process or after a restart, is a cache hit and no model call.
+     * Without it, a refinement that came back unchanged (or invalid) left
+     * the head's hash stale, and every new process paid for it again.
+     */
+    const stamp = async () => {
+      const head = await getPlanHead(userId);
+      if (head && head.signalsHash !== hash && planContent(head.spec as LayoutPlan) === planContent(bundle.plan)) {
+        await db.update(layoutSpecs).set({ signalsHash: hash }).where(eq(layoutSpecs.id, head.id));
+      }
+    };
     if (bundle.changed) {
       const head = await getPlanHead(userId);
       // Re-check under the fresh head (two renders can race; last write wins).
@@ -135,15 +178,18 @@ export async function persistPlan(userId: string, bundle: PlanBundle): Promise<v
     }
 
     // LLM refinement (SPEC §6) — tests never call a live model (VITEST guard).
-    const { anthropicFor, claudeBrainEnabled, brainSettings } = await import("@/lib/anthropic");
-    const claude = claudeBrainEnabled() ? await anthropicFor(userId) : null;
+    const { anthropicFor, claudeBrainEnabled } = await import("@/lib/anthropic");
+    const claude = opts.call ? null : claudeBrainEnabled() ? await anthropicFor(userId) : null;
     if (
       !bundle.wantsLlmRefinement ||
-      (!process.env.OPENAI_API_KEY && !claude) ||
-      process.env.VITEST ||
+      alreadyPlanned ||
+      (!opts.call && ((!process.env.OPENAI_API_KEY && !claude) || process.env.VITEST)) ||
       bundle.signals.context.calm_mode
     )
-      return;
+      return await stamp();
+    // Background work under the global net (SPEND_KILL, the all-background cap).
+    const { paidCallAllowed } = await import("@/lib/spend-guard");
+    if (!(await paidCallAllowed(userId, "layout")).ok) return;
     const preferences = await getPreferences(userId);
     const { claudePlannerCall } = await import("./plan-from-llm");
     const refined = await planWithFallback(bundle.signals, {
@@ -151,7 +197,7 @@ export async function persistPlan(userId: string, bundle: PlanBundle): Promise<v
       preferences,
       pinnedSections: bundle.pinned,
       llmEnabled: true,
-      call: claude ? claudePlannerCall(claude, (await brainSettings(userId)).model) : undefined,
+      call: opts.call ?? (claude ? claudePlannerCall(claude, PLANNER_CLAUDE_MODEL) : undefined),
       dynamicComponents: await listDynamicComponents(userId),
     });
     // Bill the planner BEFORE any of the reasons this function returns early —
@@ -170,8 +216,8 @@ export async function persistPlan(userId: string, bundle: PlanBundle): Promise<v
         });
       }
     }
-    if (refined.source !== "llm" && refined.source !== "llm-cache") return;
-    if (planContent(refined.plan) === planContent(bundle.plan)) return;
+    if (refined.source !== "llm" && refined.source !== "llm-cache") return await stamp();
+    if (planContent(refined.plan) === planContent(bundle.plan)) return await stamp();
     const head = await getPlanHead(userId);
     // Only land the refinement if the situation hasn't moved on meanwhile.
     if (head?.signalsHash && head.signalsHash !== hash) return;

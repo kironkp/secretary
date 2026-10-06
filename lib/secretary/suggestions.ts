@@ -9,6 +9,7 @@ import { db } from "@/lib/db";
 import { events, memories, tasks, usage } from "@/lib/db/schema";
 import { openai, TEXT_MODEL } from "@/lib/openai";
 import { recordUsage } from "@/lib/usage";
+import { paidCallAllowed } from "@/lib/spend-guard";
 import { findDuplicate } from "./dedupe";
 
 const suggestionSchema = z.object({
@@ -121,6 +122,7 @@ export async function generateSuggestions(userId: string, timezone: string): Pro
       ...facts.map((f) => `- ${f.fact}`),
     ].join("\n");
 
+    if (!(await paidCallAllowed(userId, "suggestions")).ok) return;
     // The attempt is what counts, from here: an empty list, a duplicate or a
     // failure all close the day.
     lastAttempt.set(userId, Date.now());

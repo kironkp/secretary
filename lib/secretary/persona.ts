@@ -211,19 +211,34 @@ export function isQuietHours(
 /** Only while the shop is visible (lib/shop/visible.ts). */
 const SHOP_PERSONA = `THE SHOP — "I can't do that" is NEVER the end of the sentence: when no tool fits, in the SAME turn, call request_capability so the shop can build it. Say it like a pro: "Can't do that yet — sent it to the shop; you'll get a plan to sign off on." Never file what your tools already do; shop plan-ready and build outcomes also arrive as push notifications.`;
 
+/**
+ * The instructions in two parts (SEC-A004): `stable` (the persona and the
+ * user's directives, the same turn after turn) and `live` (the briefing,
+ * whose clock line changes every minute). Claude caches each as its own
+ * block; OpenAI caches the longest prefix that repeats, so the stable part
+ * comes first.
+ */
+export function buildInstructionParts(
+  briefingText: string,
+  opts: { reconnect?: boolean; persona?: PersonaConfig | null } = {}
+): { stable: string; live: string } {
+  return {
+    stable: [SECRETARY_PERSONA, "", personaDirectives(opts.persona), ...(shopVisible() ? ["", SHOP_PERSONA] : [])].join(
+      "\n"
+    ),
+    live: [
+      briefingText,
+      ...(opts.reconnect
+        ? ["", "NOTE: You are resuming an ongoing call after a brief reconnect — do not greet again; pick up where you left off."]
+        : []),
+    ].join("\n"),
+  };
+}
+
 export function buildInstructions(
   briefingText: string,
   opts: { reconnect?: boolean; persona?: PersonaConfig | null } = {}
 ) {
-  return [
-    SECRETARY_PERSONA,
-    "",
-    personaDirectives(opts.persona),
-    "",
-    briefingText,
-    ...(shopVisible() ? ["", SHOP_PERSONA] : []),
-    ...(opts.reconnect
-      ? ["", "NOTE: You are resuming an ongoing call after a brief reconnect — do not greet again; pick up where you left off."]
-      : []),
-  ].join("\n");
+  const { stable, live } = buildInstructionParts(briefingText, opts);
+  return `${stable}\n\n${live}`;
 }

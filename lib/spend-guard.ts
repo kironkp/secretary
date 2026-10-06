@@ -84,6 +84,94 @@ export async function backgroundAllowed(
   return { ok: false, spent, cap };
 }
 
+// --------------------------------------------------------------------------
+// The global safety net (SEC-A004, 2026-10-06)
+// --------------------------------------------------------------------------
+
+/**
+ * What runs with no one asking: understanding, extraction, the dashboard
+ * planner, the slow loop, and suggestions (kind "other" on TEXT_MODEL;
+ * search_web is "other" too, on its own model, and is not background).
+ */
+const BACKGROUND_KINDS = ["understanding", "extraction", "layout", "slow_loop"] as const;
+const SUGGESTIONS_MODEL = () => process.env.TEXT_MODEL ?? "gpt-5.5";
+
+/** Every kind of paid call, as the guard sorts them. */
+export type PaidKind =
+  | (typeof BACKGROUND_KINDS)[number]
+  | "suggestions"
+  | "email"
+  | "consult"
+  | "paint"
+  | "search"
+  | "interpret"
+  | "chat"
+  | "voice"
+  | "transcribe"
+  | "speech";
+
+/** The user's own turn: what SPEND_KILL still lets through. */
+const USER_TURN: readonly PaidKind[] = ["chat", "voice", "transcribe", "speech"];
+
+/** All background work may spend this much in 24 hours. 0 turns it off. */
+export const backgroundDailyCapUsd = () => envUsd("BACKGROUND_DAILY_CAP_USD", 4, true);
+/** SPEND_KILL=true: no paid call but the user's own chat or voice turn. */
+export const spendKill = () => process.env.SPEND_KILL === "true";
+
+/** Dollars all background work spent in the last 24 hours, from the same cost column. */
+export async function backgroundSpentLastDay(userId: string): Promise<number> {
+  const since = new Date(Date.now() - DAY_MS);
+  const [row] = await db
+    .select({ usd: sql<string>`coalesce(sum(${usage.costUsd}), 0)` })
+    .from(usage)
+    .where(
+      and(
+        eq(usage.userId, userId),
+        gte(usage.createdAt, since),
+        sql`(${usage.kind} in (${sql.join(
+          BACKGROUND_KINDS.map((k) => sql`${k}`),
+          sql`, `
+        )}) or (${usage.kind} = 'other' and ${usage.model} = ${SUGGESTIONS_MODEL()}))`
+      )
+    );
+  return Number(row?.usd ?? 0);
+}
+
+/**
+ * Whether a paid call of `kind` may run now. SPEND_KILL refuses everything
+ * but the user's own chat or voice turn; background work also stops once
+ * the last 24 hours of it passed BACKGROUND_DAILY_CAP_USD. Either refusal
+ * pushes once that day. `line` is what to tell the user.
+ */
+export async function paidCallAllowed(
+  userId: string,
+  kind: PaidKind
+): Promise<{ ok: true } | { ok: false; line: string }> {
+  if (spendKill() && !USER_TURN.includes(kind)) {
+    await alertOnce(
+      userId,
+      "spend-kill",
+      "Paid work is switched off",
+      "SPEND_KILL is on: only your own chat and calls run. Background reading, drawing and look-ups wait.",
+      "spend-guard"
+    );
+    return { ok: false, line: "That's switched off right now (SPEND_KILL): only chat and calls run." };
+  }
+  if (!(BACKGROUND_KINDS as readonly string[]).includes(kind) && kind !== "suggestions") return { ok: true };
+  const cap = backgroundDailyCapUsd();
+  const spent = cap > 0 ? await backgroundSpentLastDay(userId) : 0;
+  if (cap > 0 && spent < cap) return { ok: true };
+  if (cap > 0) {
+    await alertOnce(
+      userId,
+      "background-cap",
+      "Background work paused",
+      `It spent $${spent.toFixed(2)} in the last 24 hours, its $${cap.toFixed(2)} cap. It starts again as that spend rolls off. Chat and calls still work.`
+    );
+  }
+  return { ok: false, line: "Background work is paused for today (its spending cap)." };
+}
+
 /** After any spend: one push the first time today's total crosses the alert line. */
 export async function checkSpendAlert(userId: string): Promise<void> {
   const line = alertUsd();

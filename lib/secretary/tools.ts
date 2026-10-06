@@ -48,6 +48,7 @@ import { describeRecurrence, firstOccurrence, normalizeRecurrence } from "./rrul
 import { findList, findOrCreateList, itemTitle, listFor, parseListPhrase, spokenList } from "./lists";
 import { arrangeDashboard } from "@/lib/layout/arrange";
 import { recordUsage } from "@/lib/usage";
+import { paidCallAllowed } from "@/lib/spend-guard";
 import { defaultPlan, sectionKey, type LayoutPlan, type PlanSection } from "@/lib/layout/plan";
 import { getPlanHead, getPreferences, savePlanAsHead } from "@/lib/layout/plan-store";
 import { REGISTRY_COMPONENTS, REGISTRY_VERSION } from "@/lib/layout/registry";
@@ -1494,6 +1495,8 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
   // Claude brain for questions that need genuine analysis. Effort capped at
   // medium — a caller is waiting on the line.
   async search_web(ctx, args) {
+    const gate = await paidCallAllowed(ctx.userId, "search");
+    if (!gate.ok) return { result: { error: gate.line } };
     const a = toolSchemas.search_web.parse(args);
     const { openai, SEARCH_MODEL } = await import("@/lib/openai");
     try {
@@ -1537,6 +1540,8 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
   },
 
   async consult_brain(ctx, args) {
+    const gate = await paidCallAllowed(ctx.userId, "consult");
+    if (!gate.ok) return { result: { error: gate.line } };
     const a = toolSchemas.consult_brain.parse(args);
     const { anthropicFor, brainSettings, claudeBrainEnabled } = await import("@/lib/anthropic");
     const client = claudeBrainEnabled() ? await anthropicFor(ctx.userId) : null;
@@ -2254,6 +2259,8 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
   // returns immediately and the Canvas page shows the paint landing live. ---
 
   async paint_canvas(ctx, args) {
+    const gate = await paidCallAllowed(ctx.userId, "paint");
+    if (!gate.ok) return { result: { error: gate.line } };
     const a = toolSchemas.paint_canvas.parse(args);
     // Fire-and-stream: don't hold the chat turn hostage to the full render.
     const done = paintCanvas(ctx.userId, a.brief, {
@@ -2359,6 +2366,8 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     };
   },
   async edit_canvas(ctx, args) {
+    const gate = await paidCallAllowed(ctx.userId, "paint");
+    if (!gate.ok) return { result: { error: gate.line } };
     const a = toolSchemas.edit_canvas.parse(args);
     const current = await latestSnapshot(ctx.userId);
     if (!current || !current.markup) {

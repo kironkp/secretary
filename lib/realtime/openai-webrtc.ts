@@ -3,6 +3,7 @@
 // the session server-side) → ephemeral client secret → SDP exchange with
 // api.openai.com → audio tracks + "oai-events" data channel.
 import { ElevenLabsMouth } from "./el-mouth";
+import { IDLE_GOODBYE, MAX_GOODBYE, nextLimitAction, WARN_LINE } from "./session-limits";
 import { EL_MOUTH_VOICE } from "@/lib/elevenlabs";
 import { playRemoteStream, remoteAudioState } from "./remote-audio";
 import type {
@@ -77,6 +78,14 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
   private lastErrorEvent: unknown = null;
   private lastResponseDone: unknown = null;
   private audioTokensTotal = 0;
+  /** What the session was billed, split as the rate card prices it (lib/pricing.ts priceRealtime). */
+  private split = { textIn: 0, audioIn: 0, cachedTextIn: 0, cachedAudioIn: 0, textOut: 0, audioOut: 0 };
+  // Call limits (session-limits.ts): idle hang-up and the 30-minute cap.
+  private lastActivityAt = 0;
+  private warned = false;
+  private endingAt: number | null = null;
+  private toolsInFlight = 0;
+  private limitTimer: ReturnType<typeof setInterval> | null = null;
 
   /** Everything the debug overlay / beacon wants, in one object. */
   debugInfo() {
@@ -296,6 +305,8 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
 
     if (this.intentionalClose) return this.abandonConnect();
     if (!this.startedAt) this.startedAt = Date.now();
+    this.lastActivityAt = Date.now();
+    this.startLimitTimer();
     this.reconnects = 0;
     this.setStatus("connected");
     this.emit("modelChanged", model);
@@ -465,7 +476,37 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
     this.micStream?.getTracks().forEach((t) => (t.enabled = !muted));
   }
 
+  /** Every five seconds: is it time to warn, or to say goodbye? */
+  private startLimitTimer() {
+    if (this.limitTimer) return;
+    this.limitTimer = setInterval(() => {
+      const action = nextLimitAction({
+        startedAt: this.startedAt,
+        lastActivityAt: this.lastActivityAt,
+        warned: this.warned,
+        busy: this.assistantResponding || this.toolsInFlight > 0,
+        endingAt: this.endingAt,
+        now: Date.now(),
+      });
+      if (action === "warn") {
+        this.warned = true;
+        this.send({ type: "response.create", response: { instructions: WARN_LINE } });
+      } else if (action === "idle-goodbye" || action === "max-goodbye") {
+        // Said first, then ended: on the reply's response.done, or after
+        // twelve seconds if the reply never comes.
+        this.endingAt = Date.now();
+        this.send({
+          type: "response.create",
+          response: { instructions: action === "idle-goodbye" ? IDLE_GOODBYE : MAX_GOODBYE },
+        });
+        setTimeout(() => void this.disconnect(), 12_000);
+      }
+    }, 5_000);
+  }
+
   async disconnect(): Promise<void> {
+    if (this.limitTimer) clearInterval(this.limitTimer);
+    this.limitTimer = null;
     this.intentionalClose = true;
     this.mouth?.dispose();
     this.mouth = null;
@@ -489,6 +530,7 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
           seconds,
           inputTokens: this.inputTokens,
           outputTokens: this.outputTokens,
+          split: this.split,
         }),
       }).catch(() => {});
     }
@@ -554,6 +596,7 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
       /* leave empty */
     }
     this.emit("toolStarted", name);
+    this.toolsInFlight += 1;
     // Whatever happens, the model gets an output and the UI a toolResult: a
     // thrown fetch used to leave the call waiting on an answer that never came.
     let body: { result?: unknown; toast?: unknown; uiAction?: unknown } = {
@@ -582,6 +625,7 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
         output: JSON.stringify(body.result ?? {}),
       },
     });
+    this.toolsInFlight -= 1;
     this.send({ type: "response.create" });
     this.emit(
       "toolResult",
@@ -596,6 +640,14 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
     const t = event.type;
     this.eventLog.push({ t: Date.now(), type: t });
     if (this.eventLog.length > 200) this.eventLog.splice(0, this.eventLog.length - 200);
+    // Anyone speaking, or a reply on its way, keeps the call alive.
+    if (
+      t.startsWith("input_audio_buffer.speech") ||
+      t.startsWith("conversation.item.input_audio_transcription") ||
+      t.startsWith("response.")
+    ) {
+      this.lastActivityAt = Date.now();
+    }
 
     if (t === "error") {
       // Never kill a live call over a server-side event error, but never
@@ -620,13 +672,20 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
     if (t === "response.done") {
       this.assistantResponding = false;
       this.emit("assistantSpeaking", false);
+      // The goodbye has been said: give the audio a moment to play out.
+      if (this.endingAt !== null) setTimeout(() => void this.disconnect(), 2_500);
       const response = event.response as {
         status?: string;
         status_details?: unknown;
         usage?: {
           input_tokens?: number;
           output_tokens?: number;
-          output_token_details?: { audio_tokens?: number };
+          input_token_details?: {
+            text_tokens?: number;
+            audio_tokens?: number;
+            cached_tokens_details?: { text_tokens?: number; audio_tokens?: number };
+          };
+          output_token_details?: { audio_tokens?: number; text_tokens?: number };
         };
       };
       this.lastResponseDone = {
@@ -639,8 +698,15 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
         console.warn("[realtime] response ended:", JSON.stringify(this.lastResponseDone));
       }
       if (response?.usage) {
-        this.inputTokens += response.usage.input_tokens ?? 0;
-        this.outputTokens += response.usage.output_tokens ?? 0;
+        const u = response.usage;
+        this.inputTokens += u.input_tokens ?? 0;
+        this.outputTokens += u.output_tokens ?? 0;
+        this.split.textIn += u.input_token_details?.text_tokens ?? 0;
+        this.split.audioIn += u.input_token_details?.audio_tokens ?? 0;
+        this.split.cachedTextIn += u.input_token_details?.cached_tokens_details?.text_tokens ?? 0;
+        this.split.cachedAudioIn += u.input_token_details?.cached_tokens_details?.audio_tokens ?? 0;
+        this.split.textOut += u.output_token_details?.text_tokens ?? 0;
+        this.split.audioOut += u.output_token_details?.audio_tokens ?? 0;
       }
       return;
     }

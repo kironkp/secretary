@@ -238,6 +238,15 @@ Selection: `plan = validate(await planFromLLM(s)) ?? validate(planFromRules(s)) 
   role, signals shape, registry table, the 10 hard rules (mirror of §1
   invariants + "on any doubt emit DEFAULT_PLAN"), DEFAULT_PLAN, output contract.
 - Log every (signals_hash, plan, accepted|reverted|pinned_over) for tuning.
+- **One call per situation, not per process (2026-10-06, SEC-A004).** When
+  the planner settles on the head plan (its refinement came back the same,
+  was refused by the validator, or the call was not made), the head is
+  stamped with the current signals hash, so the next render is a cache hit
+  even after a restart; before, only the in-memory cache stopped a re-call.
+  Plans are compared with their keys sorted: jsonb returns a stored plan's
+  keys reordered, and a plain string compare called identical plans
+  different. The Claude planner is Sonnet (`PLANNER_CLAUDE_MODEL`), not the
+  user's brain model: it runs in the background and nobody reads its prose.
 
 ## 7. Slow loop (v3)
 

@@ -447,7 +447,13 @@ already returns the ledes and, for one project, the Today line. Rules:
 Plain-language rules (validated in §4 step 4): the real title the first time
 a thing is named; nickname and number together for anything with both
 ("Lenses (2110)"); days as digits; no shorthand the user has not used in
-their own titles or messages; no banned words.
+their own titles or messages; no banned words. Dates as dates, never
+countdowns (2026-10-06, SEC-A004): "due Thu, Oct 22", not "in 3 days" or
+"42 days late". The words are kept until the next read, and a read no
+longer happens every day; the shell computes any "3d late" from the stored
+date at render. A countdown the model writes anyway is turned into its date
+from the run's clock before validation (dates.ts); "today" and "tomorrow"
+stay, since a read happens when they turn over.
 
 ## 8. Triggers
 

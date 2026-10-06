@@ -126,6 +126,8 @@ async function describeAttachments(
 ): Promise<string | null> {
   if (atts.length === 0) return null;
   try {
+    const { paidCallAllowed } = await import("@/lib/spend-guard");
+    if (!(await paidCallAllowed(userId, "email")).ok) return null;
     const { anthropicFor, claudeBrainEnabled } = await import("@/lib/anthropic");
     const client = claudeBrainEnabled() ? await anthropicFor(userId) : null;
     if (!client) return null;

@@ -3,11 +3,10 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
 import { alertProviderOutOfCredit } from "@/lib/spend-guard";
-import { db } from "@/lib/db";
-import { usage } from "@/lib/db/schema";
 import { isErrorResponse, requireSession } from "@/lib/api";
 import { checkTranscribeQuota } from "@/lib/rate-limit";
 import { openai, TRANSCRIBE_LANGUAGE, TRANSCRIBE_MODEL } from "@/lib/openai";
+import { recordUsage } from "@/lib/usage";
 
 const MAX_BYTES = 25 * 1024 * 1024;
 
@@ -35,11 +34,12 @@ export async function POST(req: Request) {
       model: TRANSCRIBE_MODEL,
       language: TRANSCRIBE_LANGUAGE,
     });
-    await db.insert(usage).values({
+    // Priced per minute (SEC-A004); a bare insert left it at $0.
+    await recordUsage({
       userId: user.id,
       kind: "transcribe",
       model: TRANSCRIBE_MODEL,
-      seconds: Math.round(file.size / 16000), // rough estimate
+      seconds: Math.max(1, Math.round(file.size / 16000)), // rough estimate
     });
     return NextResponse.json({ text: result.text });
   } catch (e) {

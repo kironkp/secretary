@@ -7,6 +7,44 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 ---
 
+## v0.28, part 2 — Spend you can see, a net under all of it, and what Kiron feels kept (2026-10-06)
+
+this commit
+
+The second half of the spend review, as sec plan approved it: cut waste,
+keep quality where Kiron feels it (voice stays gpt-realtime-2.1 full, chat
+stays Fable, the painter and consult_brain unchanged).
+
+- Every paid call is priced. A voice call is priced when it ends, from the
+  billed split (text and audio, cached and fresh; lib/pricing.ts
+  priceRealtime): 20 of 22 calls in 30 days were stored at $0, and cached
+  audio is $0.40/M against $32/M fresh. The call's own transcription is on
+  the same row. Read-aloud and ElevenLabs are "speech" (per minute, per
+  character) and no longer use up voice-call slots; dictation is priced.
+- A net under everything: BACKGROUND_DAILY_CAP_USD ($4) over all work that
+  runs with no one asking (understanding, extraction, suggestions, the
+  dashboard planner), and SPEND_KILL=true, which lets through only the
+  user's own chat, calls, dictation and read-aloud. Each pushes once a day.
+- Voice: two minutes with no one speaking ends the call, and a call ends at
+  30 minutes, warned at 25; both are said out loud first, never mid-reply
+  or mid-tool (lib/realtime/session-limits.ts).
+- Chat caches its prompt: the briefing's per-minute clock line is last, and
+  Claude gets the stable instructions and the live briefing as two cached
+  blocks. Before, the clock at the top made every turn a full cache write.
+- Extraction runs on Sonnet at low effort, max_tokens 3,000: production's
+  p99 was 1,984 output tokens over 322 calls (it ran on Opus at high, 16,000).
+- The dashboard planner is Sonnet and asks once per situation, even across
+  restarts (a stamped head; plans compared with sorted keys, since jsonb
+  reorders them and every plan compared "changed").
+- "Ask me more" reads only projects whose data changed.
+- Understanding writes dates, not countdowns; a countdown the model writes
+  anyway becomes its date before it is stored (dates.ts).
+
+Not covered by a test: the voice limits' wiring in the browser session class
+(the rules are tested; the class needs WebRTC), the Interview tab's wording.
+
+---
+
 ## v0.28 — No stupid spending, part 1: background calls that paid for nothing (2026-10-06)
 
 this commit
