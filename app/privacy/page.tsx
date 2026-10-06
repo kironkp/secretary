@@ -12,7 +12,7 @@ export default function PrivacyPage() {
   return (
     <LegalPage title="Privacy policy">
       <p>
-        {LEGAL.app} is a personal assistant app built and operated by {LEGAL.operator} for his own use. It is not a
+        {LEGAL.app} is a personal assistant app built and operated by {LEGAL.operator} for their own use. It is not a
         product offered to the public. This page says what it keeps, what it does with Google data, and who else
         processes it.
       </p>
@@ -24,8 +24,12 @@ export default function PrivacyPage() {
         <li>Conversations: what you type or say to it and what it answers, kept as your history; files you attach.</li>
         <li>Usage records: how many AI tokens each request used and what it cost, so spending can be capped.</li>
         <li>
-          Connected-account tokens, such as the token that lets it reach your Google account. These are encrypted
-          (AES-GCM) before they are stored.
+          Connected-account secrets: the tokens of a Google Calendar and Gmail connection, and any AI provider key
+          you connect. These are encrypted (AES-GCM) before they are stored.
+        </li>
+        <li>
+          If you sign in with Google, the sign-in tokens Google issues for that (an access token and an ID token,
+          which allow reading your basic profile) are stored with your account. These are not encrypted today.
         </li>
       </ul>
       <p>It is stored in a database hosted on Heroku. It is kept until you delete it or the account is removed.</p>

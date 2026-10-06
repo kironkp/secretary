@@ -5,7 +5,8 @@
 // the pages point to that consent-screen contact instead of inventing one.
 export const LEGAL = {
   app: "Secretary",
-  operator: "Kiron",
+  // Not a person's name: the owner's choice (SEC-A010 review).
+  operator: "the app's owner",
   updated: "October 6, 2026",
 } as const;
 

@@ -54,8 +54,9 @@ describe("what the privacy policy says", () => {
   it("says what is stored, what Google data is touched, that it never sends, who processes it, and how to revoke", () => {
     const t = text(renderToStaticMarkup(PrivacyPage()));
     for (const fact of [
-      "for his own use",
-      "encrypted (AES-GCM)",
+      "for their own use",
+      "the tokens of a Google Calendar and Gmail connection, and any AI provider key you connect. These are encrypted (AES-GCM)",
+      "the sign-in tokens Google issues for that (an access token and an ID token, which allow reading your basic profile) are stored with your account. These are not encrypted today.",
       "creates, changes and deletes events",
       "It never sends email",
       "Email messages are not stored in the app's database",
@@ -81,11 +82,23 @@ describe("what the privacy policy says", () => {
   });
 });
 
+describe("no one is named", () => {
+  it("the owner is not named anywhere on either page (their choice)", () => {
+    for (const html of [renderToStaticMarkup(PrivacyPage()), renderToStaticMarkup(TermsPage())]) {
+      expect(text(html)).not.toMatch(/Kiron/i);
+      expect(text(html)).toContain("the app's owner");
+    }
+    for (const path of ["app/privacy/page.tsx", "app/terms/page.tsx", "lib/legal.ts", "components/legal/legal-page.tsx"]) {
+      expect(readFileSync(path, "utf8"), path).not.toMatch(/Kiron/i);
+    }
+  });
+});
+
 describe("what the terms say", () => {
   it("personal use, never sends email, links the privacy policy", () => {
     const html = renderToStaticMarkup(TermsPage());
     const t = text(html);
-    expect(t).toContain("for his own use");
+    expect(t).toContain("for their own use");
     expect(t).toContain("It never sends email");
     expect(html).toContain('href="/privacy"');
   });

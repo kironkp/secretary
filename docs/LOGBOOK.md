@@ -17,8 +17,10 @@ privacy policy and terms at public addresses; /privacy and /terms were 404.
 - Both are plain pages outside the signed-in group (its layout is the only
   sign-in gate; there is no middleware), with no scripts and no tracking,
   readable on a phone. The sign-in pages link them.
-- What they say is what the code does: what is stored (connected-account
-  tokens encrypted with AES-GCM), Google Calendar events created, changed
+- What they say is what the code does: what is stored (the Calendar and
+  Gmail connection's tokens and connected AI keys encrypted with AES-GCM;
+  the Google sign-in tokens better-auth keeps, said plainly to be not
+  encrypted today, until SEC-A013), Google Calendar events created, changed
   and deleted on request, Gmail read, searched and drafted on request and
   never sent, no email stored in the database, the services that process
   data (Anthropic and OpenAI, ElevenLabs for voice, Resend, Heroku, browser
@@ -26,9 +28,10 @@ privacy policy and terms at public addresses; /privacy and /terms were 404.
   Google) and revoking at myaccount.google.com/permissions, and Google's own
   Limited Use sentence from its Workspace API user data policy, word for
   word with its links.
-- The contact address is Kiron's to publish: PUBLIC_CONTACT_EMAIL, read per
-  request. Unset, the pages point to the developer contact on the Google
-  consent screen.
+- No one is named: the operator is "the app's owner", and there is no
+  contact address on the pages (the owner's choice); they point to the
+  developer contact on the Google consent screen. PUBLIC_CONTACT_EMAIL can
+  print one if that ever changes.
 
 ---
 

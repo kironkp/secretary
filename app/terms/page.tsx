@@ -11,8 +11,8 @@ export default function TermsPage() {
   return (
     <LegalPage title="Terms of use">
       <p>
-        {LEGAL.app} is a personal assistant app built and operated by {LEGAL.operator} for his own use. It is not
-        offered to the public, and there is no charge for it.
+        {LEGAL.app} is a personal assistant app built and operated by {LEGAL.operator} for their own use. It is
+        not offered to the public, and there is no charge for it.
       </p>
       <h2>Using it</h2>
       <ul>
