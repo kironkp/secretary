@@ -29,9 +29,10 @@ export async function POST(req: Request) {
   // Provenance: anchor to the latest user message in this (owned) conversation.
   let conversationId: string | undefined;
   let anchorMessageId: string | undefined;
+  let readMail = false;
   if (parsed.conversationId) {
     const [owned] = await db
-      .select({ id: conversations.id })
+      .select({ id: conversations.id, untrustedAt: conversations.untrustedAt })
       .from(conversations)
       .where(
         and(eq(conversations.id, parsed.conversationId), eq(conversations.userId, user.id))
@@ -39,6 +40,7 @@ export async function POST(req: Request) {
       .limit(1);
     if (owned) {
       conversationId = owned.id;
+      readMail = owned.untrustedAt !== null;
       const [lastUserMsg] = await db
         .select({ id: messages.id })
         .from(messages)
@@ -65,6 +67,7 @@ export async function POST(req: Request) {
       anchorMessageId,
       surface: parsed.surface,
       attachmentCount: 0,
+      untrusted: readMail,
     }),
     parsed.name,
     parsed.args

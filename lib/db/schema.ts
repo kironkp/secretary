@@ -184,6 +184,34 @@ export const conversations = pgTable("conversations", {
   // mailbox intake. Email threads never hijack the active chat (review
   // finding) — they're reachable via ?c= links and history search.
   channel: text("channel"),
+  // When mail was first read into this conversation (SEC-A005). From then on
+  // every write a tool would make here is a proposal, done only after the
+  // user's own next message says yes (pendingActions): mail is outside text
+  // that could be asking for anything.
+  untrustedAt: timestamp("untrusted_at", { withTimezone: true }),
+});
+
+// A write proposed in a conversation that read mail (SEC-A005): the tool and
+// its arguments exactly as the model asked, sealed with a digest. Only the
+// user's next own message after the reply that asked can confirm it, within
+// ten minutes; it runs unchanged or not at all.
+export const pendingActions = pgTable("pending_actions", {
+  id: text("id").primaryKey().$defaultFn(uuid),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  conversationId: text("conversation_id").references(() => conversations.id, { onDelete: "cascade" }),
+  tool: text("tool").notNull(),
+  args: jsonb("args").notNull(),
+  /** What it would do, in words, for the reply that asks. */
+  summary: text("summary").notNull(),
+  /** The user message of the turn that proposed it (provenance; the yes is found by answerTo). */
+  afterMessageId: text("after_message_id"),
+  /** HMAC over id, tool and args (lib/secretary/proposals.ts): a changed row is refused. */
+  digest: text("digest").notNull(),
+  status: text("status").$type<"pending" | "done" | "refused">().notNull().default("pending"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
 });
 
 // A message's id doubles as the provenance anchor: task/event provenance links

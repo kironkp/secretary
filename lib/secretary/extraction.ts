@@ -257,6 +257,25 @@ const APPLY_CAPS = {
   ambiguities: 5,
 } as const;
 
+
+/**
+ * What extraction reads: the user and the secretary, in order. Once mail
+ * has been read in the conversation (SEC-A005) the secretary's lines from
+ * then on may be mail retold, so they are left out: nothing from mail
+ * becomes a task or an event without the user's yes. The user's own words
+ * stay.
+ */
+export function extractionTranscript(
+  rows: { role: string; content: string; createdAt: Date }[],
+  untrustedAt: Date | null
+): string {
+  return rows
+    .filter((m) => m.role !== "tool")
+    .filter((m) => m.role === "user" || !untrustedAt || m.createdAt < untrustedAt)
+    .map((m) => `${m.role === "user" ? "User" : "Secretary"}: ${m.content}`)
+    .join("\n");
+}
+
 export async function applyExtraction(
   userId: string,
   conversationId: string,
@@ -498,10 +517,7 @@ async function extractOnce(
     // so what was said is read once the cap allows.
     if (!(await paidCallAllowed(userId, "extraction")).ok) return null;
 
-    const transcript = rows
-      .filter((m) => m.role !== "tool")
-      .map((m) => `${m.role === "user" ? "User" : "Secretary"}: ${m.content}`)
-      .join("\n");
+    const transcript = extractionTranscript(rows, conv.untrustedAt);
 
     const knownTasks = await db
       .select({ title: tasks.title, dueAt: tasks.dueAt })

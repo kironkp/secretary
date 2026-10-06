@@ -69,6 +69,8 @@ export async function POST(req: Request) {
   // Conversation: reuse if owned, else create (text mode).
   let conversationId = parsed.conversationId ?? null;
   let storedResponseId: string | null = null;
+  // Mail has been read into this conversation (SEC-A005): writes need a yes.
+  let readMail = false;
   if (conversationId) {
     const [owned] = await db
       .select()
@@ -76,7 +78,10 @@ export async function POST(req: Request) {
       .where(and(eq(conversations.id, conversationId), eq(conversations.userId, user.id)))
       .limit(1);
     if (!owned) conversationId = null;
-    else storedResponseId = owned.lastResponseId;
+    else {
+      storedResponseId = owned.lastResponseId;
+      readMail = owned.untrustedAt !== null;
+    }
   }
   if (!conversationId) {
     const [conv] = await db
@@ -171,6 +176,7 @@ export async function POST(req: Request) {
     conversationId,
     anchorMessageId: userMessage.id,
     attachmentCount: attachRows.length,
+    untrusted: readMail,
   });
   const canChain = Boolean(storedResponseId) && prior.length > 0 && prior[prior.length - 1].mode === "text";
   let input: InputItem[] = canChain

@@ -208,6 +208,13 @@ procrastination scorer. Needs the database running.
   for every origin (`http://localhost:3000`, the Heroku URL). While the
   consent screen is in Testing, the user must be a test user and Google
   expires the grant after 7 days; Settings then says Disconnected → Reconnect.
+- **Gmail** (Settings → Connect Gmail; the same client and the same redirect
+  URI): enable the Gmail API and add the scopes
+  `https://www.googleapis.com/auth/gmail.readonly` and
+  `https://www.googleapis.com/auth/gmail.compose` to the consent screen. Both
+  are restricted: an app for your own use (under 100 users) runs unverified,
+  behind Google's warning screen. Publishing status is the same as Calendar's
+  (one OAuth app). The app reads on request and saves drafts; it never sends.
 - **Apple**: needs an Apple Developer account and an **https** deploy (Apple
   rejects http://localhost). Same pattern: keys in env → button appears.
 
