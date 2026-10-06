@@ -42,7 +42,10 @@ import {
   listDynamicComponents,
   rejectProposal,
 } from "@/lib/layout/slow-loop";
-import { dayRangeInTz } from "@/lib/time";
+import { dayRangeInTz, parseInTz } from "@/lib/time";
+import { deleteGoogleEvent, insertGoogleEvent, patchGoogleEvent } from "@/lib/google/calendar";
+import { connectionStatus, GoogleUnavailable, NOT_CONNECTED_LINE } from "@/lib/google/connection";
+import { describeRecurrence, normalizeRecurrence } from "./rrule";
 import { defaultPlan, sectionKey, type LayoutPlan, type PlanSection } from "@/lib/layout/plan";
 import { getPlanHead, getPreferences, savePlanAsHead } from "@/lib/layout/plan-store";
 import { REGISTRY_COMPONENTS, REGISTRY_VERSION } from "@/lib/layout/registry";
@@ -71,7 +74,34 @@ export type ToolContext = {
    * where answer_question also returns the next question to ask.
    */
   surface?: "interview";
+  /**
+   * Whether this call may write to the user's real Google Calendar (SEC-A002).
+   * "now": a live voice or chat turn with nothing attached, the user's own
+   * words. "ask": a live turn that carries an attachment; a flyer's text is
+   * outside content that could carry instructions, so the event stays in the
+   * app and the reply asks before it goes to Google. Absent: every other
+   * caller (an understanding answer, a script): the app only.
+   */
+  calendarSync?: "now" | "ask";
 };
+
+/**
+ * The context for a tool called in a live turn, the same for voice
+ * (api/secretary/tools) and chat (api/chat, both models): the only place a
+ * turn's attachments decide whether Google Calendar is written now or asked
+ * about first (ToolContext.calendarSync).
+ */
+export function liveTurnContext(turn: {
+  userId: string;
+  timezone: string;
+  conversationId?: string;
+  anchorMessageId?: string;
+  surface?: ToolContext["surface"];
+  attachmentCount: number;
+}): ToolContext {
+  const { attachmentCount, ...ctx } = turn;
+  return { ...ctx, calendarSync: attachmentCount > 0 ? "ask" : "now" };
+}
 
 /** UI-only side channel (SPEC §7.6 auto-open): the shell acts on it; it never
  *  reaches the model — only `result` is serialized into the tool result. */
@@ -85,6 +115,14 @@ export type ToolOutcome = {
 
 const OPEN_STATUSES = ["inbox", "todo", "in_progress", "blocked"] as const;
 
+/**
+ * What the model is told about a reminder time. It said "logged-only" until
+ * 2026-10-06, after lib/push.ts had long been pushing every due task and
+ * event reminder to the user's devices: the model was telling Kiron a
+ * reminder would not reach his phone when it would.
+ */
+const REMINDER_DELIVERY = "push notification to the user's phone at each time";
+
 function fmtDate(d: Date | null, tz: string, withTime = true) {
   if (!d) return null;
   return new Intl.DateTimeFormat("en-US", {
@@ -96,19 +134,20 @@ function fmtDate(d: Date | null, tz: string, withTime = true) {
   }).format(d);
 }
 
-function parseWhen(iso: string | undefined): Date | undefined {
+/** A tool's ISO time, read in the user's timezone when it carries no offset (lib/time.ts parseInTz). */
+function parseWhen(iso: string | undefined, tz: string): Date | undefined {
   if (!iso) return undefined;
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) throw new Error(`Unparseable date: ${iso}`);
+  const d = parseInTz(iso, tz);
+  if (!d) throw new Error(`Unparseable date: ${iso}`);
   return d;
 }
 
 /** Validate + normalize reminder timestamps. Undefined = leave unchanged. */
-function parseReminders(list: string[] | undefined): string[] | undefined {
+function parseReminders(list: string[] | undefined, tz: string): string[] | undefined {
   if (list === undefined) return undefined;
   return list.map((iso) => {
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) throw new Error(`Unparseable reminder time: ${iso}`);
+    const d = parseInTz(iso, tz);
+    if (!d) throw new Error(`Unparseable reminder time: ${iso}`);
     return d.toISOString();
   });
 }
@@ -144,6 +183,74 @@ async function findEvent(userId: string, ref: string) {
     .orderBy(desc(events.startsAt))
     .limit(1);
   return any[0] ?? null;
+}
+
+// --------------------------------------------------------------------------
+// Google Calendar (SEC-A002): the one-way copy of an app event
+// --------------------------------------------------------------------------
+
+const GOOGLE_NEEDS_PLAIN_TURN =
+  "That changes the user's Google Calendar, which needs their go-ahead in a plain message with nothing attached. Ask them first.";
+
+type GoogleOutcome = {
+  /** added: on Google now. ask: waiting for the user's yes. app-only: this caller never writes to Google. */
+  state: "added" | "ask" | "app-only" | "not-connected" | "disconnected" | "failed";
+  /** The sentence to say when it did not reach Google. */
+  line: string | null;
+};
+
+/** Google's own words for a failure, never more (no token is ever in one). */
+function googleErrorText(e: unknown): string {
+  return (e instanceof Error ? e.message : String(e)).slice(0, 160);
+}
+
+/** Make or update the Google copy of `event` and record how it went on the row. */
+async function sendToGoogle(userId: string, event: typeof events.$inferSelect): Promise<GoogleOutcome> {
+  try {
+    const googleEventId = event.googleEventId
+      ? (await patchGoogleEvent(userId, event.googleEventId, event), event.googleEventId)
+      : await insertGoogleEvent(userId, event);
+    await db.update(events).set({ googleEventId, googleSync: "synced" }).where(eq(events.id, event.id));
+    return { state: "added", line: null };
+  } catch (e) {
+    await db.update(events).set({ googleSync: "failed" }).where(eq(events.id, event.id));
+    if (e instanceof GoogleUnavailable) {
+      return { state: e.kind === "not-connected" ? "not-connected" : "disconnected", line: e.message };
+    }
+    console.error(`google: event ${event.id} not sent: ${googleErrorText(e)}`);
+    return { state: "failed", line: `Google Calendar refused it (${googleErrorText(e)}).` };
+  }
+}
+
+/** Where a new event goes besides the app, by who is asking (ToolContext.calendarSync). */
+async function googleForNewEvent(ctx: ToolContext, event: typeof events.$inferSelect): Promise<GoogleOutcome> {
+  if (!ctx.calendarSync) return { state: "app-only", line: null };
+  const status = await connectionStatus(ctx.userId);
+  if (status.state === "not-connected") return { state: "not-connected", line: NOT_CONNECTED_LINE };
+  if (ctx.calendarSync === "ask") {
+    await db.update(events).set({ googleSync: "pending" }).where(eq(events.id, event.id));
+    return { state: "ask", line: null };
+  }
+  return sendToGoogle(ctx.userId, event);
+}
+
+/** What the assistant says back: what was made, when, how it repeats, and where it went. */
+function eventReadBack(event: typeof events.$inferSelect, tz: string, google: GoogleOutcome): string {
+  const time = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" }).format(
+    event.startsAt
+  );
+  const day = fmtDate(event.startsAt, tz, false);
+  const repeats = describeRecurrence(event.recurrence);
+  const when = repeats ? `${repeats} at ${time}, starting ${day}` : `${day} at ${time}`;
+  const where =
+    google.state === "added"
+      ? "It's on your Google Calendar."
+      : google.state === "ask"
+        ? "It's saved in Secretary. Add it to your Google Calendar?"
+        : google.line
+          ? `It's saved in Secretary only. ${google.line}`
+          : "It's saved in Secretary.";
+  return `${event.title}, ${when}. ${where}`;
 }
 
 async function findTask(userId: string, ref: string) {
@@ -299,7 +406,7 @@ type Args = Record<string, unknown>;
 const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolOutcome>> = {
   async create_task(ctx, args) {
     const a = toolSchemas.create_task.parse(args);
-    const dueAtGuard = parseWhen(a.due_at) ?? null;
+    const dueAtGuard = parseWhen(a.due_at, ctx.timezone) ?? null;
     // Idempotency guard: a re-issued create (double tool call, reconnect)
     // must return the existing task, never insert a twin.
     const openNow = await db
@@ -342,8 +449,8 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
       };
     }
     const { project, matched } = await resolveProject(ctx.userId, a.project);
-    const dueAt = parseWhen(a.due_at);
-    const reminders = parseReminders(a.reminders) ?? [];
+    const dueAt = parseWhen(a.due_at, ctx.timezone);
+    const reminders = parseReminders(a.reminders, ctx.timezone) ?? [];
     const [task] = await db
       .insert(tasks)
       .values({
@@ -373,7 +480,7 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         project_match: matched,
         ...(task.stages.length ? { stages: task.stages.map((s) => s.name) } : {}),
         ...(task.recurrence ? { recurrence: task.recurrence } : {}),
-        ...(reminders.length ? { reminders, delivery: "logged-only" } : {}),
+        ...(reminders.length ? { reminders, delivery: REMINDER_DELIVERY } : {}),
       },
       toast: { icon: "✓", text: `Added: ${task.title}${due ? ` — due ${due}` : ""}` },
     };
@@ -399,7 +506,7 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     }
 
     if (a.due_at) {
-      const newDue = parseWhen(a.due_at)!;
+      const newDue = parseWhen(a.due_at, ctx.timezone)!;
       if (task.dueAt && newDue.getTime() > task.dueAt.getTime()) {
         postponed = true;
         updates.postponedCount = task.postponedCount + 1;
@@ -414,7 +521,7 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     if (a.title) updates.title = a.title;
     if (a.notes) updates.notes = a.notes;
     if (a.priority !== undefined) updates.priority = a.priority;
-    const newReminders = parseReminders(a.reminders);
+    const newReminders = parseReminders(a.reminders, ctx.timezone);
     if (newReminders !== undefined) updates.reminders = newReminders;
     if (a.recurrence !== undefined) {
       updates.recurrence = a.recurrence === "none" ? null : a.recurrence;
@@ -508,7 +615,7 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         ...(a.recurrence !== undefined ? { recurrence: updated.recurrence } : {}),
         ...(spawnedNext ? { next_occurrence_due: spawnedNext } : {}),
         ...(newReminders !== undefined
-          ? { reminders: updated.reminders, delivery: "logged-only" }
+          ? { reminders: updated.reminders, delivery: REMINDER_DELIVERY }
           : {}),
       },
       toast: stageAdvanced
@@ -677,7 +784,8 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
 
   async create_event(ctx, args) {
     const a = toolSchemas.create_event.parse(args);
-    const startsAtGuard = parseWhen(a.starts_at)!;
+    const startsAt = parseWhen(a.starts_at, ctx.timezone)!;
+    const recurrence = normalizeRecurrence(a.recurrence);
     // Same idempotency guard as create_task.
     const upcomingNow = await db
       .select()
@@ -685,11 +793,7 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
       .where(
         and(eq(events.userId, ctx.userId), gte(events.startsAt, new Date(Date.now() - 86400000)))
       );
-    const twin = findDuplicateEvent(
-      { title: a.title, startsAt: startsAtGuard },
-      upcomingNow,
-      CREATE_GUARD_SIMILARITY
-    );
+    const twin = findDuplicateEvent({ title: a.title, startsAt }, upcomingNow, CREATE_GUARD_SIMILARITY);
     if (twin) {
       return {
         result: {
@@ -697,11 +801,12 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
           title: twin.title,
           starts_at: twin.startsAt,
           already_existed: true,
+          on_google: twin.googleSync === "synced",
           note: "This event already exists — nothing was created. Use update_event to change it.",
         },
       };
     }
-    const reminders = parseReminders(a.reminders) ?? [];
+    const reminders = parseReminders(a.reminders, ctx.timezone) ?? [];
     const { project, matched } = await resolveProject(ctx.userId, a.project);
     const [event] = await db
       .insert(events)
@@ -709,28 +814,35 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         userId: ctx.userId,
         title: a.title,
         projectId: project?.id,
-        startsAt: parseWhen(a.starts_at)!,
-        endsAt: parseWhen(a.ends_at),
+        startsAt,
+        endsAt: parseWhen(a.ends_at, ctx.timezone),
         location: a.location,
         notes: a.notes,
         reminders,
+        recurrence,
+        timeZone: ctx.timezone,
         source: ctx.conversationId ? "spoken" : "typed",
         conversationId: ctx.conversationId,
         messageId: ctx.anchorMessageId,
       })
       .returning();
+    const google = await googleForNewEvent(ctx, event);
     return {
       result: {
         event_id: event.id,
         title: event.title,
         starts_at: event.startsAt,
+        ...(recurrence.length ? { repeats: describeRecurrence(recurrence) } : {}),
         project: project?.name ?? null,
         project_match: matched,
-        ...(reminders.length ? { reminders, delivery: "logged-only" } : {}),
+        ...(reminders.length ? { reminders, delivery: REMINDER_DELIVERY } : {}),
+        google: google.state,
+        read_back: eventReadBack(event, ctx.timezone, google),
+        undo: `delete_event with event "${event.id}"`,
       },
       toast: {
         icon: "📅",
-        text: `${event.title} — ${fmtDate(event.startsAt, ctx.timezone)}`,
+        text: `${event.title} — ${fmtDate(event.startsAt, ctx.timezone)}${google.state === "added" ? " · Google Calendar" : ""}`,
       },
     };
   },
@@ -739,13 +851,17 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     const a = toolSchemas.update_event.parse(args);
     const event = await findEvent(ctx.userId, a.event);
     if (!event) return { result: { error: `No event matching "${a.event}"` } };
+    if (event.googleEventId && ctx.calendarSync !== "now") return { result: { error: GOOGLE_NEEDS_PLAIN_TURN } };
 
     const updates: Partial<typeof events.$inferInsert> = {};
     if (a.title) updates.title = a.title;
-    if (a.starts_at) updates.startsAt = parseWhen(a.starts_at)!;
-    if (a.ends_at) updates.endsAt = parseWhen(a.ends_at);
+    if (a.starts_at) updates.startsAt = parseWhen(a.starts_at, ctx.timezone)!;
+    if (a.ends_at) updates.endsAt = parseWhen(a.ends_at, ctx.timezone);
     if (a.location !== undefined) updates.location = a.location;
     if (a.notes !== undefined) updates.notes = a.notes;
+    if (a.recurrence !== undefined) {
+      updates.recurrence = a.recurrence.trim().toLowerCase() === "none" ? [] : normalizeRecurrence(a.recurrence);
+    }
     let movedTo: string | null | undefined;
     let projectMatch: ProjectResolution["matched"] = null;
     if (a.project !== undefined) {
@@ -755,7 +871,7 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
       movedTo = res.project?.name ?? null;
       projectMatch = res.matched;
     }
-    const newReminders = parseReminders(a.reminders);
+    const newReminders = parseReminders(a.reminders, ctx.timezone);
     if (newReminders !== undefined) updates.reminders = newReminders;
     if (Object.keys(updates).length === 0) {
       return { result: { error: "Nothing to change — give a field to update" } };
@@ -766,6 +882,9 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
       .set(updates)
       .where(and(eq(events.userId, ctx.userId), eq(events.id, event.id)))
       .returning();
+    // The Google copy follows, one way. A refusal is said, not swallowed: the
+    // change is in the app, and the next yes (add_event_to_google) retries.
+    const google = updated.googleEventId ? await sendToGoogle(ctx.userId, updated) : null;
 
     return {
       result: {
@@ -773,9 +892,13 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         title: updated.title,
         starts_at: updated.startsAt,
         notes: updated.notes,
+        ...(updated.recurrence.length ? { repeats: describeRecurrence(updated.recurrence) } : {}),
         ...(movedTo !== undefined ? { project: movedTo, project_match: projectMatch } : {}),
         ...(newReminders !== undefined
-          ? { reminders: updated.reminders, delivery: "logged-only" }
+          ? { reminders: updated.reminders, delivery: REMINDER_DELIVERY }
+          : {}),
+        ...(google
+          ? { google: google.state === "added" ? "updated" : google.state, ...(google.line ? { google_problem: google.line } : {}) }
           : {}),
       },
       toast: {
@@ -792,10 +915,43 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     const a = toolSchemas.delete_event.parse(args);
     const event = await findEvent(ctx.userId, a.event);
     if (!event) return { result: { error: `No event matching "${a.event}"` } };
+    if (event.googleEventId) {
+      if (ctx.calendarSync !== "now") return { result: { error: GOOGLE_NEEDS_PLAIN_TURN } };
+      // Google first: an event gone from the app but left on Google is the
+      // one the user would never find again to remove.
+      try {
+        await deleteGoogleEvent(ctx.userId, event.googleEventId);
+      } catch (e) {
+        return {
+          result: {
+            error: `Not removed: ${e instanceof GoogleUnavailable ? e.message : `Google Calendar refused (${googleErrorText(e)}).`} It is still on both calendars.`,
+          },
+        };
+      }
+    }
     await db.delete(events).where(and(eq(events.userId, ctx.userId), eq(events.id, event.id)));
     return {
-      result: { deleted: event.title },
+      result: { deleted: event.title, ...(event.googleEventId ? { removed_from_google: true } : {}) },
       toast: { icon: "✕", text: `Removed event: ${event.title}` },
+    };
+  },
+
+  async add_event_to_google(ctx, args) {
+    const a = toolSchemas.add_event_to_google.parse(args);
+    // The yes has to be the user's own, in a later turn: in the turn that
+    // carried the flyer, the flyer's text could be asking for this.
+    if (ctx.calendarSync !== "now") return { result: { error: GOOGLE_NEEDS_PLAIN_TURN } };
+    const event = await findEvent(ctx.userId, a.event);
+    if (!event) return { result: { error: `No event matching "${a.event}"` } };
+    if (event.googleSync === "synced") {
+      return { result: { event_id: event.id, google: "added", note: "Already on Google Calendar." } };
+    }
+    const google = await sendToGoogle(ctx.userId, event);
+    return {
+      result: { event_id: event.id, google: google.state, read_back: eventReadBack(event, ctx.timezone, google) },
+      ...(google.state === "added"
+        ? { toast: { icon: "📅", text: `${event.title} — on Google Calendar` } }
+        : {}),
     };
   },
 
@@ -1703,7 +1859,7 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
 
   async create_expectation(ctx, args) {
     const a = toolSchemas.create_expectation.parse(args);
-    const when = parseWhen(a.expected_update_by);
+    const when = parseWhen(a.expected_update_by, ctx.timezone);
     if (!when) return { result: { error: `Bad expected_update_by "${a.expected_update_by}"` } };
     const task = a.task ? await findTask(ctx.userId, a.task) : null;
     const [row] = await db

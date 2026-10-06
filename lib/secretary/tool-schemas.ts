@@ -113,7 +113,11 @@ export const toolSchemas = {
   }),
   create_event: z.object({
     title: z.string().min(1),
-    starts_at: z.string().describe("Start date/time as ISO 8601 in the user's timezone"),
+    starts_at: z
+      .string()
+      .describe(
+        "Start as ISO 8601 wall-clock time in the user's timezone with no offset, e.g. 2026-10-07T08:00:00; for a recurring event, the first occurrence"
+      ),
     ends_at: z.string().optional(),
     location: z.string().optional(),
     project: z
@@ -129,7 +133,15 @@ export const toolSchemas = {
     reminders: z
       .array(z.string())
       .optional()
-      .describe("Reminder times — exact ISO 8601 timestamps in the user's timezone"),
+      .describe(
+        "Reminder times — exact ISO 8601 timestamps in the user's timezone. Each one is pushed to the user's phone; on Google Calendar it becomes a popup the same lead before every occurrence"
+      ),
+    recurrence: z
+      .string()
+      .optional()
+      .describe(
+        "Repeat rule for a recurring event, iCalendar RRULE: FREQ=DAILY (every day), FREQ=WEEKLY;BYDAY=MO,WE, FREQ=MONTHLY;BYMONTHDAY=5, with COUNT=10 or UNTIL=20261231 to end it. Omit for a one-off"
+      ),
   }),
   update_event: z.object({
     event: z.string().min(1).describe("Event id, or a distinctive fragment of its title"),
@@ -146,9 +158,16 @@ export const toolSchemas = {
       .array(z.string())
       .optional()
       .describe("Replace the event's reminder times — exact ISO 8601 timestamps; [] clears them"),
+    recurrence: z
+      .string()
+      .optional()
+      .describe('New repeat rule (an RRULE, as in create_event); "none" makes it a one-off'),
   }),
   delete_event: z.object({
     event: z.string().min(1).describe("Event id, or a distinctive fragment of its title"),
+  }),
+  add_event_to_google: z.object({
+    event: z.string().min(1).describe("The event_id create_event returned"),
   }),
   create_document: z.object({
     title: z.string().min(1),
@@ -590,10 +609,13 @@ const toolDescriptions: Record<ToolName, string> = {
   update_project:
     "Rename a project, change its color, MERGE it into another (merge_into moves all tasks then deletes the duplicate), or delete an empty one. Use this to clean up duplicate projects.",
   create_event:
-    "Log a calendar event — meetings, appointments, social plans with a specific time. Supports notes (timezone conversions, agenda) and reminder times.",
+    "Put an event on the user's calendar — meetings, appointments, plans, a daily reminder — and, when Google Calendar is connected, on their Google Calendar at once. One-off or recurring (recurrence), with reminder times. Call it only once the user has asked for it; then say back read_back exactly as returned, which says what was made and whether it reached Google. Never say it was added before this returns.",
   update_event:
-    "Edit an EXISTING event: retitle, move its time, set location, add notes (e.g. an East-Coast time conversion), or set reminder times. When the user says 'add X to that meeting', use THIS — don't create a task about it.",
-  delete_event: "Remove an event that was cancelled or logged by mistake.",
+    "Edit an EXISTING event: retitle, move its time, set location, add notes (e.g. an East-Coast time conversion), set reminder times, or change how it repeats; its Google Calendar copy changes too. When the user says 'add X to that meeting', use THIS — don't create a task about it.",
+  delete_event:
+    "Remove an event that was cancelled or logged by mistake, from Google Calendar too. For 'undo that' right after create_event, pass the event_id it returned.",
+  add_event_to_google:
+    "Put an event that is still only in Secretary onto the user's Google Calendar. Only after the user says yes to adding it (create_event asks when the request came with an attachment), or after they reconnect Google.",
   create_document:
     "Start a real living document under a project — duty statements, budgets, drafts. Give it outline sections up front when the shape is known.",
   list_documents: "All documents with their project, section headings, and last-edited time.",
@@ -749,6 +771,15 @@ export const VOICE_TOOL_NAMES = [
   // few sessions verbatim; this reaches everything older ("what did I say
   // about X last week?")
   "search_history",
+  // Calendar events by voice (SEC-A002, 2026-10-06). Kiron: "I just wanted to
+  // add something real quick for Daily Reminder, but I couldn't do it." The
+  // extractor's inferred events stay in the app and never reach Google, so a
+  // spoken "add a daily reminder at 8" needs the write itself, read back
+  // before the call moves on, and "undo that" needs the delete.
+  "create_event",
+  "update_event",
+  "delete_event",
+  "add_event_to_google",
 ] as const satisfies readonly ToolName[];
 
 export function openAIVoiceToolDefs() {

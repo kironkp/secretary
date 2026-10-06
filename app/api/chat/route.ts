@@ -12,7 +12,7 @@ import { loadHistoryWindow } from "@/lib/db/queries";
 import { buildBriefing } from "@/lib/secretary/briefing";
 import { buildInstructions } from "@/lib/secretary/persona";
 import { openAIToolDefs } from "@/lib/secretary/tool-schemas";
-import { executeTool, type ToolOutcome } from "@/lib/secretary/tools";
+import { executeTool, liveTurnContext, type ToolOutcome } from "@/lib/secretary/tools";
 import { runExtraction } from "@/lib/secretary/extraction";
 import { openaiClientFor, TEXT_MODEL } from "@/lib/openai";
 import { anthropicClientFor, chatProvider, chatSettings, claudeBrainEnabled } from "@/lib/anthropic";
@@ -161,6 +161,16 @@ export async function POST(req: Request) {
   // and tool rounds are chained via previous_response_id. The chain is only
   // valid if no voice session added messages since it was last stored.
   const prior = history.filter((m) => m.id !== userMessage.id);
+
+  // One context for every tool this turn calls, whichever model answers: a
+  // turn that carries a flyer or a file asks before writing Google Calendar.
+  const toolCtx = liveTurnContext({
+    userId: user.id,
+    timezone: user.timezone,
+    conversationId,
+    anchorMessageId: userMessage.id,
+    attachmentCount: attachRows.length,
+  });
   const canChain = Boolean(storedResponseId) && prior.length > 0 && prior[prior.length - 1].mode === "text";
   let input: InputItem[] = canChain
     ? [userTurn]
@@ -192,12 +202,7 @@ export async function POST(req: Request) {
           .map((m) => ({ role: m.role, content: m.content })),
         message: parsed.message,
         attachments: attachRows,
-        toolCtx: {
-          userId: user.id,
-          timezone: user.timezone,
-          conversationId,
-          anchorMessageId: userMessage.id,
-        },
+        toolCtx,
         executeTool,
       });
       assistantText = result.text;
@@ -265,12 +270,7 @@ export async function POST(req: Request) {
       const outputs: InputItem[] = [];
       for (const call of calls) {
         const outcome = await executeTool(
-          {
-            userId: user.id,
-            timezone: user.timezone,
-            conversationId,
-            anchorMessageId: userMessage.id,
-          },
+          toolCtx,
           call.name,
           JSON.parse(call.arguments || "{}")
         );

@@ -324,6 +324,18 @@ export const events = pgTable("events", {
   // Free-form detail that fits no structured slot (e.g. "11:00 AM PT / 2:00 PM ET")
   notes: text("notes"),
   reminders: jsonb("reminders").$type<string[]>().notNull().default([]),
+  // Google Calendar's recurrence lines ("RRULE:FREQ=DAILY"); empty for a
+  // one-off. The app's own views show the first occurrence only.
+  recurrence: jsonb("recurrence").$type<string[]>().notNull().default([]),
+  // The IANA zone the event was made in: a recurring 8:00 stays 8:00 local
+  // across a DST change only when Google is given the zone, not an offset.
+  timeZone: text("time_zone"),
+  // The copy on the user's Google Calendar (lib/google/calendar.ts), one way,
+  // app → Google. null: app only. "pending": waiting for the user's yes (it
+  // came from a turn with an attachment). "synced": googleEventId is the
+  // copy. "failed": Google refused (disconnected); a later yes retries.
+  googleEventId: text("google_event_id"),
+  googleSync: text("google_sync").$type<"pending" | "synced" | "failed">(),
   source: itemSource("source").notNull().default("typed"),
   conversationId: text("conversation_id").references(() => conversations.id, {
     onDelete: "set null",
@@ -650,6 +662,28 @@ export const connectedAccounts = pgTable("connected_accounts", {
   // last 4 chars, for "Connected ····x7Ab" display — never the key itself
   keyTail: text("key_tail").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// The user's grant to their own Google account (SEC-A002, 2026-10-06): one row
+// per user, from Settings → Connect, apart from Google sign-in (better-auth's
+// `account` row), so a sign-in can never overwrite it. `scopes` is what
+// Google granted, space-separated; Calendar today, Gmail to follow through
+// the same flow. Tokens are AES-256-GCM encrypted (lib/crypto.ts) and never
+// leave the server. `status` turns "disconnected" when Google refuses the
+// refresh token (revoked, or a Testing-mode app's 7-day expiry).
+export const googleConnection = pgTable("google_connection", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  scopes: text("scopes").notNull(),
+  encryptedRefreshToken: text("encrypted_refresh_token").notNull(),
+  encryptedAccessToken: text("encrypted_access_token"),
+  accessTokenExpiresAt: timestamp("access_token_expires_at", { withTimezone: true }),
+  status: text("status").$type<"connected" | "disconnected">().notNull().default("connected"),
+  /** Why it is disconnected, in plain words; never a token. */
+  lastError: text("last_error"),
+  connectedAt: timestamp("connected_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

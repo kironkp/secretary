@@ -201,6 +201,13 @@ procrastination scorer. Needs the database running.
   → redirect URI `http://localhost:3000/api/auth/callback/google` → paste
   `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` into `.env.local`. The button
   appears automatically once the keys exist.
+- **Google Calendar** (Settings → Connect Google Calendar; the same client):
+  enable the Google Calendar API, add the scope
+  `https://www.googleapis.com/auth/calendar.events.owned` to the consent
+  screen, and add the redirect URI `<origin>/api/google/calendar/callback`
+  for every origin (`http://localhost:3000`, the Heroku URL). While the
+  consent screen is in Testing, the user must be a test user and Google
+  expires the grant after 7 days; Settings then says Disconnected → Reconnect.
 - **Apple**: needs an Apple Developer account and an **https** deploy (Apple
   rejects http://localhost). Same pattern: keys in env → button appears.
 

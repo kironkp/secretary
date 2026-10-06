@@ -7,6 +7,55 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 ---
 
+## v0.26 — Events by voice, and onto Google Calendar (2026-10-06)
+
+this commit
+
+Kiron: "I just wanted to add something real quick for Daily Reminder, but I
+couldn't do it." Siri and Gemini had both failed him. The audit: the app had
+never had Google Calendar access (Google was sign-in only, with profile and
+email scopes and no refresh token), and the voice session could not make an
+event at all. create_event was not among its tools; a spoken event reached
+the app only through the extractor, as an inferred row.
+
+- Voice carries create_event, update_event, delete_event and the new
+  add_event_to_google (adaptive-ui SPEC §11). The model says back
+  `read_back` from the result: what was made, when, how it repeats, and
+  whether it reached Google. "Undo that" deletes by the id it returned.
+- create_event takes an RRULE (lib/secretary/rrule.ts checks it and says it
+  in words); events keep `recurrence` and `time_zone`.
+- Google Calendar, one way (lib/google): Settings → Connect Google Calendar is
+  its own consent round trip for `calendar.events.owned`, offline, apart from
+  sign-in. Tokens live in `google_connection`, AES-GCM encrypted, never in a
+  log, a result or a payload. Create, update and delete reach the primary
+  calendar by the stored Google event id, as wall-clock time plus the IANA
+  zone, so 8:00 stays 8:00 across Nov 1. A refusal is said, not swallowed. A
+  dead grant (revoked, or the 7-day expiry of a Testing app) says "Google
+  Calendar is disconnected. Reconnect it in Settings.", pushes once that
+  day, and Settings offers Reconnect.
+- Only the user's own plain words write Google: `liveTurnContext` sets
+  `calendarSync` "now" for a voice turn or a chat turn with nothing
+  attached, and "ask" when a flyer or file came with it. Then the event
+  stays in the app (`google_sync` pending) and the reply asks; only a later
+  plain turn can add it. Understanding answers, scripts and the extractor
+  never write Google.
+- Times without an offset were read in the server's zone, UTC on Heroku, by
+  both the tools and the extractor: "8 am" was stored as 1 am Pacific.
+  lib/time.ts parseInTz reads them in the user's zone; the extractor now
+  dedupes against the event voice just made.
+- Reminder results told the model "logged-only", long after lib/push.ts began
+  ringing the phone at each one; they now say so.
+
+Known limits: the app's own agenda and month view show only the first
+occurrence of a recurring event; edits made in Google do not come back.
+Whether `calendar.events.owned` covers the primary calendar is proven only by
+the live test; the fallback is `calendar.events`. 871 vitest with the keys
+blanked and TZ=UTC: 870 pass, and understanding-own-words (7) fails as it does
+at v0.24 with blank keys. 24 new tests; 17 reverted guards each fail at least
+one of them.
+
+---
+
 ## v0.25 — The spend cap holds, and a failed read is paid for once (2026-10-04)
 
 this commit

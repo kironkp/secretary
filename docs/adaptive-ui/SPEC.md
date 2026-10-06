@@ -691,7 +691,24 @@ claude.ai session used as a fixture (docs/adaptive-ui/transcript-2026-08-18).
   The extractor (brain) runs async 2–5s behind each
   utterance, writes the store, and injects clarifications back for the next
   pause. The store is the only truth; a dead voice session loses nothing.
+  **Events by voice (2026-10-06, SEC-A002).** The mouth also carries
+  `create_event`, `update_event`, `delete_event` and `add_event_to_google`.
+  Kiron: "I just wanted to add something real quick for Daily Reminder, but
+  I couldn't do it." The extractor's inferred events stay in the app and never
+  reach Google Calendar, so a spoken "add a daily reminder at 8" needs the
+  write itself, said back from its result before the call moves on, and
+  "undo that" needs the delete. The extractor dedupes against the event the
+  mouth just made (same title, same instant, both read in the user's zone).
+  These are the same tools chat uses, through the same `executeTool`; the
+  only difference a turn makes is `ToolContext.calendarSync`
+  (`liveTurnContext`): a turn with an attachment asks before Google.
 - **capture never depends on external apps**: the store is the system of
   record; Reminders/Calendar are optional exports. An export failure becomes a
   visible pending item, disclosed once — capture itself cannot fail on a
-  third-party permission.
+  third-party permission. Google Calendar is the first such export
+  (lib/google/calendar.ts): one way, app → Google, by the stored Google event
+  id; an event the Google write refused is `google_sync = failed`, said in the
+  reply, and retried by the next yes (`add_event_to_google`). A dead grant
+  (revoked, or a Testing-mode app's 7-day refresh expiry) turns the
+  connection "disconnected" with one push that day; Settings → Reconnect.
+  Edits made in Google do not come back.

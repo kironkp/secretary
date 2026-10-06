@@ -10,6 +10,7 @@ import { SpendSummary } from "@/components/settings/spend-summary";
 import { spendAllTime, spendReport, spendWindow } from "@/lib/spend";
 import { CalmModeToggle } from "@/components/settings/calm-mode-toggle";
 import { ConnectedAccounts } from "@/components/settings/connected-accounts";
+import { GoogleCalendarSection } from "@/components/settings/google-calendar";
 import { NotificationsSection } from "@/components/settings/notifications";
 import { LayoutPreferences } from "@/components/settings/layout-preferences";
 import { ProposalReview } from "@/components/settings/proposal-review";
@@ -136,6 +137,16 @@ export default async function SettingsPage() {
           Home Screen first on iPhone.
         </p>
         <NotificationsSection />
+      </section>
+
+      <section className="rounded-xl border border-edge bg-surface p-5">
+        <h2 className="mb-1 text-sm font-bold">Google Calendar</h2>
+        <p className="mb-4 text-xs text-muted">
+          Lets the secretary put events on your Google Calendar when you ask, by voice or
+          chat: one-offs and repeating ones, with reminders. It only ever touches events
+          it made, and changes made in Google don&apos;t come back here.
+        </p>
+        <GoogleCalendarSection />
       </section>
 
       <section className="rounded-xl border border-edge bg-surface p-5">

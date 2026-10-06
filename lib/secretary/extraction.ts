@@ -13,6 +13,7 @@ import {
   memories,
   tasks,
   usage,
+  user,
 } from "@/lib/db/schema";
 import { crossReferenceMentions } from "./entities";
 import { openai, TEXT_MODEL } from "@/lib/openai";
@@ -25,6 +26,7 @@ import {
 import type Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { findDuplicate, findDuplicateEvent, titleSimilarity } from "./dedupe";
+import { parseInTz } from "@/lib/time";
 
 export const extractionSchema = z.object({
   tasks: z.array(
@@ -201,10 +203,10 @@ export async function extractFromTranscript(opts: {
   };
 }
 
-function parseIso(iso: string | null): Date | null {
+/** The extractor's ISO time, read in the user's timezone when it carries no offset (lib/time.ts parseInTz). */
+function parseIso(iso: string | null, tz: string): Date | null {
   if (!iso) return null;
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? null : d;
+  return parseInTz(iso, tz);
 }
 
 /**
@@ -253,6 +255,9 @@ export async function applyExtraction(
     .from(events)
     .where(and(eq(events.userId, userId), gte(events.startsAt, new Date(now.getTime() - 86400000))));
   const knownFacts = await db.select().from(memories).where(eq(memories.userId, userId));
+  // Times without an offset are the user's wall clock, as in the tools.
+  const [owner] = await db.select({ timezone: user.timezone }).from(user).where(eq(user.id, userId));
+  const tz = owner?.timezone || "UTC";
 
   let createdTasks = 0;
   let createdEvents = 0;
@@ -268,7 +273,7 @@ export async function applyExtraction(
   };
 
   for (const t of result.tasks) {
-    const dueAt = parseIso(t.due_at);
+    const dueAt = parseIso(t.due_at, tz);
     // dedupe against every recent task (done ones included — "book flights"
     // finished yesterday must not come back as a new inferred to-do)
     if (findDuplicate({ title: t.title, dueAt }, allRecent)) continue;
@@ -286,7 +291,7 @@ export async function applyExtraction(
   }
 
   for (const e of result.events) {
-    const startsAt = parseIso(e.starts_at);
+    const startsAt = parseIso(e.starts_at, tz);
     if (!startsAt) continue;
     if (findDuplicateEvent({ title: e.title, startsAt }, upcomingEvents)) continue;
     await db.insert(events).values({
@@ -294,7 +299,7 @@ export async function applyExtraction(
       title: e.title,
       projectId: await projectIdFor(e.project),
       startsAt,
-      endsAt: parseIso(e.ends_at) ?? undefined,
+      endsAt: parseIso(e.ends_at, tz) ?? undefined,
       location: e.location ?? undefined,
       source: "inferred",
       conversationId,
@@ -325,7 +330,7 @@ export async function applyExtraction(
       if (!target.startedAt) updates.startedAt = new Date();
       note = "Started (detected in conversation)";
     } else {
-      const newDue = parseIso(s.new_due_at);
+      const newDue = parseIso(s.new_due_at, tz);
       if (newDue) updates.dueAt = newDue;
       updates.postponedCount = target.postponedCount + 1;
       note = `Postponed${s.reason ? ` — ${s.reason}` : ""} (${target.postponedCount + 1}× total, detected in conversation)`;

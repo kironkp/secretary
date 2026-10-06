@@ -8,7 +8,7 @@ import { db } from "@/lib/db";
 import { conversations, messages } from "@/lib/db/schema";
 import { nextClarification } from "@/lib/secretary/entities";
 import { isErrorResponse, parseBody, requireSession } from "@/lib/api";
-import { executeTool } from "@/lib/secretary/tools";
+import { executeTool, liveTurnContext } from "@/lib/secretary/tools";
 
 const bodySchema = z.object({
   name: z.string(),
@@ -55,8 +55,17 @@ export async function POST(req: Request) {
     }
   }
 
+  // A spoken turn carries no attachment: the user's own words, so Google
+  // Calendar is written at once (liveTurnContext).
   const outcome = await executeTool(
-    { userId: user.id, timezone: user.timezone, conversationId, anchorMessageId, surface: parsed.surface },
+    liveTurnContext({
+      userId: user.id,
+      timezone: user.timezone,
+      conversationId,
+      anchorMessageId,
+      surface: parsed.surface,
+      attachmentCount: 0,
+    }),
     parsed.name,
     parsed.args
   );

@@ -116,17 +116,23 @@ export function isOutOfCredit(message: string): boolean {
   return /no credits|insufficient_quota|usage limits|credit balance|billing/i.test(message);
 }
 
-/** A push keyed by UTC day, sent at most once per key per day. */
-async function alertOnce(userId: string, key: string, title: string, body: string): Promise<void> {
+/** A push keyed by UTC day, sent at most once per key per day; `tag` names the sender in the log. */
+export async function alertOnce(
+  userId: string,
+  key: string,
+  title: string,
+  body: string,
+  tag = "spend-guard"
+): Promise<void> {
   try {
     const { claimPush, sendPush } = await import("@/lib/push");
     const day = new Date().toISOString().slice(0, 10);
     // push_log.key is unique across users, so the user is part of it: keyed
     // by day alone, the first user over a line silenced it for everyone else.
     if (!(await claimPush(userId, `${key}:${day}:${userId}`))) return;
-    console.warn(`spend-guard: ${title} — ${body}`);
+    console.warn(`${tag}: ${title} — ${body}`);
     await sendPush(userId, { title, body, url: "/settings" });
   } catch (e) {
-    console.error("spend-guard: alert failed:", e instanceof Error ? e.message : e);
+    console.error(`${tag}: alert failed:`, e instanceof Error ? e.message : e);
   }
 }
