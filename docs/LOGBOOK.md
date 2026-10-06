@@ -7,6 +7,29 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 ---
 
+## v0.31.4 — Remember me (2026-10-06)
+
+this commit
+
+Kiron: "add remember me functionality". Sign-in kept the better-auth default
+(7 days, renewed daily) with no choice.
+
+- Sign-in has a Remember me box, ticked by default. Ticked: 60 days, and
+  every use after a day renews it to 60 days from then, so a phone or the
+  home-screen app in use stays signed in. Unticked: the session cookie has
+  no expiry, so it ends when the browser closes (on the iPhone home-screen
+  app, when the app is closed from the app switcher or iOS ends it), and
+  the session itself lasts at most a day and is never renewed.
+- Email and password follow the box. Google and passkey sign-in have no
+  way to be told and are always remembered; the line under the box says so.
+- The cookies' secure, httpOnly and sameSite attributes are unchanged
+  (better-auth's defaults).
+
+Also: both extraction test files carry an explicit 30 s ceiling (a loaded
+machine hit the 5 s default).
+
+---
+
 ## v0.31.2 — Back from Google on the app's own address, not the dyno's (2026-10-06)
 
 this commit
