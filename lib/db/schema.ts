@@ -210,6 +210,11 @@ export const pendingActions = pgTable("pending_actions", {
   /** HMAC over id, tool and args (lib/secretary/proposals.ts): a changed row is refused. */
   digest: text("digest").notNull(),
   status: text("status").$type<"pending" | "done" | "refused">().notNull().default("pending"),
+  /** Proposed in a chat turn or on a call: only the same place can answer it. */
+  via: text("via").$type<"chat" | "voice">().notNull().default("chat"),
+  /** On a call: its key and the proposing function call's item number (messages.voice_seq). */
+  voiceSession: text("voice_session"),
+  voiceSeq: integer("voice_seq"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
 });
@@ -232,6 +237,16 @@ export const messages = pgTable(
     // Photo/file intake: meta for rendering thumbnails; payloads live in the
     // attachments table (DB-stored — Heroku's filesystem is ephemeral).
     attachments: jsonb("attachments").$type<{ id: string; mime: string; name: string }[] | null>(),
+    // "app" = the user typed or spoke it in the app (the chat route, a call's
+    // transcript). Only those can say yes to a proposal (SEC-A005b): mail the
+    // intake stores as a user message has none.
+    origin: text("origin").$type<"app">(),
+    // Where a call's line sits in the Realtime conversation (SEC-A005 R2):
+    // the call's key, and the item's number in the order the server added
+    // items. A transcript is posted when it is ready, so arrival time is not
+    // spoken order; a yes to a proposal on a call is judged by this alone.
+    voiceSession: text("voice_session"),
+    voiceSeq: integer("voice_seq"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   // Recall paths (SPEC §11 cross-session recall): newest-first windows per

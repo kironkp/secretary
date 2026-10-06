@@ -8,6 +8,7 @@ import { db } from "@/lib/db";
 import { conversations, messages } from "@/lib/db/schema";
 import { nextClarification } from "@/lib/secretary/entities";
 import { isErrorResponse, parseBody, requireSession } from "@/lib/api";
+import { untrustedSince } from "@/lib/secretary/proposals";
 import { executeTool, liveTurnContext } from "@/lib/secretary/tools";
 
 const bodySchema = z.object({
@@ -17,6 +18,10 @@ const bodySchema = z.object({
   // The call's flavor (lib/secretary/interview-voice.ts): on an interview
   // call answer_question also returns the next question to ask.
   surface: z.enum(["interview"]).optional(),
+  // Where this tool call sits on the call (SEC-A005 R2): the call's key and
+  // the function call's Realtime item number, stamped by the client.
+  voiceSession: z.string().max(64).optional(),
+  voiceSeq: z.number().int().nonnegative().optional(),
 });
 
 export async function POST(req: Request) {
@@ -32,7 +37,7 @@ export async function POST(req: Request) {
   let readMail = false;
   if (parsed.conversationId) {
     const [owned] = await db
-      .select({ id: conversations.id, untrustedAt: conversations.untrustedAt })
+      .select({ id: conversations.id, untrustedAt: conversations.untrustedAt, channel: conversations.channel })
       .from(conversations)
       .where(
         and(eq(conversations.id, parsed.conversationId), eq(conversations.userId, user.id))
@@ -40,7 +45,7 @@ export async function POST(req: Request) {
       .limit(1);
     if (owned) {
       conversationId = owned.id;
-      readMail = owned.untrustedAt !== null;
+      readMail = untrustedSince(owned) !== null;
       const [lastUserMsg] = await db
         .select({ id: messages.id })
         .from(messages)
@@ -60,15 +65,20 @@ export async function POST(req: Request) {
   // A spoken turn carries no attachment: the user's own words, so Google
   // Calendar is written at once (liveTurnContext).
   const outcome = await executeTool(
-    liveTurnContext({
-      userId: user.id,
-      timezone: user.timezone,
-      conversationId,
-      anchorMessageId,
-      surface: parsed.surface,
-      attachmentCount: 0,
-      untrusted: readMail,
-    }),
+    {
+      ...liveTurnContext({
+        userId: user.id,
+        timezone: user.timezone,
+        conversationId,
+        anchorMessageId,
+        surface: parsed.surface,
+        attachmentCount: 0,
+        untrusted: readMail,
+      }),
+      // Every call through here is a call's turn; without both numbers its
+      // place is unknown, and a yes there is never taken.
+      voice: { session: parsed.voiceSession ?? null, seq: parsed.voiceSeq ?? null },
+    },
     parsed.name,
     parsed.args
   );

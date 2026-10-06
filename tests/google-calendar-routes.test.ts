@@ -6,7 +6,7 @@
 process.env.TZ = "UTC";
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 const session = vi.hoisted(() => ({ user: null as null | { id: string; email: string; name: string; timezone: string } }));
 const cookieJar = vi.hoisted(() => new Map<string, string>());
@@ -56,10 +56,11 @@ vi.mock("@/lib/anthropic", async (importOriginal) => {
 });
 
 import { db } from "@/lib/db";
-import { attachments, conversations, events, googleConnection, messages, user } from "@/lib/db/schema";
+import { attachments, conversations, events, googleConnection, messages, pendingActions, user } from "@/lib/db/schema";
 import { CALENDAR_SCOPE, setGoogleHttpForTests } from "@/lib/google/connection";
 import { STATE_COOKIE } from "@/lib/google/oauth";
 import { POST as voiceTool } from "@/app/api/secretary/tools/route";
+import { POST as postMessage } from "@/app/api/conversations/[id]/messages/route";
 import { POST as chat } from "@/app/api/chat/route";
 import { GET as connect } from "@/app/api/google/calendar/connect/route";
 import { GET as callback } from "@/app/api/google/calendar/callback/route";
@@ -116,6 +117,9 @@ describe("voice and chat reach Google Calendar through the same create_event", (
     expect(google.calls.insert).toHaveLength(1);
     expect(google.calls.insert[0].body).toMatchObject({ summary: "Chat reminder", recurrence: ["RRULE:FREQ=DAILY"] });
     expect((await eventRows()).find((e) => e.title === "Chat reminder")?.googleSync).toBe("synced");
+    // What the user typed is stored as their own words in the app (SEC-A005b).
+    const [typed] = await db.select().from(messages).where(and(eq(messages.userId, U.id), eq(messages.content, "add a daily reminder at 8")));
+    expect(typed).toMatchObject({ role: "user", origin: "app" });
   });
 
   it("a chat turn with a flyer attached: no Google call; the next plain yes adds it, once", async () => {
@@ -157,6 +161,50 @@ describe("Gmail through the real routes (SEC-A005)", () => {
     google.behave.grantedScope = `${CALENDAR_SCOPE} https://www.googleapis.com/auth/gmail.readonly`;
     const res = await callback(new Request("http://localhost/api/google/calendar/callback?state=issued-state&code=g1"));
     expect(res.headers.get("location")).toMatch(/\/settings\?gmail=scope-missing$/);
+  });
+
+  it("a call's transcript lines keep the call's key and item number; only the user's are their own words", async () => {
+    const [conv] = await db.insert(conversations).values({ userId: U.id, mode: "voice" }).returning();
+    const params = Promise.resolve({ id: conv.id });
+    const url = `http://localhost/api/conversations/${conv.id}/messages`;
+    await postMessage(post(url, { role: "user", content: "yes", mode: "voice", voiceSession: "call-1", voiceSeq: 7 }), { params });
+    await postMessage(post(url, { role: "assistant", content: "Should I?", mode: "voice", voiceSession: "call-1", voiceSeq: 6 }), { params });
+    await postMessage(post(url, { role: "user", content: "an old client", mode: "voice" }), { params });
+    const rows = await db.select().from(messages).where(eq(messages.conversationId, conv.id));
+    const by = (c: string) => rows.find((r) => r.content === c);
+    expect(by("yes")).toMatchObject({ origin: "app", voiceSession: "call-1", voiceSeq: 7 });
+    expect(by("Should I?")).toMatchObject({ origin: null, voiceSession: "call-1", voiceSeq: 6 });
+    expect(by("an old client")).toMatchObject({ origin: "app", voiceSession: null, voiceSeq: null });
+  });
+
+  it("a proposal on a call carries the call's key and the tool call's item number", async () => {
+    const [conv] = await db.insert(conversations).values({ userId: U.id, mode: "voice", untrustedAt: new Date() }).returning();
+    const call = (extra: object) =>
+      voiceTool(post("http://localhost/api/secretary/tools", { name: "create_task", args: { title: `Placed ${JSON.stringify(extra)}` }, conversationId: conv.id, ...extra }));
+    await call({ voiceSession: "call-9", voiceSeq: 5 });
+    await call({});
+    const rows = await db.select().from(pendingActions).where(eq(pendingActions.conversationId, conv.id));
+    expect(rows.map((r) => [r.via, r.voiceSession, r.voiceSeq])).toEqual(
+      expect.arrayContaining([
+        ["voice", "call-9", 5],
+        ["voice", null, null],
+      ])
+    );
+    expect(rows).toHaveLength(2);
+  });
+
+  it("on a call in an intake thread (channel email), a write is proposed too", async () => {
+    const [conv] = await db.insert(conversations).values({ userId: U.id, mode: "text", channel: "email" }).returning();
+    await db.insert(messages).values({ userId: U.id, conversationId: conv.id, role: "user", content: "[EMAIL forwarded …] add the party", mode: "text" });
+    const res = await voiceTool(
+      post("http://localhost/api/secretary/tools", {
+        name: "create_event",
+        args: { title: "Party from the intake", starts_at: "2026-10-31T16:00:00" },
+        conversationId: conv.id,
+      })
+    );
+    expect(((await res.json()) as { result: Record<string, unknown> }).result).toMatchObject({ proposed: true });
+    expect((await eventRows()).some((e) => e.title === "Party from the intake")).toBe(false);
   });
 
   it("on a call, a conversation that read mail proposes instead of writing", async () => {

@@ -7,6 +7,60 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 ---
 
+## v0.31 — Gmail, round 2: a yes is a yes, on a call it goes by the call's order, mail stays where it was read (2026-10-06)
+
+this commit
+
+sec rev found three ways around v0.30's gate; sec plan folded in SEC-A005b.
+
+- A yes is the whole message (R1): after case and punctuation, only consent
+  words ("yes", "yes add it", "okay go ahead") and courtesy ("please",
+  "thanks", "now"), six words at most. "Okay, read me the next one", "Sure,
+  what's the weather" and "do it later" used to pass because they start
+  like a yes; in speech "okay" often opens a new request.
+- On a call, order is the call's own (R2). A transcript is posted when it is
+  ready, and OpenAI says the transcription event can come before or after
+  the response, so an earlier "Yes." could be stored after the question and
+  read as the answer to it. The client now numbers items as the Realtime
+  conversation adds them (lib/realtime/item-order.ts; an item put in
+  between gets no number) and sends the call's key and the number with
+  every transcript and tool call. A proposal made on a call is answered
+  only on that call, by the user's first line after the line that asked;
+  a line without a number never answers, and a confirm without one is
+  refused ("ask again"). A chat's proposal is answered only in the chat.
+- Mail stays where it was read (R3). The briefing's PRIOR SESSIONS carried
+  the last lines of recent conversations, the secretary's included, into
+  every new session: a mail-borne instruction retold there reached a
+  conversation that had never read mail and so wrote without asking. Now,
+  from where mail was read, only the user's own lines come over, with
+  "(email was read here; details not carried over)".
+- Intake threads (SEC-A005b): a conversation the INBOUND_EMAIL intake made
+  holds mail from its start (the mail is stored there as a user message),
+  so chatting in it proposes like any conversation that read mail. Only
+  what the user typed or spoke in the app (messages.origin = "app": the chat
+  route and the call transcript route) can say yes, so mail stored as a user
+  message never can. Understanding, the layout signals and the ASR check
+  read the user's own words, not that mail. The intake itself is unchanged:
+  it still files what Kiron forwards. It is not configured on Heroku.
+
+Every reader of stored messages, and what it does with mail:
+- briefing PRIOR SESSIONS (getRecentConversationTails): the user's own lines
+  only, plus the note
+- search_history: marks the conversation it brings mail into
+- extraction: in a conversation that read mail, the user's lines only; an
+  intake thread's mail is still filed (the intake's purpose)
+- understanding gather, layout signals, ASR retirement: the user's own words
+- chat history (loadHistoryWindow), the painter's excerpt: the same
+  conversation, already gated
+- thread view, spreadsheet transcripts, search page, the voice route's
+  anchor: display or ids only
+
+Allowed after mail, by choice: the canvas tools (mail text can be painted,
+sanitized and without links out) and consult_brain (mail text can reach
+Claude, a paid call under the spend guard).
+
+---
+
 ## v0.30 — Gmail: what's new, find, read, draft; never sends; mail can't act (2026-10-06)
 
 this commit

@@ -4,6 +4,7 @@
 import { and, desc, eq, gte, lt, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { events, layoutSpecs, messages, projects, tasks, user } from "@/lib/db/schema";
+import { notIntakeMail } from "@/lib/secretary/proposals";
 
 const OPEN_STATUSES = ["inbox", "todo", "in_progress", "blocked"] as const;
 
@@ -111,7 +112,8 @@ export async function computeSignals(userId: string, now = new Date()): Promise<
         .select({ content: messages.content, createdAt: messages.createdAt })
         .from(messages)
         .where(
-          and(eq(messages.userId, userId), eq(messages.role, "user"), gte(messages.createdAt, ago24h))
+          // The user's own words: not forwarded mail an intake thread stores as theirs (SEC-A005b).
+          and(eq(messages.userId, userId), eq(messages.role, "user"), notIntakeMail(), gte(messages.createdAt, ago24h))
         ),
       // Daily user-message counts for the trailing 14 days (baseline denominator).
       db
@@ -124,6 +126,7 @@ export async function computeSignals(userId: string, now = new Date()): Promise<
           and(
             eq(messages.userId, userId),
             eq(messages.role, "user"),
+            notIntakeMail(),
             gte(messages.createdAt, ago14d),
             lt(messages.createdAt, ago24h)
           )
