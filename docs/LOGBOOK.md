@@ -28,6 +28,10 @@ sec rev found three ways around v0.30's gate; sec plan folded in SEC-A005b.
   only on that call, by the user's first line after the line that asked;
   a line without a number never answers, and a confirm without one is
   refused ("ask again"). A chat's proposal is answered only in the chat.
+  The answer must come right after the question: if the secretary speaks
+  again first (a second question, or the answer's transcript never came),
+  the question lapses and the proposal is refused; it has to be proposed
+  and asked again.
 - Mail stays where it was read (R3). The briefing's PRIOR SESSIONS carried
   the last lines of recent conversations, the secretary's included, into
   every new session: a mail-borne instruction retold there reached a

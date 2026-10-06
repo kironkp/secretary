@@ -231,6 +231,19 @@ describe("the gate: after mail, nothing is written without the user's next own y
     expect(await db.select().from(tasks).where(eq(tasks.userId, userId))).toEqual([]);
   });
 
+  it("in the chat, a question the secretary moved on from lapses", async () => {
+    const { userId, say, reply } = await setup();
+    google.mailbox.push({ ...ANN, body: "Coffee?" });
+    const t1 = await say("read Ann's email");
+    await executeTool(t1, "read_email", { id: "m1" });
+    await executeTool(t1, "create_task", { title: "Coffee with Ann" });
+    await reply("Add a coffee task?");
+    await reply("Also, Ann's second email is about dinner.");
+    const t2 = await say("yes");
+    expect(String(((await executeTool(t2, "confirm_pending", {})).result as { error: string }).error)).toMatch(/went unanswered/);
+    expect(await db.select().from(tasks).where(eq(tasks.userId, userId))).toEqual([]);
+  });
+
   it("a stale yes, not the next message, is refused", async () => {
     const { userId, say, reply } = await setup();
     google.mailbox.push({ ...ANN, body: "Dinner Friday?" });
@@ -608,6 +621,28 @@ describe("on a call, a yes is judged by the call's own item order (SEC-A005 R2)"
     expect(await db.select().from(tasks).where(eq(tasks.userId, c.userId))).toEqual([]);
     // Having heard the yes, it confirms again: that one counts.
     expect((await executeTool(await c.at(6), "confirm_pending", {})).result).toHaveProperty("done");
+  });
+
+  it("on a call, if the secretary speaks again before the user answers, the question lapses; asking again works", async () => {
+    const c = await call();
+    google.mailbox.push({ ...ANN, body: "Lunch?" });
+    await executeTool(await c.at(1), "read_email", { id: "m1" });
+    await executeTool(await c.at(2), "create_task", { title: "Lunch with Ann" });
+    await c.line("assistant", "Add a lunch task?", 3);
+    // The answer to that never arrived; a second question came first.
+    await c.line("assistant", "Want me to read the next one?", 4);
+    await c.line("user", "yes", 5);
+    const lapsedOut = await executeTool(await c.at(6), "confirm_pending", {});
+    expect(String((lapsedOut.result as { error: string }).error)).toMatch(/went unanswered/);
+    expect(await db.select().from(tasks).where(eq(tasks.userId, c.userId))).toEqual([]);
+    const [old] = await db.select().from(pendingActions).where(eq(pendingActions.userId, c.userId));
+    expect(old.status).toBe("refused");
+    // Proposed again and asked again, the next yes does it.
+    await executeTool(await c.at(7), "create_task", { title: "Lunch with Ann" });
+    await c.line("assistant", "Should I add the lunch task?", 8);
+    await c.line("user", "yes", 9);
+    expect((await executeTool(await c.at(10), "confirm_pending", {})).result).toHaveProperty("done");
+    expect((await db.select().from(tasks).where(eq(tasks.userId, c.userId))).map((t) => t.title)).toEqual(["Lunch with Ann"]);
   });
 
   it("on a call, a yes after another answer is too late", async () => {
