@@ -38,7 +38,9 @@ const runAll = async (model: ReturnType<typeof fakeModel>) => {
   return out;
 };
 
-describe("the A009 hash change costs no re-reads", () => {
+// Two understanding runs per step against the database: past vitest's 5 s
+// default when another DB-heavy file runs alongside (5037 ms seen).
+describe("the A009 hash change costs no re-reads", { timeout: 30_000 }, () => {
   it("first read: every project runs once and is stamped with the new formula", async () => {
     const model = fakeModel((bundle) => minimalOutputFor(bundle));
     const out = await runAll(model);

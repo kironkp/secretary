@@ -123,6 +123,11 @@ describe("lanes: one per project, with its progress, late first", () => {
     expect(lanes.map((l) => l.name)).toEqual(["Personal", "Jazz music project", "No project"]);
     expect(lanes[0].late).toBe(true);
   });
+  it("a late project stays first even when the filter hides its late task", () => {
+    // Done shows no open task anywhere, so the nearest-date order ties; late still leads.
+    const done = buildLanes(PROJECTS, tasks, [], TZ, NOW, { ...DEFAULT_FILTERS, status: "done" });
+    expect(done.map((l) => l.name)).toEqual(["Personal", "Jazz music project", "No project"]);
+  });
   it("the deadline is a flag at its day, committed or not", () => {
     expect(lanes.find((l) => l.id === "jazz")!.deadline).toEqual({ day: day("2026-11-20T08:00:00Z"), committed: true });
   });
