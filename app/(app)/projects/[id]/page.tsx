@@ -5,6 +5,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { documents, events, projects, tasks } from "@/lib/db/schema";
 import { ProjectView } from "@/components/projects/project-view";
+import { dueLabel, isPastDue } from "@/lib/due";
 
 export default async function ProjectPage({ params }: { params: Promise<{ id: string }> }) {
   const session = await auth.api.getSession({ headers: await headers() });
@@ -18,6 +19,8 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
     .where(and(eq(projects.id, id), eq(projects.userId, userId)))
     .limit(1);
   if (!project) notFound();
+  const timezone = (session.user as { timezone?: string }).timezone ?? "UTC";
+  const now = new Date();
 
   const [taskRows, eventRows, docRows] = await Promise.all([
     db.select().from(tasks).where(and(eq(tasks.userId, userId), eq(tasks.projectId, id))),
@@ -40,6 +43,8 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
         stages: t.stages ?? [],
         recurrence: t.recurrence,
         source: t.source,
+        dueLabel: dueLabel(t.dueAt, timezone, now),
+        pastDue: isPastDue(t, timezone, now),
       }))}
       events={eventRows.map((e) => ({
         id: e.id,

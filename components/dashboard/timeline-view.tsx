@@ -7,7 +7,7 @@ import {
   CheckButton,
   ProvenanceLink,
   ReminderChip,
-  fmtDue,
+  dueText,
   isOverdue,
   openDetail,
   type EventRow,
@@ -15,33 +15,34 @@ import {
 } from "./shared";
 
 type Entry =
-  | { kind: "task"; at: Date; task: TaskRow }
-  | { kind: "event"; at: Date; event: EventRow };
+  | { kind: "task"; at: Date; days: number; task: TaskRow }
+  | { kind: "event"; at: Date; days: number; event: EventRow };
 
 export function TimelineView({
   tasks,
   events,
   crossing,
   onDone,
+  timezone,
 }: {
   tasks: TaskRow[];
   events: EventRow[];
   crossing: Set<string>;
   onDone: (id: string) => void;
+  timezone: string;
 }) {
-  const now = new Date();
-  const horizon = new Date(now.getTime() + 30 * 86400000);
-
+  // Days are the user's calendar days (lib/due.ts, SEC-A006), worked out on
+  // the server: the same "past due" and "today" every other screen says.
   const entries: Entry[] = [
     ...tasks
-      .filter((t) => t.dueAt && !["done", "dropped"].includes(t.status))
-      .map((t) => ({ kind: "task" as const, at: new Date(t.dueAt!), task: t })),
+      .filter((t) => t.dueAt && t.dueDays !== null && !["done", "dropped"].includes(t.status))
+      .map((t) => ({ kind: "task" as const, at: new Date(t.dueAt!), days: t.dueDays!, task: t })),
     ...events
-      .filter((e) => new Date(e.startsAt) >= new Date(now.getTime() - 86400000))
-      .map((e) => ({ kind: "event" as const, at: new Date(e.startsAt), event: e })),
+      .filter((e) => e.startDays >= 0)
+      .map((e) => ({ kind: "event" as const, at: new Date(e.startsAt), days: e.startDays, event: e })),
   ]
-    .filter((e) => e.at <= horizon)
-    .sort((a, b) => a.at.getTime() - b.at.getTime());
+    .filter((e) => e.days <= 30)
+    .sort((a, b) => a.days - b.days || a.at.getTime() - b.at.getTime());
 
   if (entries.length === 0) {
     return (
@@ -52,22 +53,13 @@ export function TimelineView({
   }
 
   // group by calendar day
-  const groups = new Map<string, Entry[]>();
-  for (const e of entries) {
-    const key = new Intl.DateTimeFormat("en-CA", { dateStyle: "short" }).format(e.at);
-    groups.set(key, [...(groups.get(key) ?? []), e]);
-  }
+  const groups = new Map<number, Entry[]>();
+  for (const e of entries) groups.set(e.days, [...(groups.get(e.days) ?? []), e]);
 
-  const dayLabel = (d: Date) => {
-    const overdueDay = d.getTime() < now.getTime() - 86400000;
-    const sameDay = d.toDateString() === now.toDateString();
-    if (sameDay) return "Today";
-    if (overdueDay) return `${new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric" }).format(d)} — overdue`;
-    return new Intl.DateTimeFormat("en-US", {
-      weekday: "short",
-      month: "short",
-      day: "numeric",
-    }).format(d);
+  const dayLabel = (d: Date, days: number) => {
+    if (days === 0) return "Today";
+    const date = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: timezone }).format(d);
+    return days < 0 ? `${date} — past due` : date;
   };
 
   return (
@@ -89,7 +81,7 @@ export function TimelineView({
                 anyOverdue ? "text-danger" : "text-muted"
               }`}
             >
-              {dayLabel(at)}
+              {dayLabel(at, key)}
             </p>
             <div className="space-y-1.5">
               {dayEntries.map((e) =>
@@ -123,7 +115,7 @@ export function TimelineView({
                       {e.task.title}
                     </span>
                     {isOverdue(e.task) && (
-                      <span className="text-xs text-danger">{fmtDue(e.task.dueAt)}</span>
+                      <span className="text-xs text-danger">{dueText(e.task)}</span>
                     )}
                     {e.task.postponedCount > 0 && (
                       <span className="text-xs text-warn">pushed {e.task.postponedCount}×</span>

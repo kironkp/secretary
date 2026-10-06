@@ -26,6 +26,13 @@ export type TaskRow = {
   conversationId: string | null;
   messageId: string | null;
   conversationLabel: string | null;
+  /**
+   * The one due-date truth (lib/due.ts, SEC-A006), worked out on the server
+   * in the user's timezone: calendar days from today (negative = late; null
+   * = undated) and how it reads ("3 days late", "today", "Fri", "Sep 3").
+   */
+  dueDays: number | null;
+  dueLabel: string;
 };
 
 export type EventRow = {
@@ -40,6 +47,9 @@ export type EventRow = {
   projectName: string | null;
   source: string;
   createdAt: string;
+  /** Calendar days from today to the start, and how it reads (lib/due.ts). */
+  startDays: number;
+  startLabel: string;
 };
 
 export type DocRow = {
@@ -140,14 +150,22 @@ export const STATUS_LABEL: Record<TaskRow["status"], string> = {
   dropped: "dropped",
 };
 
+/** Past due: open and due on a calendar day before today (lib/due.ts). Due earlier today is not late. */
 export function isOverdue(t: TaskRow) {
-  return (
-    t.dueAt !== null &&
-    !["done", "dropped"].includes(t.status) &&
-    new Date(t.dueAt).getTime() < Date.now()
-  );
+  return t.dueDays !== null && t.dueDays < 0 && !["done", "dropped"].includes(t.status);
 }
 
+/** A task's due date as every screen says it; "—" when undated. */
+export function dueText(t: Pick<TaskRow, "dueLabel">): string {
+  return t.dueLabel || "—";
+}
+
+/**
+ * The 5-week chart's own reading of a date, from this instant in the
+ * browser's zone. Only that chart still uses it; it is being replaced
+ * (SEC-A007/A009) and is left untouched until then. Everything else reads
+ * dueText.
+ */
 export function fmtDue(dueAt: string | null) {
   if (!dueAt) return "—";
   const d = new Date(dueAt);

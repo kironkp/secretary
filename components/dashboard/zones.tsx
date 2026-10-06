@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { ChevronRight, FileText } from "lucide-react";
+import { useHideUntilNew } from "./hide-until-new";
 import {
   isMomentumTap,
   CheckButton,
@@ -27,6 +28,7 @@ import {
   ReminderChip,
   RepeatChip,
   StageDots,
+  dueText,
   fmtDue,
   isOverdue,
   openDetail,
@@ -86,15 +88,6 @@ function daysUntil(iso: string, now: number): number {
   return Math.ceil((new Date(iso).getTime() - now) / DAY);
 }
 
-/** Days until a task's due date, measured now (helper keeps render pure). */
-function dueDays(t: TaskRow): number {
-  return daysUntil(t.dueAt!, Date.now());
-}
-
-/** Days until an event starts, measured now (helper keeps render pure). */
-function eventDays(e: EventRow): number {
-  return daysUntil(e.startsAt, Date.now());
-}
 
 /** Deadline pressure → tone (colour is pressure, never project identity). */
 function pressureTone(days: number | null): Tone {
@@ -105,7 +98,7 @@ function pressureTone(days: number | null): Tone {
 }
 
 function pressureLabel(days: number): string {
-  if (days < 0) return `${-days}d late`;
+  if (days < 0) return `${-days} ${days === -1 ? "day" : "days"} late`;
   if (days === 0) return "today";
   if (days === 1) return "tomorrow";
   return `in ${days}d`;
@@ -124,18 +117,59 @@ function sourceLabel(t: TaskRow): string {
 // overdue callout
 // ---------------------------------------------------------------------------
 
-export function OverdueCallout({ tasks }: { tasks: TaskRow[] }) {
-  const overdue = tasks.filter(isOverdue);
-  if (overdue.length === 0) return null;
+/**
+ * "N past due" (SEC-A006): a small chip, never every title joined by dots.
+ * A tap opens the list, each row opening its task; Hide keeps it away until
+ * something new goes past due (hide-until-new.ts, Kiron's pick). The count
+ * is the one Today shows: open, due on a day before today (lib/due.ts).
+ */
+export function PastDueChip({ tasks }: { tasks: TaskRow[] }) {
+  const pastDue = useMemo(
+    () => tasks.filter(isOverdue).sort((a, b) => (a.dueDays ?? 0) - (b.dueDays ?? 0)),
+    [tasks]
+  );
+  const ids = useMemo(() => pastDue.map((t) => t.id), [pastDue]);
+  const { ready, hidden, hide } = useHideUntilNew("secretary:past-due-hidden", ids);
+  const [open, setOpen] = useState(false);
+  if (pastDue.length === 0 || !ready || hidden) return null;
   return (
-    <div className="flex items-baseline gap-2 rounded-xl border border-danger/50 bg-danger/10 px-4 py-3 text-sm">
-      <span className="inline-flex items-center gap-1.5 font-bold text-danger">
-        <TriangleAlert size={15} strokeWidth={2} className="translate-y-[2px]" />
-        Overdue ({overdue.length})
-      </span>
-      <span className="text-muted">
-        {overdue.map((t) => `${t.title} (${fmtDue(t.dueAt)})`).join(" · ")}
-      </span>
+    <div data-testid="past-due-chip">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-danger/40 bg-danger/10 px-4 text-sm font-semibold text-danger"
+      >
+        <TriangleAlert size={15} strokeWidth={2} />
+        {pastDue.length} past due
+        <ChevronRight size={14} strokeWidth={2.5} className={`transition-transform ${open ? "rotate-90" : ""}`} />
+      </button>
+      {open && (
+        <div className="animate-rise-in mt-2 rounded-xl border border-edge bg-surface px-4 py-2">
+          <ul className="divide-y divide-edge/50">
+            {pastDue.map((t) => (
+              <li key={t.id}>
+                <button
+                  type="button"
+                  onClick={() => openDetail("task", t.id)}
+                  className="flex min-h-11 w-full flex-wrap items-center gap-2 py-1.5 text-left text-sm hover:text-accent"
+                >
+                  <span className="font-medium">{t.title}</span>
+                  {t.projectName && <span className="text-xs text-faint">{t.projectName}</span>}
+                  <span className="ml-auto text-xs font-semibold text-danger">{dueText(t)}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          <button
+            type="button"
+            onClick={hide}
+            className="mt-1 inline-flex min-h-11 items-center text-xs font-semibold text-muted hover:text-ink"
+          >
+            Hide until something new is past due
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -144,7 +178,9 @@ export function OverdueCallout({ tasks }: { tasks: TaskRow[] }) {
 // stat tiles — compact single row, accent only where it means something
 // ---------------------------------------------------------------------------
 
-type StatDetail = { key: string; title: string; detail?: string; tone?: Tone; pill?: string };
+/** What a row opens (SEC-A006: nothing on the board that looks tappable is a dead end). */
+type Opens = { kind: "task" | "event"; id: string } | { kind: "project"; id: string } | null;
+type StatDetail = { key: string; title: string; detail?: string; tone?: Tone; pill?: string; opens: Opens };
 
 function computeStats(tasks: TaskRow[], events: EventRow[]) {
   const now = Date.now();
@@ -152,66 +188,59 @@ function computeStats(tasks: TaskRow[], events: EventRow[]) {
   const overdueTasks = tasks.filter(isOverdue);
   const undatedTasks = open.filter((t) => !t.dueAt);
 
-  const projectMap = new Map<string, { count: number; soonest: string | null }>();
+  const projectMap = new Map<string, { id: string | null; count: number; soonest: TaskRow | null }>();
   for (const t of open) {
     if (!t.projectName) continue;
-    const p = projectMap.get(t.projectName) ?? { count: 0, soonest: null };
+    const p = projectMap.get(t.projectName) ?? { id: t.projectId, count: 0, soonest: null };
     p.count++;
-    if (t.dueAt && (!p.soonest || t.dueAt < p.soonest)) p.soonest = t.dueAt;
+    if (t.dueAt && (!p.soonest || t.dueAt < p.soonest.dueAt!)) p.soonest = t;
     projectMap.set(t.projectName, p);
   }
 
   const upcoming = [
     ...events
       .filter((e) => new Date(e.startsAt).getTime() >= now)
-      .map((e) => ({ title: e.title, at: e.startsAt, kind: "event" })),
+      .map((e) => ({ title: e.title, at: e.startsAt, days: e.startDays, label: e.startLabel, kind: "event" as const, id: e.id })),
     ...open
       .filter((t) => t.dueAt && new Date(t.dueAt).getTime() >= now)
-      .map((t) => ({ title: t.title, at: t.dueAt!, kind: "task" })),
+      .map((t) => ({ title: t.title, at: t.dueAt!, days: t.dueDays!, label: t.dueLabel, kind: "task" as const, id: t.id })),
   ].sort((a, b) => a.at.localeCompare(b.at));
+
+  const taskRow = (t: TaskRow, pill: string, tone: Tone): StatDetail => ({
+    key: t.id,
+    title: t.title,
+    detail: t.projectName ?? undefined,
+    pill,
+    tone,
+    opens: { kind: "task", id: t.id },
+  });
 
   const details: Record<string, StatDetail[]> = {
     projects: [...projectMap.entries()].map(([name, p]) => ({
       key: name,
       title: name,
       detail: `${p.count} open`,
-      pill: p.soonest ? fmtDue(p.soonest) : "undated",
-      tone: p.soonest ? pressureTone(daysUntil(p.soonest, now)) : "warn",
+      pill: p.soonest ? dueText(p.soonest) : "undated",
+      tone: p.soonest ? pressureTone(p.soonest.dueDays) : "warn",
+      opens: p.id ? { kind: "project", id: p.id } : null,
     })),
     next: upcoming.slice(0, 6).map((u, i) => ({
       key: `${u.title}-${i}`,
       title: u.title,
       detail: u.kind,
-      pill: fmtDue(u.at),
-      tone: pressureTone(daysUntil(u.at, now)),
+      pill: u.label,
+      tone: pressureTone(u.days),
+      opens: { kind: u.kind, id: u.id },
     })),
-    overdue: overdueTasks.map((t) => ({
-      key: t.id,
-      title: t.title,
-      detail: t.projectName ?? undefined,
-      pill: fmtDue(t.dueAt),
-      tone: "danger" as Tone,
-    })),
+    overdue: overdueTasks.map((t) => taskRow(t, dueText(t), "danger")),
     open: open
       .slice()
       .sort((a, b) => (a.dueAt ?? "9999").localeCompare(b.dueAt ?? "9999"))
-      .map((t) => ({
-        key: t.id,
-        title: t.title,
-        detail: t.projectName ?? undefined,
-        pill: t.dueAt ? fmtDue(t.dueAt) : "no date",
-        tone: t.dueAt ? pressureTone(daysUntil(t.dueAt, now)) : ("warn" as Tone),
-      })),
-    undated: undatedTasks.map((t) => ({
-      key: t.id,
-      title: t.title,
-      detail: t.projectName ?? undefined,
-      pill: "no date",
-      tone: "warn" as Tone,
-    })),
+      .map((t) => taskRow(t, t.dueAt ? dueText(t) : "no date", t.dueAt ? pressureTone(t.dueDays) : "warn")),
+    undated: undatedTasks.map((t) => taskRow(t, "no date", "warn")),
   };
 
-  const nextInDays = upcoming.length ? daysUntil(upcoming[0].at, now) : null;
+  const nextInDays = upcoming.length ? upcoming[0].days : null;
   return {
     open: open.length,
     overdue: overdueTasks.length,
@@ -246,7 +275,7 @@ export function StatTiles({ tasks, events }: { tasks: TaskRow[]; events: EventRo
     {
       id: "overdue",
       value: String(s.overdue),
-      label: "overdue",
+      label: "past due",
       Icon: TriangleAlert,
       tone: s.overdue > 0 ? "text-danger" : undefined,
     },
@@ -296,24 +325,44 @@ export function StatTiles({ tasks, events }: { tasks: TaskRow[]; events: EventRo
           {detail.length === 0 ? (
             <p className="py-1 text-sm text-faint">
               {expanded === "overdue"
-                ? "Nothing overdue — clean slate."
+                ? "Nothing past due — clean slate."
                 : expanded === "undated"
                   ? "Everything has a date. As it should."
                   : "Nothing here yet."}
             </p>
           ) : (
             <ul className="divide-y divide-edge/50">
-              {detail.slice(0, 8).map((d) => (
-                <li key={d.key} className="flex flex-wrap items-baseline gap-2 py-1.5 text-sm">
-                  <span className="font-medium">{d.title}</span>
-                  {d.detail && <span className="text-xs text-faint">{d.detail}</span>}
-                  {d.pill && (
-                    <span className="ml-auto">
-                      <Pill tone={d.tone ?? "neut"}>{d.pill}</Pill>
-                    </span>
-                  )}
-                </li>
-              ))}
+              {detail.slice(0, 8).map((d) => {
+                const body = (
+                  <>
+                    <span className="font-medium">{d.title}</span>
+                    {d.detail && <span className="text-xs text-faint">{d.detail}</span>}
+                    {d.pill && (
+                      <span className="ml-auto">
+                        <Pill tone={d.tone ?? "neut"}>{d.pill}</Pill>
+                      </span>
+                    )}
+                  </>
+                );
+                // Every row opens what it names, a 44 px target (SEC-A006).
+                const row = "flex min-h-11 w-full flex-wrap items-center gap-2 py-1.5 text-left text-sm";
+                const opens = d.opens;
+                return (
+                  <li key={d.key}>
+                    {opens?.kind === "project" ? (
+                      <Link href={`/projects/${opens.id}`} className={`${row} hover:text-accent`}>
+                        {body}
+                      </Link>
+                    ) : opens ? (
+                      <button type="button" onClick={() => openDetail(opens.kind, opens.id)} className={`${row} hover:text-accent`}>
+                        {body}
+                      </button>
+                    ) : (
+                      <div className={row}>{body}</div>
+                    )}
+                  </li>
+                );
+              })}
               {detail.length > 8 && (
                 <li className="py-1.5 text-xs text-faint">+ {detail.length - 8} more</li>
               )}
@@ -387,7 +436,11 @@ export function findNextUp(
   ].sort((a, b) => a.at.getTime() - b.at.getTime());
   const first = candidates[0];
   if (!first) return null;
-  return { ...first, days: Math.ceil((first.at.getTime() - now) / DAY) };
+  const days =
+    first.kind === "task"
+      ? (tasks.find((t) => t.id === first.id)?.dueDays ?? 0)
+      : (events.find((e) => e.id === first.id)?.startDays ?? 0);
+  return { ...first, days };
 }
 
 export function NextUpHero({ tasks, events }: { tasks: TaskRow[]; events: EventRow[] }) {
@@ -813,26 +866,41 @@ export function ProcrastinationZone({ tasks }: { tasks: TaskRow[] }) {
         <Flame size={13} strokeWidth={2} /> Procrastinating
       </p>
       {offenders.map((t) => (
-        <p key={t.id} className="mb-1.5 flex flex-wrap items-baseline gap-2 text-sm last:mb-0">
+        <button
+          key={t.id}
+          type="button"
+          onClick={() => openDetail("task", t.id)}
+          className="flex min-h-11 w-full flex-wrap items-center gap-2 text-left text-sm hover:text-accent"
+        >
           {t.title}
           <span className="text-xs text-faint">
             {[
               t.postponedCount ? `pushed ${t.postponedCount}×` : null,
-              isOverdue(t) ? fmtDue(t.dueAt) : null,
+              isOverdue(t) ? dueText(t) : null,
             ]
               .filter(Boolean)
               .join(" · ") || "stalling"}
           </span>
-        </p>
+        </button>
       ))}
     </div>
   );
 }
 
+/**
+ * Suggestions, one at a time (SEC-A006): the title in large text, why under
+ * it, Add and Not now ("Not now" is the old dismiss). Hide suggestions folds
+ * the area to "See suggestions (N)" until a new one arrives
+ * (hide-until-new.ts).
+ */
 export function SuggestedZone({ suggestions }: { suggestions: TaskRow[] }) {
   const router = useRouter();
-  const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const [acted, setActed] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<string | null>(null);
+
+  const visible = useMemo(() => suggestions.filter((s) => !acted.has(s.id)), [suggestions, acted]);
+  const ids = useMemo(() => visible.map((s) => s.id), [visible]);
+  const { ready, hidden, hide, show } = useHideUntilNew("secretary:suggestions-hidden", ids);
 
   const act = async (id: string, status: "todo" | "dropped") => {
     if (isMomentumTap()) return; // scroll-stop tap must never accept/dismiss
@@ -844,42 +912,60 @@ export function SuggestedZone({ suggestions }: { suggestions: TaskRow[] }) {
     });
     setBusy(null);
     if (res.ok) {
-      setHidden((h) => new Set(h).add(id));
+      setActed((h) => new Set(h).add(id));
       router.refresh();
     }
   };
 
-  const visible = suggestions.filter((s) => !hidden.has(s.id));
-  if (visible.length === 0) return null;
+  if (visible.length === 0 || !ready) return null;
+  if (hidden) {
+    return (
+      <button
+        type="button"
+        onClick={show}
+        data-testid="see-suggestions"
+        className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-edge bg-surface px-4 text-sm font-semibold text-muted hover:text-ink"
+      >
+        <Sparkles size={14} strokeWidth={2} className="text-ok" /> See suggestions ({visible.length})
+      </button>
+    );
+  }
+  const s = visible[0];
   return (
-    <div className="rounded-2xl border border-edge bg-surface px-5 py-4">
-      <p className="mb-2.5 inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.08em] text-ok">
-        <Sparkles size={13} strokeWidth={2} /> Suggested
-      </p>
-      {visible.map((s) => (
-        <div key={s.id} className="mb-2 flex flex-wrap items-center gap-2 text-sm last:mb-0">
-          <span>{s.title}</span>
-          {s.notes && (
-            <span className="text-xs text-faint">{s.notes.replace(/^Suggested: /, "")}</span>
-          )}
-          <span className="ml-auto flex gap-1.5">
-            <button
-              disabled={busy === s.id}
-              onClick={() => act(s.id, "todo")}
-              className="inline-flex items-center gap-1 rounded-full border border-ok/50 px-2.5 py-0.5 text-xs text-ok hover:bg-ok/10 disabled:opacity-50"
-            >
-              <Check size={12} strokeWidth={2.5} /> add
-            </button>
-            <button
-              disabled={busy === s.id}
-              onClick={() => act(s.id, "dropped")}
-              className="inline-flex items-center gap-1 rounded-full border border-edge px-2.5 py-0.5 text-xs text-muted hover:border-danger/50 hover:text-danger disabled:opacity-50"
-            >
-              <X size={12} strokeWidth={2.5} /> dismiss
-            </button>
-          </span>
-        </div>
-      ))}
+    <div data-testid="suggestion" className="rounded-2xl border border-edge bg-surface px-5 py-4">
+      <div className="mb-2 flex items-center gap-2">
+        <p className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.08em] text-ok">
+          <Sparkles size={13} strokeWidth={2} /> Suggestion
+        </p>
+        {visible.length > 1 && <span className="text-xs text-faint">1 of {visible.length}</span>}
+        <button
+          type="button"
+          onClick={hide}
+          className="ml-auto inline-flex min-h-11 items-center text-xs font-semibold text-muted hover:text-ink"
+        >
+          Hide suggestions
+        </button>
+      </div>
+      <p className="text-xl font-semibold leading-snug">{s.title}</p>
+      {s.notes && <p className="mt-1 text-sm text-muted">{s.notes.replace(/^Suggested: /, "")}</p>}
+      <div className="mt-3 flex gap-2">
+        <button
+          type="button"
+          disabled={busy === s.id}
+          onClick={() => act(s.id, "todo")}
+          className="inline-flex min-h-11 items-center gap-1.5 rounded-full bg-ok px-5 text-sm font-bold text-bg disabled:opacity-50"
+        >
+          <Check size={15} strokeWidth={2.5} /> Add
+        </button>
+        <button
+          type="button"
+          disabled={busy === s.id}
+          onClick={() => act(s.id, "dropped")}
+          className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-edge px-5 text-sm font-semibold text-muted hover:text-ink disabled:opacity-50"
+        >
+          <X size={15} strokeWidth={2.5} /> Not now
+        </button>
+      </div>
     </div>
   );
 }
@@ -926,8 +1012,8 @@ export function buildProjects(tasks: TaskRow[], events: EventRow[] = []): Projec
     if (!p.id && t.projectId) p.id = t.projectId;
     if (OPEN.has(t.status)) {
       p.open.push(t);
-      if (t.dueAt) {
-        const d = daysUntil(t.dueAt, now);
+      if (t.dueDays !== null) {
+        const d = t.dueDays;
         if (p.earliestDays === null || d < p.earliestDays) p.earliestDays = d;
       }
     } else if (t.status === "done") {
@@ -946,7 +1032,7 @@ export function buildProjects(tasks: TaskRow[], events: EventRow[] = []): Projec
     const p = ensure(e.projectName ?? "Unfiled", null, e.projectId);
     if (!p.id && e.projectId) p.id = e.projectId;
     if (!p.nextEvent || e.startsAt < p.nextEvent.startsAt) p.nextEvent = e;
-    const d = daysUntil(e.startsAt, now);
+    const d = e.startDays;
     if (p.earliestDays === null || d < p.earliestDays) p.earliestDays = d;
   }
   return [...map.values()]
@@ -990,47 +1076,47 @@ export function ProjectGrid({
             key={p.name}
             className="flex flex-col gap-3.5 rounded-2xl border border-edge bg-surface p-5"
           >
-            <div className="flex items-start gap-2.5">
-              <div className="min-w-0 flex-1">
-                {p.id ? (
-                  // The chevron is ALWAYS visible on touch devices (no hover
-                  // there — an invisible affordance is a dead end), and the
-                  // link carries no hover-gated content: iOS Safari spends the
-                  // first tap on hover when it does, eating the navigation.
-                  <Link
-                    href={`/projects/${p.id}`}
-                    className="group/title flex items-center gap-2 text-[17px] font-semibold tracking-tight hover:text-accent"
-                  >
-                    <span
-                      className="h-2 w-2 flex-none rounded-full"
-                      style={{ background: p.color ?? "var(--color-accent)" }}
-                    />
-                    {p.name}
-                    <ChevronRight
-                      size={14}
-                      strokeWidth={2}
-                      className="opacity-60 transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/title:opacity-70"
-                    />
-                  </Link>
-                ) : (
-                  <h3 className="flex items-center gap-2 text-[17px] font-semibold tracking-tight">
-                    <span
-                      className="h-2 w-2 flex-none rounded-full"
-                      style={{ background: p.color ?? "var(--color-accent)" }}
-                    />
-                    {p.name}
-                  </h3>
-                )}
-                <p className="mt-0.5 text-xs text-faint">
-                  {p.open.length} open{p.doneCount ? ` · ${p.doneCount} done` : ""}
-                </p>
-              </div>
-              {p.earliestDays !== null ? (
-                <Pill tone={tone}>{pressureLabel(p.earliestDays)}</Pill>
+            {(() => {
+              // The whole header is the way in (SEC-A006): name, "N open" and
+              // the date pill all open the project page, one target of at
+              // least 44 px. The chevron is ALWAYS visible (no hover on
+              // touch, and an invisible affordance is a dead end), and the
+              // link carries no hover-gated content: iOS Safari spends the
+              // first tap on hover when it does, eating the navigation.
+              const header = (
+                <>
+                  <div className="min-w-0 flex-1">
+                    <span className="flex items-center gap-2 text-[17px] font-semibold tracking-tight">
+                      <span
+                        className="h-2 w-2 flex-none rounded-full"
+                        style={{ background: p.color ?? "var(--color-accent)" }}
+                      />
+                      {p.name}
+                      {p.id && <ChevronRight size={14} strokeWidth={2} className="flex-none opacity-60" />}
+                    </span>
+                    <span className="mt-0.5 block text-xs text-faint">
+                      {p.open.length} open{p.doneCount ? ` · ${p.doneCount} done` : ""}
+                    </span>
+                  </div>
+                  {p.earliestDays !== null ? (
+                    <Pill tone={tone}>{pressureLabel(p.earliestDays)}</Pill>
+                  ) : (
+                    <Pill tone="warn">undated</Pill>
+                  )}
+                </>
+              );
+              return p.id ? (
+                <Link
+                  href={`/projects/${p.id}`}
+                  aria-label={`${p.name}, ${p.open.length} open`}
+                  className="-mx-2 -my-1.5 flex min-h-11 items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors hover:bg-surface-2/40 hover:text-accent"
+                >
+                  {header}
+                </Link>
               ) : (
-                <Pill tone="warn">undated</Pill>
-              )}
-            </div>
+                <div className="flex items-start gap-2.5">{header}</div>
+              );
+            })()}
 
             <div>
               <div className="mb-1.5 flex justify-between text-xs text-faint">
@@ -1101,7 +1187,7 @@ export function ProjectGrid({
                     )}
                     {t.dueAt && (
                       <span className={`ml-1.5 text-xs ${isOverdue(t) ? "text-danger" : "text-faint"}`}>
-                        {fmtDue(t.dueAt)}
+                        {dueText(t)}
                       </span>
                     )}
                     {t.source === "inferred" && (
@@ -1188,6 +1274,10 @@ export function buildLoopGroups(tasks: TaskRow[], events: EventRow[] = []) {
       items: g.items.sort((a, b) => (a.date ?? "9999").localeCompare(b.date ?? "9999")),
       done: g.done,
       earliest: g.items.map((i) => i.date).find(Boolean) ?? null,
+      earliestLabel:
+        g.items
+          .filter((i) => i.date)
+          .map((i) => (i.kind === "task" ? i.task.dueLabel : i.event.startLabel))[0] ?? null,
       openCount: g.items.filter((i) => i.kind === "task").length,
       eventCount: g.items.filter((i) => i.kind === "event").length,
     }))
@@ -1219,12 +1309,12 @@ export function OpenLoopsTable({
 
   const whenPill = (t: TaskRow) => {
     if (!t.dueAt) return <Pill tone="warn">no date</Pill>;
-    return <Pill tone={pressureTone(dueDays(t))}>{fmtDue(t.dueAt)}</Pill>;
+    return <Pill tone={pressureTone(t.dueDays)}>{dueText(t)}</Pill>;
   };
 
   const eventWhenPill = (e: EventRow) => {
     return (
-      <Pill tone={pressureTone(eventDays(e))}>
+      <Pill tone={pressureTone(e.startDays)}>
         {new Intl.DateTimeFormat("en-US", {
           weekday: "short",
           hour: "numeric",
@@ -1264,8 +1354,8 @@ export function OpenLoopsTable({
                     {g.eventCount
                       ? ` · ${g.eventCount} event${g.eventCount > 1 ? "s" : ""}`
                       : ""}
-                    {g.earliest
-                      ? ` · next ${fmtDue(g.earliest)}`
+                    {g.earliestLabel
+                      ? ` · next ${g.earliestLabel}`
                       : g.openCount
                         ? " · no dates"
                         : ""}

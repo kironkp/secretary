@@ -1,15 +1,7 @@
-import { headers } from "next/headers";
+// The Canvas is a view inside the Dashboard since SEC-A006 (Kiron: "make it
+// make sense"); the old address still lands on it.
 import { redirect } from "next/navigation";
-import { auth } from "@/lib/auth";
-import { CanvasView } from "@/components/canvas/canvas-view";
 
-export default async function CanvasPage() {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) redirect("/sign-in");
-  return (
-    <div className="py-2">
-      <h1 className="mb-3 text-lg font-bold">Canvas</h1>
-      <CanvasView />
-    </div>
-  );
+export default function CanvasPage() {
+  redirect("/dashboard?view=canvas");
 }

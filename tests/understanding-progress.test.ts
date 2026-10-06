@@ -239,7 +239,7 @@ describe("the phases a run publishes", () => {
     const finished = events.find((e) => e.kind === "finished");
     expect(finished?.kind === "finished" && finished.entry).toMatchObject({
       status: "failed",
-      line: "Could not read Caltrans",
+      line: "I couldn't update my notes on Caltrans",
       detail: "the model has no credits",
       reason: "no-credits",
     });
@@ -445,12 +445,12 @@ describe("the lines", () => {
         `${MODEL_ERROR_PREFIX}anthropic: ${CLAUDE_CAPPED}`,
       ])
     ).toEqual({
-      line: "Could not read Caltrans",
+      line: "I couldn't update my notes on Caltrans",
       detail: "the Claude limit resets on October 1 and OpenAI has no credits",
       reason: "no-credits",
     });
     expect(failedLines("Caltrans", [`${MODEL_ERROR_PREFIX}anthropic: ${CLAUDE_CAPPED}`])).toEqual({
-      line: "Could not read Caltrans",
+      line: "I couldn't update my notes on Caltrans",
       detail: "the model's limit resets on October 1",
       reason: "capped",
     });
@@ -459,7 +459,7 @@ describe("the lines", () => {
       reason: "auth",
     });
     expect(failedLines("Caltrans", [`${MODEL_ERROR_PREFIX}claude refusal`])).toEqual({
-      line: "Could not read Caltrans",
+      line: "I couldn't update my notes on Caltrans",
       detail: "the model did not answer",
       reason: "other",
     });
@@ -471,16 +471,16 @@ describe("the lines", () => {
         `${MODEL_ERROR_PREFIX}openai: 429 You have no credits remaining`,
       ])
     ).toEqual({
-      line: "Could not read Caltrans",
+      line: "I couldn't update my notes on Caltrans",
       detail: "Claude is not answering and OpenAI has no credits",
       reason: "no-credits",
     });
     expect(failedLines("Caltrans", ["record.things[0].state.sources: at least one source"])).toEqual({
-      line: "Could not read Caltrans",
-      detail: "the model's answer did not check out",
+      line: "I couldn't update my notes on Caltrans",
+      detail: "I'll try again when something changes",
       reason: "validation",
     });
-    expect(failedLines("Caltrans", [])).toMatchObject({ detail: "something went wrong", reason: "other" });
+    expect(failedLines("Caltrans", [])).toMatchObject({ detail: "I'll try again when something changes", reason: "other" });
   });
 
   it("okLines, displayModelName, outageLine", () => {
@@ -570,7 +570,7 @@ describe("GET /api/understanding/progress", () => {
     expect(again.lastRun).toMatchObject({
       projectName: "Caltrans",
       status: "failed",
-      line: "Could not read Caltrans",
+      line: "I couldn't update my notes on Caltrans",
       detail: "the model has no credits",
     });
   });

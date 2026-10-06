@@ -9,7 +9,7 @@ import { useRouter } from "next/navigation";
 import { Pin, Sparkles, Undo2 } from "lucide-react";
 import type { LayoutPlan, PlanSection } from "@/lib/layout/plan";
 import { sectionKey } from "@/lib/layout/plan";
-import type { DocRow, EventRow, TaskRow } from "./shared";
+import { openDetail, type DocRow, type EventRow, type TaskRow } from "./shared";
 import { BoardView } from "./task-views";
 import { Pill } from "./zones";
 import {
@@ -99,15 +99,18 @@ function DateChase({ tasks, itemIds }: { tasks: TaskRow[]; itemIds?: string[] })
       <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
         Needs a date
       </p>
+      {/* Each opens its task, where the date is set: no dead ends (SEC-A006). */}
       <div className="flex flex-wrap gap-2">
         {undated.map((t) => (
-          <span
+          <button
             key={t.id}
-            className="inline-flex items-center gap-2 rounded-full border border-edge bg-card px-3 py-1 text-xs"
+            type="button"
+            onClick={() => openDetail("task", t.id)}
+            className="inline-flex min-h-11 items-center gap-2 rounded-full border border-edge bg-card px-3 text-left text-xs hover:border-faint"
           >
             {t.title}
             <Pill tone="warn">no date</Pill>
-          </span>
+          </button>
         ))}
       </div>
     </div>

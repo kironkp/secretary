@@ -11,7 +11,10 @@ import { z } from "zod";
 import { isErrorResponse, parseBody, requireSession } from "@/lib/api";
 import { checkUnderstandNowQuota } from "@/lib/rate-limit";
 import { providerHealth } from "@/lib/understanding/provider-health";
-import { runAll } from "@/lib/understanding/run";
+import { runAll, runProject } from "@/lib/understanding/run";
+import { and, eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { projects } from "@/lib/db/schema";
 import {
   describeProvider,
   hasConnectedAnthropic,
@@ -26,6 +29,11 @@ import {
 const bodySchema = z.object({
   /** Call the model for every active project even where the hash matches. */
   force: z.boolean().optional(),
+  /**
+   * Today's "Try now" under a failed read (SEC-A006): read just this one
+   * project again, not every project. The same quota and spend caps apply.
+   */
+  projectId: z.string().min(1).max(80).optional(),
 });
 
 export async function GET() {
@@ -72,6 +80,18 @@ export async function POST(req: Request) {
 
   const quota = checkUnderstandNowQuota(user.id);
   if (!quota.ok) return NextResponse.json({ error: quota.message }, { status: quota.status });
+
+  if (parsed.projectId) {
+    // Only a project of this user's; anything else is not found, never read.
+    const [owned] = await db
+      .select({ id: projects.id })
+      .from(projects)
+      .where(and(eq(projects.id, parsed.projectId), eq(projects.userId, user.id)))
+      .limit(1);
+    if (!owned) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    const result = await runProject(user.id, owned.id, { timezone: user.timezone });
+    return NextResponse.json({ ...tallyResults({ [owned.id]: result }), results: { [owned.id]: result } });
+  }
 
   const { results, retiredAsr } = await runAll(user.id, {
     timezone: user.timezone,

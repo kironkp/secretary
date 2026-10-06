@@ -59,14 +59,14 @@ export default async function SettingsPage() {
         <AppearancePicker />
       </section>
 
-      {/* The tab bar carries four screens (the mockup's). These still exist
-          and are reached from here rather than from a tab. */}
+      {/* Screens that are not on the tab bar (SEC-A006): still here. The
+          Canvas is a view inside the Dashboard. */}
       <section className="rounded-xl border border-edge bg-surface p-5">
         <h2 className="mb-1 text-sm font-bold">More screens</h2>
         <p className="mb-3 text-xs text-muted">Not on the tab bar, still here.</p>
         <ul className="flex flex-col divide-y divide-sep">
           {[
-            { href: "/dashboard", label: "Dashboard" },
+            { href: "/workspace", label: "Workspace" },
             { href: "/spreadsheet", label: "Spreadsheet" },
             { href: "/soundtest", label: "Sound test" },
           ].map((l) => (

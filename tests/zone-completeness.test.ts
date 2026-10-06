@@ -41,6 +41,9 @@ const task: TaskRow = {
   conversationId: "conv-1",
   messageId: null,
   conversationLabel: null,
+  // The server works these out in the user's zone (lib/due.ts); here, as it would say.
+  dueDays: 3,
+  dueLabel: "Fri",
 };
 
 const event: EventRow = {
@@ -55,6 +58,8 @@ const event: EventRow = {
   projectName: "DAW patent",
   source: "spoken",
   createdAt: iso(-2 * HOUR),
+  startDays: 2,
+  startLabel: "Thu",
 };
 
 describe("render completeness: open loops", () => {

@@ -9,7 +9,7 @@
 //   - Showing a question is what "asked" means (SPEC §5): the first time a row
 //     is returned its surfacedAt is set and the project's record logs it, so
 //     the next run can reason from what the user has already been asked.
-import { and, count, eq, gte, inArray, isNotNull, lt, max, sql } from "drizzle-orm";
+import { and, count, eq, gte, inArray, isNotNull, isNull, lt, max, notInArray, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   clarifications,
@@ -18,12 +18,13 @@ import {
   expectations,
   memories,
   messages,
+  projects,
   records,
   tasks,
   understandingRuns,
 } from "@/lib/db/schema";
 import { dayRangeInTz } from "@/lib/time";
-import { resolveBinding } from "@/lib/workspace/bindings";
+import { isWaitingSuggestionRow, resolveBinding } from "@/lib/workspace/bindings";
 import type { BoundRow } from "@/lib/workspace/types";
 import { listQuestions, type QuestionRow } from "./questions";
 import { upsertAsked } from "./record";
@@ -440,6 +441,23 @@ export async function markSurfaced(
   return new Set(flipped.map((r) => r.id));
 }
 
+/** The user's lists (Shopping): their items are not work to chase or count (SEC-A003). */
+function listProjectIds(userId: string) {
+  return db
+    .select({ id: projects.id })
+    .from(projects)
+    .where(and(eq(projects.userId, userId), eq(projects.kind, "list")));
+}
+
+/** Open items on the user's lists, by id, to leave out of Today's work. */
+async function openListItemIds(userId: string): Promise<Set<string>> {
+  const rows = await db
+    .select({ id: tasks.id })
+    .from(tasks)
+    .where(and(eq(tasks.userId, userId), inArray(tasks.status, [...OPEN_STATUSES]), inArray(tasks.projectId, listProjectIds(userId))));
+  return new Set(rows.map((r) => r.id));
+}
+
 export async function buildToday(
   userId: string,
   timezone: string,
@@ -447,7 +465,7 @@ export async function buildToday(
 ): Promise<TodayData> {
   const { start } = dayRangeInTz(timezone, now);
 
-  const [queue, [{ open }], [pastDueCounts], dueToday, pastDueAll, comingUp, recordRows, [lastRun]] = await Promise.all([
+  const [queue, [{ open }], [pastDueCounts], dueTodayAll, pastDueAll, comingUp, recordRows, [lastRun]] = await Promise.all([
     listQuestions(userId, { limit: QUEUE_LIMIT }),
     db
       .select({ open: count() })
@@ -463,10 +481,14 @@ export async function buildToday(
     // the listed fifty, split the way SPEC §10 splits them: the user's own
     // work in one, the app's untaken suggestions in the other. The same
     // filter the tasks binding applies for { open: true, due: "overdue" }.
+    // One truth with every other screen (SEC-A006, lib/due.ts): a
+    // suggestion still waiting is counted apart; one the user took up
+    // ("todo", source still "suggested") is their work. A list's items
+    // (Shopping) are not work to chase, as on the Dashboard (SEC-A003).
     db
       .select({
-        own: sql<number>`count(*) filter (where ${tasks.source} <> 'suggested')`.mapWith(Number),
-        suggested: sql<number>`count(*) filter (where ${tasks.source} = 'suggested')`.mapWith(Number),
+        own: sql<number>`count(*) filter (where not (${tasks.source} = 'suggested' and ${tasks.status} = 'inbox'))`.mapWith(Number),
+        suggested: sql<number>`count(*) filter (where ${tasks.source} = 'suggested' and ${tasks.status} = 'inbox')`.mapWith(Number),
       })
       .from(tasks)
       .where(
@@ -474,7 +496,8 @@ export async function buildToday(
           eq(tasks.userId, userId),
           inArray(tasks.status, [...OPEN_STATUSES]),
           isNotNull(tasks.dueAt),
-          lt(tasks.dueAt, start)
+          lt(tasks.dueAt, start),
+          or(isNull(tasks.projectId), notInArray(tasks.projectId, listProjectIds(userId)))
         )
       ),
     resolveBinding(
@@ -517,7 +540,10 @@ export async function buildToday(
   // suggestions" line. The list is the first fifty by due date minus the
   // suggestions among them; the numbers come from the count above, so a
   // backlog past fifty is still counted whole.
-  const pastDue = pastDueAll.filter((r) => r.fields.source !== "suggested");
+  const listItems = await openListItemIds(userId);
+  const pastDue = pastDueAll.filter((r) => !isWaitingSuggestionRow(r.fields) && !listItems.has(r.id));
+  // Due today, counted the same way as everywhere: the user's work only.
+  const dueToday = dueTodayAll.filter((r) => !isWaitingSuggestionRow(r.fields) && !listItems.has(r.id));
 
   const candidates: RecordWords[] = recordRows.flatMap((r) => {
     const line = r.words?.todayLine;

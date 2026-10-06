@@ -680,9 +680,12 @@ clip; that is the first change in phase 1 below.
 - A run can never complete, drop, move or reschedule a task by itself.
   "I'd close all three" is a proposal on a question, not an action.
 - Suggested tasks (`source = suggested`) are labelled as the app's own in
-  every surface, excluded from "past due" counts of the user's work, and
-  become one `doesnt_add_up` question after 14 days, then dropped if the
-  answer is "drop" or silence for another 14.
+  every surface. While one waits to be taken up (`status = inbox`) it is
+  excluded from "past due" and open counts of the user's work, and becomes
+  one `doesnt_add_up` question after 14 days, then dropped if the answer is
+  "drop" or silence for another 14. Once taken up (`todo`; the source
+  stays) it is the user's work and counts like any other, on Today and on
+  every Dashboard view alike (SEC-A006, `lib/due.ts`).
 - Output is text and JSON; nothing from the model reaches `innerHTML`. Ledes
   render through `textContent` into a slot, the same as bound fields.
 - The honesty rule from the persona applies: "closed" is said only for

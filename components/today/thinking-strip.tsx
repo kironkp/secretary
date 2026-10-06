@@ -90,13 +90,23 @@ type Shown = {
   detail: string | null;
   /** The way out, as a link to Settings. */
   action: string | null;
+  /**
+   * A recent read that failed on its own (not a provider being down): the
+   * project a "Try now" button reads again (SEC-A006). Null otherwise.
+   */
+  retry: string | null;
   /** The main line's colour: the warn tone for a failure the user can act on. */
   tone: "ink" | "warn";
   /** Whose words: the screen's own two lines each get their beat; the server's collapse to the latest. */
   source: "local" | "server";
 };
 
-const NOTHING: Shown = { phase: "idle", line: "", detail: null, action: null, tone: "ink", source: "server" };
+const NOTHING: Shown = { phase: "idle", line: "", detail: null, action: null, retry: null, tone: "ink", source: "server" };
+
+/** A failed read older than this, and not being read again, is not shown at all (SEC-A006). */
+export const FAILED_SHOWN_MS = 24 * 60 * 60 * 1000;
+/** Failures the user can retry: the read itself, not a provider being down or out of money. */
+const retryable = (reason: string | null | undefined) => reason === "validation" || reason === "other";
 
 /** What the screenshot hooks show, with nothing polled (see `preview` below). */
 const PREVIEW: Record<string, Shown> = {
@@ -105,14 +115,16 @@ const PREVIEW: Record<string, Shown> = {
     line: "Reading Caltrans",
     detail: "43 tasks, 12 messages",
     action: null,
+    retry: null,
     tone: "ink",
     source: "server",
   },
   failed: {
     phase: "failed",
-    line: "Could not read Caltrans",
+    line: "I couldn't update my notes on Caltrans",
     detail: "the model has no credits",
     action: "Add credits, raise the limit, or connect your own key in Settings.",
+    retry: null,
     tone: "warn",
     source: "server",
   },
@@ -164,8 +176,8 @@ function isOver(activity: StripActivity, watch: Watch, progress: Progress | null
   return landedSince(progress, watch.since);
 }
 
-function derive(progress: Progress | null, activity: StripActivity | null, watch: Watch | null, now: number): Shown {
-  const server = { action: null, tone: "ink", source: "server" } as const;
+export function derive(progress: Progress | null, activity: StripActivity | null, watch: Watch | null, now: number): Shown {
+  const server = { action: null, retry: null, tone: "ink", source: "server" } as const;
   const entry = pickActive(progress?.active ?? [], activity?.projectId);
   if (entry) return { ...server, phase: "active", line: entry.line, detail: entry.detail };
   if (activity && watch && !isOver(activity, watch, progress, now)) {
@@ -175,6 +187,7 @@ function derive(progress: Progress | null, activity: StripActivity | null, watch
         line: activity.line,
         detail: activity.detail ?? null,
         action: progress?.provider.action ?? null,
+        retry: null,
         tone: "warn",
         source: "local",
       };
@@ -190,6 +203,7 @@ function derive(progress: Progress | null, activity: StripActivity | null, watch
       line: newest.line,
       detail: newest.detail,
       action: progress.provider.action,
+      retry: progress.provider.ok && retryable(newest.reason) ? newest.projectId : null,
       tone: "warn",
     };
   }
@@ -215,12 +229,24 @@ function derive(progress: Progress | null, activity: StripActivity | null, watch
   const last = finished ?? progress.lastRun;
   if (!last) return { ...server, phase: "idle", line: "Nothing read yet", detail: null };
   const ago = agoInWords(last.finishedAt, now);
+  if (last.status === "failed") {
+    // An old failure nobody is retrying is news no longer: say nothing.
+    if (now - Date.parse(last.finishedAt) > FAILED_SHOWN_MS) return NOTHING;
+    return {
+      ...server,
+      phase: "idle",
+      line: last.line,
+      detail: last.detail ? `${last.detail}, ${ago}` : ago,
+      retry: progress.provider.ok && retryable(last.reason) ? last.projectId : null,
+      tone: "warn",
+    };
+  }
   return {
     ...server,
     phase: "idle",
     line: last.line,
     detail: last.detail ? `${last.detail}, ${ago}` : ago,
-    tone: last.status === "failed" ? "warn" : "ink",
+    tone: "ink",
   };
 }
 
@@ -385,9 +411,9 @@ export function ThinkingStrip({
     /** The screen's own lines already shown for this tap, so each gets one beat and no more. */
     localShown: Set<string>;
   }>({ shown: want, since: 0, startedAt, pending: [], timer: null, localShown: new Set() });
-  const { phase, line, detail, action, tone, source } = want;
+  const { phase, line, detail, action, retry, tone, source } = want;
   useLayoutEffect(() => {
-    const next: Shown = { phase, line, detail, action, tone, source };
+    const next: Shown = { phase, line, detail, action, retry, tone, source };
     const st = dwell.current;
     const sameLine = (a: Shown, b: Shown) => a.line === b.line && a.phase === b.phase;
     const show = (item: Shown) => {
@@ -438,6 +464,7 @@ export function ThinkingStrip({
         line: own,
         detail: activity?.detail ?? null,
         action: null,
+        retry: null,
         tone: "ink",
         source: "local",
       };
@@ -452,6 +479,7 @@ export function ThinkingStrip({
       else if (
         next.detail !== st.shown.detail ||
         next.action !== st.shown.action ||
+        next.retry !== st.shown.retry ||
         next.tone !== st.shown.tone
       ) {
         st.shown = next;
@@ -462,7 +490,7 @@ export function ThinkingStrip({
     if (tail && tail.source === "server" && next.source === "server") st.pending[st.pending.length - 1] = next;
     else st.pending.push(next);
     schedule();
-  }, [phase, line, detail, action, tone, source, startedAt, activity]);
+  }, [phase, line, detail, action, retry, tone, source, startedAt, activity]);
   useEffect(() => {
     const st = dwell.current;
     return () => {
@@ -495,7 +523,7 @@ export function ThinkingStrip({
   // instead of jumping. A CSS transition: reduced motion makes it instant.
   const textRef = useRef<HTMLDivElement>(null);
   const lastHeight = useRef<number | null>(null);
-  const shape = `${swap.n}|${shown.detail ?? ""}|${shown.action ?? ""}`;
+  const shape = `${swap.n}|${shown.detail ?? ""}|${shown.action ?? ""}|${shown.retry ?? ""}`;
   const committed = useRef(shape);
   useLayoutEffect(() => {
     if (committed.current === shape) return;
@@ -580,6 +608,7 @@ export function ThinkingStrip({
             {shown.detail ?? "\u00a0"}
           </p>
         )}
+        {shown.retry && !shown.action && <TryNow projectId={shown.retry} />}
         {shown.action && (
           <Link
             href={SETTINGS_HREF}
@@ -591,5 +620,34 @@ export function ThinkingStrip({
         )}
       </div>
     </section>
+  );
+}
+
+/**
+ * "Try now" under a recent failed read (SEC-A006): reads that one project
+ * again (POST /api/understanding with its id, the same quota and caps as
+ * "Understand now"), then tells every screen the data may have changed.
+ */
+function TryNow({ projectId }: { projectId: string }) {
+  const [state, setState] = useState<"idle" | "busy" | "refused">("idle");
+  return (
+    <button
+      type="button"
+      data-try-now
+      disabled={state === "busy"}
+      onClick={async () => {
+        setState("busy");
+        const res = await fetch("/api/understanding", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ projectId }),
+        }).catch(() => null);
+        setState(res?.ok ? "idle" : "refused");
+        window.dispatchEvent(new Event("secretary:data-changed"));
+      }}
+      className="-my-2 inline-flex min-h-11 items-center text-[13px] font-semibold leading-[1.3] text-accent disabled:text-faint"
+    >
+      {state === "busy" ? "Trying again…" : state === "refused" ? "Not now; try again in a minute" : "Try now"}
+    </button>
   );
 }
