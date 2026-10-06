@@ -7,6 +7,47 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 ---
 
+## v0.33 — A timeline you can move things on (2026-10-06)
+
+Kiron, on the Timeline: "make it usable… showing progress per project…
+filters… like notion, you should be able to move things on it… extending
+start dates, due dates". It was a read-only vertical list.
+
+- Dashboard › Timeline is a board: a lane per project with its progress
+  ("3/7 done") and deadline flag, late projects first; bars from a planned
+  start to the due date, diamonds for a due date alone, one-off events as
+  bars, repeating ones locked. A Today line and button; Week, Month
+  (default), Quarter; filters for project, Open/Late/Done/All and events,
+  remembered on the device. Open tasks with no date sit in a No date tray.
+- Move things by dragging: a bar's body moves it, its edges set the start or
+  the due date, a diamond's left handle pulls out a start, a No date task
+  dropped on a day gets that date. Reminders move with what they remind
+  about. Whole calendar days, the same time of day across a DST change.
+  Touch drags after a long press; a phone shows the board and taps to edit,
+  but does not drag. Arrow keys move the focused item a day. Every move has
+  Undo.
+- A drag is the same operation as saying it: the move route calls
+  update_task / update_event, so a Google-synced event is patched on Google,
+  a later due date counts as postponed, and a start after the due is
+  refused. If Google refuses, the move stays and the toast says "not on
+  Google yet" with Retry.
+- Tasks have a planned start (`start_at`, a new nullable column; nothing is
+  deleted or rewritten). Voice sets it: "start the album cover on the 12th"
+  (amend_task and create_commitment take it). update_task's due date takes
+  "none", which is how Undo puts a task back in the tray.
+- The understanding hash leaves out the planned start and a bare
+  updated_at, so dragging dates around costs no model reads. Records stamped
+  with the old formula over unchanged inputs are re-stamped with no model
+  call, so deploying this re-reads nothing that did not change.
+- From sec rev's A006 review: Overview's "1d to your next commitment" tile
+  now shows the date ("tomorrow", "Fri", "Oct 9"; SPEC §7: dates, never
+  countdowns), and the next-up pill and project cards say the item's own
+  date, red only when it is actually late. Two test gaps closed: a Shopping
+  item due today is not "due today" (E5), and a blocked task counts as open
+  work on every screen (E11).
+
+---
+
 ## v0.32 — One truth, no dead ends, no nagging (2026-10-06)
 
 this commit

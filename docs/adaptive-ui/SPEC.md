@@ -105,6 +105,36 @@ the Needs-a-date chips and the procrastination rows each open what they
 name, at 44 px or more. The 5-week chart is untouched (SEC-A007/A009
 replace it).
 
+**SEC-A009 (2026-10-06, Kiron: "make it usable… progress per project…
+filters… like notion, you should be able to move things on it… extending
+start dates, due dates"):** Dashboard › Timeline is a board you move things
+on (`components/dashboard/timeline-board.tsx`, geometry and date math in
+`lib/timeline.ts`). One lane per active project, late projects first, each
+with its progress ("3/7 done", every task but dropped ones, whatever the
+filter shows) and its deadline as a flag (red committed, amber not). A task
+with a planned start (`tasks.start_at`, new) is a bar from start to due; a
+task with only a due date is a diamond; a one-off event is a bar; a
+repeating event is locked (tap to edit; v1 moves repeats by asking). A red
+Today line and a Today button; Week / Month (default) / Quarter. Filters:
+project chips (and the progress strip above, which is also a filter), Open
+/ Late / Done / All, and events on or off; zoom, filters and folded lanes
+are remembered per device. Open tasks with no date wait in a No date (N)
+tray. Moves: drag a bar's body (both dates and every reminder shift by the
+same whole calendar days, keeping the time of day across DST), its left
+edge (the start), its right edge (the due), a diamond's small left handle
+(pulls out a start), or a tray task onto a day (5 PM that day); arrow keys
+move the focused item a day; touch drags after a long press; a phone shows
+the board and taps to edit, but does not drag. Every move is the same
+operation as saying it: `POST /api/timeline/move` calls `update_task` or
+`update_event` through `executeTool` in a live turn, so a Google-synced
+event is patched on Google, a later due counts as postponed, and a start
+after the due is refused; Undo sends the old dates back the same way. If
+Google refuses, the move stays, the toast says "not on Google yet", and
+Retry is `add_event_to_google`. By voice, `amend_task` and
+`create_commitment` take `start_at` ("start the album cover on the 12th").
+The planned start is left out of the understanding hash, as is a bare
+`updated_at`: moving a start is not news to a run.
+
 **v1.3 refinements (Phase 3 implementation):** (a) the wishlist lives in a
 `wishlist` DB table (not a .jsonl file) — same dedupe-by-need + tombstone
 semantics, but durable, user-scoped, and included in the nightly Heroku

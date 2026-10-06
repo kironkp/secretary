@@ -11,7 +11,7 @@
 // operation as saying it: POST /api/timeline/move → update_task or
 // update_event (lib/timeline.ts has the geometry and the date math). The
 // shell owns all of it; nothing here calls a model.
-import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronRight, Lock } from "lucide-react";
 import { localDay } from "@/lib/due";
@@ -171,6 +171,20 @@ export function TimelineBoard({
   const [drag, setDrag] = useState<Drag | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Once a long press has lifted an item, the finger drags it instead of
+  // scrolling the page. touch-action is fixed when the touch starts, so
+  // Safari has to be told on every move (a non-passive listener).
+  const lifted = useRef(false);
+  useEffect(() => {
+    lifted.current = drag?.lifted ?? false;
+  }, [drag]);
+  useEffect(() => {
+    const stop = (e: TouchEvent) => {
+      if (lifted.current) e.preventDefault();
+    };
+    document.addEventListener("touchmove", stop, { passive: false });
+    return () => document.removeEventListener("touchmove", stop);
+  }, []);
 
 
   // --- moves: always the server's tool path -----------------------------------
@@ -323,8 +337,12 @@ export function TimelineBoard({
   };
 
   const beginItem = (e: React.PointerEvent, item: Item, grip: Grip) => {
-    if (isPhone() || (item.kind === "event" && item.locked)) return; // T3, T2: tap edits instead
     e.stopPropagation();
+    if (isPhone() || (item.kind === "event" && item.locked)) {
+      // A phone (T3) and a repeating event (T2): a tap opens it; nothing drags.
+      setDrag({ kind: "item", item, grip: "body", startX: e.clientX, days: 0, lifted: false, pointerId: e.pointerId });
+      return;
+    }
     const start: Drag = { kind: "item", item, grip, startX: e.clientX, days: 0, lifted: e.pointerType === "mouse", pointerId: e.pointerId };
     if (e.pointerType !== "mouse") {
       pressTimer.current = setTimeout(() => setDrag((d) => (d && d.kind === "item" ? { ...d, lifted: true } : d)), LONG_PRESS_MS);
@@ -348,8 +366,8 @@ export function TimelineBoard({
     if (!drag.lifted) {
       // Moving before the long press is a scroll: let it go.
       const dx = drag.kind === "item" ? e.clientX - drag.startX : e.clientX - drag.x;
-      if (Math.abs(dx) > 8 && pressTimer.current) {
-        clearTimeout(pressTimer.current);
+      if (Math.abs(dx) > 8) {
+        if (pressTimer.current) clearTimeout(pressTimer.current);
         pressTimer.current = null;
         setDrag(null);
       }
@@ -358,6 +376,12 @@ export function TimelineBoard({
     e.preventDefault();
     if (drag.kind === "item") setDrag({ ...drag, days: Math.round((e.clientX - drag.startX) / px) });
     else setDrag({ ...drag, x: e.clientX, y: e.clientY, day: dayUnderPointer(e.clientX) });
+  };
+  // The browser took the touch for a scroll: nothing moves, nothing opens.
+  const onCancel = () => {
+    if (pressTimer.current) clearTimeout(pressTimer.current);
+    pressTimer.current = null;
+    setDrag(null);
   };
   const onUp = (e: React.PointerEvent) => {
     if (pressTimer.current) {
@@ -420,7 +444,7 @@ export function TimelineBoard({
     }`;
 
   return (
-    <div className="space-y-3" onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
+    <div className="space-y-3" onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onCancel}>
       <ProjectProgressStrip lanes={allLanes} active={filters.project} onPick={(id) => setFilters({ project: filters.project === id ? "all" : id })} />
 
       <div className="flex flex-wrap items-center gap-2">
@@ -669,7 +693,7 @@ function LaneRows({
                     }}
                     className={`absolute top-1 flex h-7 items-center overflow-hidden rounded-md border text-[11px] ${tone} ${
                       dragging === item.id ? "shadow-lg ring-2 ring-accent" : ""
-                    } ${locked ? "cursor-pointer" : "cursor-grab"} touch-manipulation select-none`}
+                    } ${locked ? "cursor-pointer" : "cursor-grab"} touch-manipulation select-none [-webkit-touch-callout:none]`}
                     style={{ left, width }}
                   >
                     {!locked && (
@@ -709,7 +733,7 @@ function LaneRows({
                         if (e.key === "ArrowRight") onKeyMove(item, 1);
                         if (e.key === "Enter") openDetail(item.kind, item.id);
                       }}
-                      className={`ml-1 h-4 w-4 rotate-45 cursor-grab touch-manipulation border ${tone} ${
+                      className={`ml-1 h-4 w-4 rotate-45 cursor-grab touch-manipulation select-none border [-webkit-touch-callout:none] ${tone} ${
                         dragging === item.id ? "ring-2 ring-accent" : ""
                       }`}
                     />
