@@ -7,9 +7,12 @@ import { cookies } from "next/headers";
 import { isErrorResponse, requireSession } from "@/lib/api";
 import { FEATURE_SCOPES, googleHttp, saveConnection, type GoogleFeature } from "@/lib/google/connection";
 import { redirectUri, sameState, STATE_COOKIE } from "@/lib/google/oauth";
+import { publicUrl } from "@/lib/public-origin";
 
+// Back to Settings on the PUBLIC origin (SEC-A011): req.url is the dyno's own
+// https://localhost:$PORT behind the Heroku router.
 function back(req: Request, outcome: string, feature: GoogleFeature = "calendar"): NextResponse {
-  const res = NextResponse.redirect(new URL(`/settings?${feature}=${outcome}`, req.url));
+  const res = NextResponse.redirect(publicUrl(`/settings?${feature}=${outcome}`, req.url));
   res.cookies.set(STATE_COOKIE, "", { path: "/api/google", maxAge: 0 });
   return res;
 }

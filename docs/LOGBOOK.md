@@ -32,6 +32,31 @@ privacy policy and terms at public addresses; /privacy and /terms were 404.
 
 ---
 
+## v0.31.2 — Back from Google on the app's own address, not the dyno's (2026-10-06)
+
+this commit
+
+Kiron connected Google Calendar on v55. Google's consent went through and
+the connection was stored (12:41 PDT), but his browser ended at
+https://localhost:35386, "This site can't be reached". Behind the Heroku
+router a request's own URL is the dyno's (https://localhost:$PORT), and the
+callback built its way back to Settings from it. The token exchange was
+right only because BETTER_AUTH_URL happened to be set.
+
+- One helper, `lib/public-origin.ts`: BETTER_AUTH_URL, then
+  NEXT_PUBLIC_APP_URL, then, only when neither is set (local development),
+  the request's own origin. x-forwarded-host is not trusted: any client can
+  set it.
+- It builds the Google redirect_uri (the consent page and the token
+  exchange, the same string) and every redirect back to Settings, Calendar
+  and Gmail alike. Nothing else in the app builds a URL from the request's
+  origin; the rest only read its query.
+- Tested from http://localhost:35386 with a forged x-forwarded-host: every
+  outcome lands on the public origin (the tests used to run where the two
+  were the same, which is how this was missed).
+
+---
+
 ## v0.31.1 — Reading: a button that reads wrong is dropped, not the whole read; most-used projects first (2026-10-06)
 
 this commit
