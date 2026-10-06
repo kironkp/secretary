@@ -44,6 +44,7 @@ const task: TaskRow = {
   // The server works these out in the user's zone (lib/due.ts); here, as it would say.
   dueDays: 3,
   dueLabel: "Fri",
+  startAt: null,
 };
 
 const event: EventRow = {
@@ -60,6 +61,7 @@ const event: EventRow = {
   createdAt: iso(-2 * HOUR),
   startDays: 2,
   startLabel: "Thu",
+  recurrence: [],
 };
 
 describe("render completeness: open loops", () => {

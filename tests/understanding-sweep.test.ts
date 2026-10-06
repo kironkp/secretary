@@ -107,8 +107,12 @@ describe("sweepUnderstanding", () => {
     });
 
     // New data in both projects, so both run again. (A day passing no longer
-    // does on its own: only an item crossing a date line does, SEC-A004.)
-    await db.update(tasks).set({ updatedAt: new Date(NOW.getTime() + 60_000) }).where(eq(tasks.userId, U.id));
+    // does on its own: only an item crossing a date line does, SEC-A004. And
+    // a bare updated_at no longer does: only a field a run reads, SEC-A009.)
+    await db
+      .update(tasks)
+      .set({ notes: "New notes since the last read.", updatedAt: new Date(NOW.getTime() + 60_000) })
+      .where(eq(tasks.userId, U.id));
     const inFlight = sweepUnderstanding({ now: NOW, model: slow, userIds: [U.id] });
     await enteredOnce;
     const second = await sweepUnderstanding({ now: NOW, model: slow, userIds: [U.id] });

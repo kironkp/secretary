@@ -31,6 +31,10 @@ export type PlanProject = {
   parentId: string | null;
   /** "list": a list like Shopping, shown as one checklist card (SEC-A003). */
   kind?: "project" | "list";
+  /** The timeline's deadline flag (SEC-A009): ISO, and whether it is committed. */
+  deadline?: string | null;
+  deadlineKind?: string | null;
+  status?: string;
 };
 
 /** A list (Shopping) on the board: its open items, each tickable, with what it is for. */

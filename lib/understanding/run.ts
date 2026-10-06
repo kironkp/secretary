@@ -18,7 +18,7 @@ import { db } from "@/lib/db";
 import { records, understandingRuns } from "@/lib/db/schema";
 import { anthropicClientFor, BRAIN_EFFORTS, type BrainEffort, type KeySource } from "@/lib/anthropic";
 import { recordUsage } from "@/lib/usage";
-import { gatherAll, gatherProject, hashBundle } from "./gather";
+import { gatherAll, gatherProject, hashBundle, legacyHashBundle } from "./gather";
 import {
   CHECKING_LINE,
   STORING_LINE,
@@ -956,6 +956,18 @@ async function runOnce(
   if (!opts.force && previous?.inputsHash === inputsHash) {
     // The sweep's normal state (SPEC §8); not logged, or the log would be
     // nothing but this.
+    return { status: "skipped", reason: "unchanged" };
+  }
+  // Stored under the old formula (before SEC-A009) on inputs that have not
+  // changed: the same read, so re-stamp the record with the new hash and
+  // call nothing. Deploying the new formula must not re-read every project.
+  if (!opts.force && previous && previous.inputsHash === legacyHashBundle(bundle)) {
+    if (!opts.dryRun) {
+      await db
+        .update(records)
+        .set({ inputsHash })
+        .where(and(eq(records.userId, userId), eq(records.projectId, projectId)));
+    }
     return { status: "skipped", reason: "unchanged" };
   }
 

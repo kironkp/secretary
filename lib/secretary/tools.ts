@@ -221,6 +221,8 @@ async function readIntoConversation(ctx: ToolContext, conversationId: string): P
 /** Mail is read only inside a conversation, so the mark has somewhere to stay. */
 const NO_MAIL_WITHOUT_CONVERSATION = { result: { error: "Mail can only be read inside a conversation." } };
 
+const START_AFTER_DUE = "The start can't be after the due date. Nothing was changed.";
+
 const GOOGLE_NEEDS_PLAIN_TURN =
   "That changes the user's Google Calendar, which needs their go-ahead in a plain message with nothing attached. Ask them first.";
 
@@ -510,8 +512,12 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
           : {}),
       };
     }
-    const { project, matched } = await resolveProject(ctx.userId, a.project);
     const dueAt = parseWhen(a.due_at, ctx.timezone);
+    const startAt = parseWhen(a.start_at, ctx.timezone);
+    if (startAt && dueAt && startAt.getTime() > dueAt.getTime()) {
+      return { result: { error: START_AFTER_DUE } };
+    }
+    const { project, matched } = await resolveProject(ctx.userId, a.project);
     const reminders = parseReminders(a.reminders, ctx.timezone) ?? [];
     const [task] = await db
       .insert(tasks)
@@ -521,6 +527,7 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         notes: a.notes,
         projectId: project?.id,
         dueAt,
+        startAt,
         priority: a.priority ?? 0,
         reminders,
         stages: (a.stages ?? []).map((name) => ({ name, done: false })),
@@ -538,6 +545,7 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         task_id: task.id,
         title: task.title,
         due_at: task.dueAt,
+        ...(task.startAt ? { start_at: task.startAt } : {}),
         project: project?.name ?? null,
         project_match: matched,
         ...(task.stages.length ? { stages: task.stages.map((s) => s.name) } : {}),
@@ -567,13 +575,25 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
       projectMatch = res.matched;
     }
 
-    if (a.due_at) {
+    if (a.due_at && a.due_at.trim().toLowerCase() === "none") {
+      // "Take the date off it", or the timeline's undo of giving it one.
+      updates.dueAt = null;
+    } else if (a.due_at) {
       const newDue = parseWhen(a.due_at, ctx.timezone)!;
       if (task.dueAt && newDue.getTime() > task.dueAt.getTime()) {
         postponed = true;
         updates.postponedCount = task.postponedCount + 1;
       }
       updates.dueAt = newDue;
+    }
+    if (a.start_at !== undefined) {
+      updates.startAt = a.start_at.trim().toLowerCase() === "none" ? null : parseWhen(a.start_at, ctx.timezone);
+    }
+    // A start after the due date is not a plan; nothing is written (SEC-A009).
+    {
+      const start = updates.startAt !== undefined ? updates.startAt : task.startAt;
+      const due = updates.dueAt !== undefined ? updates.dueAt : task.dueAt;
+      if (start && due && start.getTime() > due.getTime()) return { result: { error: START_AFTER_DUE } };
     }
     if (a.status) {
       updates.status = a.status;
@@ -665,6 +685,7 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         title: updated.title,
         status: updated.status,
         due_at: updated.dueAt,
+        ...(updated.startAt ? { start_at: updated.startAt } : {}),
         postponed_count: updated.postponedCount,
         ...(updated.blockedReason ? { blocked_reason: updated.blockedReason } : {}),
         ...(movedTo !== undefined ? { project: movedTo, project_match: projectMatch } : {}),

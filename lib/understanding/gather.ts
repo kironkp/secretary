@@ -620,12 +620,10 @@ export function hashBundle(bundle: Bundle): string {
       ...bundle.tasksOpen.flatMap((t) => (t.dueAt ? [{ id: t.id, at: t.dueAt }] : [])),
       ...bundle.events.map((e) => ({ id: e.id, at: e.startsAt })),
     ]).map((x) => [x.id, datePhase(x.at, bundle.clock)]),
-    tasks: byId([...bundle.tasksOpen, ...bundle.tasksDone]).map((t) => [
-      t.id,
-      t.status,
-      t.updatedAt,
-      t.dueAt,
-    ]),
+    // What a run reads of each task, not when the row last changed (SEC-A009):
+    // a write that leaves all of it alone (a timeline drag of the planned
+    // start, which bumps updated_at and is not in the bundle) costs no read.
+    tasks: byId([...bundle.tasksOpen, ...bundle.tasksDone]).map((t) => [t.id, taskStamp(t)]),
     memories: byId(bundle.memories).map((m) => [m.id, m.updatedAt]),
     messages: byId(bundle.messages).map((m) => m.id),
     events: byId(bundle.events).map((e) => [e.id, e.startsAt]),
@@ -633,6 +631,52 @@ export function hashBundle(bundle: Bundle): string {
     expectations: byId(bundle.expectations).map((e) => [e.id, e.status]),
     widgets: byId(bundle.widgets).map((w) => [w.id, w.rows.map((r) => r.id).sort()]),
     // A process saved or changed is news to every project that might hold one of its jobs.
+    processes: (bundle.processes ?? []).map((p) => [p.name, p.steps]),
+  };
+  return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
+}
+
+/** Every field of a task a run reads (BundleTask, minus its timestamps of record). */
+function taskStamp(t: Bundle["tasksOpen"][number]): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify([
+        t.title,
+        t.notes,
+        t.status,
+        t.stages,
+        t.blockedReason,
+        t.stakes,
+        t.source,
+        t.recurrence,
+        t.dueAt,
+        t.completedAt,
+        t.createdAt,
+      ])
+    )
+    .digest("hex")
+    .slice(0, 16);
+}
+
+/**
+ * The formula before SEC-A009, which stamped each task by its updated_at. A
+ * record stored under it, on inputs that have not changed, is re-stamped with
+ * the new hash and no model call (run.ts), so deploying the new formula reads
+ * nothing again. It can go once every record carries a new-formula hash.
+ */
+export function legacyHashBundle(bundle: Bundle): string {
+  const canonical = {
+    phases: byId([
+      ...bundle.tasksOpen.flatMap((t) => (t.dueAt ? [{ id: t.id, at: t.dueAt }] : [])),
+      ...bundle.events.map((e) => ({ id: e.id, at: e.startsAt })),
+    ]).map((x) => [x.id, datePhase(x.at, bundle.clock)]),
+    tasks: byId([...bundle.tasksOpen, ...bundle.tasksDone]).map((t) => [t.id, t.status, t.updatedAt, t.dueAt]),
+    memories: byId(bundle.memories).map((m) => [m.id, m.updatedAt]),
+    messages: byId(bundle.messages).map((m) => m.id),
+    events: byId(bundle.events).map((e) => [e.id, e.startsAt]),
+    documents: byId(bundle.documents).map((d) => [d.id, d.updatedAt]),
+    expectations: byId(bundle.expectations).map((e) => [e.id, e.status]),
+    widgets: byId(bundle.widgets).map((w) => [w.id, w.rows.map((r) => r.id).sort()]),
     processes: (bundle.processes ?? []).map((p) => [p.name, p.steps]),
   };
   return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");

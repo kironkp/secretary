@@ -45,6 +45,9 @@ export async function DashboardPanel({
         color: projectsTable.color,
         parentId: projectsTable.parentId,
         kind: projectsTable.kind,
+        deadline: projectsTable.deadline,
+        deadlineKind: projectsTable.deadlineKind,
+        status: projectsTable.status,
       })
       .from(projectsTable)
       .where(eq(projectsTable.userId, userId)) as Promise<PlanProject[]>,
@@ -99,6 +102,7 @@ export async function DashboardPanel({
       : null,
     dueDays: task.dueAt ? daysFromToday(task.dueAt, timezone, now) : null,
     dueLabel: dueLabel(task.dueAt, timezone, now),
+    startAt: task.startAt?.toISOString() ?? null,
   }));
 
   // Pending suggestions live in their own zone, never in the main views.
@@ -119,6 +123,7 @@ export async function DashboardPanel({
     createdAt: e.createdAt.toISOString(),
     startDays: daysFromToday(e.startsAt, timezone, now),
     startLabel: dueLabel(e.startsAt, timezone, now),
+    recurrence: e.recurrence ?? [],
   }));
 
   const docs: DocRow[] = docRows.map(({ doc, projectName }) => ({
@@ -144,7 +149,11 @@ export async function DashboardPanel({
       plan={planBundle?.plan ?? null}
       planVersion={planBundle?.version ?? 0}
       planPinned={planBundle?.pinned ?? []}
-      planProjects={projectRows}
+      planProjects={projectRows.map((p) => ({
+        ...p,
+        // A Date from the database; the client reads ISO strings.
+        deadline: p.deadline ? new Date(p.deadline).toISOString() : null,
+      }))}
       planDynamicHtml={dynamicHtml}
       compact={compact}
       timezone={timezone}

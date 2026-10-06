@@ -317,6 +317,10 @@ export const tasks = pgTable(
     onDelete: "set null",
   }),
   startedAt: timestamp("started_at", { withTimezone: true }),
+  // When work is PLANNED to start (SEC-A009, the timeline's left edge); not
+  // when it actually did (startedAt). With dueAt it makes a bar; without it a
+  // task is a single date. Kept out of the understanding hash (gather.ts).
+  startAt: timestamp("start_at", { withTimezone: true }),
   completedAt: timestamp("completed_at", { withTimezone: true }),
   // Reminder times as ISO timestamps. No push delivery yet — surfaced in the
   // briefing and the dashboard (supersedes the never-used remindAt column).

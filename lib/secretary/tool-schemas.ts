@@ -21,6 +21,10 @@ export const toolSchemas = {
       .string()
       .optional()
       .describe("Due date/time as ISO 8601 in the user's timezone, if mentioned"),
+    start_at: z
+      .string()
+      .optional()
+      .describe("When work should start, ISO 8601, if mentioned ('start Monday'); never after due_at"),
     project: z.string().optional().describe("Project name to file it under (created if new)"),
     priority: z.number().int().min(0).max(3).optional().describe("0 none · 1 low · 2 medium · 3 high"),
     reminders: z
@@ -49,7 +53,11 @@ export const toolSchemas = {
     status: z
       .enum(["inbox", "todo", "in_progress", "blocked", "done", "dropped"])
       .optional(),
-    due_at: z.string().optional().describe("New due date/time, ISO 8601"),
+    due_at: z.string().optional().describe('New due date/time, ISO 8601; "none" removes the due date'),
+    start_at: z
+      .string()
+      .optional()
+      .describe('New planned start, ISO 8601 ("start the album cover on the 12th"); "none" clears it. Never after the due date.'),
     title: z.string().optional(),
     notes: z.string().optional(),
     priority: z.number().int().min(0).max(3).optional(),

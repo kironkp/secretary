@@ -33,6 +33,8 @@ export type TaskRow = {
    */
   dueDays: number | null;
   dueLabel: string;
+  /** The planned start (SEC-A009), ISO, or null: with dueAt it is a bar on the timeline. */
+  startAt: string | null;
 };
 
 export type EventRow = {
@@ -50,6 +52,8 @@ export type EventRow = {
   /** Calendar days from today to the start, and how it reads (lib/due.ts). */
   startDays: number;
   startLabel: string;
+  /** RRULE lines; a repeating event is locked on the timeline in v1 (SEC-A009 T2). */
+  recurrence: string[];
 };
 
 export type DocRow = {

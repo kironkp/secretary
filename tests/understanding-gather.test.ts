@@ -539,20 +539,21 @@ describe("hashBundle", () => {
     }
   });
 
-  it("changes when a task's updated_at changes", async () => {
+  it("changes when a field a run reads changes, not when only updated_at or the planned start moves (SEC-A009)", async () => {
     const before = await gather();
-    const touch = (updatedAt: Date) =>
-      db
-        .update(tasks)
-        .set({ updatedAt })
-        .where(and(eq(tasks.id, ids.checkCpo), eq(tasks.userId, U.id)));
-    await touch(daysFromNow(-12));
+    const [row] = await db.select().from(tasks).where(and(eq(tasks.id, ids.checkCpo), eq(tasks.userId, U.id)));
+    const set = (values: Partial<typeof tasks.$inferInsert>) =>
+      db.update(tasks).set(values).where(and(eq(tasks.id, ids.checkCpo), eq(tasks.userId, U.id)));
     try {
-      const after = await gather();
-      expect(hashBundle(after!)).not.toBe(hashBundle(before!));
+      // A timeline drag of the start: updated_at moves, start_at moves, nothing a run reads does.
+      await set({ updatedAt: daysFromNow(-12), startAt: daysFromNow(2) });
+      expect(hashBundle((await gather())!)).toBe(hashBundle(before!));
+      // A note is read: that is news.
+      await set({ notes: "Teresa says it is waiting on the FY27 conversion." });
+      expect(hashBundle((await gather())!)).not.toBe(hashBundle(before!));
     } finally {
       // Put it back so no other test in this file depends on this one.
-      await touch(daysFromNow(-13));
+      await set({ updatedAt: row.updatedAt, startAt: row.startAt, notes: row.notes });
     }
   });
 
