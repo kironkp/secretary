@@ -201,9 +201,10 @@ export async function persistPlan(
       dynamicComponents: await listDynamicComponents(userId),
     });
     // Bill the planner BEFORE any of the reasons this function returns early —
-    // the tokens were spent whether or not the refinement lands. A cache hit
-    // spent nothing, so it has nothing to record.
-    if (refined.source === "llm") {
+    // the tokens were spent whether or not the refinement lands, and whether
+    // or not the validator kept its plan (sec rev: a refused plan went
+    // unrecorded, so the caps under-counted it). A cache hit spent nothing.
+    if (refined.called) {
       const { lastPlannerUsage } = await import("./plan-from-llm");
       if (lastPlannerUsage.model) {
         const { recordUsage } = await import("@/lib/usage");

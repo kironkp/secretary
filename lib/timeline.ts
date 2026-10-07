@@ -4,6 +4,7 @@
 // to due) or single dates; one-off events as bars; the days are his calendar
 // days (lib/due.ts). The shell owns all geometry: nothing here calls a model.
 import { localDay } from "@/lib/due";
+import { byUrgency } from "@/lib/project-order";
 import { parseInTz, wallTimeInTz } from "@/lib/time";
 
 export type Zoom = "week" | "month" | "quarter";
@@ -74,6 +75,8 @@ export type Lane = {
   /** The project's own extent: earliest start or due to latest due or deadline. */
   from: number | null;
   to: number | null;
+  /** Its earliest open due day, late or not, whatever the filter shows: the order key. */
+  soonest: number | null;
   deadline: { day: number; committed: boolean } | null;
 };
 
@@ -148,6 +151,7 @@ export function buildLanes(
         late: false,
         from: null,
         to: null,
+        soonest: null,
         deadline: p?.deadline ? { day: localDay(new Date(p.deadline), tz), committed: p.deadlineKind === "committed" } : null,
       };
       lanes.set(key, lane);
@@ -164,6 +168,7 @@ export function buildLanes(
     if (!item) continue;
     if (item.late) lane.late = true;
     if (isOpen(t)) {
+      lane.soonest = lane.soonest === null ? item.to : Math.min(lane.soonest, item.to);
       lane.from = lane.from === null ? item.from : Math.min(lane.from, item.from);
       lane.to = lane.to === null ? item.to : Math.max(lane.to, item.to);
     }
@@ -177,10 +182,16 @@ export function buildLanes(
     if (lane.deadline) lane.to = lane.to === null ? lane.deadline.day : Math.max(lane.to, lane.deadline.day);
     lane.items.sort((a, b) => a.from - b.from || a.to - b.to || a.title.localeCompare(b.title));
   }
-  const nearest = (l: Lane) => Math.min(...l.items.filter((i) => i.kind === "task" && !i.done).map((i) => i.to), Infinity);
+  // The order the Overview's cards use too (lib/project-order.ts): late
+  // first by how late, then the nearest date or deadline, then undated.
+  const urgency = (l: Lane) => ({
+    name: l.name,
+    soonest: l.soonest === null ? null : l.soonest - today,
+    deadline: l.deadline ? l.deadline.day - today : null,
+  });
   return [...lanes.values()]
     .filter((l) => (filters.project === "all" ? l.total > 0 || l.items.length > 0 : l.id === filters.project))
-    .sort((a, b) => Number(b.late) - Number(a.late) || nearest(a) - nearest(b) || a.name.localeCompare(b.name));
+    .sort((a, b) => byUrgency(urgency(a), urgency(b)));
 }
 
 /** Open tasks with no date: the No date tray (filtered by project like the lanes). */

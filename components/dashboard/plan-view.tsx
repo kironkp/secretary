@@ -195,16 +195,20 @@ function DateChase({ tasks, itemIds, timezone }: { tasks: TaskRow[]; itemIds?: s
                     {label}
                   </button>
                 ))}
-                <input
-                  type="date"
-                  aria-label="Pick a date"
-                  disabled={saving}
-                  onChange={(e) => {
-                    const due = pickedDay(e.target.value, timezone);
-                    if (due) void setDate(t, due);
-                  }}
-                  className={`${choice} font-normal`}
-                />
+                {/* "Pick…" on screen, then the system's own date picker. */}
+                <label className={`${choice} gap-2`}>
+                  Pick…
+                  <input
+                    type="date"
+                    aria-label="Pick a date"
+                    disabled={saving}
+                    onChange={(e) => {
+                      const due = pickedDay(e.target.value, timezone);
+                      if (due) void setDate(t, due);
+                    }}
+                    className="bg-transparent text-xs font-normal"
+                  />
+                </label>
                 <button type="button" onClick={() => openDetail("task", t.id)} className="min-h-11 px-2 text-xs text-muted hover:text-ink">
                   Details
                 </button>

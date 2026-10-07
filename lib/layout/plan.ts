@@ -3,7 +3,8 @@
 // string ever reaches markup unescaped.
 import { z } from "zod";
 import { isRegistryComponent, type RegistryComponent } from "./registry";
-import type { Signals } from "./signals";
+import type { ProjectSignal, Signals } from "./signals";
+import { byUrgency, type Urgency } from "@/lib/project-order";
 
 export const planSectionSchema = z
   .object({
@@ -59,6 +60,14 @@ export function sectionKey(s: { component: string; props?: Record<string, unknow
   return typeof pid === "string" ? `${s.component}:${pid}` : s.component;
 }
 
+/** A project's urgency from its signals; days_left stands in for a fixture without the newer fields. */
+const urgencyOf = (p: ProjectSignal): Urgency => ({
+  name: p.name,
+  list: p.kind === "list",
+  soonest: p.soonest_days ?? null,
+  deadline: p.deadline_days !== undefined ? p.deadline_days : p.days_left,
+});
+
 /**
  * DEFAULT_PLAN (SPEC §2): also the fallback and the calm-mode plan. Depends on
  * the user's active projects, so it's a function of signals. Deterministic:
@@ -73,17 +82,13 @@ export function defaultPlan(signals: Signals): LayoutPlan {
       { component: "stat_row" },
       // The projects progress strip (registry v3, SEC-A007), above the cards it sums up.
       { component: "timeline", props: { span_days: 21, expanded: false } },
-      // Most urgent first (fewest days left; undated after, in their own
-      // order), lists (Shopping) last: a list is not work to chase. Urgent
-      // cards stay above the fold (§3 invariant 4) however many projects
-      // there are, and Overview reads like the Timeline: late first.
+      // The order the strip and the Timeline use (lib/project-order.ts):
+      // late first by how late, then the nearest date, then undated, lists
+      // (Shopping) last. Urgent and late cards stay above the fold (§3
+      // invariant 4), and the cards agree with the strip above them.
       ...signals.projects
         .filter((p) => !p.parent_id)
-        .toSorted(
-          (a, b) =>
-            Number(a.kind === "list") - Number(b.kind === "list") ||
-            (a.days_left ?? Number.MAX_SAFE_INTEGER) - (b.days_left ?? Number.MAX_SAFE_INTEGER)
-        )
+        .toSorted((a, b) => byUrgency(urgencyOf(a), urgencyOf(b)))
         .map((p): PlanSection => ({
           component: "project_card",
           props: { project_id: p.id, variant: "full" },

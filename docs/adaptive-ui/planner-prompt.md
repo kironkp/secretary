@@ -49,8 +49,9 @@ Omitted props render computed defaults. DEFAULT_PLAN is:
 3. Emphasis (variant/accent/expand) is free every plan. Reordering sections is
    allowed ONLY when `context.days_since_layout_change >= 1`, and every moved
    section carries a `why`.
-4. Nothing urgent disappears: every project with `days_left <= 7` keeps its
-   project_card within the first 8 sections. Compact is fine; absent is not.
+4. Nothing urgent disappears: every project with `days_left <= 7`, or with
+   late open work (`soonest_days < 0`), keeps its project_card within the
+   first 8 sections. Compact is fine; absent is not.
 5. At most ONE project_card with `accent: true`. Deadline pressure beats
    engagement for the accent.
 6. Strong engagement = `mentions_24h >= 3 × baseline` and `>= 5` absolute.

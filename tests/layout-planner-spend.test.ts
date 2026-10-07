@@ -5,7 +5,9 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { layoutSpecs, projects, user } from "@/lib/db/schema";
-import { clearPlanCache } from "@/lib/layout/plan-from-llm";
+import { clearPlanCache, lastPlannerUsage } from "@/lib/layout/plan-from-llm";
+import { usage } from "@/lib/db/schema";
+import { and } from "drizzle-orm";
 import { computeCurrentPlan, getPlanHead, persistPlan } from "@/lib/layout/plan-store";
 
 const users: string[] = [];
@@ -66,3 +68,26 @@ describe("the layout planner runs once per situation", () => {
     expect(calls).toBe(1); // remembered across the "restart"
   });
 });
+
+describe("a planner answer the validator refuses is still paid for (sec rev, SEC-A007)", () => {
+  it("is recorded in usage, priced, so the caps count it", async () => {
+    const userId = await newUser();
+    const bundle = await computeCurrentPlan(userId);
+    // A real call reports its tokens this way (notePlannerUsage), then answers
+    // with something that is not a plan.
+    const refused = async () => {
+      calls++;
+      lastPlannerUsage.model = "claude-sonnet-5";
+      lastPlannerUsage.input = 4_000;
+      lastPlannerUsage.output = 800;
+      return "Here is a nicer layout for you!";
+    };
+    await persistPlan(userId, bundle, { call: refused });
+    expect(calls).toBe(1);
+    const rows = await db.select().from(usage).where(and(eq(usage.userId, userId), eq(usage.kind, "layout")));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ model: "claude-sonnet-5", inputTokens: 4_000, outputTokens: 800 });
+    expect(Number(rows[0].costUsd)).toBeGreaterThan(0);
+  });
+});
+

@@ -114,7 +114,12 @@ export async function planWithFallback(
     /** Approved dynamic components (SPEC v1.3): valid names + prompt rows. */
     dynamicComponents?: { name: string; description: string }[];
   }
-): Promise<{ plan: LayoutPlan; source: "llm" | "llm-cache" | "rules" | "previous" | "default" }> {
+): Promise<{
+  plan: LayoutPlan;
+  source: "llm" | "llm-cache" | "rules" | "previous" | "default";
+  /** A live planner call returned (and was paid for), whatever became of its plan. */
+  called?: boolean;
+}> {
   const ctx = {
     signals,
     previousPlan: opts.previousPlan,
@@ -124,11 +129,17 @@ export async function planWithFallback(
     dynamicComponents: opts.dynamicComponents?.map((d) => d.name),
   };
   const key = cacheKey(signals);
+  // A planner's plan is named by the server, never by the model (sec rev):
+  // the validator measures a plan against the one before it, and treats a
+  // previous plan named "default" as the default (SEC-A007), so a model that
+  // wrote "default" would loosen the rationing for the plan after it.
+  const serverId = (plan: LayoutPlan): LayoutPlan => ({ ...plan, plan_id: `llm-${key}` });
+  let called = false;
 
   if (opts.llmEnabled !== false) {
     const cached = planCache.get(key);
     if (cached) {
-      const v = validatePlan(cached, ctx);
+      const v = validatePlan(serverId(cached), ctx);
       if (v.ok) return { plan: applyBans(v.plan, opts.preferences), source: "llm-cache" };
     }
     try {
@@ -140,20 +151,28 @@ export async function planWithFallback(
             .map((d) => `| ${d.name} | — | ${d.description} |`)
             .join("\n")}\n`
         : plannerPrompt();
+      // What this call costs is what it reports, not a figure left over
+      // from an earlier call.
+      lastPlannerUsage.model = null;
+      lastPlannerUsage.input = 0;
+      lastPlannerUsage.output = 0;
       const raw = await Promise.race([
         call(prompt, JSON.stringify(signals)),
         new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error("planner timeout")), LLM_TIMEOUT_MS)
         ),
       ]);
+      // It answered, so it was paid for, whether or not the answer validates.
+      called = true;
       const v = validatePlan(raw, ctx);
       if (v.ok) {
+        const plan = serverId(v.plan);
         if (planCache.size >= CACHE_MAX) {
           const oldest = planCache.keys().next().value;
           if (oldest) planCache.delete(oldest);
         }
-        planCache.set(key, v.plan);
-        return { plan: applyBans(v.plan, opts.preferences), source: "llm" };
+        planCache.set(key, plan);
+        return { plan: applyBans(plan, opts.preferences), source: "llm", called };
       }
     } catch {
       // fall through to rules
@@ -161,14 +180,14 @@ export async function planWithFallback(
   }
 
   const rules = validatePlan(planFromRules(signals), ctx);
-  if (rules.ok) return { plan: applyBans(rules.plan, opts.preferences), source: "rules" };
+  if (rules.ok) return { plan: applyBans(rules.plan, opts.preferences), source: "rules", called };
 
   if (opts.previousPlan) {
     const prev = validatePlan(opts.previousPlan, ctx);
-    if (prev.ok) return { plan: applyBans(prev.plan, opts.preferences), source: "previous" };
+    if (prev.ok) return { plan: applyBans(prev.plan, opts.preferences), source: "previous", called };
   }
 
-  return { plan: applyBans(defaultPlan(signals), opts.preferences), source: "default" };
+  return { plan: applyBans(defaultPlan(signals), opts.preferences), source: "default", called };
 }
 
 /** test hook */

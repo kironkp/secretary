@@ -196,13 +196,15 @@ export function validatePlan(input: unknown, ctx: ValidationContext): Validation
 
   // Invariant 4 — nothing urgent disappears: every project with days_left <= 7
   // must have its card above the fold. Compact allowed; absent = rejected.
+  // Late open work is urgent too (SEC-A007): days_left skips the past.
   for (const p of ctx.signals.projects) {
-    if (p.days_left !== null && p.days_left <= 7) {
+    const late = typeof p.soonest_days === "number" && p.soonest_days < 0;
+    if ((p.days_left !== null && p.days_left <= 7) || late) {
       const idx = plan.sections.findIndex(
         (s) => s.component === "project_card" && s.props?.project_id === p.id
       );
       if (idx === -1 || idx >= ABOVE_THE_FOLD) {
-        reasons.push(`urgent project "${p.name}" (${p.days_left}d) not above the fold`);
+        reasons.push(`urgent project "${p.name}" (${late ? `${-(p.soonest_days as number)}d late` : `${p.days_left}d`}) not above the fold`);
       }
     }
   }

@@ -2,6 +2,7 @@
 // computed from existing data. Pure consumers (planFromRules, validator) take
 // this object; only computeSignals touches the database.
 import { and, desc, eq, gte, lt, sql } from "drizzle-orm";
+import { daysFromToday, isOpenWork } from "@/lib/due";
 import { db } from "@/lib/db";
 import { events, layoutSpecs, messages, projects, tasks, user } from "@/lib/db/schema";
 import { notIntakeMail } from "@/lib/secretary/proposals";
@@ -23,6 +24,14 @@ export type ProjectSignal = {
   done_count: number;
   subprojects: { id: string; name: string; open_count: number; done_count: number }[];
   people: string[];
+  /**
+   * Calendar days (the user's) to the project's earliest open dated task,
+   * negative when it is late (SEC-A007). days_left skips the past, so a
+   * project whose only open work is late had no urgency at all.
+   */
+  soonest_days?: number | null;
+  /** Calendar days to the project's own stored deadline, committed or not. */
+  deadline_days?: number | null;
 };
 
 /** SPEC §4: the id vocabulary for painted surfaces — every task id the Canvas
@@ -131,7 +140,7 @@ export async function computeSignals(userId: string, now = new Date()): Promise<
             lt(messages.createdAt, ago24h)
           )
         ),
-      db.select({ calmMode: user.calmMode }).from(user).where(eq(user.id, userId)),
+      db.select({ calmMode: user.calmMode, timezone: user.timezone }).from(user).where(eq(user.id, userId)),
       db
         .select({
           spec: layoutSpecs.spec,
@@ -156,6 +165,17 @@ export async function computeSignals(userId: string, now = new Date()): Promise<
       if (m) m.set(t.projectId, (m.get(t.projectId) ?? 0) + 1);
     }
     if (open && !t.dueAt && t.source !== "suggested") missingDates.push(t.id);
+  }
+
+  // Earliest open work per project, late included, in the user's calendar
+  // days: the order every screen sorts projects by (lib/project-order.ts).
+  const tz = userRow?.timezone ?? "UTC";
+  const soonestDays = new Map<string, number>();
+  for (const t of taskRows) {
+    if (!t.projectId || !t.dueAt || !isOpenWork(t)) continue;
+    const d = daysFromToday(t.dueAt, tz, now);
+    const cur = soonestDays.get(t.projectId);
+    if (cur === undefined || d < cur) soonestDays.set(t.projectId, d);
   }
 
   // Earliest dated open work per project → inferred deadline when no committed one.
@@ -253,6 +273,8 @@ export async function computeSignals(userId: string, now = new Date()): Promise<
             done_count: doneByProject.get(s.id) ?? 0,
           })),
           people: [], // until the entity store exists (SPEC §11) — see INTEGRATION
+          soonest_days: soonestDays.get(p.id) ?? null,
+          deadline_days: p.deadline ? daysFromToday(p.deadline, tz, now) : null,
         };
       }),
     tasks: taskRows
