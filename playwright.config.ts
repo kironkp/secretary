@@ -85,6 +85,12 @@ export default defineConfig({
       testMatch: /timeline\.spec\.ts/,
       use: { ...devices["iPad Pro 11 landscape"] },
     },
+    {
+      // On a phone the timeline is read and tapped, never dragged.
+      name: "timeline-phone",
+      testMatch: /timeline-phone\.spec\.ts/,
+      use: { ...devices["iPhone 15"] },
+    },
   ],
 
   webServer: {

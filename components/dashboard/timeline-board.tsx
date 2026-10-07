@@ -193,6 +193,16 @@ export function TimelineBoard({
   // scrolling the page. touch-action is fixed when the touch starts, so
   // Safari has to be told on every move (a non-passive listener).
   const lifted = useRef(false);
+  // A tap opens an item on CLICK, not on pointerup: on touch the browser
+  // sends its compatibility click after pointerup, and a dialog opened on
+  // pointerup is already under it, so that click landed on the backdrop and
+  // shut the dialog ~9 ms later (sec rev). This marks a gesture that dragged
+  // or scrolled, whose click must not open anything.
+  const gestureMoved = useRef(false);
+  const openItem = (kind: "task" | "event", id: string) => {
+    if (gestureMoved.current) return;
+    openDetail(kind, id);
+  };
   useEffect(() => {
     lifted.current = drag?.lifted ?? false;
   }, [drag]);
@@ -339,6 +349,7 @@ export function TimelineBoard({
 
   const beginItem = (e: React.PointerEvent, item: Item, grip: Grip) => {
     e.stopPropagation();
+    gestureMoved.current = false;
     if (isPhone() || (item.kind === "event" && item.locked)) {
       // A phone (T3) and a repeating event (T2): a tap opens it; nothing drags.
       setDrag({ kind: "item", item, grip: "body", startX: e.clientX, days: 0, lifted: false, pointerId: e.pointerId });
@@ -353,6 +364,7 @@ export function TimelineBoard({
     setDrag(start);
   };
   const beginTray = (e: React.PointerEvent, task: TlTask) => {
+    gestureMoved.current = false;
     if (isPhone()) return;
     const start: Drag = { kind: "tray", task, x: e.clientX, y: e.clientY, day: null, lifted: e.pointerType === "mouse", pointerId: e.pointerId };
     if (e.pointerType !== "mouse") {
@@ -370,11 +382,13 @@ export function TimelineBoard({
       if (Math.abs(dx) > 8) {
         if (pressTimer.current) clearTimeout(pressTimer.current);
         pressTimer.current = null;
+        gestureMoved.current = true;
         setDrag(null);
       }
       return;
     }
     e.preventDefault();
+    if (drag.kind === "tray" || Math.round((e.clientX - drag.startX) / px) !== 0) gestureMoved.current = true;
     if (drag.kind === "item") setDrag({ ...drag, days: Math.round((e.clientX - drag.startX) / px) });
     else setDrag({ ...drag, x: e.clientX, y: e.clientY, day: dayUnderPointer(e.clientX, e.clientY) });
   };
@@ -382,6 +396,7 @@ export function TimelineBoard({
   const onCancel = () => {
     if (pressTimer.current) clearTimeout(pressTimer.current);
     pressTimer.current = null;
+    gestureMoved.current = true;
     setDrag(null);
   };
   const onUp = (e: React.PointerEvent) => {
@@ -392,9 +407,9 @@ export function TimelineBoard({
     if (!drag || e.pointerId !== drag.pointerId) return;
     const d = drag;
     setDrag(null);
+    // pointerup only ends a drag; a tap opens on its click (openItem).
     if (d.kind === "item") {
       if (d.lifted && d.days !== 0) moveItem(d.item, d.grip, d.days);
-      else if (!d.lifted || d.days === 0) openDetail(d.item.kind, d.item.id);
       return;
     }
     if (d.lifted && d.day !== null) dropFromTray(d.task, d.day);
@@ -563,6 +578,7 @@ export function TimelineBoard({
               drawn={drawn}
               beginItem={beginItem}
               onKeyMove={(item, n) => moveItem(item, "body", n)}
+              onOpen={openItem}
               dragging={drag?.kind === "item" && drag.lifted ? drag.item.id : null}
             />
           ))}
@@ -588,8 +604,7 @@ export function TimelineBoard({
                 key={t.id}
                 type="button"
                 onPointerDown={(e) => beginTray(e, t)}
-                onClick={() => (isPhone() ? openDetail("task", t.id) : undefined)}
-                onKeyDown={(e) => e.key === "Enter" && openDetail("task", t.id)}
+                onClick={() => openItem("task", t.id)}
                 className="min-h-11 touch-none rounded-full border border-edge bg-card px-3 text-left text-xs hover:border-faint"
               >
                 {t.title}
@@ -625,6 +640,7 @@ function LaneRows({
   drawn,
   beginItem,
   onKeyMove,
+  onOpen,
   dragging,
 }: {
   lane: Lane;
@@ -636,6 +652,7 @@ function LaneRows({
   drawn: (item: Item) => { from: number; to: number };
   beginItem: (e: React.PointerEvent, item: Item, grip: Grip) => void;
   onKeyMove: (item: Item, days: number) => void;
+  onOpen: (kind: "task" | "event", id: string) => void;
   dragging: string | null;
 }) {
   const pct = lane.total ? Math.round((lane.done / lane.total) * 100) : 0;
@@ -703,6 +720,7 @@ function LaneRows({
                     data-item={item.id}
                     aria-label={`${item.title}${locked ? ", repeats (tap to edit)" : ", drag to move"}`}
                     onPointerDown={(e) => beginItem(e, item, "body")}
+                    onClick={() => onOpen(item.kind, item.id)}
                     onKeyDown={(e) => {
                       if (e.key === "ArrowLeft") onKeyMove(item, -1);
                       if (e.key === "ArrowRight") onKeyMove(item, 1);
@@ -746,6 +764,7 @@ function LaneRows({
                       data-item={item.id}
                       aria-label={`${item.title}, drag to move`}
                       onPointerDown={(e) => beginItem(e, item, "body")}
+                      onClick={() => onOpen(item.kind, item.id)}
                       onKeyDown={(e) => {
                         if (e.key === "ArrowLeft") onKeyMove(item, -1);
                         if (e.key === "ArrowRight") onKeyMove(item, 1);

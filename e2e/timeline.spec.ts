@@ -57,14 +57,19 @@ test("dragging a date two days right moves it two days, and Undo puts it back", 
   await expect.poll(() => storedDue(page)).toBe(dueAt);
 });
 
-test("a tap opens the task instead of moving it", async ({ page }) => {
+test("a touch tap opens the task and it stays open, instead of moving it", async ({ page }) => {
   await page.goto("/dashboard?view=timeline");
   const item = page.locator(`[data-item="${taskId}"]`);
   await item.scrollIntoViewIfNeeded();
   // A tap within 150 ms of a scroll is a scroll-stop, not a request
   // (isMomentumTap in components/dashboard/shared.tsx): let the scroll settle.
   await page.waitForTimeout(300);
-  await item.click();
+  // A real touch tap, not a mouse click: on touch the browser's compatibility
+  // click arrives after pointerup, and a dialog opened on pointerup was shut
+  // by it ~9 ms later (sec rev). click() never sends touch, so it passed.
+  await item.tap();
   await expect(page.getByRole("dialog")).toContainText(TITLE);
+  await page.waitForTimeout(600);
+  await expect(page.getByRole("dialog")).toBeVisible();
   expect(await storedDue(page)).toBe(dueAt);
 });

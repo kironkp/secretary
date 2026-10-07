@@ -5,7 +5,7 @@
 // modal shows EVERYTHING stored about the task or event — notes in full,
 // reminders, source, provenance, check-in history. Mounted once in the app
 // shell; re-fetches on window focus so live updates don't show stale detail.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -153,9 +153,21 @@ export function DetailDialog() {
     }
   }, []);
 
+  // The click that opened the dialog must not also close it. On touch a
+  // browser sends its compatibility click after the pointer events, so an
+  // opener that acts on pointerup puts the backdrop under that click (sec
+  // rev, SEC-A009: open, then shut ~9 ms later). Openers act on click; this
+  // is the backstop for any that don't.
+  const openedAt = useRef(0);
+  const closeFromBackdrop = () => {
+    if (performance.now() - openedAt.current < 400) return;
+    setTarget(null);
+  };
+
   useEffect(() => {
     const onOpen = (e: Event) => {
       const { kind, id } = (e as CustomEvent).detail as { kind: "task" | "event"; id: string };
+      openedAt.current = performance.now();
       setTarget({ kind, id });
       setDetail(null);
       setError(false);
@@ -223,7 +235,7 @@ export function DetailDialog() {
 
   return (
     <div
-      onClick={() => setTarget(null)}
+      onClick={closeFromBackdrop}
       className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40 p-4 backdrop-blur-[2px] sm:items-center"
     >
       <div
