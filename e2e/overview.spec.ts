@@ -46,7 +46,8 @@ test("no table and no 5-week chart; the progress strip; the cards use the width"
   // Each task once in the lists: on its card, and no table repeats it (the
   // Next up hero may name it: that is the one next commitment, not a list).
   await expect(page.getByRole("table")).toHaveCount(0);
-  await expect(page.getByTestId("project-grid").getByText(IN_PROJECT, { exact: true })).toHaveCount(1);
+  // (A card row holds the title and its date together, so not an exact match.)
+  await expect(page.getByTestId("project-grid").getByText(IN_PROJECT)).toHaveCount(1);
 
   const grid = page.getByTestId("project-grid").first();
   const columns = await grid.evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(" ").length);
