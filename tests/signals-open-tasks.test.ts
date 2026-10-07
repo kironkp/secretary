@@ -82,3 +82,18 @@ describe("SIGNALS.tasks", () => {
     expect(signals.tasks.some((t) => t.title === "someday, undated")).toBe(false);
   });
 });
+
+describe("SIGNALS.projects", () => {
+  it("carry a project's real kind, so the default plan can put a list (Shopping) after the work (SEC-A007)", async () => {
+    const [shopping] = await db
+      .insert(projects)
+      .values({ userId: B.id, name: "Shopping", status: "active", kind: "list" as const })
+      .returning();
+    await db.insert(projects).values({ userId: B.id, name: "Album", status: "active" });
+    const signals = await computeSignals(B.id);
+    const kinds = Object.fromEntries(signals.projects.map((p) => [p.name, p.kind]));
+    expect(kinds).toEqual({ Shopping: "list", Album: "project" });
+    expect(signals.projects.find((p) => p.kind === "list")?.id).toBe(shopping.id);
+  });
+});
+
