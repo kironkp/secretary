@@ -16,6 +16,36 @@ async function storedDue(page: Page): Promise<string> {
   return ((await res.json()) as { task: { dueAt: string } }).task.dueAt;
 }
 
+/**
+ * A real touch on the item's centre, once nothing is scrolling. Taps within
+ * 150 ms of a scroll are scroll-stops, not requests (isMomentumTap in
+ * components/dashboard/shared.tsx), and locator.tap() scrolls the item into
+ * view itself just before touching, so it is swallowed. touchscreen.tap()
+ * never scrolls; the item is centred first, clear of the fixed tab bar.
+ */
+async function touchItem(page: Page, item: ReturnType<Page["locator"]>) {
+  // Centred: at the edge of the scroll area the fixed tab bar covers it.
+  await item.evaluate((el) => el.scrollIntoView({ block: "center", inline: "center" }));
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        let quiet = setTimeout(done, 300);
+        function bump() {
+          clearTimeout(quiet);
+          quiet = setTimeout(done, 300);
+        }
+        function done() {
+          window.removeEventListener("scroll", bump, true);
+          resolve();
+        }
+        window.addEventListener("scroll", bump, true);
+      })
+  );
+  const box = await item.boundingBox();
+  if (!box) throw new Error("the item is not on the board");
+  await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+}
+
 test.beforeAll(async ({ request }) => {
   // Five days out at noon UTC: clear of today's line and of any DST edge by a margin.
   const d = new Date(Date.now() + 5 * DAY);
@@ -59,15 +89,10 @@ test("dragging a date two days right moves it two days, and Undo puts it back", 
 
 test("a touch tap opens the task and it stays open, instead of moving it", async ({ page }) => {
   await page.goto("/dashboard?view=timeline");
-  const item = page.locator(`[data-item="${taskId}"]`);
-  await item.scrollIntoViewIfNeeded();
-  // A tap within 150 ms of a scroll is a scroll-stop, not a request
-  // (isMomentumTap in components/dashboard/shared.tsx): let the scroll settle.
-  await page.waitForTimeout(300);
   // A real touch tap, not a mouse click: on touch the browser's compatibility
   // click arrives after pointerup, and a dialog opened on pointerup was shut
   // by it ~9 ms later (sec rev). click() never sends touch, so it passed.
-  await item.tap();
+  await touchItem(page, page.locator(`[data-item="${taskId}"]`));
   await expect(page.getByRole("dialog")).toContainText(TITLE);
   await page.waitForTimeout(600);
   await expect(page.getByRole("dialog")).toBeVisible();

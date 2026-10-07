@@ -18,6 +18,36 @@ async function storedDue(page: Page): Promise<string> {
   return ((await res.json()) as { task: { dueAt: string } }).task.dueAt;
 }
 
+/**
+ * A real touch on the item's centre, once nothing is scrolling. Taps within
+ * 150 ms of a scroll are scroll-stops, not requests (isMomentumTap in
+ * components/dashboard/shared.tsx), and locator.tap() scrolls the item into
+ * view itself just before touching, so it is swallowed. touchscreen.tap()
+ * never scrolls; the item is centred first, clear of the fixed tab bar.
+ */
+async function touchItem(page: Page, item: ReturnType<Page["locator"]>) {
+  // Centred: at the edge of the scroll area the fixed tab bar covers it.
+  await item.evaluate((el) => el.scrollIntoView({ block: "center", inline: "center" }));
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        let quiet = setTimeout(done, 300);
+        function bump() {
+          clearTimeout(quiet);
+          quiet = setTimeout(done, 300);
+        }
+        function done() {
+          window.removeEventListener("scroll", bump, true);
+          resolve();
+        }
+        window.addEventListener("scroll", bump, true);
+      })
+  );
+  const box = await item.boundingBox();
+  if (!box) throw new Error("the item is not on the board");
+  await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+}
+
 test.beforeAll(async ({ request }) => {
   const d = new Date(Date.now() + 2 * DAY);
   d.setUTCHours(12, 0, 0, 0);
@@ -36,10 +66,8 @@ test.afterAll(async ({ request }) => {
 
 test("a tap opens the task, it stays open, and its date changes from the dialog", async ({ page }) => {
   await page.goto("/dashboard?view=timeline");
-  const item = page.locator(`[data-item="${taskId}"]`);
-  await item.scrollIntoViewIfNeeded();
-  await page.waitForTimeout(300); // past the 150 ms scroll-stop guard
-  await item.tap();
+  await page.getByTestId("timeline-board").waitFor();
+  await touchItem(page, page.locator(`[data-item="${taskId}"]`));
 
   const dialog = page.getByRole("dialog");
   await expect(dialog).toContainText(TITLE);
@@ -48,7 +76,7 @@ test("a tap opens the task, it stays open, and its date changes from the dialog"
 
   const target = new Date(Date.now() + 9 * DAY);
   const day = target.toISOString().slice(0, 10);
-  const due = dialog.getByLabel("Due date");
+  const due = dialog.getByLabel("Due date", { exact: true });
   await due.fill(`${day}T09:00`);
   await due.blur();
   await expect.poll(() => storedDue(page)).toBe(`${day}T09:00:00.000Z`);
