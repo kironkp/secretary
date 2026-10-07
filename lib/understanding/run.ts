@@ -11,7 +11,7 @@
 import { alertProviderOutOfCredit, backgroundAllowed, isOutOfCredit, paidCallAllowed, runCapUsd } from "@/lib/spend-guard";
 import { priceUsage } from "@/lib/pricing";
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { db } from "@/lib/db";
@@ -947,6 +947,9 @@ async function runOnce(
     return { status: "skipped", reason: "no-project" };
   }
   const inputsHash = hashBundle(bundle);
+  // The same inputs under the formula before SEC-A009. Rows written before the
+  // deploy carry it; matching both keeps a formula change from buying a read.
+  const legacyHash = legacyHashBundle(bundle);
 
   const [previous] = await db
     .select({ inputsHash: records.inputsHash, body: records.body })
@@ -961,7 +964,7 @@ async function runOnce(
   // Stored under the old formula (before SEC-A009) on inputs that have not
   // changed: the same read, so re-stamp the record with the new hash and
   // call nothing. Deploying the new formula must not re-read every project.
-  if (!opts.force && previous && previous.inputsHash === legacyHashBundle(bundle)) {
+  if (!opts.force && previous && previous.inputsHash === legacyHash) {
     if (!opts.dryRun) {
       await db
         .update(records)
@@ -973,7 +976,9 @@ async function runOnce(
 
   if (opts.backoffAfterFailure && !opts.force) {
     // Every failed run on these inputs, not just the latest row: a budget
-    // skip logged in between must not wipe the memory of the failure.
+    // skip logged in between must not wipe the memory of the failure. Under
+    // either hash formula: a failure logged before SEC-A009 is still a
+    // failure on these inputs, and must not be released by the deploy.
     const failures = await db
       .select({
         errors: understandingRuns.errors,
@@ -986,7 +991,7 @@ async function runOnce(
           eq(understandingRuns.userId, userId),
           eq(understandingRuns.projectId, projectId),
           eq(understandingRuns.status, "failed"),
-          eq(understandingRuns.inputsHash, inputsHash)
+          inArray(understandingRuns.inputsHash, [inputsHash, legacyHash])
         )
       );
     if (
@@ -1040,7 +1045,7 @@ async function runOnce(
         .where(and(eq(understandingRuns.userId, userId), eq(understandingRuns.projectId, projectId)))
         .orderBy(desc(understandingRuns.startedAt))
         .limit(1);
-      if (!(last?.reason === "budget" && last.inputsHash === inputsHash)) {
+      if (!(last?.reason === "budget" && (last.inputsHash === inputsHash || last.inputsHash === legacyHash))) {
         await logRun({ id: runId, userId, projectId, startedAt, status: "skipped", reason: "budget", inputsHash });
       }
       return { status: "skipped", reason: "budget" };

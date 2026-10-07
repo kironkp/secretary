@@ -32,9 +32,11 @@ vi.mock("@/lib/google/calendar", async (importOriginal) => ({
 
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { events, projects, tasks, user } from "@/lib/db/schema";
+import { checkins, events, expectations, projects, tasks, user } from "@/lib/db/schema";
 import { POST as move } from "@/app/api/timeline/move/route";
 import { POST as retry } from "@/app/api/timeline/google-retry/route";
+import { POST as undo } from "@/app/api/timeline/undo/route";
+import { openUndo, sealUndo } from "@/lib/timeline-undo";
 import { executeTool, liveTurnContext } from "@/lib/secretary/tools";
 import { openAIVoiceToolDefs } from "@/lib/secretary/tool-schemas";
 import { shiftDays } from "@/lib/timeline";
@@ -142,9 +144,17 @@ describe("a drag is update_task: the dates, the postponed count, the reminders",
     expect(await taskRow(ids.stems)).toEqual(before);
   });
 
-  it("dropping a No-date task on a day gives it that date; Undo takes it off again", async () => {
-    expect((await post(move, { kind: "task", id: ids.passport, due_at: "2026-10-13T00:00:00.000Z" })).status).toBe(200);
+  it("dropping a No-date task on a day gives it that date; Undo puts it back in the tray", async () => {
+    const res = await post(move, { kind: "task", id: ids.passport, due_at: "2026-10-13T00:00:00.000Z" });
+    expect(res.status).toBe(200);
     expect((await taskRow(ids.passport)).dueAt!.toISOString()).toBe("2026-10-13T00:00:00.000Z");
+    const { undo: token } = (await res.json()) as { undo: string };
+    expect((await post(undo, { token })).status).toBe(200);
+    expect((await taskRow(ids.passport)).dueAt).toBeNull();
+  });
+
+  it('a null due date (what "take the date off it" sends) clears it through update_task', async () => {
+    await post(move, { kind: "task", id: ids.passport, due_at: "2026-10-14T00:00:00.000Z" });
     expect((await post(move, { kind: "task", id: ids.passport, due_at: null })).status).toBe(200);
     expect((await taskRow(ids.passport)).dueAt).toBeNull();
   });
@@ -196,6 +206,151 @@ describe("a drag is update_event: Google is patched in the same move", () => {
     expect(res.status).toBe(409);
     expect(await eventRow(ids.weekly)).toEqual(before);
     expect(google.patches).toEqual([]);
+  });
+});
+
+describe("Undo means it never happened (sec plan): a restore, not another move", () => {
+  let mix = "";
+  let party = "";
+  let expectation = "";
+  let olderCheckin = "";
+  beforeAll(async () => {
+    const [t] = await db
+      .insert(tasks)
+      .values({
+        userId: U.id,
+        projectId: ids.album,
+        title: "Mix the B-side",
+        status: "todo" as const,
+        source: "spoken" as const,
+        dueAt: new Date("2026-10-20T00:00:00Z"),
+        reminders: ["2026-10-19T16:00:00.000Z"],
+        postponedCount: 2,
+        updatedAt: new Date("2026-10-01T12:00:00Z"),
+      })
+      .returning();
+    mix = t.id;
+    const [x] = await db
+      .insert(expectations)
+      .values({ userId: U.id, taskId: mix, commitment: "Send the B-side mix", expectedUpdateBy: new Date("2026-10-18T00:00:00Z") })
+      .returning();
+    expectation = x.id;
+    const [c] = await db.insert(checkins).values({ userId: U.id, taskId: mix, type: "user_update", note: "Started the mix" }).returning();
+    olderCheckin = c.id;
+    const [e] = await db
+      .insert(events)
+      .values({
+        userId: U.id,
+        title: "Listening party",
+        startsAt: new Date("2026-10-16T02:00:00Z"),
+        endsAt: new Date("2026-10-16T05:00:00Z"),
+        googleEventId: "g-listening-party",
+        googleSync: "synced",
+        reminders: ["2026-10-16T01:00:00.000Z"],
+      })
+      .returning();
+    party = e.id;
+  });
+
+  const ticketOf = async (res: Response) => ((await res.json()) as { undo: string }).undo;
+  const mixState = async () => {
+    const row = await taskRow(mix);
+    const notes = (await db.select().from(checkins).where(eq(checkins.taskId, mix))).map((c) => c.id).sort();
+    const [x] = await db.select().from(expectations).where(eq(expectations.id, expectation));
+    return {
+      dueAt: row.dueAt?.toISOString(),
+      startAt: row.startAt?.toISOString() ?? null,
+      reminders: row.reminders,
+      postponedCount: row.postponedCount,
+      updatedAt: row.updatedAt.toISOString(),
+      checkins: notes,
+      expectation: { status: x.status, clearedAt: x.clearedAt },
+    };
+  };
+
+  it("drag later → Undo: the postponed count, its check-in and the cleared expectation are all as they were", async () => {
+    const before = await mixState();
+    expect(before.postponedCount).toBe(2);
+    expect(before.expectation.status).toBe("open");
+    const res = await post(move, {
+      kind: "task",
+      id: mix,
+      due_at: shiftDays("2026-10-20T00:00:00.000Z", 3, U.tz),
+      reminders: [shiftDays("2026-10-19T16:00:00.000Z", 3, U.tz)],
+    });
+    expect(res.status).toBe(200);
+    const token = await ticketOf(res);
+    // The move did what a postponement does.
+    const moved = await mixState();
+    expect(moved.postponedCount).toBe(3);
+    expect(moved.checkins).toHaveLength(2);
+    expect(moved.expectation.status).toBe("cleared");
+
+    expect((await post(undo, { token })).status).toBe(200);
+    expect(await mixState()).toEqual(before);
+    expect((await mixState()).checkins).toEqual([olderCheckin]);
+  });
+
+  it("drag earlier → Undo: moving it back later is not counted as a postponement", async () => {
+    const before = await mixState();
+    const res = await post(move, { kind: "task", id: mix, due_at: shiftDays("2026-10-20T00:00:00.000Z", -2, U.tz) });
+    expect((await post(undo, { token: await ticketOf(res) })).status).toBe(200);
+    expect(await mixState()).toEqual(before);
+  });
+
+  it("a Google-synced event: drag → Undo patches Google exactly once more, back to the original times", async () => {
+    const res = await post(move, {
+      kind: "event",
+      id: party,
+      starts_at: "2026-10-18T02:00:00.000Z",
+      ends_at: "2026-10-18T05:00:00.000Z",
+      reminders: ["2026-10-18T01:00:00.000Z"],
+    });
+    expect(res.status).toBe(200);
+    expect(google.patches).toHaveLength(1);
+    const token = await ticketOf(res);
+
+    expect((await post(undo, { token })).status).toBe(200);
+    expect(google.patches).toEqual([
+      { id: "g-listening-party", startsAt: new Date("2026-10-18T02:00:00.000Z") },
+      { id: "g-listening-party", startsAt: new Date("2026-10-16T02:00:00.000Z") },
+    ]);
+    const row = await eventRow(party);
+    expect(row.startsAt.toISOString()).toBe("2026-10-16T02:00:00.000Z");
+    expect(row.endsAt!.toISOString()).toBe("2026-10-16T05:00:00.000Z");
+    expect(row.reminders).toEqual(["2026-10-16T01:00:00.000Z"]);
+    expect(row.googleSync).toBe("synced");
+  });
+
+  it("an Undo after the item moved again restores nothing", async () => {
+    const first = await post(move, { kind: "task", id: mix, due_at: "2026-10-22T00:00:00.000Z" });
+    const stale = await ticketOf(first);
+    const second = await post(move, { kind: "task", id: mix, due_at: "2026-10-24T00:00:00.000Z" });
+    const afterSecond = await mixState();
+    const res = await post(undo, { token: stale });
+    expect(res.status).toBe(409);
+    expect(await mixState()).toEqual(afterSecond);
+    // The newer move's own Undo still works, back to after the first.
+    expect((await post(undo, { token: await ticketOf(second) })).status).toBe(200);
+    expect((await taskRow(mix)).dueAt!.toISOString()).toBe("2026-10-22T00:00:00.000Z");
+  });
+
+  it("a ticket that was edited, is someone else's, or has expired is refused", async () => {
+    const res = await post(move, { kind: "task", id: mix, due_at: "2026-10-26T00:00:00.000Z" });
+    const token = await ticketOf(res);
+    const ticket = openUndo(token, U.id)!;
+    expect(ticket).toMatchObject({ kind: "task", id: mix });
+    const state = await mixState();
+    // Edited: a lower postponed count with the old seal.
+    const [body, sig] = token.split(".");
+    const forged = Buffer.from(JSON.stringify({ ...ticket, before: { ...(ticket as { before: object }).before, postponedCount: 0 } })).toString("base64url");
+    expect((await post(undo, { token: `${forged}.${sig}` })).status).toBe(403);
+    expect(body).not.toBe(forged);
+    // Someone else's, sealed properly but for another user.
+    expect((await post(undo, { token: sealUndo({ ...ticket, userId: OTHER.id }) })).status).toBe(403);
+    // Expired.
+    expect((await post(undo, { token: sealUndo({ ...ticket, exp: Date.now() - 1 }) })).status).toBe(403);
+    expect(await mixState()).toEqual(state);
   });
 });
 

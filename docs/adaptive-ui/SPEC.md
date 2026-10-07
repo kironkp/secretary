@@ -129,7 +129,13 @@ the board and taps to edit, but does not drag. Every move is the same
 operation as saying it: `POST /api/timeline/move` calls `update_task` or
 `update_event` through `executeTool` in a live turn, so a Google-synced
 event is patched on Google, a later due counts as postponed, and a start
-after the due is refused; Undo sends the old dates back the same way. If
+after the due is refused. Undo is a restore, never a second move: the
+move returns a sealed, user-bound ticket (`lib/timeline-undo.ts`, 15
+minutes) naming the prior values and exactly the check-ins it wrote and the
+expectations it cleared, and `POST /api/timeline/undo` puts all of it back
+through the tool layer (`restoreTaskMove` / `restoreEventMove`, the latter
+patching Google back through the same `sendToGoogle`). If the item moved
+since, nothing is restored. If
 Google refuses, the move stays, the toast says "not on Google yet", and
 Retry is `add_event_to_google`. By voice, `amend_task` and
 `create_commitment` take `start_at` ("start the album cover on the 12th").

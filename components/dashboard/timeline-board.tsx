@@ -213,8 +213,8 @@ export function TimelineBoard({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      const json = (await res.json().catch(() => ({}))) as { result?: Record<string, unknown> };
-      return { ok: res.ok, result: json.result ?? {} };
+      const json = (await res.json().catch(() => ({}))) as { result?: Record<string, unknown>; undo?: string };
+      return { ok: res.ok, result: json.result ?? {}, undo: json.undo ?? null };
     },
     []
   );
@@ -224,12 +224,11 @@ export function TimelineBoard({
       id: string,
       title: string,
       body: Record<string, unknown>,
-      before: Record<string, unknown>,
       optimistic: Optimistic,
       label: string
     ) => {
       setPending((p) => ({ base: tasks, map: new Map(p.base === tasks ? p.map : []).set(id, optimistic) }));
-      const { ok, result } = await send(body);
+      const { ok, result, undo: ticket } = await send(body);
       if (!ok) {
         setPending((p) => {
           const map = new Map(p.map);
@@ -239,12 +238,22 @@ export function TimelineBoard({
         setToast({ text: String(result.error ?? "That move didn't save."), tone: "warn" });
         return;
       }
-      const undo = async () => {
-        setToast(null);
-        const back = await send(before);
-        if (!back.ok) setToast({ text: String(back.result.error ?? "Undo didn't save."), tone: "warn" });
-        router.refresh();
-      };
+      // Undo is a restore, not another move: the server's sealed ticket puts
+      // back exactly what this move changed (lib/timeline-undo.ts).
+      const undo = ticket
+        ? async () => {
+            setToast(null);
+            const res = await fetch("/api/timeline/undo", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ token: ticket }),
+            });
+            const json = (await res.json().catch(() => ({}))) as { result?: { error?: string; google_problem?: string } };
+            if (!res.ok) setToast({ text: json.result?.error ?? "Undo didn't save.", tone: "warn" });
+            else if (json.result?.google_problem) setToast({ text: `Put back here; ${json.result.google_problem}`, tone: "warn" });
+            router.refresh();
+          }
+        : undefined;
       const problem = typeof result.google_problem === "string" ? result.google_problem : null;
       setToast(
         problem
@@ -280,46 +289,27 @@ export function TimelineBoard({
       if (item.kind === "task") {
         const t = item.task;
         const body: Record<string, unknown> = { kind: "task", id: t.id };
-        const before: Record<string, unknown> = { kind: "task", id: t.id };
         if (change.due_at) {
           body.due_at = change.due_at;
-          before.due_at = t.dueAt;
-          if (t.reminders.length) {
-            body.reminders = shiftedReminders(t.reminders, dayShift, timezone);
-            before.reminders = t.reminders;
-          }
+          if (t.reminders.length) body.reminders = shiftedReminders(t.reminders, dayShift, timezone);
         }
-        if (change.start_at !== undefined) {
-          body.start_at = change.start_at;
-          before.start_at = t.startAt;
-        }
+        if (change.start_at !== undefined) body.start_at = change.start_at;
         const optimistic: Partial<TlTask> = {
           ...(change.due_at ? { dueAt: change.due_at } : {}),
           ...(change.start_at !== undefined ? { startAt: change.start_at } : {}),
         };
-        void commit(t.id, t.title, body, before, optimistic, dayLabel(change.due_at ?? change.start_at ?? t.dueAt!, timezone));
+        void commit(t.id, t.title, body, optimistic, dayLabel(change.due_at ?? change.start_at ?? t.dueAt!, timezone));
         return;
       }
       const e = item.event;
       const body: Record<string, unknown> = { kind: "event", id: e.id };
-      const before: Record<string, unknown> = { kind: "event", id: e.id };
-      if (change.starts_at) {
-        body.starts_at = change.starts_at;
-        before.starts_at = e.startsAt;
-      }
-      if (change.ends_at) {
-        body.ends_at = change.ends_at;
-        if (e.endsAt) before.ends_at = e.endsAt;
-      }
-      if (grip === "body" && e.reminders.length) {
-        body.reminders = shiftedReminders(e.reminders, dayShift, timezone);
-        before.reminders = e.reminders;
-      }
+      if (change.starts_at) body.starts_at = change.starts_at;
+      if (change.ends_at) body.ends_at = change.ends_at;
+      if (grip === "body" && e.reminders.length) body.reminders = shiftedReminders(e.reminders, dayShift, timezone);
       void commit(
         e.id,
         e.title,
         body,
-        before,
         { ...(change.starts_at ? { startsAt: change.starts_at } : {}), ...(change.ends_at ? { endsAt: change.ends_at } : {}) },
         dayLabel(change.starts_at ?? change.ends_at ?? e.startsAt, timezone)
       );
@@ -330,8 +320,7 @@ export function TimelineBoard({
   const dropFromTray = useCallback(
     (task: TlTask, day: number) => {
       const due = atDay(day, timezone);
-      // Undo puts it back in the tray: no due date.
-      void commit(task.id, task.title, { kind: "task", id: task.id, due_at: due }, { kind: "task", id: task.id, due_at: null }, { dueAt: due }, dayLabel(due, timezone));
+      void commit(task.id, task.title, { kind: "task", id: task.id, due_at: due }, { dueAt: due }, dayLabel(due, timezone));
     },
     [commit, timezone]
   );

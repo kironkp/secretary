@@ -24,8 +24,15 @@ start dates, due dates". It was a read-only vertical list.
   dropped on a day gets that date. Reminders move with what they remind
   about. Whole calendar days, the same time of day across a DST change.
   Touch drags after a long press; a phone shows the board and taps to edit,
-  but does not drag. Arrow keys move the focused item a day. Every move has
-  Undo.
+  but does not drag. Arrow keys move the focused item a day.
+- Every move has Undo, and Undo means it never happened: not a second move
+  (which could only count up) but a restore of exactly what the move
+  changed. The dates and reminders, the postponed count and updated_at go
+  back, the "Postponed to …" check-in is deleted, follow-ups the move
+  cleared are open again, and a Google-synced event is patched back on
+  Google. The move hands the browser a sealed, short-lived ticket for this;
+  it can't be edited or used by anyone else, and if the item has moved
+  since, Undo changes nothing.
 - A drag is the same operation as saying it: the move route calls
   update_task / update_event, so a Google-synced event is patched on Google,
   a later due date counts as postponed, and a start after the due is
@@ -38,7 +45,10 @@ start dates, due dates". It was a read-only vertical list.
 - The understanding hash leaves out the planned start and a bare
   updated_at, so dragging dates around costs no model reads. Records stamped
   with the old formula over unchanged inputs are re-stamped with no model
-  call, so deploying this re-reads nothing that did not change.
+  call, so deploying this re-reads nothing that did not change; and a failed
+  read logged under the old formula keeps its backoff (sec rev, from a
+  simulation on production's shape: Caltrans would otherwise have bought
+  one paid read on deploy). A formula change buys no reads.
 - From sec rev's A006 review: Overview's "1d to your next commitment" tile
   now shows the date ("tomorrow", "Fri", "Oct 9"; SPEC §7: dates, never
   countdowns), and the next-up pill and project cards say the item's own

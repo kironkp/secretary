@@ -11,6 +11,7 @@ import { isErrorResponse, parseBody, requireSession } from "@/lib/api";
 import { db } from "@/lib/db";
 import { events } from "@/lib/db/schema";
 import { executeTool, liveTurnContext } from "@/lib/secretary/tools";
+import { eventSnapshot, eventTicket, sealUndo, taskSnapshot, taskTicket } from "@/lib/timeline-undo";
 
 const iso = z.string().min(1).max(40);
 const bodySchema = z.discriminatedUnion("kind", [
@@ -42,13 +43,16 @@ export async function POST(req: Request) {
   const ctx = liveTurnContext({ userId: user.id, timezone: user.timezone, attachmentCount: 0 });
 
   if (parsed.kind === "task") {
+    // What Undo will need, read before the tool can change it.
+    const snap = await taskSnapshot(user.id, parsed.id);
     const outcome = await executeTool(ctx, "update_task", {
       task: parsed.id,
       ...(parsed.due_at !== undefined ? { due_at: parsed.due_at ?? "none" } : {}),
       ...(parsed.start_at !== undefined ? { start_at: parsed.start_at ?? "none" } : {}),
       ...(parsed.reminders ? { reminders: parsed.reminders } : {}),
     });
-    return NextResponse.json(outcome, { status: hasError(outcome.result) ? 422 : 200 });
+    if (hasError(outcome.result) || !snap) return NextResponse.json(outcome, { status: 422 });
+    return NextResponse.json({ ...outcome, undo: sealUndo(await taskTicket(user.id, parsed.id, snap)) });
   }
 
   // T2: a repeating event is moved by asking, not by dragging, in v1.
@@ -61,13 +65,15 @@ export async function POST(req: Request) {
   if (event.recurrence.length > 0) {
     return NextResponse.json({ result: { error: "A repeating event moves when you ask, not by dragging." } }, { status: 409 });
   }
+  const before = await eventSnapshot(user.id, parsed.id);
   const outcome = await executeTool(ctx, "update_event", {
     event: parsed.id,
     ...(parsed.starts_at ? { starts_at: parsed.starts_at } : {}),
     ...(parsed.ends_at ? { ends_at: parsed.ends_at } : {}),
     ...(parsed.reminders ? { reminders: parsed.reminders } : {}),
   });
-  return NextResponse.json(outcome, { status: hasError(outcome.result) ? 422 : 200 });
+  if (hasError(outcome.result) || !before) return NextResponse.json(outcome, { status: 422 });
+  return NextResponse.json({ ...outcome, undo: sealUndo(await eventTicket(user.id, parsed.id, before)) });
 }
 
 const hasError = (r: unknown) => typeof r === "object" && r !== null && "error" in r;

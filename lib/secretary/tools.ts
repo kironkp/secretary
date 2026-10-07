@@ -58,6 +58,7 @@ import { computeSignals } from "@/lib/layout/signals";
 import { applyBans, validatePlan } from "@/lib/layout/validator";
 import { setAsideInWords } from "@/components/today/copy";
 import { QUESTION_KINDS } from "@/lib/understanding/types";
+import type { UndoTicket } from "@/lib/timeline-undo";
 import { findDuplicate, findDuplicateEvent } from "./dedupe";
 import { clearExpectationsFor } from "./expectations";
 import { spawnNextOccurrence } from "./recurrence";
@@ -254,6 +255,90 @@ async function sendToGoogle(userId: string, event: typeof events.$inferSelect): 
     console.error(`google: event ${event.id} not sent: ${googleErrorText(e)}`);
     return { state: "failed", line: `Google Calendar refused it (${googleErrorText(e)}).` };
   }
+}
+
+const MOVED_SINCE = "It has moved since, so there is nothing to undo.";
+const isoOrNull = (d: Date | null) => (d ? d.toISOString() : null);
+
+/**
+ * Undo a timeline move (SEC-A009): the task exactly as it was, as if the
+ * move never happened. The dates and reminders, the postponed count and
+ * updated_at go back; the check-in the move wrote is deleted and the
+ * expectations it cleared are open again. Nothing is restored if the task
+ * has moved since (a newer move has its own Undo).
+ */
+export async function restoreTaskMove(
+  userId: string,
+  ticket: Extract<UndoTicket, { kind: "task" }>
+): Promise<{ task_id: string } | { error: string }> {
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .select()
+      .from(tasks)
+      .where(and(eq(tasks.id, ticket.id), eq(tasks.userId, userId)))
+      .for("update");
+    if (!row) return { error: "Not found" };
+    if (isoOrNull(row.dueAt) !== ticket.after.dueAt || isoOrNull(row.startAt) !== ticket.after.startAt) {
+      return { error: MOVED_SINCE };
+    }
+    const b = ticket.before;
+    await tx
+      .update(tasks)
+      .set({
+        dueAt: b.dueAt ? new Date(b.dueAt) : null,
+        startAt: b.startAt ? new Date(b.startAt) : null,
+        reminders: b.reminders,
+        postponedCount: b.postponedCount,
+        updatedAt: new Date(b.updatedAt),
+      })
+      .where(and(eq(tasks.id, ticket.id), eq(tasks.userId, userId)));
+    if (ticket.checkinIds.length) {
+      await tx
+        .delete(checkins)
+        .where(and(eq(checkins.userId, userId), eq(checkins.taskId, ticket.id), inArray(checkins.id, ticket.checkinIds)));
+    }
+    if (ticket.expectationIds.length) {
+      await tx
+        .update(expectations)
+        .set({ status: "open", clearedAt: null })
+        .where(
+          and(
+            eq(expectations.userId, userId),
+            eq(expectations.taskId, ticket.id),
+            inArray(expectations.id, ticket.expectationIds),
+            eq(expectations.status, "cleared")
+          )
+        );
+    }
+    return { task_id: ticket.id };
+  });
+}
+
+/**
+ * Undo an event's timeline move: its times and reminders as they were, and a
+ * Google-synced event patched back on Google through the same sendToGoogle a
+ * move takes (a refusal comes back as google_problem, like update_event's).
+ */
+export async function restoreEventMove(
+  userId: string,
+  ticket: Extract<UndoTicket, { kind: "event" }>
+): Promise<{ event_id: string; google?: string; google_problem?: string } | { error: string }> {
+  const [row] = await db.select().from(events).where(and(eq(events.id, ticket.id), eq(events.userId, userId)));
+  if (!row) return { error: "Not found" };
+  if (row.startsAt.toISOString() !== ticket.after.startsAt || isoOrNull(row.endsAt) !== ticket.after.endsAt) {
+    return { error: MOVED_SINCE };
+  }
+  const b = ticket.before;
+  const [restored] = await db
+    .update(events)
+    .set({ startsAt: new Date(b.startsAt), endsAt: b.endsAt ? new Date(b.endsAt) : null, reminders: b.reminders })
+    .where(and(eq(events.id, ticket.id), eq(events.userId, userId)))
+    .returning();
+  const google = restored.googleEventId ? await sendToGoogle(userId, restored) : null;
+  return {
+    event_id: restored.id,
+    ...(google ? { google: google.state === "added" ? "updated" : google.state, ...(google.line ? { google_problem: google.line } : {}) } : {}),
+  };
 }
 
 /** An instant moved along with a rolled-forward start. */

@@ -7,7 +7,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { records, tasks, user } from "@/lib/db/schema";
+import { projects, records, tasks, understandingRuns, user } from "@/lib/db/schema";
 import { gatherProject, hashBundle, legacyHashBundle } from "@/lib/understanding/gather";
 import { runProject } from "@/lib/understanding/run";
 import { CPO_NOW, CPO_TZ, fakeModel, minimalOutputFor, seedCpoScenario, type CpoIds } from "./fixtures/understanding";
@@ -84,5 +84,46 @@ describe("the A009 hash change costs no re-reads", { timeout: 30_000 }, () => {
     const again = fakeModel((bundle) => minimalOutputFor(bundle));
     expect(Object.values(await runAll(again))).toEqual(["skipped:unchanged", "skipped:unchanged"]);
     expect(again.calls).toHaveLength(0);
+  });
+});
+
+describe("a failure logged under the old formula keeps its backoff (sec rev's prod simulation)", { timeout: 30_000 }, () => {
+  // As Caltrans is in production: no record (a failed run stores none) and a
+  // validator-refused run stamped with the formula before A009. Releasing
+  // that backoff would buy one paid read the moment A009 deploys.
+  let projectId = "";
+  beforeAll(async () => {
+    const [p] = await db.insert(projects).values({ userId: U.id, name: "Backoff under the old hash", status: "active" }).returning();
+    projectId = p.id;
+    await db.insert(tasks).values({ userId: U.id, projectId, title: "File the FY27 conversion", status: "todo", source: "spoken" });
+    const bundle = (await gather(projectId))!;
+    await db.insert(understandingRuns).values({
+      userId: U.id,
+      projectId,
+      status: "failed",
+      inputsHash: legacyHashBundle(bundle),
+      errors: ["things[0].evidence: no such row"],
+      inputTokens: 18_000,
+      outputTokens: 4_000,
+    });
+  });
+
+  it("the sweep holds back, with 0 model calls", async () => {
+    const model = fakeModel((bundle) => minimalOutputFor(bundle));
+    const result = await runProject(U.id, projectId, { timezone: TZ, now: NOW, model, backoffAfterFailure: true });
+    expect(result).toEqual({ status: "skipped", reason: "backoff" });
+    expect(model.calls).toHaveLength(0);
+  });
+
+  it("and a genuine change to its data still reads it, once", async () => {
+    // As the app writes it: update_task bumps updated_at with every change.
+    await db
+      .update(tasks)
+      .set({ notes: "Teresa signed it.", updatedAt: new Date(NOW.getTime() + 60_000) })
+      .where(eq(tasks.projectId, projectId));
+    const model = fakeModel((bundle) => minimalOutputFor(bundle));
+    const result = await runProject(U.id, projectId, { timezone: TZ, now: NOW, model, backoffAfterFailure: true });
+    expect(result.status === "skipped" ? `skipped:${result.reason}` : result.status).toBe("ok");
+    expect(model.calls).toHaveLength(1);
   });
 });
