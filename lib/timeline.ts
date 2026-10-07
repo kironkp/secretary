@@ -80,7 +80,12 @@ export type Lane = {
 export type Filters = { project: string | "all"; status: "open" | "late" | "done" | "all"; events: boolean };
 export const DEFAULT_FILTERS: Filters = { project: "all", status: "open", events: true };
 
-/** A task's place: a bar from its start to its due day, or a single date. */
+/**
+ * A task's place: a bar from its start to its due day, or a single date. A
+ * start on the due day itself is allowed (update_task refuses only a start
+ * AFTER the due) and is a one-day bar: it says "this is planned", which a
+ * bare due date does not (sec rev G5).
+ */
 export function taskItem(t: TlTask, tz: string, today: number): Item | null {
   if (!t.dueAt) return null;
   const to = localDay(new Date(t.dueAt), tz);
@@ -91,7 +96,7 @@ export function taskItem(t: TlTask, tz: string, today: number): Item | null {
     title: t.title,
     from: start !== null && start <= to ? start : to,
     to,
-    bar: start !== null && start < to,
+    bar: start !== null && start <= to,
     late: isOpen(t) && to < today,
     done: t.status === "done",
     task: t,

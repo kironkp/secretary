@@ -9,6 +9,8 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { projects, records, tasks, understandingRuns, user } from "@/lib/db/schema";
 import { gatherProject, hashBundle, legacyHashBundle } from "@/lib/understanding/gather";
+import { taskDigests } from "@/lib/understanding/words";
+import { sql } from "drizzle-orm";
 import { runProject } from "@/lib/understanding/run";
 import { CPO_NOW, CPO_TZ, fakeModel, minimalOutputFor, seedCpoScenario, type CpoIds } from "./fixtures/understanding";
 
@@ -47,6 +49,17 @@ describe("the A009 hash change costs no re-reads", { timeout: 30_000 }, () => {
     expect(Object.values(out)).toEqual(["ok", "ok"]);
     expect(model.calls).toHaveLength(2);
     for (const p of projectIds()) expect((await record(p)).inputsHash).toBe(hashBundle((await gather(p))!));
+    // And the digest its ledes are judged by (words.ts), of the tasks it read.
+    for (const p of projectIds()) expect((await record(p)).words.taskDigest).toBe((await taskDigests(U.id, [p])).get(p));
+  });
+
+  it("a record from before the digest gets one from an unchanged sweep, with 0 model calls", async () => {
+    await db.update(records).set({ words: sql`${records.words} - 'taskDigest'` }).where(eq(records.userId, U.id));
+    expect((await record(ids.caltrans)).words.taskDigest).toBeUndefined();
+    const model = fakeModel((bundle) => minimalOutputFor(bundle));
+    expect(Object.values(await runAll(model))).toEqual(["skipped:unchanged", "skipped:unchanged"]);
+    expect(model.calls).toHaveLength(0);
+    for (const p of projectIds()) expect((await record(p)).words.taskDigest).toBe((await taskDigests(U.id, [p])).get(p));
   });
 
   it("a record stamped with the OLD formula over unchanged inputs is re-stamped, with 0 model calls", async () => {

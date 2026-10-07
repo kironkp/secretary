@@ -597,7 +597,9 @@ export const records = pgTable(
     // kit still re-issues every jsonb default on every push (workspaces.board
     // too), which is a harmless ALTER, not a change.
     words: jsonb("words")
-      .$type<{ todayLine?: string; ledes: Record<string, string> }>()
+      // taskDigest (SEC-A007): the project's tasks as the run read them
+      // (words.ts taskDigests), so a lede dims only when one of them changed.
+      .$type<{ todayLine?: string; ledes: Record<string, string>; taskDigest?: string }>()
       .notNull()
       .default(sql`'{"ledes": {}}'::jsonb`),
     version: integer("version").notNull().default(1),

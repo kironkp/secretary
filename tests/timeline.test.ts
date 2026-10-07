@@ -81,6 +81,10 @@ describe("items: a bar from start to due, or a single date", () => {
     const item = taskItem(task({ startAt: "2026-10-07T16:00:00Z", dueAt: "2026-10-12T00:00:00Z" }), TZ, TODAY)!;
     expect(item).toMatchObject({ from: day("2026-10-07T16:00:00Z"), to: day("2026-10-12T00:00:00Z"), bar: true, late: false });
   });
+  it("a start on the due day is a one-day bar (sec rev G5: allowed, and drawn as planned)", () => {
+    const item = taskItem(task({ startAt: "2026-10-09T16:00:00Z", dueAt: "2026-10-10T00:00:00Z" }), TZ, TODAY)!;
+    expect(item).toMatchObject({ bar: true, from: item.to });
+  });
   it("due only is a single date; no date is not on the board", () => {
     expect(taskItem(task({ dueAt: "2026-10-09T19:00:00Z" }), TZ, TODAY)).toMatchObject({ bar: false });
     expect(taskItem(task({}), TZ, TODAY)).toBeNull();
