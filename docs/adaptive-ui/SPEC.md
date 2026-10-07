@@ -117,7 +117,9 @@ project cards, the lists, then Needs a date. No task appears twice: the
 WHAT / WHEN / HEARD table is gone from Overview (it is the List view, whose
 headers now read Task / Due / Added). The shell owns the geometry:
 consecutive project cards render as one grid, two across on an iPad and
-three on a desktop, each card the full width of its cell. Needs a date
+three on a desktop, each card the full width of its cell (an accented one
+takes a whole row). `inline_loops` unfolds the card's own list of open items
+instead of adding a second table of them. Needs a date
 sets a date where it stands: a tap opens Today / Tomorrow / Next week /
 Pick… and the choice saves at once through `update_task` (the same move
 route as the Timeline, with Undo). Board, List and Calendar get project

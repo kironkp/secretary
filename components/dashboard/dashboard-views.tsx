@@ -204,6 +204,7 @@ export function DashboardViews({
             projects={planProjects}
             dynamicHtml={planDynamicHtml}
             timezone={timezone}
+            onOpenView={setView}
             tasks={tasks}
             listTasks={listTasks}
             suggestions={suggestions}

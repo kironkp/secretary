@@ -1061,6 +1061,7 @@ export function ProjectGrid({
   crossing,
   onDone,
   single = false,
+  unfolded = false,
 }: {
   tasks: TaskRow[];
   events: EventRow[];
@@ -1068,10 +1069,12 @@ export function ProjectGrid({
   onDone: (id: string) => void;
   /** One project's card, the full width of its cell: the plan's grid lays the cards out (SEC-A007). */
   single?: boolean;
+  /** Every open item listed, not the first three (a plan's inline_loops, SEC-A007). */
+  unfolded?: boolean;
 }) {
   const projects = useMemo(() => buildProjects(tasks, events), [tasks, events]);
   // "+ N more" is a real control: tap to unfold the full task list in place.
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [expanded, setExpanded] = useState<Set<string>>(() => (unfolded ? new Set(buildProjects(tasks, events).map((p) => p.name)) : new Set()));
   if (projects.length === 0) return null;
 
   return (

@@ -43,8 +43,10 @@ test("no table and no 5-week chart; the progress strip; the cards use the width"
   // The chart's legend and the table's headers are gone.
   await expect(page.getByText("imminent — under a week")).toHaveCount(0);
   await expect(page.getByRole("columnheader", { name: /^(what|heard)$/i })).toHaveCount(0);
-  // Each task once: the in-project task is on its card and nowhere else on Overview.
-  await expect(page.getByText(IN_PROJECT, { exact: true })).toHaveCount(1);
+  // Each task once in the lists: on its card, and no table repeats it (the
+  // Next up hero may name it: that is the one next commitment, not a list).
+  await expect(page.getByRole("table")).toHaveCount(0);
+  await expect(page.getByTestId("project-grid").getByText(IN_PROJECT, { exact: true })).toHaveCount(1);
 
   const grid = page.getByTestId("project-grid").first();
   const columns = await grid.evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(" ").length);

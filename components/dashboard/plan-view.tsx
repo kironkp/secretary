@@ -19,7 +19,6 @@ import {
   ComingUpStrip,
   DocumentsZone,
   NextUpHero,
-  OpenLoopsTable,
   ProcrastinationZone,
   ProjectGrid,
   StatTiles,
@@ -244,7 +243,6 @@ function ProjectCardSection({
   events,
   crossing,
   onDone,
-  fresh,
 }: {
   section: PlanSection;
   projects: PlanProject[];
@@ -252,7 +250,6 @@ function ProjectCardSection({
   events: EventRow[];
   crossing: Set<string>;
   onDone: (id: string) => void;
-  fresh?: Set<string>;
 }) {
   const projectId = String(section.props?.project_id ?? "");
   const variant = String(section.props?.variant ?? "full");
@@ -294,7 +291,10 @@ function ProjectCardSection({
           : undefined
       }
     >
-      <ProjectGrid tasks={mine} events={myEvents} crossing={crossing} onDone={onDone} single />
+      {/* inline_loops (the planner's "show this project's open items") unfolds
+          the card's own list: it used to add a second table of the same tasks
+          under it (SEC-A007, "no task twice"). */}
+      <ProjectGrid tasks={mine} events={myEvents} crossing={crossing} onDone={onDone} single unfolded={inlineLoops} />
       {variant === "nested" && childIds.length > 0 && (
         <div className="mt-2 grid gap-2 pl-4">
           {projects
@@ -321,17 +321,6 @@ function ProjectCardSection({
             })}
         </div>
       )}
-      {inlineLoops && open.length > 0 && (
-        <div className="mt-2">
-          <OpenLoopsTable
-            tasks={mine}
-            events={myEvents}
-            crossing={crossing}
-            onDone={onDone}
-            fresh={fresh}
-          />
-        </div>
-      )}
     </div>
   );
   return card;
@@ -353,6 +342,7 @@ export function PlanView({
   fresh,
   dynamicHtml = {},
   timezone,
+  onOpenView,
 }: {
   plan: LayoutPlan;
   version: number;
@@ -372,6 +362,8 @@ export function PlanView({
   dynamicHtml?: Record<string, string>;
   /** The user's zone: the strip's and Needs a date's calendar days (lib/due.ts). */
   timezone: string;
+  /** Switch the Dashboard to another view (the strip opens the Timeline). */
+  onOpenView?: (view: "timeline") => void;
 }) {
   const router = useRouter();
   // The progress strip's lanes (lib/timeline.ts), lists left out like everywhere.
@@ -451,7 +443,6 @@ export function PlanView({
             events={events}
             crossing={crossing}
             onDone={onDone}
-            fresh={fresh}
           />
         );
       }
@@ -466,7 +457,10 @@ export function PlanView({
             timezone={timezone}
             onPick={(id) => {
               pickTimelineProject(id);
-              router.push("/dashboard?view=timeline");
+              // The views' own switch: a push to the same page with a new
+              // ?view= leaves the open view as it is.
+              if (onOpenView) onOpenView("timeline");
+              else router.push("/dashboard?view=timeline");
             }}
           />
         );
@@ -533,7 +527,7 @@ export function PlanView({
           // accented card or one with its open items inline takes a whole row.
           <div key={`cards-${group.at}`} data-testid="project-grid" className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {group.sections.map(({ section, i }) => {
-              const wide = section.props?.accent === true || section.props?.inline_loops === true;
+              const wide = section.props?.accent === true;
               return (
                 <div key={`${sectionKey(section)}-${i}`} className={wide ? "md:col-span-2 xl:col-span-3" : undefined}>
                   {sectionFor(section, i)}
