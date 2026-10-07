@@ -4,18 +4,20 @@
 // against the fixed registry. Every section is hand-built furniture — the plan
 // only chooses, orders, and parameterizes it. Why-chips surface the planner's
 // stated reason on adapted sections; pins + one-tap revert are the user's veto.
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Pin, Sparkles, Undo2 } from "lucide-react";
 import type { LayoutPlan, PlanSection } from "@/lib/layout/plan";
 import { sectionKey } from "@/lib/layout/plan";
 import { openDetail, type DocRow, type EventRow, type TaskRow } from "./shared";
+import { ProjectProgressStrip, pickTimelineProject } from "./timeline-board";
+import { buildLanes, datePresets, DEFAULT_FILTERS, pickedDay } from "@/lib/timeline";
+import { dueLabel } from "@/lib/due";
 import { BoardView } from "./task-views";
 import { Pill } from "./zones";
 import {
   ComingUpStrip,
   DocumentsZone,
-  FiveWeekTimeline,
   NextUpHero,
   OpenLoopsTable,
   ProcrastinationZone,
@@ -89,7 +91,18 @@ function WhyChip({ why }: { why?: string }) {
   );
 }
 
-function DateChase({ tasks, itemIds }: { tasks: TaskRow[]; itemIds?: string[] }) {
+/**
+ * Needs a date (SEC-A007, D5): a tap on a task opens Today / Tomorrow / Next
+ * week / Pick… right there, and the choice saves at once, with no dialog.
+ * It saves through the same move route as a Timeline drag (update_task in a
+ * live turn: the tool layer's rules, never a raw write), and Undo restores.
+ */
+function DateChase({ tasks, itemIds, timezone }: { tasks: TaskRow[]; itemIds?: string[]; timezone: string }) {
+  const router = useRouter();
+  const [open, setOpen] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState<{ title: string; label: string; undo: string | null } | null>(null);
   const undated = tasks.filter(
     (t) =>
       t.status !== "done" &&
@@ -97,24 +110,108 @@ function DateChase({ tasks, itemIds }: { tasks: TaskRow[]; itemIds?: string[] })
       !t.dueAt &&
       (itemIds ? itemIds.includes(t.id) : true)
   );
-  if (!undated.length) return null;
+  if (!undated.length && !saved) return null;
+
+  const setDate = async (t: TaskRow, due: string) => {
+    setSaving(true);
+    setError(null);
+    const res = await fetch("/api/timeline/move", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: "task", id: t.id, due_at: due }),
+    }).catch(() => null);
+    const json = ((await res?.json().catch(() => ({}))) ?? {}) as { result?: { error?: string }; undo?: string };
+    setSaving(false);
+    if (!res?.ok) {
+      setError(json.result?.error ?? "That date didn't save.");
+      return;
+    }
+    setOpen(null);
+    setSaved({ title: t.title, label: dueLabel(due, timezone), undo: json.undo ?? null });
+    router.refresh();
+  };
+  const undo = async (token: string) => {
+    setSaved(null);
+    const res = await fetch("/api/timeline/undo", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    }).catch(() => null);
+    if (!res?.ok) setError("Undo didn't save.");
+    router.refresh();
+  };
+  const choice =
+    "inline-flex min-h-11 items-center rounded-full border border-edge bg-card px-3.5 text-xs font-semibold hover:border-faint disabled:opacity-50";
+
   return (
-    <div className="rounded-2xl border border-edge bg-surface px-4 py-3">
-      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
-        Needs a date
-      </p>
-      {/* Each opens its task, where the date is set: no dead ends (SEC-A006). */}
+    <div data-testid="date-chase" className="rounded-2xl border border-edge bg-surface px-4 py-3">
+      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Needs a date</p>
+      {saved && (
+        <p role="status" className="mb-2 flex flex-wrap items-center gap-2 text-sm">
+          <span>
+            &ldquo;{saved.title}&rdquo; is due {saved.label}.
+          </span>
+          {saved.undo && (
+            <button type="button" onClick={() => undo(saved.undo!)} className="min-h-11 px-1 text-xs font-bold text-accent">
+              Undo
+            </button>
+          )}
+        </p>
+      )}
+      {error && (
+        <p role="alert" className="mb-2 text-sm text-danger">
+          {error}
+        </p>
+      )}
       <div className="flex flex-wrap gap-2">
         {undated.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            onClick={() => openDetail("task", t.id)}
-            className="inline-flex min-h-11 items-center gap-2 rounded-full border border-edge bg-card px-3 text-left text-xs hover:border-faint"
-          >
-            {t.title}
-            <Pill tone="warn">no date</Pill>
-          </button>
+          <div key={t.id} className={open === t.id ? "w-full" : undefined}>
+            <button
+              type="button"
+              data-chase={t.id}
+              aria-expanded={open === t.id}
+              onClick={() => setOpen(open === t.id ? null : t.id)}
+              className="inline-flex min-h-11 items-center gap-2 rounded-full border border-edge bg-card px-3 text-left text-xs hover:border-faint"
+            >
+              {t.title}
+              <Pill tone="warn">no date</Pill>
+            </button>
+            {open === t.id && (
+              <div role="group" aria-label={`A date for ${t.title}`} className="mt-2 flex flex-wrap items-center gap-2">
+                {(
+                  [
+                    ["Today", "today"],
+                    ["Tomorrow", "tomorrow"],
+                    ["Next week", "nextWeek"],
+                  ] as const
+                ).map(([label, key]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    disabled={saving}
+                    // Worked out at the tap, not at render: the day it is now, in his zone.
+                    onClick={() => setDate(t, datePresets(timezone, new Date())[key])}
+                    className={choice}
+                  >
+                    {label}
+                  </button>
+                ))}
+                <input
+                  type="date"
+                  aria-label="Pick a date"
+                  disabled={saving}
+                  onChange={(e) => {
+                    const due = pickedDay(e.target.value, timezone);
+                    if (due) void setDate(t, due);
+                  }}
+                  className={`${choice} font-normal`}
+                />
+                <button type="button" onClick={() => openDetail("task", t.id)} className="min-h-11 px-2 text-xs text-muted hover:text-ink">
+                  Details
+                </button>
+              </div>
+            )}
+          </div>
         ))}
       </div>
     </div>
@@ -197,7 +294,7 @@ function ProjectCardSection({
           : undefined
       }
     >
-      <ProjectGrid tasks={mine} events={myEvents} crossing={crossing} onDone={onDone} />
+      <ProjectGrid tasks={mine} events={myEvents} crossing={crossing} onDone={onDone} single />
       {variant === "nested" && childIds.length > 0 && (
         <div className="mt-2 grid gap-2 pl-4">
           {projects
@@ -255,6 +352,7 @@ export function PlanView({
   onDone,
   fresh,
   dynamicHtml = {},
+  timezone,
 }: {
   plan: LayoutPlan;
   version: number;
@@ -272,8 +370,25 @@ export function PlanView({
   fresh?: Set<string>;
   /** Approved dynamic components, pre-interpolated + sanitized on the server. */
   dynamicHtml?: Record<string, string>;
+  /** The user's zone: the strip's and Needs a date's calendar days (lib/due.ts). */
+  timezone: string;
 }) {
   const router = useRouter();
+  // The progress strip's lanes (lib/timeline.ts), lists left out like everywhere.
+  const lanes = useMemo(() => {
+    const work = projects.filter((p) => p.kind !== "list" && (p.status ?? "active") === "active");
+    const ids = new Set(work.map((p) => p.id));
+    return buildLanes(
+      work.map((p) => ({ id: p.id, name: p.name, color: p.color, deadline: p.deadline ?? null, deadlineKind: p.deadlineKind ?? null })),
+      tasks
+        .filter((t) => t.projectId === null || ids.has(t.projectId))
+        .map((t) => ({ id: t.id, title: t.title, status: t.status, dueAt: t.dueAt, startAt: t.startAt, projectId: t.projectId, reminders: t.reminders })),
+      [],
+      timezone,
+      new Date(),
+      { ...DEFAULT_FILTERS, events: false }
+    );
+  }, [projects, tasks, timezone]);
   const [pinned, setPinned] = useState<Set<string>>(new Set(initialPinned));
   const [reverting, setReverting] = useState(false);
 
@@ -340,28 +455,26 @@ export function PlanView({
           />
         );
       }
-      case "timeline": {
-        const expanded = section.props?.expanded === true;
+      case "timeline":
+        // Registry v3 (SEC-A007): the projects progress strip, where the
+        // 5-week chart was. A tap opens the Timeline on that project.
         return (
-          <div className={expanded ? "" : "max-h-96 overflow-hidden"}>
-            <FiveWeekTimeline tasks={tasks} events={events} />
-          </div>
-        );
-      }
-      case "open_loops":
-        return (
-          <OpenLoopsTable
-            tasks={tasks}
-            events={events}
-            crossing={crossing}
-            onDone={onDone}
-            fresh={fresh}
+          <ProjectProgressStrip
+            lanes={lanes}
+            active="all"
+            compact={section.props?.expanded !== true}
+            timezone={timezone}
+            onPick={(id) => {
+              pickTimelineProject(id);
+              router.push("/dashboard?view=timeline");
+            }}
           />
         );
       case "date_chase":
         return (
           <DateChase
             tasks={tasks}
+            timezone={timezone}
             itemIds={Array.isArray(section.props?.item_ids) ? (section.props.item_ids as string[]) : undefined}
           />
         );
@@ -413,7 +526,29 @@ export function PlanView({
           </button>
         </div>
       )}
-      {plan.sections.map((section, i) => {
+      {groupCards(plan.sections, projects).map((group) =>
+        group.kind === "cards" ? (
+          // Consecutive project cards share one grid (SEC-A007): two across on
+          // an iPad, three on a desktop. The shell owns the geometry; an
+          // accented card or one with its open items inline takes a whole row.
+          <div key={`cards-${group.at}`} data-testid="project-grid" className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {group.sections.map(({ section, i }) => {
+              const wide = section.props?.accent === true || section.props?.inline_loops === true;
+              return (
+                <div key={`${sectionKey(section)}-${i}`} className={wide ? "md:col-span-2 xl:col-span-3" : undefined}>
+                  {sectionFor(section, i)}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <Fragment key={`${sectionKey(group.section)}-${group.i}`}>{sectionFor(group.section, group.i)}</Fragment>
+        )
+      )}
+    </div>
+  );
+
+  function sectionFor(section: PlanSection, i: number): ReactNode {
         const key = sectionKey(section);
         const content = render(section);
         if (content === null) return null;
@@ -436,7 +571,23 @@ export function PlanView({
             {content}
           </section>
         );
-      })}
-    </div>
-  );
+  }
+}
+
+type Group =
+  | { kind: "cards"; at: number; sections: { section: PlanSection; i: number }[] }
+  | { kind: "one"; section: PlanSection; i: number };
+
+/** Runs of project cards (not lists) become one grid; everything else stands alone. */
+function groupCards(sections: PlanSection[], projects: PlanProject[]): Group[] {
+  const lists = new Set(projects.filter((p) => p.kind === "list").map((p) => p.id));
+  const groups: Group[] = [];
+  sections.forEach((section, i) => {
+    const card = section.component === "project_card" && !lists.has(String(section.props?.project_id ?? ""));
+    const last = groups[groups.length - 1];
+    if (card && last?.kind === "cards") last.sections.push({ section, i });
+    else if (card) groups.push({ kind: "cards", at: i, sections: [{ section, i }] });
+    else groups.push({ kind: "one", section, i });
+  });
+  return groups;
 }

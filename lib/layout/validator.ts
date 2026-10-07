@@ -9,7 +9,7 @@
 //   project wins; ties keep the first. (Rejected-not-demoted was the
 //   alternative; demotion degrades more gracefully mid-conversation.)
 // - "Above the fold" = the first 8 sections of the plan.
-import { PROP_SCHEMAS, isRegistryComponent, type RegistryComponent } from "./registry";
+import { PROP_SCHEMAS, RETIRED_COMPONENTS, isRegistryComponent, type RegistryComponent } from "./registry";
 import { layoutPlanSchema, sectionKey, type LayoutPlan, type PlanSection } from "./plan";
 import type { Signals } from "./signals";
 
@@ -210,8 +210,14 @@ export function validatePlan(input: unknown, ctx: ValidationContext): Validation
   // Invariant 3 — movement is rationed for SYSTEM-initiated plans: reordering
   // needs days_since_layout_change >= 1 AND a why on every moved section.
   // (User-initiated changes are exempt — nothing the user asked for is a surprise.)
-  if (!ctx.userInitiated && ctx.previousPlan) {
-    const prevKeys = ctx.previousPlan.sections.map(sectionKey);
+  // A previous plan that is itself the default (nobody arranged it) is
+  // measured as the NEW default (SEC-A007): a product change to the default
+  // is not the planner moving things, and measuring against the old one
+  // would keep every unarranged board on it forever. A retired component's
+  // section is not on anyone's screen, so its absence is not a removal.
+  const baseline = ctx.previousPlan?.plan_id === "default" ? ctx.defaultPlan : ctx.previousPlan;
+  if (!ctx.userInitiated && baseline) {
+    const prevKeys = baseline.sections.filter((s) => !RETIRED_COMPONENTS.has(s.component)).map(sectionKey);
     const newKeys = plan.sections.map(sectionKey);
     // Invariant 8: same-day system plans may add or re-emphasize, but
     // removals wait — a section the user saw today can't silently vanish.
@@ -249,11 +255,14 @@ export function validatePlan(input: unknown, ctx: ValidationContext): Validation
       ...ctx.pinnedSections,
       ...ctx.preferences.filter((p) => p.kind === "pin_section").map((p) => p.value.section),
     ]);
+    // Positions count among the sections still drawn: a retired one between
+    // them moves nothing the user can see.
+    const shown = ctx.previousPlan.sections.filter((s) => !RETIRED_COMPONENTS.has(s.component));
     for (const key of pinKeys) {
-      const oldIdx = ctx.previousPlan.sections.findIndex((s) => sectionKey(s) === key);
+      const oldIdx = shown.findIndex((s) => sectionKey(s) === key);
       if (oldIdx === -1) continue;
       const newIdx = plan.sections.findIndex((s) => sectionKey(s) === key);
-      const oldVariant = ctx.previousPlan.sections[oldIdx].props?.variant;
+      const oldVariant = shown[oldIdx].props?.variant;
       const newVariant = newIdx === -1 ? undefined : plan.sections[newIdx].props?.variant;
       if (newIdx !== oldIdx || (oldVariant !== undefined && newVariant !== oldVariant)) {
         reasons.push(`pinned section "${key}" moved or changed`);

@@ -22,6 +22,7 @@ import { CalendarView } from "./calendar-view";
 import { TimelineBoard } from "./timeline-board";
 import { BoardView, ListTable } from "./task-views";
 import { PastDueChip, SuggestedZone } from "./zones";
+import { ProjectFilterChips, useProjectFilter } from "./project-filter";
 
 export type { EventRow, TaskRow } from "./shared";
 
@@ -71,6 +72,8 @@ export function DashboardViews({
   timezone: string;
 }) {
   const router = useRouter();
+  // Board, List and Calendar narrowed to one project (SEC-A007, T1).
+  const [projectFilter, setProjectFilter] = useProjectFilter(planProjects);
   const asked = useSearchParams().get("view");
   const [view, setViewState] = useState<View>(isView(asked) ? asked : "adaptive");
   const setView = (v: View) => {
@@ -102,6 +105,14 @@ export function DashboardViews({
       allTasks.filter((t) => lists.has(t.projectId ?? "")),
     ];
   }, [allTasks, planProjects]);
+  // What Board, List and Calendar show under the project filter.
+  const [shownTasks, shownEvents] = useMemo(
+    () =>
+      projectFilter === "all"
+        ? [tasks, events]
+        : [tasks.filter((t) => t.projectId === projectFilter), events.filter((e) => e.projectId === projectFilter)],
+    [tasks, events, projectFilter]
+  );
 
   // Entrance animation: ids (tasks AND events) that appeared after this
   // component mounted — i.e. the secretary logged them live. `seen` absorbs
@@ -192,6 +203,7 @@ export function DashboardViews({
             updatedAt={layoutUpdatedAt}
             projects={planProjects}
             dynamicHtml={planDynamicHtml}
+            timezone={timezone}
             tasks={tasks}
             listTasks={listTasks}
             suggestions={suggestions}
@@ -222,13 +234,16 @@ export function DashboardViews({
         <>
           <PastDueChip tasks={tasks} />
           <SuggestedZone suggestions={suggestions} />
+          {view !== "timeline" && (
+            <ProjectFilterChips projects={planProjects} tasks={tasks} value={projectFilter} onChange={setProjectFilter} />
+          )}
           {view === "list" && (
-            <ListTable tasks={tasks} crossing={crossing} onDone={markDone} fresh={fresh} />
+            <ListTable tasks={shownTasks} crossing={crossing} onDone={markDone} fresh={fresh} />
           )}
           {view === "board" && (
-            <BoardView tasks={tasks} crossing={crossing} onDone={markDone} fresh={fresh} />
+            <BoardView tasks={shownTasks} crossing={crossing} onDone={markDone} fresh={fresh} />
           )}
-          {view === "calendar" && <CalendarView tasks={tasks} events={events} timezone={timezone} />}
+          {view === "calendar" && <CalendarView tasks={shownTasks} events={shownEvents} timezone={timezone} />}
           {view === "timeline" && (
             <TimelineBoard
               tasks={tasks}

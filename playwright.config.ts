@@ -91,6 +91,17 @@ export default defineConfig({
       testMatch: /timeline-phone\.spec\.ts/,
       use: { ...devices["iPhone 15"] },
     },
+    {
+      // Overview, Needs a date and the project filter (SEC-A007), on both.
+      name: "overview",
+      testMatch: /overview\.spec\.ts/,
+      use: { ...devices["iPad Pro 11 landscape"] },
+    },
+    {
+      name: "overview-phone",
+      testMatch: /overview\.spec\.ts/,
+      use: { ...devices["iPhone 15"] },
+    },
   ],
 
   webServer: {
@@ -110,6 +121,12 @@ export default defineConfig({
       // keys, so without this the run would try a real call and fail in the
       // log after every answer; the specs assert on the writes, not the run.
       UNDERSTANDING_DISABLED: "true",
+      // The Overview production renders (the LayoutPlan board), not the
+      // legacy one that runs when the flag is unset (SEC-A007). Its planner
+      // refines in the background with a model; SPEND_KILL refuses every
+      // paid call but a user's own chat or voice turn, so none is made.
+      ADAPTIVE_V2: "true",
+      SPEND_KILL: "true",
     },
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

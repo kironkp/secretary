@@ -70,13 +70,18 @@ version number; the validator loads prop-schemas from it.
 | `hero_next_up` | `event_id: string`                                                    | next hard commitment card |
 | `stat_row`     | `tiles: {value, label, tone?}[]` (max 5)                              | |
 | `project_card` | `project_id`, `variant: "full"\|"compact"\|"nested"`, `accent?: bool`, `inline_loops?: bool` | `nested` renders subprojects with own progress; `inline_loops` embeds that project's open items |
-| `timeline`     | `span_days: 14\|21\|35`, `expanded: bool`                             | rows = active projects; undated = dashed |
-| `open_loops`   | `group_by: "project"\|"date"`, `include_done: bool`                   | the grouped table |
+| `timeline`     | `span_days: 14\|21\|35`, `expanded: bool`                             | since registry v3 (SEC-A007): the projects progress strip, one chip per project (progress, "3/7", next date, late); a tap opens Dashboard › Timeline filtered to it. `expanded` shows every project as a grid; `span_days` is kept for old plans and ignored |
+| ~~`open_loops`~~ | —                                                                   | retired in registry v3 (SEC-A007): it repeated every task on the project cards, and it is the List view. A stored plan carrying it drops the section; its removal or pin never blocks a plan |
 | `date_chase`   | `item_ids: string[]`                                                  | the "needs a date" strip |
 | `people_index` | —                                                                     | |
 
-`DEFAULT_PLAN` (also the fallback and calm mode):
-`[hero_next_up, stat_row, project_card × each active project (full), timeline(21, false), open_loops(project, true), date_chase(all missing), people_index]`
+`DEFAULT_PLAN` (also the fallback and calm mode), since registry v3:
+`[hero_next_up, stat_row, timeline(21, false), project_card × each active project (full), project_card × each list, date_chase(all missing), people_index]`
+
+A plan whose head is the default (nobody arranged it) is measured against the
+NEW default for movement and removals (§3 invariants 3 and 8): a product
+change to the default is not a system-initiated move. A plan the user arranged
+or pinned keeps its order.
 
 Adding a component = bump registry version + add prop schema + add render fn +
 mention in planner prompt. Never mid-session.
@@ -104,6 +109,21 @@ looks tappable is a dead end: a project card's header, a stat tile's rows,
 the Needs-a-date chips and the procrastination rows each open what they
 name, at 44 px or more. The 5-week chart is untouched (SEC-A007/A009
 replace it).
+
+**SEC-A007 (2026-10-06, Kiron: "make it make sense"; sec rev's round 2, "a
+clear Overview"):** Overview reads top to bottom as the next commitment and
+its tiles, the projects progress strip (in place of the 5-week chart), the
+project cards, the lists, then Needs a date. No task appears twice: the
+WHAT / WHEN / HEARD table is gone from Overview (it is the List view, whose
+headers now read Task / Due / Added). The shell owns the geometry:
+consecutive project cards render as one grid, two across on an iPad and
+three on a desktop, each card the full width of its cell. Needs a date
+sets a date where it stands: a tap opens Today / Tomorrow / Next week /
+Pick… and the choice saves at once through `update_task` (the same move
+route as the Timeline, with Undo). Board, List and Calendar get project
+filter chips (All, then projects by most recent activity), remembered per
+device; the Timeline keeps its own (the strip). The Spreadsheet view is
+untouched.
 
 **SEC-A009 (2026-10-06, Kiron: "make it usable… progress per project…
 filters… like notion, you should be able to move things on it… extending

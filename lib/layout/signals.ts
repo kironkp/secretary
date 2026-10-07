@@ -239,7 +239,7 @@ export async function computeSignals(userId: string, now = new Date()): Promise<
         return {
           id: p.id,
           name: p.name,
-          kind: "project",
+          kind: p.kind ?? "project",
           parent_id: null,
           deadline: deadline?.toISOString().slice(0, 10) ?? null,
           deadline_type: committed ? ("committed" as const) : inferred ? ("inferred" as const) : ("none" as const),

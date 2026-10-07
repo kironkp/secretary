@@ -17,7 +17,11 @@ export const layoutPlanSchema = z
   .object({
     plan_id: z.string(),
     reason_summary: z.string().max(120).nullable().optional(),
-    sections: z.array(planSectionSchema).min(1).max(14),
+    // DEFAULT_PLAN carries a card per project, so the cap must hold a real
+    // board: at 14, nine projects and a list (Kiron's) made 15 sections, his
+    // default never validated, and every render fell back to the stored head
+    // (SEC-A007). 40 still stops a runaway planner.
+    sections: z.array(planSectionSchema).min(1).max(40),
     wishlist: z
       .array(
         z.object({
@@ -67,14 +71,23 @@ export function defaultPlan(signals: Signals): LayoutPlan {
     sections: [
       { component: "hero_next_up" },
       { component: "stat_row" },
+      // The projects progress strip (registry v3, SEC-A007), above the cards it sums up.
+      { component: "timeline", props: { span_days: 21, expanded: false } },
+      // Most urgent first (fewest days left; undated after, in their own
+      // order), lists (Shopping) last: a list is not work to chase. Urgent
+      // cards stay above the fold (§3 invariant 4) however many projects
+      // there are, and Overview reads like the Timeline: late first.
       ...signals.projects
         .filter((p) => !p.parent_id)
+        .toSorted(
+          (a, b) =>
+            Number(a.kind === "list") - Number(b.kind === "list") ||
+            (a.days_left ?? Number.MAX_SAFE_INTEGER) - (b.days_left ?? Number.MAX_SAFE_INTEGER)
+        )
         .map((p): PlanSection => ({
           component: "project_card",
           props: { project_id: p.id, variant: "full" },
         })),
-      { component: "timeline", props: { span_days: 21, expanded: false } },
-      { component: "open_loops", props: { group_by: "project", include_done: true } },
       { component: "date_chase" },
       { component: "people_index" },
     ],

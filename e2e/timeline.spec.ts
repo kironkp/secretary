@@ -4,6 +4,7 @@
 // read from the API first, so a failure says whether the gesture produced no
 // move or the board did not redraw.
 import { test, expect, type Page } from "@playwright/test";
+import { touch } from "./touch";
 
 const TITLE = `Timeline drag ${Date.now()}`;
 const DAY = 86_400_000;
@@ -14,36 +15,6 @@ async function storedDue(page: Page): Promise<string> {
   const res = await page.request.get(`/api/tasks/${taskId}`);
   expect(res.ok()).toBeTruthy();
   return ((await res.json()) as { task: { dueAt: string } }).task.dueAt;
-}
-
-/**
- * A real touch on the item's centre, once nothing is scrolling. Taps within
- * 150 ms of a scroll are scroll-stops, not requests (isMomentumTap in
- * components/dashboard/shared.tsx), and locator.tap() scrolls the item into
- * view itself just before touching, so it is swallowed. touchscreen.tap()
- * never scrolls; the item is centred first, clear of the fixed tab bar.
- */
-async function touchItem(page: Page, item: ReturnType<Page["locator"]>) {
-  // Centred: at the edge of the scroll area the fixed tab bar covers it.
-  await item.evaluate((el) => el.scrollIntoView({ block: "center", inline: "center" }));
-  await page.evaluate(
-    () =>
-      new Promise<void>((resolve) => {
-        let quiet = setTimeout(done, 300);
-        function bump() {
-          clearTimeout(quiet);
-          quiet = setTimeout(done, 300);
-        }
-        function done() {
-          window.removeEventListener("scroll", bump, true);
-          resolve();
-        }
-        window.addEventListener("scroll", bump, true);
-      })
-  );
-  const box = await item.boundingBox();
-  if (!box) throw new Error("the item is not on the board");
-  await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
 }
 
 test.beforeAll(async ({ request }) => {
@@ -92,7 +63,7 @@ test("a touch tap opens the task and it stays open, instead of moving it", async
   // A real touch tap, not a mouse click: on touch the browser's compatibility
   // click arrives after pointerup, and a dialog opened on pointerup was shut
   // by it ~9 ms later (sec rev). click() never sends touch, so it passed.
-  await touchItem(page, page.locator(`[data-item="${taskId}"]`));
+  await touch(page, page.locator(`[data-item="${taskId}"]`));
   await expect(page.getByRole("dialog")).toContainText(TITLE);
   await page.waitForTimeout(600);
   await expect(page.getByRole("dialog")).toBeVisible();

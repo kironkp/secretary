@@ -247,3 +247,22 @@ export function moved(item: Item, grip: Grip, days: number, tz: string): Record<
 export function shiftedReminders(reminders: string[], days: number, tz: string): string[] {
   return reminders.map((r) => shiftDays(r, days, tz));
 }
+
+/**
+ * Needs a date's one-tap choices (SEC-A007), as due instants at 5 PM on his
+ * calendar days: today, tomorrow, and next week (the coming Monday; a week
+ * on from a Monday).
+ */
+export function datePresets(tz: string, now: Date): { today: string; tomorrow: string; nextWeek: string } {
+  const today = localDay(now, tz);
+  const weekday = new Date(today * 86_400_000).getUTCDay(); // 0 Sunday … 6 Saturday
+  const toMonday = (8 - weekday) % 7 || 7;
+  return { today: atDay(today, tz), tomorrow: atDay(today + 1, tz), nextWeek: atDay(today + toMonday, tz) };
+}
+
+/** A picked calendar date ("2026-10-12", as a date input gives it) at 5 PM in his zone. */
+export function pickedDay(ymd: string, tz: string): string | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
+  if (!m) return null;
+  return atDay(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) / 86_400_000, tz);
+}

@@ -25,8 +25,8 @@ const COMPONENT_NAMES: Record<string, string[]> = {
   focus_banner: ["banner", "focus banner"],
   hero_next_up: ["next up", "up next", "what's next", "hero"],
   stat_row: ["stats", "numbers", "stat row", "counts"],
-  timeline: ["timeline", "calendar strip"],
-  open_loops: ["open loops", "loops", "open items", "to-dos", "todos"],
+  // The projects progress strip since registry v3 (SEC-A007).
+  timeline: ["progress", "project progress", "progress strip", "projects strip", "timeline"],
   date_chase: ["needs a date", "no date", "date chase", "undated"],
   people_index: ["people", "people index", "contacts"],
   documents: ["documents", "docs"],
