@@ -25,8 +25,9 @@ const COMPONENT_NAMES: Record<string, string[]> = {
   focus_banner: ["banner", "focus banner"],
   hero_next_up: ["next up", "up next", "what's next", "hero"],
   stat_row: ["stats", "numbers", "stat row", "counts"],
-  // The projects progress strip since registry v3 (SEC-A007).
-  timeline: ["progress", "project progress", "progress strip", "projects strip", "timeline"],
+  // The projects progress strip since registry v3 (SEC-A007); the first name
+  // is what a read-back says ("Done: hid project progress.").
+  timeline: ["project progress", "progress", "progress strip", "projects strip", "timeline"],
   date_chase: ["needs a date", "no date", "date chase", "undated"],
   people_index: ["people", "people index", "contacts"],
   documents: ["documents", "docs"],
