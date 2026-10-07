@@ -149,8 +149,14 @@ export const opSchema = z.object({
     "tidy",
     "undo",
     "redo",
+    // SEC-A008a: a position that shoves aside what it lands on (voice's "top
+    // right"), and taking another widget's place (the phone's move up/down).
+    "place",
+    "move_before",
   ]),
   id: z.string().max(64).optional(),
+  /** move_before: the widget whose place this one takes. */
+  before: z.string().max(64).optional(),
   x: z.number().int().min(0).max(GRID_COLS - 1).optional(),
   y: z.number().int().min(0).max(400).optional(),
   w: z.number().int().min(MIN_W).max(GRID_COLS).optional(),
@@ -158,3 +164,21 @@ export const opSchema = z.object({
 });
 
 export type Op = z.infer<typeof opSchema>;
+
+/** What a spoken or typed arrange may ask for (lib/workspace/arrange.ts, SEC-A008a). */
+export const ARRANGE_WORKSPACE_OPS = [
+  "move_to_top",
+  "move_to_bottom",
+  "move_up",
+  "move_down",
+  "place",
+  "resize",
+  "collapse",
+  "expand",
+  "remove",
+  "tidy",
+  "undo",
+  "redo",
+] as const;
+export const PLACES = ["top_left", "top_right", "bottom_left", "bottom_right", "top", "bottom", "left", "right"] as const;
+export const SIZES = ["small", "medium", "large", "full_width", "bigger", "smaller"] as const;

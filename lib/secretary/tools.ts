@@ -47,6 +47,7 @@ import { connectionStatus, GoogleUnavailable, NOT_CONNECTED_LINE } from "@/lib/g
 import { describeRecurrence, firstOccurrence, normalizeRecurrence } from "./rrule";
 import { findList, findOrCreateList, itemTitle, listFor, parseListPhrase, spokenList } from "./lists";
 import { arrangeDashboard } from "@/lib/layout/arrange";
+import { arrangeWorkspace } from "@/lib/workspace/arrange";
 import { draftReply, inboxSummary, readMail, searchMail } from "@/lib/google/gmail";
 import { carriesMail, claimProposal, confirmable, markUntrusted, placeOf, propose, sealProposal, UNTRUSTED_OK } from "./proposals";
 import { recordUsage } from "@/lib/usage";
@@ -1216,6 +1217,17 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         items: items.map((i) => ({ item: i.title, note: i.notes })),
         read_back: items.length ? `${list.name}: ${spokenList(spoken)}.` : `Your ${list.name} list is empty.`,
       },
+    };
+  },
+
+  async arrange_workspace(ctx, args) {
+    const a = toolSchemas.arrange_workspace.parse(args);
+    const r = await arrangeWorkspace(ctx.userId, a.operations);
+    if (!r.ok) return { result: { error: r.error } };
+    const said = r.said.join(", ");
+    return {
+      result: { applied: true, read_back: `Done: ${said.charAt(0).toLowerCase()}${said.slice(1)}.` },
+      toast: { icon: "layout", text: "Workspace rearranged" },
     };
   },
 

@@ -68,6 +68,34 @@ export function tidy(widgets: Widget[]): Widget[] {
   });
 }
 
+const overlaps = (a: Widget, b: Widget) =>
+  a.id !== b.id && a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+
+/**
+ * Push whatever the moved widget now covers straight down, and whatever that
+ * covers in turn (SEC-A008a). Only widgets in the way move: the rest of an
+ * arrangement, gaps and deliberate overlaps included, stays exactly as it was.
+ */
+export function pushAside(widgets: Widget[], movedId: string): Widget[] {
+  const out = widgets.map((w) => ({ ...w }));
+  const queue = out.filter((w) => w.id === movedId);
+  // Bounded: each pass moves a widget strictly down; a board has at most 48.
+  for (let guard = 0; queue.length > 0 && guard < 10_000; guard++) {
+    const m = queue.shift()!;
+    for (const w of out) {
+      if (w.id === movedId || !overlaps(m, w)) continue;
+      w.y = m.y + m.h;
+      queue.push(w);
+    }
+  }
+  return out;
+}
+
+/** Reading order: how a phone stacks them (top to bottom, then left to right). */
+export function readingOrder(widgets: Widget[]): Widget[] {
+  return [...widgets].sort((a, b) => a.y - b.y || a.x - b.x || a.id.localeCompare(b.id));
+}
+
 /** Board height in grid rows, for sizing the scroll area. */
 export function boardRows(widgets: Widget[]): number {
   return widgets.reduce((m, w) => Math.max(m, w.y + w.h), 0);
@@ -132,6 +160,26 @@ function applyOne(board: Board, op: Op): Board {
         x: clamp(op.x ?? t.x, 0, GRID_COLS - w),
         y: Math.max(0, op.y ?? t.y),
       }));
+    }
+    case "place": {
+      // Where it was asked to go, and what was there moves down out of its way.
+      const placed = board.widgets.map((w) =>
+        w.id === target.id
+          ? { ...w, x: clamp(op.x ?? w.x, 0, GRID_COLS - w.w), y: Math.max(0, op.y ?? w.y) }
+          : w
+      );
+      return withHistory(board, pushAside(placed, target.id));
+    }
+    case "move_before": {
+      // Take the other widget's place (its column, its row); it and anything
+      // else in the way move down. On a phone, where widgets stack in reading
+      // order, that is "move up" (and "move down" is the next one taking ours).
+      const ref = board.widgets.find((w) => w.id === op.before);
+      if (!ref || ref.id === target.id) return board;
+      const placed = board.widgets.map((w) =>
+        w.id === target.id ? { ...w, x: clamp(ref.x, 0, GRID_COLS - w.w), y: ref.y } : w
+      );
+      return withHistory(board, pushAside(placed, target.id));
     }
     case "resize": {
       const width = clamp(op.w ?? target.w, MIN_W, GRID_COLS);

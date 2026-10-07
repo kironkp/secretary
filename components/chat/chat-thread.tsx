@@ -452,6 +452,10 @@ export function ChatThread({
       const uiActions = (body.uiActions ?? []) as { type: string }[];
       if (uiActions.some((a) => a.type === "show_canvas")) showCanvas();
       router.refresh(); // today strip + dashboard counts
+      // The screens that hold their own state (the Workspace board) refresh on
+      // this, the same as after a voice tool: "put overdue at the top right"
+      // typed in the docked chat moves the board beside it (SEC-A008a).
+      window.dispatchEvent(new Event("secretary:data-changed"));
     } catch {
       setMsgs((m) =>
         m.map((msg) => (msg.id === tempId ? { ...msg, failed: "Not delivered" } : msg))

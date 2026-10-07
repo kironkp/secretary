@@ -28,7 +28,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 // bundled for the client. `import type` is erased at compile time.
 import type { Lede } from "@/lib/understanding/words";
 import { applyBindings } from "@/lib/workspace/apply-bindings";
-import { boardRows } from "@/lib/workspace/ops";
+import { applyOps, boardRows, readingOrder } from "@/lib/workspace/ops";
 import {
   GRID_COLS,
   GRID_GAP_PX,
@@ -315,6 +315,18 @@ export function WorkspaceBoard({ initial }: { initial: BoardState }) {
     }
   };
 
+  // A phone stacks widgets in reading order and cannot drag (SPEC §3.1): it
+  // reorders instead, with the same engine op voice's "move it up" sends.
+  const order = readingOrder(state.widgets);
+  const reorder = (w: Widget, dir: "up" | "down") => {
+    const at = order.findIndex((x) => x.id === w.id);
+    const other = order[dir === "up" ? at - 1 : at + 1];
+    if (!other) return;
+    const op = dir === "up" ? { op: "move_before" as const, id: w.id, before: other.id } : { op: "move_before" as const, id: other.id, before: w.id };
+    const optimistic = applyOps({ widgets: state.widgets, seedVersion: 0, undo: [], redo: [], focusId: null }, [op]).widgets;
+    void send([op], optimistic);
+  };
+
   const rows = boardRows(state.widgets);
   const boardHeight = narrow ? undefined : Math.max(rows, 6) * (GRID_ROW_PX + GRID_GAP_PX);
 
@@ -325,7 +337,7 @@ export function WorkspaceBoard({ initial }: { initial: BoardState }) {
           with order-2, so this row sits above it). */}
       <div className="order-1 flex items-baseline justify-between gap-3">
         <span className="text-[13px] font-semibold text-faint">
-          {error ? <span className="text-danger">{error}</span> : "Drag to arrange"}
+          {error ? <span className="text-danger">{error}</span> : narrow ? "Arrange with the arrows" : "Drag to arrange"}
         </span>
         <span className="flex items-baseline gap-4">
           <Toolbutton
@@ -404,6 +416,30 @@ export function WorkspaceBoard({ initial }: { initial: BoardState }) {
               <header className="flex shrink-0 items-center gap-1">
                 {/* 44px minimum. The Canvas shipped an 18px target on a row that
                     navigated away on a near miss; nothing here goes below 44. */}
+                {narrow ? (
+                  <span className="flex shrink-0">
+                    {(["up", "down"] as const).map((dir) => {
+                      const at = order.findIndex((x) => x.id === w.id);
+                      const end = dir === "up" ? at <= 0 : at >= order.length - 1;
+                      return (
+                        <button
+                          key={dir}
+                          type="button"
+                          data-reorder={dir}
+                          aria-label={`Move ${w.title} ${dir}`}
+                          disabled={end}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            reorder(w, dir);
+                          }}
+                          className="flex h-11 w-11 items-center justify-center text-muted disabled:opacity-30"
+                        >
+                          <span aria-hidden>{dir === "up" ? "↑" : "↓"}</span>
+                        </button>
+                      );
+                    })}
+                  </span>
+                ) : (
                 <button
                   type="button"
                   data-drag-handle={w.id}
@@ -414,6 +450,7 @@ export function WorkspaceBoard({ initial }: { initial: BoardState }) {
                 >
                   <span aria-hidden className="text-base leading-none">⠿</span>
                 </button>
+                )}
                 {/* Wraps, never truncates (docs/understanding/SPEC.md §9). A
                     title the user cannot read in full is a title cut off. The
                     header grows and the body gives up the height: the body is

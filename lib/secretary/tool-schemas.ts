@@ -1,6 +1,7 @@
 // Tool definitions shared by the Realtime session (voice) and the Responses
 // API (text chat). One source of truth: zod schemas → OpenAI JSON schemas.
 import { z } from "zod";
+import { ARRANGE_WORKSPACE_OPS, PLACES, SIZES } from "@/lib/workspace/types";
 import { withoutHiddenShop } from "@/lib/shop/visible";
 
 /** A block reference: an id from the briefing, OR the words the user actually
@@ -225,6 +226,26 @@ export const toolSchemas = {
             .min(1)
             .max(80)
             .describe("The section in the user's words: 'shopping list', 'timeline', 'Caltrans', 'stats'"),
+        })
+      )
+      .min(1)
+      .max(8),
+  }),
+  // The Workspace by voice or chat (SEC-A008a): the same geometry ops a drag
+  // or the phone's move buttons send, chosen by name. Flat (no union), every
+  // field an enum or a bounded string: the Realtime API rejects oneOf.
+  arrange_workspace: z.object({
+    operations: z
+      .array(
+        z.object({
+          op: z.enum(ARRANGE_WORKSPACE_OPS),
+          widget: z
+            .string()
+            .max(80)
+            .optional()
+            .describe("The widget in the user's words: 'overdue', 'coming up', 'projects'. Not needed for tidy, undo, redo"),
+          where: z.enum(PLACES).optional().describe("For place: top_left, top_right, bottom_left, bottom_right, top, bottom, left, right"),
+          size: z.enum(SIZES).optional().describe("For resize: small, medium, large, full_width, bigger, smaller"),
         })
       )
       .min(1)
@@ -691,6 +712,8 @@ const toolDescriptions: Record<ToolName, string> = {
   add_to_list:
     "Add items to one of the user's lists: shopping by default, or a list they name ('packing list'). 'Add lotion to my shopping list for the boat' is items ['lotion'], note 'for the boat', on the shopping list. Never a task called 'buy lotion', never a new project. Say back read_back.",
   list_items: "What is on one of the user's lists right now (shopping by default), to read back when asked.",
+  arrange_workspace:
+    "Arrange the user's Workspace board the moment they ask: move a widget to the top or bottom, up or down a place, to a corner or side ('put overdue at the top right'), make it small, medium, large, full width, bigger or smaller, collapse, open or remove it, tidy the board, or undo. Name widgets in the user's words; the server finds them. It is the same move as their own drag, and undo works on it. If it returns an error, say that error; don't say you moved anything before this returns.",
   arrange_dashboard:
     "Rearrange the user's dashboard the moment they ask: move a section to the top or bottom, up or down a place, hide it, or show it again ('put the shopping list at the top', 'hide the timeline'). Name sections in the user's words; the server finds them. Applies at once and stays put. If it returns an error, say that error; don't say you moved anything before this returns.",
   add_event_to_google:
@@ -867,6 +890,9 @@ export const VOICE_TOOL_NAMES = [
   "add_to_list",
   "list_items",
   "arrange_dashboard",
+  // The Workspace, the same way (SEC-A008a): a spoken "put overdue at the top
+  // right" is the op a drag would send; no model call for the geometry.
+  "arrange_workspace",
   // Gmail by voice (SEC-A005): "what's new in my email?", find one, read it,
   // draft a reply; and the yes that a conversation which read mail needs.
   "email_summary",

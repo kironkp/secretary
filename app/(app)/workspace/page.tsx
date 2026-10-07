@@ -50,7 +50,9 @@ export default async function WorkspacePage() {
   ]);
 
   return (
-    <div className="mx-auto flex max-w-2xl flex-col gap-4 pt-1.5">
+    <div className="flex w-full flex-col gap-4 pt-1.5">
+      {/* The full width the app gives a page (SEC-A008a): a 12-column board
+          squeezed into 672 px left its 2D drag nowhere to go. */}
       {/* The mockup's title: the same 34px as Today. The toolbar row above it
           is the board's (Tidy, Undo, Redo). */}
       <h1 className="order-2 text-[34px] font-bold leading-[1.2] tracking-[-0.01em]">Workspace</h1>
