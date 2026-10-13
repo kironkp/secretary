@@ -89,24 +89,26 @@ beside me in a workshop."*
   answered (the Reviewer drafted and brute-forced it, the Executor
   confirmed the fit): ONE function in the composition decides; the
   request has no rule of its own; the section goes into the system's list
-  before the cards' place is counted. It goes where today's plan would
-  keep it: directly under the last section in step that precedes it,
-  else directly above the first in step that follows it, "in step" by
-  the validator's own reading; on a board that is held anyway, a tie
-  between two readings is settled by reading as moved a section the
-  rules can move or one that carries a reason on the board. Before it
-  writes, a request also checks it has not turned an accepted board into
-  a held one (a guard; his request is applied either way). The guard and
-  the walk ask it for EVERY order the rules can produce, not only
-  today's, because the Reviewer then stepped time for real beside a
-  control board and found what no check in the round had looked for: on
-  `472c2a7`, 45 of 260 futures are held by a hide-and-show alone, one
-  step later. The everyday one: on the day a rule sends the strip up, he
-  hides and shows next up, and from the next day the system's plan is
-  frozen. Two more sentences came from it: on a board that is not held a
-  returning section takes its usual side of a section the plan is about
-  to move, and when that section is itself the one coming back it comes
-  back where it stood (the system's move lands by itself). Named limits:
+  before the cards' place is counted. The Reviewer then stepped time for
+  real beside a control board and found what no check in the round had
+  looked for: on `472c2a7`, 45 of 260 futures are held by a hide-and-show
+  alone, one step later (the everyday one: on the day a rule sends the
+  strip up he hides and shows next up, and from the next day the system's
+  plan is frozen). The rule as it now stands is that check read the other
+  way, and replaced three clauses I had ruled in on the way to it: a
+  section the list lacks takes its place in the first order the rules can
+  produce that is accepted against the list as it stands (the usual order
+  first, then the strip sent up); if none is accepted (a planner has
+  moved something) it goes by today's order, a tie read against the
+  section that carries a reason on the board, or else one the rules can
+  move. No order accepted before his request is refused after it: shown
+  on the Reviewer's own model for both orders (0 of 325), and asked again
+  before every write by a guard that should never fire, and after every
+  request by the walk in its own code. It leans on the validator's
+  tie-break in one family of boards, so a test pins that tie-break by
+  name. Named limits: with the strip sent up and only one of next up or
+  the tiles on the board, hiding and showing that one brings it back
+  above the strip (it mends itself at the next change in his data);
   on a board a planner crossed, some sections come back on the other side
   of the moved one; a planner answer that leaves a default section out on
   such a board can be refused and its one call is thrown away (measured:
