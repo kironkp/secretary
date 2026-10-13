@@ -7,13 +7,36 @@ beside me in a workshop."*
 
 ## Now
 
-- **Cycle counter: 102.** 1.00 is accepted; 1.01 and 1.02 are open. See §9.
+- **Cycle counter: 104.** 1.00 is accepted; 1.01 to 1.04 are open. See §9.
 - **1.00** — this plan. Accepted and live: `34fc1f1`, Heroku v63, 2026-10-12.
 - **1.01** — the measured baseline, `docs/jarvis/BASELINE.md`. Measured and
   checked by the Reviewer, except production: the Executor's session is refused
   production reads, so Kiron runs the one read-only command in BASELINE §2.
-- **1.02** — land the parked Overview round (A007). With the Executor.
-- **Next:** Phase 2a, then the Workspace branch on top of 1.02.
+  This branch (`jarvis-1.01-plan`) is merged into it when it is offered.
+- **1.02** — the Overview round (A007), rebuilt on `jarvis-1.02-overview-r2`
+  from main with made-up fixture names. The first offer (`3eb1142`, branch
+  `jarvis-1.02-overview`) FAILED and stays untouched. `aced086` restates
+  invariant 4 (below); one more commit, `v1.02 r3`, is with the Executor.
+- **1.03** — a page load no longer cancels a promised follow-up. Offered as
+  `7073e9a` on `jarvis-1.03-followup`; with the Reviewer.
+- **1.04** — the background bill counted right (first slice of Phase 2a): the
+  code default cap is $3, cache writes priced as cache writes, a call that
+  timed out still recorded, a sweep with nothing new proven to cost nothing.
+  Branch `jarvis-1.04-spend-count`. With the Executor after 1.02 r3.
+- **Next:** 1.05, reserve before sending so two requests cannot overshoot, and
+  email attachments retried when there is room. Then clarifications and
+  understanding questions, which are marked asked on every page load the way
+  follow-ups were (after 1.03 lands, same pattern). Then the Workspace branch
+  rebuilt on main after 1.02.
+- **Invariant 4 since 1.02** (the binding text is `docs/adaptive-ui/SPEC.md`
+  §3 once 1.02 lands): late work or a week or less to go makes a project
+  urgent; a list never is. Every urgent project has a card. A plan the system
+  writes is refused if it lacks one; a stored plan that has come to lack one
+  gets the card added after the last urgent card with a why, and nothing else
+  moves. The system may not put a quiet card ahead of an urgent one where it
+  was not already. A stored plan Kiron arranged or pinned is kept as it
+  stands; a stored plan the system wrote that has such a pair falls to the
+  default. No fixed position: "above the fold" is gone.
 - **Waiting on Kiron:** the production command; his yes to the Findit planner,
   given in the Findit session; decisions 4 to 6 in §10.
 
@@ -221,9 +244,12 @@ Small defects the baseline found, each a short task of its own:
 
 | Defect | Goes with |
 |---|---|
-| A page load cancels a promised follow-up | Its own task, straight after 1.02 |
-| Cache writes priced as plain input | Phase 2a |
-| At the cap an email's attachments are skipped and never retried | Phase 2a |
+| A page load cancels a promised follow-up | 1.03 |
+| A page load marks the next clarification asked and the next understanding question surfaced, with nobody asked (`lib/secretary/entities.ts:145-164`, `markSurfaced` in `lib/secretary/briefing.ts`) | Its own task after 1.03 lands |
+| Cache writes priced as plain input | 1.04 |
+| A dashboard planner call that times out is paid for and leaves no usage row | 1.04 |
+| At the cap an email's attachments are skipped and never retried | 1.05 |
+| `backfillDigest` repeats every sweep for a project with no tasks (two small queries, no model call) | Later, with Phase 9 |
 | The phone board says "Drag to arrange" and cannot | Phase 5 |
 | The stored board has overlapping widgets in a 672 px column | Phase 3 |
 | A spoken Canvas move goes to the model | Phase 7 |
