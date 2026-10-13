@@ -55,9 +55,15 @@ CHI'09, Lavie & Meyer IJHCS'10, Google A2UI's declarative-over-codegen design):
      order. With no plan to replace, any such pair is refused; DEFAULT_PLAN
      puts the urgent cards first, so it has none. A list's card is a card
      that is not urgent.
-   - A plan left as it stands is never refused for its order, and neither is
-     an order the user made (invariant 7; §2). A change the user asked for is
-     never refused under the order rule.
+   - **Whose order it is.** A stored plan the user arranged (`plan_id`
+     `user-…` or `chat-…`) or that carries a pin of his is kept as it stands
+     and is never refused for its order; a change the user asks for is never
+     refused under the order rule (invariant 7; §2). A stored plan the SYSTEM
+     wrote (planner, rules, default) is kept only while it has no card that
+     is not urgent ahead of an urgent one. Once it has, it is not kept:
+     DEFAULT_PLAN is shown instead, exactly as for any other stored plan that
+     fails. The system's own stale order is nobody's to protect: a planner
+     plan from weeks ago otherwise keeps late work below quiet projects.
    - There is no fixed position. Until v1.02 the rule was "above the fold"
      (the first 8 sections): with six urgent projects no plan could meet it,
      so the default and the rules plan were themselves refused, and it
