@@ -142,6 +142,31 @@ beside me in a workshop."*
   before, refused after" number is run again); the Reviewer's probe and
   their view on whether the sentence closes the family or the model
   itself should change. A third defect stops the fixing and I decide.
+  **The third, and the decision.** The Reviewer's model (66,842 boards,
+  1.4 million requests, checked against the real composition) found the
+  sentence's hole before it was built on: on a board a planner has
+  rearranged, a section shown can go behind the cards, the count moves
+  the cards under it and something of his is left under another
+  neighbour (476 cases; and `472c2a7` already does the same on a crossed
+  board with every kind of request). It also named the cause: his places
+  are numbers read off a list the request builds, and the count then
+  moves the cards under those numbers; every sentence so far taught the
+  list-builder to guess the count. Decided: r5 goes on, the stored row is
+  not split now, and there is no fourth sentence. In the request, the
+  composition and its count settle the system's sections and the cards
+  first; then each thing of his is stood next to the neighbour it had on
+  the board he saw, and his places are read off that board (stored form
+  unchanged; on the model, list against board 0 of 1.4 million, crossed
+  boards included). The sentence is read with the run of cards counting
+  as a section of the order between the strip and Needs a date. Two
+  checks in the walk from no rule, on every board: his things keep their
+  neighbours after a request naming a system section; hide and show gives
+  the board he had. New named limit until 1.07: a section hidden and
+  shown may come back on the other side of something of his that stood
+  right beside it (the side is written nowhere once the section is gone).
+  **Stop rule from here: one more product defect of this family after
+  this change and the row is split first.** Burn-in starts again from
+  nothing.
   The Executor's pass on a copy of his
   real board was repeated on `472c2a7` as the landing day goes and found
   nothing (their own check, not an independent one; it did not stand on
