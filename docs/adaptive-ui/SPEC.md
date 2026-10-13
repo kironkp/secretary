@@ -132,6 +132,23 @@ every way the board can change, with a model of its own.
    place. A planner cannot drop a default section, as it cannot drop a card.
 3. **The cards he did not place, in data order** (urgent first, then the one
    urgency order, lists last), in one run where the system's plan has it.
+   The right way up, whatever that plan says: the run goes after the last of
+   the system's next up and tiles, and before the first Needs a date or
+   People that stands below that point. Top wins: a planner may move one of
+   the system's sections with a reason (Needs a date raised above next up,
+   the tiles sunk under it), and the two halves cannot then both hold; the
+   planner keeps that freedom and the composition is total. "The system's"
+   is each section on its own: with next up his and at the bottom, the
+   bound is the tiles. It is worked out on the list the composition cuts
+   on, hidden sections included, and in one place (`runPlace`), which the
+   held path asks too.
+   The strip is not part of the bound. Bounded, the run lands right under
+   the tiles and above the strip. (A planner on main put urgent cards above
+   next up; read as "the run starts at the first card", such a plan put
+   every card above next up. On the day this version lands, with main's row
+   held, the run under the tiles and the strip under the cards is main's
+   own look; the next rules plan has the strip above the cards, with no
+   reason given, because the cards are outside the movement measure.)
 4. **What he placed, at its place.** A place is a position on the board he
    was last told (below). Top-counted sections go in in place order, each at
    its place; then bottom-counted ones, each at its place from the end. On a
@@ -166,6 +183,17 @@ name, never its key.
 - Known cost, accepted: a place remembered past the end of a board that has
   grown short is read again as where the section stands the next time he
   speaks.
+- **A place is a position, not a neighbour.** When the card run moves (the
+  bound above, a rule sending the strip up), a section he placed in the
+  middle of the board keeps its count from the top or the bottom and may
+  get new neighbours.
+- **Rows main wrote.** What he placed with the voice tool or the pin button
+  is on the row's pins and stays where he put it; its place is read once
+  from the stored order, without the components retired since (main still
+  stored them, the page does not draw them). A card he moved above next up
+  with main's chat tool was never pinned on main: it is read as the
+  system's, follows the data, and does not say where the run goes. Main
+  lost that move at the next change in his data anyway.
 - **A place goes with its section.** When a section he placed leaves the
   board (its project is archived, its component banned, he hides it), its
   place is gone for good, with the first board worked out without it.
@@ -194,6 +222,11 @@ section he ADDED (or any section outside the default board that he has
 placed) is always placed: unpin does not apply to it and says so; hidden and
 shown again it comes back placed at the end, as the bare component, because
 its props lived only on the board.
+
+**Lifting a hide when there is nothing to show.** The project was archived
+or deleted since, or the component retired: the hide simply goes (it must not
+sit in Settings for good because the board cannot draw what it hid). A card
+whose project is deleted is called "a project that is no longer there".
 
 **A ban is a request too**, and works like a hide of that component's
 section: the board he saw without it, everything else in order. Nothing can
