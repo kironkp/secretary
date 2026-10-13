@@ -145,10 +145,15 @@ describe("2a: the daily cap holds for every run", () => {
       { modelName: "claude-opus-5", provider: "anthropic" as const }
     );
 
+    // The all-background cap is $3 by default too since v1.04 and is asked
+    // first; it is moved out of the way here, so this is the understanding
+    // cap's own behaviour. The test after this one is both at their defaults.
     const sweep = () =>
-      withEnv("UNDERSTANDING_DAILY_CAP_USD", undefined, () =>
-        withEnv("UNDERSTANDING_RUN_CAP_USD", undefined, () =>
-          sweepUnderstanding({ now: NOW, model: billing, userIds: [userId] })
+      withEnv("BACKGROUND_DAILY_CAP_USD", "10", () =>
+        withEnv("UNDERSTANDING_DAILY_CAP_USD", undefined, () =>
+          withEnv("UNDERSTANDING_RUN_CAP_USD", undefined, () =>
+            sweepUnderstanding({ now: NOW, model: billing, userIds: [userId] })
+          )
         )
       );
 
@@ -170,6 +175,32 @@ describe("2a: the daily cap holds for every run", () => {
     for (const p of refused) expect((await runRowsFor(userId, p)).map((r) => r.reason)).toEqual(["budget"]);
     // Over the cap on what was really spent: the user is told, once.
     expect(await capPushes(userId)).toHaveLength(1);
+  });
+
+  it("with both caps at their $3 defaults, the same sweep stops at the same place and the one push is the all-background one", async () => {
+    const { userId, projectIds } = await seedUser(4);
+    const calls: string[] = [];
+    const billing = Object.assign(
+      async (input: Parameters<ModelCall>[0]) => {
+        calls.push(input.bundle.project.id);
+        return { output: minimalOutputFor(input.bundle), model: "claude-opus-5", inputTokens: 140_000, outputTokens: 32_000 };
+      },
+      { modelName: "claude-opus-5", provider: "anthropic" as const }
+    );
+    const sweep = () =>
+      withEnv("BACKGROUND_DAILY_CAP_USD", undefined, () =>
+        withEnv("UNDERSTANDING_DAILY_CAP_USD", undefined, () =>
+          withEnv("UNDERSTANDING_RUN_CAP_USD", undefined, () =>
+            sweepUnderstanding({ now: NOW, model: billing, userIds: [userId] })
+          )
+        )
+      );
+    expect(await sweep()).toMatchObject({ ran: 2, skipped: 2, failed: 0 });
+    expect(await sweep()).toMatchObject({ ran: 0, skipped: 4, failed: 0 });
+    expect(calls).toHaveLength(2);
+    expect(projectIds.filter((p) => !calls.includes(p))).toHaveLength(2);
+    const told = await db.select().from(pushLog).where(eq(pushLog.userId, userId));
+    expect(told.map((r) => r.key.split(":")[0])).toEqual(["background-cap"]);
   });
 
   it("two runs started in the same tick cannot both start under a cap that holds one", async () => {
