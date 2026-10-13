@@ -112,7 +112,21 @@ beside me in a workshop."*
   on a board a planner crossed, some sections come back on the other side
   of the moved one; a planner answer that leaves a default section out on
   such a board can be refused and its one call is thrown away (measured:
-  no further calls for the same signals). The Executor's pass on a copy of his
+  no further calls for the same signals). **Burn-in, product defects so
+  far: 1 of 3.** The first fresh seed (29979245) found it 25 minutes in:
+  with nothing of the system's above the strip (next up hidden, the tiles
+  his), hiding and showing the strip brought it back under the cards; in
+  calm mode the list his places are read off and the board drawn then
+  disagreed and a card he had placed moved. Same family (a place said
+  twice). Out of calm mode no check complained, because the walker's
+  model carried the rule's own sentence. Fix accepted to build: with no
+  section in step above it, the section goes in front of the cards, never
+  under them for want of something to stand under. Asked with it: a
+  round-trip check in the walk that does not come from the rule (hide and
+  show, nothing else changing: the board he had), the bias made to reach
+  calm mode, and the Reviewer probing the half-sentence in their own
+  model before the burn-in counts. Mutants before this fix: 135, all
+  caught without the walk. The Executor's pass on a copy of his
   real board was repeated on `472c2a7` as the landing day goes and found
   nothing (their own check, not an independent one; it did not stand on
   either of those two states). Found on main while building it and live
