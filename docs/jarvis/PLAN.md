@@ -32,10 +32,12 @@ beside me in a workshop."*
   token was minted (the Reviewer proved a call that never connects still
   loses the promise); three tests the Reviewer's mutants showed missing.
 - **1.06** — one day count on the Overview (calendar days in his zone;
-  `days_left` today is whole 24-hour periods, so something due tomorrow
-  morning reads as today), and a size he sets on one card survives (in 1.02
-  it lasts until the next render). Goes before 1.04 if the day mismatch
-  shows on screen.
+  `days_left` today is whole 24-hour periods, so in the evening a task due
+  tomorrow at 17:00 counts as 0 days), and a size he sets on one card
+  survives (in 1.02 it lasts until the next render). 1.02 r3 already makes
+  the card's "Due in N days" chip read the calendar count, because it sat
+  beside a date that contradicted it; thresholds, "urgent" and the hash
+  wait for 1.06.
 - **Next:** reserve before sending so two requests cannot overshoot, and email
   attachments retried when there is room. Then the Workspace branch rebuilt
   on main after 1.02.
@@ -45,7 +47,7 @@ beside me in a workshop."*
   are not cards), then the sections Kiron placed put back where he put them,
   then the cards he did not place in data order around those (urgent first,
   then the one urgency order), then his hides, then presence. A pin holds a
-  slot: k-th card from the top, or last. The set of cards is the data's:
+  place on the board: n-th section from the top, or last. The set of cards is the data's:
   every active project and list has one unless he hid it, and a hidden card
   returns while its project is urgent (late work, or a week or less to go; a
   list never is). The system never places or drops a card. A stored plan is
