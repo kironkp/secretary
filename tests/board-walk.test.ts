@@ -127,7 +127,8 @@
 // with the named section taken out, the system's sections stand in the
 // order they had and the cards in theirs; and the run of cards moves as a
 // whole only where ruling A allows it (something of the system's on the
-// wrong side of the cards before or after). His places are numbers read
+// wrong side of the cards before or after), and never for a section that
+// comes back: that one stands on its own side of them. His places are numbers read
 // off a list; where the list and the board drawn came apart, something of
 // his was left under another neighbour, and no check that went through the
 // model could see it.
@@ -312,8 +313,11 @@ function acceptedAgainst(system: string[], rules: (typeof RULES_ORDERS)[number])
  * run of the system's cards, which counts as a section of the order between
  * the strip and Needs a date: next up, the tiles and the strip have the
  * cards below them, Needs a date and People have them above. The cards are
- * never read as out of step. With nothing of the system's on the board at
- * all, first under the banner.
+ * never read as out of step. Where "next to its section in step" and its
+ * side of the cards cannot both hold, the side of the cards wins, both ways:
+ * next up, the tiles and the strip never go below the first card of the run,
+ * Needs a date and People never above its last. With nothing of the system's
+ * on the board at all, first under the banner.
  * If no order is accepted (a planner has moved something), the order is
  * today's (`todays`, taken from the product: the rules are not what this
  * walk tests), and of two sections that could each be read as the one out
@@ -347,7 +351,10 @@ function returnModel(board: string[], key: string, placed: string[], todays: str
   const overs = (here === -1 ? [] : order.slice(here + 1)).filter((k) => kept.includes(k)).map((k) => rest.indexOf(k));
   if (cardsBelowIt && run.length) overs.push(run[0]);
   const firstOwn = rest.findIndex(own);
-  const at = unders.length ? Math.max(...unders) : overs.length ? Math.min(...overs) : firstOwn !== -1 ? firstOwn : rest[0] === BANNER ? 1 : 0;
+  // The side of the cards wins both ways: what has the cards below it never goes under the first card of the run,
+  // even when its section in step stands under the cards (what has them above it has the cards among `unders`).
+  const underAll = unders.length ? Math.max(...unders) : -1;
+  const at = unders.length ? (cardsBelowIt && run.length ? Math.min(underAll, run[0]) : underAll) : overs.length ? Math.min(...overs) : firstOwn !== -1 ? firstOwn : rest[0] === BANNER ? 1 : 0;
   return insertAt(rest, key, at);
 }
 /** The places of what he placed, read off a board he was told: from the bottom when nothing upper stands below. */
@@ -729,6 +736,12 @@ async function walk(index: number, scripted = false) {
       };
       if (rightWayUp(before, hadPlaced) && rightWayUp(board, hisNow) && over(before) !== -1 && over(board) !== -1 && over(before) !== over(board)) {
         complain("the cards move only where ruling A allows it", `${what}: he had ${row(before)} | he has ${row(board)}`);
+      }
+      // And a section that comes back to the system (shown, added back, let go) never moves them, on any board: it
+      // comes back on its own side of the cards, so the count has nothing to put right.
+      const cameBack = board.includes(named) && !hisNow.includes(named) && (!before.includes(named) || hadPlaced.includes(named));
+      if (cameBack && over(before) !== -1 && over(board) !== -1 && over(before) !== over(board)) {
+        complain("a section that comes back does not move the cards", `${what}: he had ${row(before)} | he has ${row(board)}`);
       }
     }
     // No order the rules can produce that was accepted against the board he had is refused against the board he has.
