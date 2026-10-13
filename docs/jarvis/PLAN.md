@@ -168,7 +168,11 @@ beside me in a workshop."*
   this change and the row is split first.** Burn-in starts again from
   nothing. The Executor reports the change fits the code and is built
   (its own runs: the Reviewer's two boards red before and green after;
-  hide and show gives the board he had in 160 of 175, was 141). One board
+  hide and show gives the board he had in 160 of 200 pairs, and in 142
+  of 175 on the seven states shared with the Reviewer's probe, was 141;
+  the rest are a section the system had moved going to its usual place,
+  the other side of a moved section, and a strip that stood under the
+  cards coming back in front of them). One board
   showed the build and the Reviewer's model reading the sentence two
   ways (a section shown on a planner-rearranged board: under its
   neighbour and every card moves, or in front of the cards and nothing
@@ -179,7 +183,11 @@ beside me in a workshop."*
   6,436; list against board, 0 of 1.4 million. The limit "a thing of his
   placed in the middle may get new neighbours when the cards move" is
   gone at his requests and stays between them (a rule's move, a
-  planner's answer, the data sorting the cards) until 1.07.
+  planner's answer, the data sorting the cards) until 1.07. Ruling A is
+  narrower than I ruled it: only a section taken away (hide, ban, pin,
+  remove) can move the cards; one that comes back never does, held by a
+  check from no rule. Built and committed locally with that (W x5, S, P
+  on the ten walker commits); mutants (170) running, then the burn-in.
   The Executor's pass on a copy of his
   real board was repeated on `472c2a7` as the landing day goes and found
   nothing (their own check, not an independent one; it did not stand on
