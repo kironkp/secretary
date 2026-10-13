@@ -297,6 +297,37 @@ describe("on a board with one section he placed, everything else still follows t
     expect(await b.keys()).not.toContain(b.card("Iris"));
   });
 
+  it("calm mode: the default with no rule's emphasis; what he placed and hid still holds, and a move made meanwhile shows", async () => {
+    const b = await board(5);
+    expect((await b.render()).plan.sections.some((s) => s.props?.accent === true)).toBe(true); // rule 1 fires on this board
+    await b.arrange([{ op: "move_to_top", section: "shopping list" }, { op: "hide", section: "stats" }]);
+    await db.update(user).set({ calmMode: true }).where(eq(user.id, b.id));
+    const bundle = await b.render();
+    const shown = bundle.plan.sections.map(sectionKey);
+    expect(bundle.signals.context.calm_mode).toBe(true);
+    expect(bundle.plan.sections.some((s) => s.why || s.props?.accent === true)).toBe(false);
+    expect(shown[0]).toBe(b.card("Shopping"));
+    expect(shown).not.toContain("stat_row");
+    await expectCardsFollowData(b, shown, [b.card("Shopping")]);
+    expect((await b.arrange([{ op: "move_to_bottom", section: "Atlas" }])).result).toMatchObject({ applied: true });
+    expect((await b.keys()).at(-1)).toBe(b.card("Atlas"));
+  });
+
+  it("moving again what he already placed: it goes where the latest move put it, with either tool", async () => {
+    const b = await board(3);
+    await b.render();
+    await b.arrange([{ op: "move_to_top", section: "shopping list" }]);
+    await b.arrange([{ op: "move_to_bottom", section: "shopping list" }]);
+    expect((await b.keys()).at(-1)).toBe(b.card("Shopping"));
+    await b.chatEdit([{ op: "move", section: b.card("Shopping"), to: 2 }]);
+    expect((await b.keys())[2]).toBe(b.card("Shopping"));
+    await b.arrange([{ op: "move_up", section: "shopping list" }]);
+    expect((await b.keys())[1]).toBe(b.card("Shopping"));
+    await b.add("Juniper", null);
+    expect((await b.keys())[1]).toBe(b.card("Shopping"));
+    expect((await b.head()).pinned).toEqual([b.card("Shopping")]);
+  });
+
   it("Undo of a move takes the pin with it: the list is back among the cards, last, and stays last when a project is made", async () => {
     const b = await board(5);
     const before = await b.keys();
@@ -343,6 +374,7 @@ describe("every operation of both tools is on the board at the next render", () 
       if (change) {
         await b.nextDay();
         await b.newTask(change, -40);
+        await b.add("Juniper", null); // one section more on the board: last is still last
       }
       const shown = await b.keys();
       expect(shown.slice(0, 2)).toEqual(["date_chase", b.card("Shopping")]);
@@ -416,6 +448,10 @@ describe("every operation of both tools is on the board at the next render", () 
     expect((await b.chatEdit([{ op: "add", component: "kanban", at: 1 }])).result).toMatchObject({ applied: true });
     expect((await b.keys())[1]).toBe("kanban");
     expect((await b.head()).pinned).toContain("kanban");
+    // Nor is one that is on the board already: it is refused, and nothing is stored.
+    const versionBefore = (await b.head()).version;
+    expect(((await b.chatEdit([{ op: "add", component: "timeline" }])).result as { error?: string }).error).toMatch(/already on the dashboard/);
+    expect((await b.head()).version).toBe(versionBefore);
     // An unknown component is not "applied".
     expect(((await b.chatEdit([{ op: "add", component: "no_such_thing" }])).result as { error?: string }).error).toMatch(/no "no_such_thing"/);
 

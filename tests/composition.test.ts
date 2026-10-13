@@ -177,6 +177,22 @@ describe("presence (invariant 4)", () => {
       { kind: "ban_component", value: { component: "people_index" } },
     ];
     expect(keys(compose(defaultPlan(signals), signals, null, [], prefs)).filter((k) => !k.startsWith("project_card:"))).toEqual(["hero_next_up", "timeline", "date_chase"]);
+    // Pinned as well, they are still off the board: a hide or a ban beats a pin.
+    const pinned = compose(defaultPlan(signals), signals, defaultPlan(signals), ["stat_row", "people_index"], prefs);
+    expect(keys(pinned).filter((k) => !k.startsWith("project_card:"))).toEqual(["hero_next_up", "timeline", "date_chase"]);
+  });
+
+  it("with a component he has just banned still in the stored plan, the default is composed: the ban, his hide and his pin all hold", async () => {
+    const stored = pinnedAt(compose(defaultPlan(signals), signals), "project_card:shopping", 0);
+    const prefs: LayoutPreference[] = [
+      { kind: "ban_component", value: { component: "people_index" } },
+      { kind: "hide_section", value: { section: "project_card:quiet-one" } },
+    ];
+    const res = await render(signals, stored, ["project_card:shopping"], prefs);
+    expect(res.source).toBe("default");
+    expect(keys(res.plan)).not.toContain("people_index");
+    expect(keys(res.plan)).not.toContain("project_card:quiet-one");
+    expect(keys(res.plan)[0]).toBe("project_card:shopping");
   });
 });
 
@@ -260,6 +276,44 @@ describe("on a board he has not arranged, the cards follow the data", () => {
   });
 });
 
+describe("when a system move is refused and the stored sections are held", () => {
+  const before = board(3);
+  const stored = (): LayoutPlan => {
+    const base = defaultPlan(before);
+    return { plan_id: "llm-old", reason_summary: "A busy week", sections: [{ component: "focus_banner", props: { text: "Three things are late", tone: "serious" } }, ...base.sections] };
+  };
+
+  it("a project made the same day, already late, has its card, first; the banner stands (its removal waits a day)", async () => {
+    const sameDay = changed(before, (p) => [...p, project("Brand new", -40)]);
+    sameDay.context.days_since_layout_change = 0;
+    const res = await render(sameDay, stored());
+    expect(res.source).toBe("previous");
+    expect(res.plan.sections[0]).toMatchObject({ component: "focus_banner" });
+    expect(cards(res.plan)[0]).toBe("brand-new");
+    expect(cards(res.plan)).toEqual(cards(defaultPlan(sameDay)));
+  });
+
+  it("the cards carry today's emphasis, not the stored plan's: rule 1's why is today's count", async () => {
+    const old = stored();
+    old.sections = old.sections.map((s) => (s.props?.project_id === "soon" ? { ...s, props: { ...s.props, accent: true }, why: "Due in 6 days" } : s));
+    const sameDay = structuredClone(before);
+    sameDay.context.days_since_layout_change = 0;
+    sameDay.projects = redate("late-a", -9)(sameDay.projects);
+    const res = await render(sameDay, old);
+    expect(res.source).toBe("previous");
+    expect(cardOf(res.plan, "soon")).toMatchObject({ props: { accent: true }, why: "Due in 3 days" });
+  });
+
+  it("a planner cannot drop a card: its plan has none, and every card is there, under the strip, in data order", async () => {
+    // Nothing urgent on this board, so a plan with no cards is a valid plan.
+    const quiet = changed(board(0), (p) => p.filter((x) => x.id !== "soon"));
+    const none: LayoutPlan = { plan_id: "x", reason_summary: "Lean", sections: defaultPlan(quiet).sections.filter((s) => s.component !== "project_card") };
+    const res = await planWithFallback(quiet, { previousPlan: null, preferences: [], pinnedSections: [], llmEnabled: true, call: async () => JSON.stringify(none) });
+    expect(res.source).toBe("llm");
+    expect(keys(res.plan)).toEqual(keys(defaultPlan(quiet)));
+  });
+});
+
 describe("movement is measured without the cards and without his pins (invariants 3 and 7)", () => {
   const signals = board(3);
 
@@ -304,6 +358,16 @@ describe("movement is measured without the cards and without his pins (invariant
     expect(keys(res.plan)[3]).toBe("project_card:quiet-two");
   });
 
+  it("a pinned section that is not a card takes today's props too: the strip he moved opens when rule 3 fires", async () => {
+    const stored = pinnedAt(compose(defaultPlan(signals), signals), "timeline", 4);
+    const talk = structuredClone(signals);
+    talk.conversation.schedule_word_share = 0.5;
+    const res = await render(talk, stored, ["timeline"]);
+    expect(res.source).toBe("rules");
+    expect(res.plan.sections[4]).toMatchObject({ component: "timeline", props: { span_days: 14, expanded: true }, place: 4 });
+    expect(res.plan.sections[4].why).toMatch(/talking dates/);
+  });
+
   it("what he placed stays and a system move lands below it: his list on top, rule 3's timeline second", async () => {
     const stored = pinnedAt(compose(defaultPlan(signals), signals), "project_card:shopping", 0);
     const talk = structuredClone(signals);
@@ -338,6 +402,10 @@ describe("a section he placed stays where he put it", () => {
   describe.each(shapes)("%s", (_what, key, index) => {
     const stored = pinnedAt(base, key, index);
     const place = stored.sections.find((s) => sectionKey(s) === key)!.place!;
+
+    it("its place is the n-th from the top, or last", () => {
+      expect(place).toBe(index);
+    });
 
     it.each(changes)("%s: it is at its place, and the cards he did not place are in data order around it", async (_change, now) => {
       const gone = key.startsWith("project_card:") && !now.projects.some((p) => `project_card:${p.id}` === key);
@@ -381,6 +449,9 @@ describe("a section he placed stays where he put it", () => {
     expect(keys(viaPreference)[at]).toBe(key);
     // Unpinned, it goes back to following the data.
     expect(cards(compose(defaultPlan(later), later, first))).toEqual(cards(defaultPlan(later)));
+    // Read from a stored plan that has a banner: the banner is not a place.
+    const bannered: LayoutPlan = { ...stored, sections: [{ component: "focus_banner", props: { text: "Two things are late", tone: "serious" } }, ...stored.sections] };
+    expect(keys(compose(defaultPlan(signals), signals, bannered, [key]))[at]).toBe(key);
   });
 
   it("two he placed at the same place keep their stored order: the later one has the place, the earlier sits next to it", () => {
@@ -445,6 +516,9 @@ describe("rule 1's why counts calendar days in his zone, like the date beside it
   });
   it("a committed deadline is counted the same way, and says it is one", () => {
     expect(due(1, null, { deadline_type: "committed", deadline_days: 2 })).toBe("Due in 2 days — you committed to this date");
+  });
+  it("with a committed deadline and an earlier task, the why names the committed date", () => {
+    expect(due(3, 1, { deadline_type: "committed", deadline_days: 4 })).toBe("Due in 4 days — you committed to this date");
   });
   it("a date the calendar count does not see (an event) falls back to days_left", () => {
     expect(due(2, null)).toBe("Due in 2 days");

@@ -8,7 +8,7 @@ import { openai, PLANNER_MODEL } from "@/lib/openai";
 import type Anthropic from "@anthropic-ai/sdk";
 import { REGISTRY_VERSION } from "./registry";
 import { composePlan } from "./compose";
-import { defaultPlan, type LayoutPlan } from "./plan";
+import { defaultPlan, type LayoutPlan, type PlanSection } from "./plan";
 import { planFromRules } from "./plan-from-rules";
 import { signalsHash, type Signals } from "./signals";
 import { movementReasons, validatePlan, type LayoutPreference } from "./validator";
@@ -201,18 +201,20 @@ export async function planWithFallback(
   if (rules) return { plan: rules.composed, source: "rules", called };
 
   // The rules plan would move or remove something of the system's that is
-  // rationed today. Nothing moves then: the stored plan's own sections stay
-  // where they are, composed like any other system plan, with today's
-  // emphasis on the cards (a why is about today).
+  // rationed today. Nothing of the system's moves then: the stored plan's
+  // sections that are not cards stay where they are, composed like any other
+  // system plan. The cards are today's rules cards, all of them: the card set
+  // is the data's (a project made since has its card, so presence holds) and
+  // a why is about today.
   if (opts.previousPlan) {
-    const todays = new Map(
-      rulesPlan.sections.filter((s) => s.component === "project_card").map((s) => [String(s.props?.project_id ?? ""), s])
-    );
+    const isCard = (s: PlanSection) => s.component === "project_card";
+    const stored = opts.previousPlan.sections;
+    const others = stored.filter((s) => !isCard(s));
+    const firstCard = stored.findIndex(isCard);
+    const at = firstCard === -1 ? others.length : firstCard;
     const standing: LayoutPlan = {
       ...opts.previousPlan,
-      sections: opts.previousPlan.sections.map((s) =>
-        s.component === "project_card" ? (todays.get(String(s.props?.project_id ?? "")) ?? s) : s
-      ),
+      sections: [...others.slice(0, at), ...rulesPlan.sections.filter(isCard), ...others.slice(at)],
     };
     const v = validatePlan(standing, { ...ctx, skipMovement: true });
     if (v.ok) return { plan: compose(v.plan), source: "previous", called };
