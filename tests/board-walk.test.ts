@@ -1419,8 +1419,8 @@ async function walk(index: number, scripted = false) {
   // The Reviewer's two boards (the third defect of r5, and one 472c2a7 already had). A card of his stands among the
   // cards, and a request moves the run to the other side of a section. His place was a number read off the list
   // the request built; the count then moved the cards, and his card was left behind under another neighbour.
-  // One: a planner has Needs a date above next up and the cards on top of both; he hides Needs a date, and the
-  // cards go under next up. Two: next up and the tiles hidden; a planner has the cards above the strip and Needs
+  // One: the tiles hidden, a planner has Needs a date above next up and the cards on top of both; he hides Needs
+  // a date, and the cards go under next up. Two: next up and the tiles hidden; a planner has the cards above the strip and Needs
   // a date under People (two answers: raised, then sunk); he talks dates, a day on, and the board is held; next up
   // is shown, comes back under the strip, and the cards go under it.
   const hisAmongTheCardsWhenTheyMove = async () => {
@@ -1441,8 +1441,11 @@ async function walk(index: number, scripted = false) {
       if (over !== -1 && now !== -1 && now !== over) count("scripted: ... and the cards did move, with a card of his among them");
     };
     if (rs.chance(0.5)) {
-      moves.push("scripted: the next day; needs a date raised, the cards first; a card pinned among the cards; needs a date hidden, and shown");
+      moves.push("scripted: the tiles hidden; the next day; needs a date raised, the cards first; a card pinned among the cards; needs a date hidden, and shown");
       count("scripted: his card among the cards on a crossed board, and Needs a date is hidden");
+      // (Without the tiles: with them on the board the cards stand under the tiles whatever the planner writes, and
+      // hiding Needs a date moves nothing.)
+      if ((await boardNow()).includes("stat_row") && !placedSet().includes("stat_row")) await arrange([{ op: "hide", key: "stat_row" }]);
       await nextDay();
       await plannerAnswers("needs a date raised, the cards first");
       if (!(await pinsACard()) || !(await boardNow()).includes("date_chase") || placedSet().includes("date_chase")) return;
