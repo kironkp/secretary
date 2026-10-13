@@ -10,6 +10,7 @@ import { inArray } from "drizzle-orm";
 import { isErrorResponse, parseBody, requireSession } from "@/lib/api";
 import { loadHistoryWindow } from "@/lib/db/queries";
 import { buildBriefing } from "@/lib/secretary/briefing";
+import { settleFollowUps } from "@/lib/secretary/expectations";
 import { buildInstructionParts } from "@/lib/secretary/persona";
 import { openAIToolDefs } from "@/lib/secretary/tool-schemas";
 import { untrustedSince } from "@/lib/secretary/proposals";
@@ -129,6 +130,9 @@ export async function POST(req: Request) {
   const history = await loadHistoryWindow(user.id, conversationId, HISTORY_LIMIT);
 
   const briefing = await buildBriefing(user.id, user.timezone, {
+    // A session start: nudges are spent, and what Secretary promised to ask
+    // is raised (SPEC §11); those are settled below, once a model has
+    // answered with this briefing.
     consumeNudges: true,
     // this thread is already the model's input — prior sessions only
     excludeConversationId: conversationId,
@@ -312,6 +316,11 @@ export async function POST(req: Request) {
   }
 
   if (!assistantText) assistantText = "(done)";
+
+  // A model answered this turn with the briefing in hand, so the follow-ups
+  // it raised have been asked (SPEC §11, v1.03). A turn that failed returned
+  // above and left them open for the next one.
+  await settleFollowUps(user.id, briefing.followUps);
 
   if (!claudeServed && previousResponseId) {
     await db

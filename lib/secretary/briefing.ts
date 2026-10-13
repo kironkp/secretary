@@ -55,7 +55,17 @@ export type BriefingCard = {
   hasContent: boolean;
 };
 
-export type Briefing = { text: string; card: BriefingCard };
+export type Briefing = {
+  text: string;
+  card: BriefingCard;
+  /**
+   * The promised follow-ups this briefing raised (SPEC §11): ids of the
+   * expectations in its EXPECTATIONS MISSED block. Empty unless this is a
+   * session start (`consumeNudges`). Whoever hands the text to the model
+   * settles them with settleFollowUps once the hand-over has succeeded.
+   */
+  followUps: string[];
+};
 
 function fmt(d: Date, tz: string, withTime = true) {
   return new Intl.DateTimeFormat("en-US", {
@@ -68,9 +78,16 @@ function fmt(d: Date, tz: string, withTime = true) {
 }
 
 /**
- * Build the briefing. With consumeNudges=true (session starts), the overdue
- * items surfaced for nudging get lastNudgedAt stamped so the same item isn't
- * nagged twice in a day.
+ * Build the briefing. consumeNudges=true marks a SESSION START: a briefing
+ * that opens a session with the user and is handed to the model (a chat
+ * turn, the start of a voice call). Then the overdue items surfaced for
+ * nudging get lastNudgedAt stamped, so the same item isn't nagged twice in a
+ * day, and the promised follow-ups that are due go in as the opener, their
+ * ids returned in `followUps` for the caller to settle after the hand-over
+ * (SPEC §11, v1.03). Without it (the dock's bootstrap on a page load, the
+ * briefing card, consult_brain, a reconnect, an interview call) neither
+ * happens: the follow-ups are not shown and stay open. Building a briefing
+ * never changes an expectation.
  */
 /** The blocks currently on the canvas — best-effort: the briefing must never
  *  fail because the canvas is mid-paint or empty. */
@@ -553,34 +570,31 @@ export async function buildBriefing(
     }
   }
   // Expectations / nag engine (SPEC §11): session start is the trigger. Open
-  // expectations past their update-by time become MISSED and fire here —
-  // batched into ONE opening ping, quiet-hours-aware, escalating per policy,
-  // citing task stakes when recorded. A cleared expectation never appears.
+  // expectations past their update-by time fire here — batched into ONE
+  // opening ping, quiet-hours-aware, escalating per policy, citing task
+  // stakes when recorded. A cleared expectation never appears. Only a
+  // session start raises them (opts.consumeNudges), and nothing is written
+  // here: they become MISSED when the caller settles them, after
+  // the model has this text. Until v1.03 this block marked them missed on
+  // every build, and the chat dock builds a briefing on every page load.
   const [personaRow] = await db
     .select({ persona: user.persona })
     .from(user)
     .where(eq(user.id, userId));
-  const dueExpectations = await db
-    .select()
-    .from(expectations)
-    .where(
-      and(
-        eq(expectations.userId, userId),
-        eq(expectations.status, "open"),
-        lt(expectations.expectedUpdateBy, now)
-      )
-    )
-    .orderBy(expectations.expectedUpdateBy);
-  if (dueExpectations.length) {
-    await db
-      .update(expectations)
-      .set({ status: "missed" })
-      .where(
-        inArray(
-          expectations.id,
-          dueExpectations.map((e) => e.id)
+  const dueExpectations = opts.consumeNudges
+    ? await db
+        .select()
+        .from(expectations)
+        .where(
+          and(
+            eq(expectations.userId, userId),
+            eq(expectations.status, "open"),
+            lt(expectations.expectedUpdateBy, now)
+          )
         )
-      );
+        .orderBy(expectations.expectedUpdateBy)
+    : [];
+  if (dueExpectations.length) {
     const quiet = isQuietHours(personaRow?.persona, now, timezone);
     if (quiet) {
       lines.push(
@@ -727,5 +741,5 @@ export async function buildBriefing(
   // Last, not first (SEC-A004): it changes every minute, and everything above
   // it is a prefix the model provider can cache from one turn to the next.
   lines.push("", `CURRENT DATE & TIME (server truth — never guess dates): ${card.dateLabel} (${timezone})`);
-  return { text: lines.join("\n"), card };
+  return { text: lines.join("\n"), card, followUps: dueExpectations.map((e) => e.id) };
 }

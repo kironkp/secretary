@@ -1,7 +1,9 @@
 // Bootstrap for the chat dock (SPEC §7.7): thread + briefing + persona,
 // fetched once after paint so no page load waits on it. ?c= loads a specific
 // conversation (push-receipt deep links). Nudges aren't consumed here — a
-// passive dock mount isn't a session start; the budget stays with voice.
+// passive dock mount isn't a session start; the budget stays with voice. Nor
+// are promised follow-ups raised or settled (SPEC §11, v1.03): only the card
+// leaves this route, so a page load must not use up what the model was to ask.
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";

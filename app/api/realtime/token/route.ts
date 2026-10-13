@@ -10,6 +10,7 @@ import { isErrorResponse, parseBody, requireSession } from "@/lib/api";
 import { EL_MOUTH_VOICE, elevenLabsConfigured } from "@/lib/elevenlabs";
 import { checkVoiceQuota } from "@/lib/rate-limit";
 import { buildBriefing } from "@/lib/secretary/briefing";
+import { settleFollowUps } from "@/lib/secretary/expectations";
 import { buildLexicon, lexiconPrompt } from "@/lib/secretary/lexicon";
 import { buildInstructions, VOICE_MODALITY_RULES } from "@/lib/secretary/persona";
 import { interviewSessionBlock, VOICE_FLAVORS } from "@/lib/secretary/interview-voice";
@@ -115,7 +116,9 @@ export async function POST(req: Request) {
 
   const interview = parsed.flavor === "interview";
   const briefing = await buildBriefing(user.id, user.timezone, {
-    // an interview call nudges nothing, so it spends no nudges
+    // A session start, unless this is a reconnect ("do not greet again") or
+    // an interview call, which nudges nothing and whose opener is its own
+    // queue: those spend no nudges and raise no promised follow-up (SPEC §11).
     consumeNudges: !parsed.reconnect && !interview,
     // this call's own thread shouldn't echo back as a "prior session"
     excludeConversationId: conversationId,
@@ -210,6 +213,10 @@ export async function POST(req: Request) {
   }
   noteProviderOk("openai", key.source);
   const secret = (await res.json()) as { value: string };
+  // The provider has the call's instructions, so the follow-ups in them have
+  // been handed over (SPEC §11, v1.03). A refused mint returned above and
+  // left them open.
+  await settleFollowUps(user.id, briefing.followUps);
 
   let usageId = reuseUsageId;
   if (usageId) {
