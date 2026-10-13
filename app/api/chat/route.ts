@@ -200,6 +200,8 @@ export async function POST(req: Request) {
   let assistantText = "";
   let totalIn = 0;
   let totalCached = 0;
+  /** Claude only: input written to the prompt cache, priced above the input rate. Null on the OpenAI road, which reports none. */
+  let totalCacheWrite: number | null = null;
   let totalOut = 0;
   let servedBy = openAIModel;
   let claudeServed = false;
@@ -224,6 +226,7 @@ export async function POST(req: Request) {
       uiActions.push(...result.uiActions);
       totalIn = result.inputTokens;
       totalCached = result.cachedInputTokens;
+      totalCacheWrite = result.cacheWriteInputTokens;
       totalOut = result.outputTokens;
       servedBy = chip.model;
       claudeServed = true;
@@ -351,6 +354,7 @@ export async function POST(req: Request) {
     inputTokens: totalIn,
     outputTokens: totalOut,
     cachedInputTokens: totalCached,
+    cacheWriteInputTokens: totalCacheWrite,
   });
 
   // Safety-net extraction over the new turn (incremental — extractedAt

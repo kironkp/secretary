@@ -3,6 +3,7 @@
 // chip picks one. Mirrors the /api/chat OpenAI loop; the route falls back to
 // OpenAI if this throws (refusal included) — the chip can never brick chat.
 import type Anthropic from "@anthropic-ai/sdk";
+import { cacheControl } from "@/lib/prompt-cache";
 import { anthropicToolDefs } from "./tool-schemas";
 import { anthropicAttachmentBlocks } from "./attachment-blocks";
 import type { ToolContext, ToolOutcome } from "./tools";
@@ -19,6 +20,8 @@ export type ClaudeChatResult = {
   /** Of inputTokens, how many were served from the prompt cache (billed ~10%).
    *  Reported so a cache that silently stops working is visible. */
   cachedInputTokens: number;
+  /** Of inputTokens, how many were written to the prompt cache (billed above the input rate). */
+  cacheWriteInputTokens: number;
 };
 
 export async function runClaudeChat(opts: {
@@ -53,6 +56,7 @@ export async function runClaudeChat(opts: {
   let inputTokens = 0;
   let outputTokens = 0;
   let cachedInputTokens = 0;
+  let cacheWriteInputTokens = 0;
 
   // THE COST FIX. A single user turn runs up to MAX_TOOL_ROUNDS requests, and
   // every one re-sends the identical prefix: instructions (~6k tokens) plus the
@@ -67,7 +71,7 @@ export async function runClaudeChat(opts: {
   // price instead of paying for it again.
   const cachedTools = anthropicToolDefs().map((tool, i, all) =>
     i === all.length - 1
-      ? { ...tool, cache_control: { type: "ephemeral" as const } }
+      ? { ...tool, cache_control: cacheControl() }
       : tool
   ) as Anthropic.Tool[];
   // Three breakpoints: the tools, the stable instructions, then the live
@@ -76,8 +80,8 @@ export async function runClaudeChat(opts: {
   // the persona and directives are a cache read from the second turn on,
   // and rounds 2..N of a turn read the briefing too.
   const cachedSystem: Anthropic.TextBlockParam[] = [
-    { type: "text", text: opts.instructions.stable, cache_control: { type: "ephemeral" } },
-    { type: "text", text: opts.instructions.live, cache_control: { type: "ephemeral" } },
+    { type: "text", text: opts.instructions.stable, cache_control: cacheControl() },
+    { type: "text", text: opts.instructions.live, cache_control: cacheControl() },
   ];
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
@@ -90,12 +94,15 @@ export async function runClaudeChat(opts: {
       messages,
     });
     // cache_read is billed at ~10% and cache_creation at ~125%, so both are
-    // counted as input and the read portion is reported separately — the only
-    // way to know the cache is actually being HIT rather than merely enabled.
+    // counted as input and each portion is reported separately: the read one
+    // is the only way to know the cache is actually being HIT rather than
+    // merely enabled, and the written one is priced above the input rate
+    // (docs/spend/SPEC.md §1.1; until v1.04 it was counted as fresh input).
     const cacheRead = response.usage.cache_read_input_tokens ?? 0;
     const cacheWrite = response.usage.cache_creation_input_tokens ?? 0;
     inputTokens += response.usage.input_tokens + cacheRead + cacheWrite;
     cachedInputTokens += cacheRead;
+    cacheWriteInputTokens += cacheWrite;
     outputTokens += response.usage.output_tokens;
 
     if (response.stop_reason === "refusal") throw new Error("claude refusal");
@@ -108,7 +115,7 @@ export async function runClaudeChat(opts: {
         .filter((b): b is Anthropic.TextBlock => b.type === "text")
         .map((b) => b.text)
         .join("");
-      return { text, toasts, uiActions, inputTokens, outputTokens, cachedInputTokens };
+      return { text, toasts, uiActions, inputTokens, outputTokens, cachedInputTokens, cacheWriteInputTokens };
     }
 
     // Full assistant content back (thinking blocks included — required for
@@ -140,5 +147,5 @@ export async function runClaudeChat(opts: {
     messages.push({ role: "user", content: results });
   }
 
-  return { text: "(done)", toasts, uiActions, inputTokens, outputTokens, cachedInputTokens };
+  return { text: "(done)", toasts, uiActions, inputTokens, outputTokens, cachedInputTokens, cacheWriteInputTokens };
 }

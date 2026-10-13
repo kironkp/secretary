@@ -10,6 +10,7 @@
 // questions and its words exactly as they were.
 import { alertProviderOutOfCredit, backgroundAllowed, isOutOfCredit, paidCallAllowed, runCapUsd } from "@/lib/spend-guard";
 import { priceUsage } from "@/lib/pricing";
+import { cacheControl, PROMPT_CACHE_LIFETIME } from "@/lib/prompt-cache";
 import { randomUUID } from "node:crypto";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -94,6 +95,8 @@ export type ModelCall = ((input: {
   inputTokens: number;
   /** The part of inputTokens served from the cache, billed at a tenth (lib/pricing.ts). */
   cachedInputTokens?: number;
+  /** The part of inputTokens written to the cache, billed above the input rate (docs/spend/SPEC.md §1.1). */
+  cacheWriteInputTokens?: number;
   outputTokens: number;
 }>) &
   CallMeta;
@@ -191,6 +194,8 @@ export type CallUsage = {
   model: string;
   inputTokens: number;
   cachedInputTokens: number;
+  /** Claude only: the part of inputTokens written to the prompt cache. */
+  cacheWriteInputTokens?: number;
   outputTokens: number;
 };
 
@@ -295,7 +300,7 @@ export async function anthropicModelCall(userId: string): Promise<ModelCall | nu
         // The system prompt is identical for every project and every run; mark
         // it cacheable so a sweep over N projects pays for it once (SPEC §4).
         system: [
-          { type: "text", text: system + OUTPUT_FORMAT_TEXT, cache_control: { type: "ephemeral" } },
+          { type: "text", text: system + OUTPUT_FORMAT_TEXT, cache_control: cacheControl() },
         ],
         messages: [{ role: "user", content }],
         output_config: { effort },
@@ -308,10 +313,12 @@ export async function anthropicModelCall(userId: string): Promise<ModelCall | nu
     // the answer is judged: a refused answer was billed all the same.
     const usage = response.usage;
     const cached = usage.cache_read_input_tokens ?? 0;
+    const written = usage.cache_creation_input_tokens ?? 0;
     const billed: CallUsage = {
       model,
-      inputTokens: usage.input_tokens + (usage.cache_creation_input_tokens ?? 0) + cached,
+      inputTokens: usage.input_tokens + written + cached,
       cachedInputTokens: cached,
+      cacheWriteInputTokens: written,
       outputTokens: usage.output_tokens,
     };
     if (response.stop_reason === "refusal") throw new ModelOutputError("claude refusal", billed);
@@ -1082,6 +1089,7 @@ async function runOnce(
   let modelId = "";
   let inputTokens = 0;
   let cachedInputTokens = 0;
+  let cacheWriteInputTokens = 0;
   let outputTokens = 0;
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS && !output; attempt++) {
@@ -1095,6 +1103,8 @@ async function runOnce(
       inputTokens,
       outputTokens,
       cachedInputTokens,
+      cacheWriteInputTokens,
+      cacheWriteLifetime: PROMPT_CACHE_LIFETIME,
       seconds: 0,
     }).usd;
     const prompt =
@@ -1128,6 +1138,7 @@ async function runOnce(
           modelId = e.usage.model;
           inputTokens += e.usage.inputTokens;
           cachedInputTokens += e.usage.cachedInputTokens;
+          cacheWriteInputTokens += e.usage.cacheWriteInputTokens ?? 0;
           outputTokens += e.usage.outputTokens;
         }
         const closed = taggedProviderFailures(e);
@@ -1165,6 +1176,7 @@ async function runOnce(
     modelId = result.model;
     inputTokens += result.inputTokens;
     cachedInputTokens += result.cachedInputTokens ?? 0;
+    cacheWriteInputTokens += result.cacheWriteInputTokens ?? 0;
     outputTokens += result.outputTokens;
     // A UUID copied with a slipped digit is mended to the one id it is that
     // close to before the validator sees it (repair.ts); the log says so.
@@ -1246,6 +1258,7 @@ async function runOnce(
           inputTokens,
           outputTokens,
           cachedInputTokens,
+          cacheWriteInputTokens,
         });
       }
       const failed = failedLines(name, logged);
@@ -1310,6 +1323,7 @@ async function runOnce(
     inputTokens,
     outputTokens,
     cachedInputTokens,
+    cacheWriteInputTokens,
   });
   await logRun({
     id: runId,

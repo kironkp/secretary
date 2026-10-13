@@ -12,6 +12,7 @@
 import { db } from "@/lib/db";
 import { usage } from "@/lib/db/schema";
 import { priceUsage } from "@/lib/pricing";
+import { PROMPT_CACHE_LIFETIME } from "@/lib/prompt-cache";
 
 export type UsageKind =
   | "voice"
@@ -49,6 +50,14 @@ export type UsageRecord = {
   audioOutputTokens?: number | null;
   /** Re-read input, billed at a tenth. */
   cachedInputTokens?: number | null;
+  /**
+   * Input written to the prompt cache, billed ABOVE the input rate. Part of
+   * inputTokens, like the cached count. Leave it out where the provider does
+   * not report one.
+   */
+  cacheWriteInputTokens?: number | null;
+  /** True when the tokens are a guess (a call that was sent and never answered). */
+  estimated?: boolean;
 };
 
 /** Fire-and-forget. Await it when you are already awaiting other writes. */
@@ -67,6 +76,9 @@ export async function recordUsage(entry: UsageRecord): Promise<void> {
       audioInputTokens: entry.audioInputTokens ?? null,
       audioOutputTokens: entry.audioOutputTokens ?? null,
       cachedInputTokens: entry.cachedInputTokens ?? null,
+      cacheWriteInputTokens: entry.cacheWriteInputTokens ?? null,
+      // The lifetime every cacheable request asks for (lib/prompt-cache.ts).
+      cacheWriteLifetime: PROMPT_CACHE_LIFETIME,
     });
     await db.insert(usage).values({
       userId: entry.userId,
@@ -78,8 +90,9 @@ export async function recordUsage(entry: UsageRecord): Promise<void> {
       audioInputTokens: entry.audioInputTokens ?? null,
       audioOutputTokens: entry.audioOutputTokens ?? null,
       cachedInputTokens: entry.cachedInputTokens ?? null,
+      cacheWriteInputTokens: entry.cacheWriteInputTokens ?? null,
       costUsd: priced.usd.toFixed(6),
-      costEstimated: priced.estimated || !priced.known,
+      costEstimated: priced.estimated || !priced.known || entry.estimated === true,
     });
     // The fail-safe's alert line (lib/spend-guard.ts): checked after every
     // priced call, pushed at most once a day. Never awaited by the caller.
