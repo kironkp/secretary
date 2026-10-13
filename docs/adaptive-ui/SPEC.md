@@ -134,8 +134,10 @@ every way the board can change, with a model of its own.
    urgency order, lists last), in one run where the system's plan has it.
    The right way up, whatever that plan says: **the cards go where the
    fewest of the system's sections end up on the wrong side of them.** Take
-   the system's own sections that are not cards, in its order (hidden ones
-   included, his left out). Next up and the tiles belong above the cards;
+   the system's own sections that are not cards, in its order: the ones
+   that will be drawn (his left out; one he hid or banned left out too,
+   because the stored board does not have it and has to compose to
+   itself). Next up and the tiles belong above the cards;
    Needs a date and People belong below; the strip is neither. For each
    place the run could go, count the above-sections that would be under
    the cards plus the below-sections that would be over them. The run goes
