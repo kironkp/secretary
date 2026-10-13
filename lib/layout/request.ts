@@ -174,10 +174,7 @@ export async function requestBoard(userId: string, request: BoardRequest): Promi
     } else if (op.op === "hide") {
       // (Shown earlier in this same request, it is on its way back to the board: the last word wins.)
       if (!has(key) && !floating.has(key)) return refuse(`There's no ${say(key)} on the dashboard to hide.`);
-      const project = active.get(key);
-      if (project && isUrgent(project)) {
-        return refuse(`That would break a dashboard rule: urgent project "${project.name}" (${urgencyLabel(project)}) would have no card. Nothing was changed.`);
-      }
+      // (An urgent project's card cannot be hidden: the open draws it all the same, and the claim below is what refuses.)
       if (has(key)) take(key);
       placed.delete(key);
       floating.delete(key);
@@ -304,7 +301,14 @@ export async function requestBoard(userId: string, request: BoardRequest): Promi
     if (!drawn.has(key)) return refuse(`That would not show on the dashboard: there is no place on it for ${say(key)}. Nothing was changed.`);
   }
   for (const key of claims.absent) {
-    if (drawn.has(key)) return refuse(`That would not show on the dashboard: ${say(key)} would still be on it. Nothing was changed.`);
+    if (!drawn.has(key)) continue;
+    // Still drawn after he hid it: an urgent project always has its card (invariant 4, presence).
+    const project = active.get(key);
+    return refuse(
+      project && isUrgent(project)
+        ? `That would break a dashboard rule: urgent project "${project.name}" (${urgencyLabel(project)}) would have no card. Nothing was changed.`
+        : `That would not show on the dashboard: ${say(key)} would still be on it. Nothing was changed.`
+    );
   }
   // A size or accent he set has to be on that board too (calm mode shows every section the default way).
   for (const op of ops) {

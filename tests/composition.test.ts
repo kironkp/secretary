@@ -592,10 +592,10 @@ describe("a section he placed stays where he put it", () => {
     // it is the state that round failed on: A,B then B,A then A,B.
     const sections = [...base.sections];
     const [a, b] = [sections.findIndex((s) => sectionKey(s) === "date_chase"), sections.findIndex((s) => sectionKey(s) === "people_index")];
-    const row: LayoutPlan = { ...base, sections: sections.map((s, i) => (i === a || i === b ? { ...s, place: 20 } : s)) };
+    const row: LayoutPlan = { ...base, sections: sections.map((s, i) => (i === a || i === b ? { ...s, place: 0 } : s)) };
     const pins = ["date_chase", "people_index"];
     const once = compose(defaultPlan(signals), signals, row, pins);
-    expect(keys(once).slice(-2)).toEqual(["date_chase", "people_index"]);
+    expect(keys(once).slice(0, 2)).toEqual(["date_chase", "people_index"]);
     const twice = compose(once, signals, once, pins);
     expect(keys(twice)).toEqual(keys(once));
   });
