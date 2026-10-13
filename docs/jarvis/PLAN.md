@@ -8,7 +8,8 @@ beside me in a workshop."*
 ## Now
 
 - **Cycle counter: 108.** 1.00, 1.03 and 1.04 are accepted; 1.01 and 1.02 are
-  open; then 1.09, 1.08, 1.05, 1.06, 1.07 in that order. See §9.
+  open; then 1.09, 1.08, then Kiron's feedback of 2026-10-13 (1.10 to
+  1.13), then 1.05, 1.06, 1.07. See §9.
 - **1.00** — this plan. Accepted and live: `34fc1f1`, Heroku v63, 2026-10-12.
 - **1.01** — the measured baseline, `docs/jarvis/BASELINE.md`. Measured and
   checked by the Reviewer, except production: the Executor's session is refused
@@ -235,6 +236,44 @@ beside me in a workshop."*
   are a DRAFT, to be answered with a diagnosis and probed by the Reviewer
   before they are contracted. Later, small: the slow loop's
   tool answers "building" on Heroku, where it cannot run at all.
+- **Kiron's feedback, 2026-10-13** (he ran one project prompt through
+  Secretary and through Notion and compared; typed into the Executor's
+  session, relayed to me; his screenshots hold real names and stay out of
+  the repo). His bar: "It should be really simple", "simple and working
+  and no clutter", "clear views and clear understandings". He is the only
+  user: "you don't need to think about other people and other users just
+  yet". Read on main before placing it: a task has no tags, place, link
+  or files of its own (files hang on messages); a project has no order
+  column; the task dialog shows Project, Status, Due, Priority, Notes,
+  Reminders, Heard, From. Each task below starts with a diagnosis, and
+  the two with a new screen start with a mockup he approves.
+  - **1.10** — a task reads like a reminder. The model writes field
+    labels into a task's notes (owner, dependency, effort, next action,
+    evidence, status of record): "completely unnecessary for me to
+    know". Notes become plain words, a line or two, or nothing; no
+    priority anywhere he sees or is asked ("the priorities don't really
+    work for me"; the column stays, nothing is migrated); the task
+    screen is his list: title, notes, tags, a place with a small map,
+    link, images, files. What exists is shown now; tags, place, link and
+    files on a task are new columns and come as a second part. Notes
+    already written are his data: nothing is rewritten or deleted
+    without his word.
+  - **1.11** — he orders his projects. A grab handle to drag a project
+    to the top, and "move that project to the top" by voice or chat: one
+    operation, one stored order, no model call for the drag. 1.02 r5
+    gives the spoken move of a card on the Overview; the handle, and the
+    same order on the Projects tab, are not built.
+  - **1.12** — merge two projects. He asked for one project to replace
+    and absorb another; it made a new one and left the old one. There is
+    no merge tool. Wanted: the tasks, notes and the rest move into the
+    one that stays, the other is archived (not deleted) and it can be
+    undone; and when it cannot do what he asked it says so instead of
+    doing something else (1.05's rule).
+  - **1.13** — a roadmap for a project: steps in order, each with a
+    plain-English goal, the gate to move on, and a status; and a plain
+    checklist. He liked that table in Notion and not Notion's clutter.
+    Spec and mockup first (a task already has `stages`; the diagnosis
+    says whether a roadmap is that or a new thing).
 - **1.05** — "asked means asked", the rest of what 1.03 began, built on main
   after 1.04: clarifications, understanding questions and nudges marked only
   after the hand-over; voice settles when the call really ran, not when the
