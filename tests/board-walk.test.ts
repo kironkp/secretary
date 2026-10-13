@@ -26,8 +26,11 @@
 // board that comes back (shown, added back, let go, a hide or a ban lifted)
 // the model says where: where today's rules plan would keep it (returnModel,
 // with the walker's own reading of which sections are in step with that
-// plan: every run tried, not the validator's table). It is put onto the list
-// after everything else the request asked for. Only for a CARD that comes back can it say no
+// plan: every run tried, not the validator's table; and its own reading of
+// whether the rules plan would be refused against the list anyway, in which
+// case a tie is read against a section the rules can move or one that
+// carries a reason on the board). It is put onto the list after everything
+// else the request asked for. Only for a CARD that comes back can it say no
 // more than "by the data": there it asks that the card is drawn, that
 // everything else kept its order, and the standing questions (the cards he
 // did not place are one run in data order). It keeps its own history, one entry per stored version, and
@@ -146,6 +149,8 @@ const SAID: Record<string, string> = { focus_banner: "banner", hero_next_up: "ne
 const DEFAULT_SECTIONS = ["hero_next_up", "stat_row", "timeline", "date_chase", "people_index"];
 const ADDABLE = ["kanban", "coming_up", "documents", "suggested_zone"];
 const BANNER = "focus_banner";
+/** The sections a rule can move: the strip, which rule 3 sends to the top. The walker's own statement of it. */
+const RULES_MOVE = ["timeline"];
 /** Planner answers that move one of the system's sections across the cards' side of the board, with the cards in each of three places. */
 const CROSSINGS = [
   "needs a date raised, the cards first",
@@ -251,11 +256,22 @@ function longestInStep(list: string[], order: string[]): string[] {
  * first that follows it; with nothing of the system's on the board but
  * cards, in front of those; on a board with nothing of the system's at all,
  * first under the banner.
+ * `held`: the rules plan would be refused against the board anyway (the
+ * walker's own reading, refusedAnyway). Then, of two sections that could
+ * each be read as the one out of step, one the rules can move or one that
+ * carries a reason on the board (`reasoned`) is the one read as moved: a
+ * section could be read so when a run as long stands without it; if a run
+ * as long stands without all of those, that run is the one in step, else
+ * (both could, or neither) the reading above stands.
  */
-function returnModel(board: string[], key: string, placed: string[], order: string[]): string[] {
+function returnModel(board: string[], key: string, placed: string[], order: string[], held: boolean, reasoned: string[]): string[] {
   const rest = without(board, key);
   const own = (k: string) => k !== BANNER && !placed.includes(k);
-  const kept = longestInStep(rest.filter((k) => own(k) && !isCard(k) && order.includes(k)), order);
+  const system = rest.filter((k) => own(k) && !isCard(k) && order.includes(k));
+  const all = longestInStep(system, order);
+  const could = system.filter((k) => (RULES_MOVE.includes(k) || reasoned.includes(k)) && longestInStep(without(system, k), order).length === all.length);
+  const still = longestInStep(system.filter((k) => !could.includes(k)), order);
+  const kept = held && still.length === all.length ? still : all;
   const here = order.indexOf(key);
   const above = order.slice(0, Math.max(0, here)).findLast((k) => kept.includes(k));
   const below = order.slice(here + 1).find((k) => kept.includes(k));
@@ -584,6 +600,30 @@ async function walk(index: number, scripted = false) {
     return keysOf(signals.context.calm_mode ? defaultPlan(signals) : planFromRules(signals));
   };
   const isDefault = (key: string) => DEFAULT_SECTIONS.includes(key);
+  /**
+   * The walker's own reading of "the rules plan would be refused against this list anyway" (SPEC §2), on a list as it
+   * stands before a section is put back: for its order (a section of the system's out of step with today's plan that
+   * the plan gives no reason for moving, or any out of step on a day the layout has already changed), or for
+   * something the system put on the board today that today's plan does not have. Today's rules plan and the two
+   * signals (the layout clock, what is new today) are taken from the product, as the order is.
+   */
+  const refusedAnyway = async (list: string[], his: string[]) => {
+    const signals = (await computeCurrentPlan(id)).signals;
+    if (signals.context.calm_mode) return false;
+    const plan = planFromRules(signals);
+    const today = keysOf(plan);
+    const system = without(list, BANNER).filter((k) => !isCard(k) && !his.includes(k) && today.includes(k));
+    const inStep = longestInStep(system, today);
+    const moved = system.filter((k) => !inStep.includes(k));
+    const reasons = plan.sections.filter((s) => s.why).map(sectionKey);
+    const forItsOrder = moved.length > 0 && (signals.context.days_since_layout_change < 1 || moved.some((k) => !reasons.includes(k)));
+    const forWhatIsNew = (signals.context.sections_new_today ?? []).some((k) => list.includes(k) && !his.includes(k) && !isCard(k) && !today.includes(k));
+    return forItsOrder || forWhatIsNew;
+  };
+  /** The sections that carry a reason on the board he sees (not the cards: theirs are about the data). */
+  const reasonedNow = async () => (await computeCurrentPlan(id)).plan.sections.filter((s) => s.why && s.component !== "project_card").map(sectionKey);
+  /** A section of the default board back on a list (returnModel), the list judged as it stands before the section is put in. */
+  const backOn = async (list: string[], key: string, his: string[]) => returnModel(list, key, his, await systemOrder(), await refusedAnyway(without(list, key), his), await reasonedNow());
 
   /** One or more operations by voice in one request; the last word about a section wins. */
   const arrange = async (ops: { op: string; key: string }[]) => {
@@ -620,7 +660,9 @@ async function walk(index: number, scripted = false) {
       }
       if (op === "hide" && returning.includes(key)) returning.splice(returning.indexOf(key), 1);
     }
-    for (const key of DEFAULT_SECTIONS) if (model && returning.includes(key) && !model.includes(key)) model = returnModel(model, key, placedNow, order);
+    const held = model && returning.length ? await refusedAnyway(model, placedNow) : false;
+    const reasoned = returning.length ? await reasonedNow() : [];
+    for (const key of DEFAULT_SECTIONS) if (model && returning.includes(key) && !model.includes(key)) model = returnModel(model, key, placedNow, order, held, reasoned);
     const res = (await executeTool(ctx, "arrange_dashboard", { operations: ops.map((o) => ({ op: o.op, section: nameOf(o.key) })) })).result as { applied?: boolean; error?: string; order?: string[] };
     if (!res.applied) return refused(res.error ?? "no reason given", predicted.length ? predicted : null);
     if (predicted.length) complain("a request the model refuses was applied", `${predicted.join(" / ")}: arrange ${ops.map((o) => `${o.op} ${short(o.key)}`).join(" + ")}`);
@@ -638,7 +680,6 @@ async function walk(index: number, scripted = false) {
     const urgent = new Set((await computeCurrentPlan(id)).signals.projects.filter(isUrgent).map((p) => `project_card:${p.id}`));
     const heldBefore = await sourceNow();
     const banned = await bannedNow();
-    const order = await systemOrder();
     const calm = (await computeCurrentPlan(id)).signals.context.calm_mode;
     let model: string[] | null = before;
     let placedNow = placedSet();
@@ -653,7 +694,7 @@ async function walk(index: number, scripted = false) {
         if (banned.has(key.split(":")[0])) predicted.push("he asked never to be shown it");
         else if (onBoard) predicted.push("adding what is already on the board");
         else if (isCard(key) && !ids.has(nameOf(key).replace(/ list$/, ""))) predicted.push("a card for something that is not on the board");
-        else if (hidden.has(key) && isDefault(key)) model = model ? returnModel(model, key, placedNow, order) : null; // a show: where the system has it
+        else if (hidden.has(key) && isDefault(key)) model = model ? await backOn(model, key, placedNow) : null; // a show: where the system has it
         else if (hidden.has(key) && !added.has(key)) model = null; // a card shown again: by the data
         else {
           model = model ? editModel(model, o, key) : null; // a new component, or one he added and hid: placed
@@ -708,7 +749,7 @@ async function walk(index: number, scripted = false) {
     const what = `${pinned ? "pin" : "unpin"} ${short(key)} (${how})`;
     const placedNow = pinned ? [...new Set([...placedSet(), key])] : without(placedSet(), key);
     // Pinned, the board is the same. Let go, a default section goes where the system has it; a card, by the data.
-    const expected = pinned ? before : isDefault(key) ? returnModel(before, key, placedNow, await systemOrder()) : null;
+    const expected = pinned ? before : isDefault(key) ? await backOn(before, key, placedNow) : null;
     await afterRequest(what, before, expected, [key], null, placedNow, heldBefore);
   };
 
@@ -812,7 +853,7 @@ async function walk(index: number, scripted = false) {
     const res = await route({ action: "remove_preference", id: pref.id });
     if (!res.ok) return refused(res.json.error ?? "no reason given", null);
     const his = added.has(key) && !stillOff;
-    const expected = stillOff || before.includes(key) ? before : his ? [...before, key] : isDefault(key) ? returnModel(before, key, placedSet(), await systemOrder()) : null;
+    const expected = stillOff || before.includes(key) ? before : his ? [...before, key] : isDefault(key) ? await backOn(before, key, placedSet()) : null;
     await afterRequest(`settings lifts ${pref.kind} ${short(key)}`, before, expected, [key], null, his ? [...new Set([...placedSet(), key])] : placedSet(), heldBefore);
   };
   /** The preference tool bans a component, or takes a ban back. */
@@ -827,7 +868,7 @@ async function walk(index: number, scripted = false) {
     // A ban is a hide of the component's section: the board he saw without it, everything else in order, its place
     // gone. Lifted, a section he had put there himself comes back placed, at the end; another goes where the system has it.
     const his = remove && added.has(component) && !stillHidden;
-    const expected = remove ? (stillHidden ? before : his ? [...before, component] : isDefault(component) ? returnModel(before, component, placedSet(), await systemOrder()) : null) : without(before, component);
+    const expected = remove ? (stillHidden ? before : his ? [...before, component] : isDefault(component) ? await backOn(before, component, placedSet()) : null) : without(before, component);
     const placedNow = remove ? (his ? [...new Set([...placedSet(), component])] : placedSet()) : without(placedSet(), component);
     await afterRequest(`${remove ? "unban" : "ban"} ${component}`, before, expected, [component], null, placedNow, heldBefore);
   };
