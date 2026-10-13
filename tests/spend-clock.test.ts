@@ -11,7 +11,7 @@ process.env.TZ = "UTC";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { layoutSpecs, projects, tasks, user } from "@/lib/db/schema";
+import { conversations, layoutSpecs, messages, projects, tasks, user } from "@/lib/db/schema";
 import { defaultPlan, sectionKey, type LayoutPlan } from "@/lib/layout/plan";
 import { clearPlanCache, lastPlannerUsage } from "@/lib/layout/plan-from-llm";
 import { computeCurrentPlan, getPlanHead, hashOnceStored, persistPlan } from "@/lib/layout/plan-store";
@@ -144,6 +144,18 @@ describe("what one change costs in planner calls", { timeout: 30_000 }, () => {
       expect(bundle.wantsLlmRefinement, `open ${open + 2}`).toBe(false);
       expect(bundle.plan.sections.map(sectionKey)[0], `open ${open + 2}`).toBe(first);
     }
+    expect(b.calls()).toBe(1);
+  });
+
+  it("the rules themselves move a section (he has been asking about dates): that open's one call, none at the next", async () => {
+    const b = await settled();
+    const [conv] = await db.insert(conversations).values({ userId: b.id, mode: "text" }).returning();
+    await db.insert(messages).values(Array.from({ length: 4 }, (_, i) => ({ userId: b.id, conversationId: conv.id, role: "user" as const, content: `when is the deadline? (${i})`, mode: "text" as const })));
+    const first = await b.open(agrees);
+    // The render's own plan moved the strip to the top: the row it is stored in resets the clock.
+    expect(first.plan.sections[0].component).toBe("timeline");
+    expect(b.calls()).toBe(1);
+    for (let open = 0; open < 3; open++) expect((await b.open(agrees)).wantsLlmRefinement, `open ${open + 2}`).toBe(false);
     expect(b.calls()).toBe(1);
   });
 

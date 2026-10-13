@@ -9,7 +9,8 @@ import { and, eq } from "drizzle-orm";
 import type Anthropic from "@anthropic-ai/sdk";
 import { db } from "@/lib/db";
 import { projects, tasks, usage, user } from "@/lib/db/schema";
-import { claudePlannerCall, clearPlanCache, lastPlannerUsage, plannerPrompt, type PlannerCall } from "@/lib/layout/plan-from-llm";
+import { claudePlannerCall, clearPlanCache, lastPlannerUsage, livePlannerCall, plannerPrompt, type PlannerCall } from "@/lib/layout/plan-from-llm";
+import { PLANNER_MODEL } from "@/lib/openai";
 import { computeCurrentPlan, persistPlan } from "@/lib/layout/plan-store";
 import { backgroundSpentLastDay, paidCallAllowed } from "@/lib/spend-guard";
 import { estimateSentTokens, mayHaveBeenBilled } from "@/lib/unanswered";
@@ -189,6 +190,8 @@ describe("the dashboard planner, answered and thrown away", { timeout: 30_000 },
     } as unknown as Anthropic;
     const call = claudePlannerCall(client, "claude-sonnet-5");
     expect(call.modelName).toBe("claude-sonnet-5");
+    // The OpenAI planner names its model too, so its unanswered calls are priced on it.
+    expect(livePlannerCall.modelName).toBe(PLANNER_MODEL);
     const signal = new AbortController().signal;
     await call("p", "{}", signal);
     expect(options?.signal).toBe(signal);
