@@ -307,13 +307,13 @@ function acceptedAgainst(system: string[], rules: (typeof RULES_ORDERS)[number])
  * rules can produce that is accepted against the board as it stands (in calm
  * mode, the usual order). Of the system's sections on the board, those in
  * step with that order are the ones a plan in it would not move. The section
- * goes under the last of them that precedes it in the order; with none,
- * above the first that follows it; with nothing of the system's on the
- * board but cards, among those; on a board with nothing of the system's at
- * all, first under the banner. And on its side of the cards: between two of
- * the system's sections there may stand cards, and things he placed among
- * them; next up, the tiles and the strip go in front of those cards, Needs
- * a date and People behind them.
+ * goes under everything that precedes it and, with nothing before it, above
+ * everything that follows it. "Everything" is the sections in step, and the
+ * run of the system's cards, which counts as a section of the order between
+ * the strip and Needs a date: next up, the tiles and the strip have the
+ * cards below them, Needs a date and People have them above. The cards are
+ * never read as out of step. With nothing of the system's on the board at
+ * all, first under the banner.
  * If no order is accepted (a planner has moved something), the order is
  * today's (`todays`, taken from the product: the rules are not what this
  * walk tests), and of two sections that could each be read as the one out
@@ -340,27 +340,14 @@ function returnModel(board: string[], key: string, placed: string[], todays: str
     }
   }
   const here = order.indexOf(key);
-  const above = order.slice(0, Math.max(0, here)).findLast((k) => kept.includes(k));
-  const below = order.slice(here + 1).find((k) => kept.includes(k));
-  const inFront = ["hero_next_up", "stat_row", "timeline"].includes(key);
-  const systemsSection = (k: string) => own(k) && !isCard(k);
-  /** The system's cards standing from `lo` up to `hi` on the board. */
-  const cardsFrom = (lo: number, hi: number) => rest.map((k, i) => (i >= lo && i < hi && own(k) && isCard(k) ? i : -1)).filter((i) => i !== -1);
-  let at: number;
-  if (above) {
-    const lo = rest.indexOf(above) + 1;
-    const next = rest.findIndex((k, i) => i >= lo && systemsSection(k));
-    const cards = inFront ? [] : cardsFrom(lo, next === -1 ? rest.length : next);
-    at = cards.length ? cards.at(-1)! + 1 : lo;
-  } else if (below) {
-    const hi = rest.indexOf(below);
-    const cards = inFront ? cardsFrom(rest.slice(0, hi).findLastIndex(systemsSection) + 1, hi) : [];
-    at = cards.length ? cards[0] : hi;
-  } else {
-    const cards = cardsFrom(0, rest.length);
-    const firstOwn = rest.findIndex(own);
-    at = cards.length ? (inFront ? cards[0] : cards.at(-1)! + 1) : firstOwn !== -1 ? firstOwn : rest[0] === BANNER ? 1 : 0;
-  }
+  const cardsBelowIt = ["hero_next_up", "stat_row", "timeline"].includes(key);
+  const run = rest.map((k, i) => (own(k) && isCard(k) ? i : -1)).filter((i) => i !== -1);
+  const unders = order.slice(0, Math.max(0, here)).filter((k) => kept.includes(k)).map((k) => rest.indexOf(k) + 1);
+  if (!cardsBelowIt && run.length) unders.push(run.at(-1)! + 1);
+  const overs = (here === -1 ? [] : order.slice(here + 1)).filter((k) => kept.includes(k)).map((k) => rest.indexOf(k));
+  if (cardsBelowIt && run.length) overs.push(run[0]);
+  const firstOwn = rest.findIndex(own);
+  const at = unders.length ? Math.max(...unders) : overs.length ? Math.min(...overs) : firstOwn !== -1 ? firstOwn : rest[0] === BANNER ? 1 : 0;
   return insertAt(rest, key, at);
 }
 /** The places of what he placed, read off a board he was told: from the bottom when nothing upper stands below. */
@@ -406,7 +393,15 @@ const fewestWrong = (system: string[]) => Math.min(...Array.from({ length: syste
  * the cards he has not placed, as one run, at the place among the system's
  * sections with the fewest on the wrong side; among such places the nearest
  * to where the run stood; the upper one at equal distance. What he placed is
- * then put back at the places read off the board the request asked for.
+ * then stood next to the neighbour it had on the board the request asked
+ * for. One neighbour each: for a thing counted from the top (something
+ * upper stands below it), the nearest thing above it that is not his, or
+ * the top; for a thing counted from the bottom, the nearest thing below it
+ * that is not his, or the bottom. Several with one neighbour keep the order
+ * they had. Its place is read off that board afterwards. (Until the last
+ * fix of r5 it was put back at the number read off the list, before the
+ * cards were where the count puts them; the number then pointed at another
+ * neighbour.)
  * The walker's own code and its own count: nothing here is the product's.
  */
 function cardsWhereTheRulePutsThem(board: string[], placed: string[]): string[] {
@@ -421,7 +416,26 @@ function cardsWhereTheRulePutsThem(board: string[], placed: string[]): string[] 
     const [now, was] = [wrongSide(system, at), wrongSide(system, best)];
     if (now < was || (now === was && Math.abs(at - stood) < Math.abs(best - stood))) best = at;
   }
-  return [...banner, ...placeInto([...system.slice(0, best), ...cards, ...system.slice(best)], readPlaces(board, placed))];
+  const out = [...banner, ...system.slice(0, best), ...cards, ...system.slice(best)];
+  const fromTop = readPlaces(board, placed).filter((t) => t.from === "top").map((t) => t.key);
+  const last = new Map<string, string>();
+  let above = "";
+  for (const k of board) {
+    if (!placed.includes(k)) above = k;
+    else if (fromTop.includes(k)) {
+      out.splice(out.indexOf(last.get(above) ?? above) + 1, 0, k);
+      last.set(above, k);
+    }
+  }
+  let below: string | null = null;
+  for (const k of board.toReversed()) {
+    if (!placed.includes(k)) below = k;
+    else if (!fromTop.includes(k)) {
+      out.splice(below === null ? out.length : out.indexOf(below), 0, k);
+      below = k;
+    }
+  }
+  return out;
 }
 /**
  * Whether the system's sections and the cards stand as the default board has them (what he placed aside): next up,
