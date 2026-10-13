@@ -59,11 +59,22 @@ beside me in a workshop."*
   get new neighbours when the cards move; one undo step is lost at the
   update; after a rollback to v65 main reads no row this version stored
   and draws its own board until he next arranges it (nothing deleted).
-  Claimed by the Executor for `472c2a7`, with the Reviewer to check:
-  CI-exact all green (2,558 tests, 73 browser specs); 85 of 85 mutants
-  caught; the three long runs at zero. Not repeated on the tip yet: the
-  pass on the copy of his real board (asked of the Executor, as the
-  landing day goes). Found on main while building it and live until this
+  On `472c2a7` the Reviewer's own runs hold (CI-exact, 2,558 tests, 73
+  browser specs; no schema change; the update from rows main wrote, seven
+  made-up users; a rollback to v65; the on-screen pass on made-up data),
+  and a fresh seed of theirs found one more product defect before any
+  verdict: on a crossed board, Put it back onto a board that lacked a
+  default section stores one board and the next open shows another (the
+  missing section is put in after the cards' place is worked out). It is
+  being fixed on top, walker first; **the verdict moves to a third tip,
+  and the bar for it is fixed in advance**: the small diff read in full;
+  five fresh seeds at 120 walks of 30 steps that the Executor has never
+  seen, all at zero; the Reviewer's own probes and mutants again. A
+  complaint on a fresh seed traced to the product is a FAIL of r5, not
+  another fix on top. Not repeated on the tip yet: the pass on the copy of
+  his real board (asked of the Executor on the final tip, as the landing
+  day goes; the Executor's own check, not an independent one). Found on
+  main while building it and live until this
   lands: the layout clock reads only the newest ten stored rows, so on a
   busy day a system move can happen twice. Not done by anyone
   independent: a browser pass on real data; the Reviewer's session
