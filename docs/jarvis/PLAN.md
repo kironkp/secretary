@@ -7,8 +7,8 @@ beside me in a workshop."*
 
 ## Now
 
-- **Cycle counter: 106.** 1.00 and 1.03 are accepted; 1.01 and 1.02 are open;
-  1.04, 1.05 and 1.06 are contracted, in that order. See §9.
+- **Cycle counter: 107.** 1.00 and 1.03 are accepted; 1.01 and 1.02 are open;
+  1.04 is with the Executor; 1.05, 1.06 and 1.07 follow in that order. See §9.
 - **1.00** — this plan. Accepted and live: `34fc1f1`, Heroku v63, 2026-10-12.
 - **1.01** — the measured baseline, `docs/jarvis/BASELINE.md`. Measured and
   checked by the Reviewer, except production: the Executor's session is refused
@@ -16,16 +16,16 @@ beside me in a workshop."*
   This branch (`jarvis-1.01-plan`) is merged into it when it is offered.
 - **1.02** — the Overview round (A007), rebuilt on `jarvis-1.02-overview-r2`
   from main with made-up fixture names. The first offer (`3eb1142`, branch
-  `jarvis-1.02-overview`) FAILED and stays untouched. `v1.02 r3` is with the
-  Executor, about two days: the render becomes composed instead of chosen
-  (below). Merged with main; package version stays 1.0.3.
+  `jarvis-1.02-overview`) FAILED and stays untouched. `v1.02 r3` is offered
+  as `d32121f` and with the Reviewer: the render is composed instead of
+  chosen (below). Merged with main; package version stays 1.0.3.
 - **1.03** — a page load no longer cancels a promised follow-up. Accepted and
   live: `7073e9a`, Heroku v64, 2026-10-12.
 - **1.04** — the background bill counted right (first slice of Phase 2a): the
   code default cap is $3, cache writes priced as cache writes (needs an added
   column for the write count), a call that timed out still recorded, a sweep
   with nothing new proven to cost nothing. Branch `jarvis-1.04-spend-count`.
-  After 1.02 r3.
+  With the Executor.
 - **1.05** — "asked means asked", the rest of what 1.03 began, built on main
   after 1.04: clarifications, understanding questions and nudges marked only
   after the hand-over; voice settles when the call really ran, not when the
@@ -38,6 +38,11 @@ beside me in a workshop."*
   the card's "Due in N days" chip read the calendar count, because it sat
   beside a date that contradicted it; thresholds, "urgent" and the hash
   wait for 1.06.
+- **1.07** — arranging by voice is honest. A place is counted among what is
+  drawn (today a card that draws nothing still counts, so "up one" can be
+  stored and change nothing on the page); a placed section can be let go by
+  voice and on a phone (the pin button is hover only); "Put it back" undoes
+  his last action, not the latest stored version.
 - **Next:** reserve before sending so two requests cannot overshoot, and email
   attachments retried when there is room. Then the Workspace branch rebuilt
   on main after 1.02.
