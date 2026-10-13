@@ -193,8 +193,15 @@ placed by him). `add` of something he had hidden is a show: the hide is
 lifted and nothing is pinned, when the board has that section anyway (a
 project's card, a section of the default board); a section the board does
 not have by itself is added and pinned as any other, with its hide lifted.
-Unpinning a card lets it follow the data again; unpinning another section
-leaves it where it is (the limit above). Hiding, the section leaving the board, the pin button, and
+Unpinning a card lets it follow the data again, and a card that carries a
+place and is no longer pinned never says where the card run goes. Unpinning
+another section leaves it at its place: the place stored with it goes on
+holding it until he moves it, hides it or uses Undo (the limit above; it
+returns by itself in 1.06). "The top" is under the banner for both tools: a
+section sent to the first place sits just below it, and the banner is never
+pushed down and lost. The model is told the board as it renders now, not as
+it was last stored (the briefing's DASHBOARD line and `get_current_plan`), so
+a position it reads is a position `edit_layout_plan` will find. Hiding, the section leaving the board, the pin button, and
 Undo of the move that made it remove a pin (Undo puts back the previous
 version of the board, its pins included). `remove` in `edit_layout_plan` is a hide, for a card or any
 other section. No tool answers that a change was applied when the next render
