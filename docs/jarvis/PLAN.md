@@ -32,14 +32,21 @@ beside me in a workshop."*
   to copy the database and Kiron's say is needed.
 - **1.03** — a page load no longer cancels a promised follow-up. Accepted and
   live: `7073e9a`, Heroku v64, 2026-10-12.
-- **1.04** — the background bill counted right (first slice of Phase 2a): the
-  code default cap is $3, cache writes priced as cache writes (needs an added
-  column for the write count), a call that timed out still recorded, a sweep
-  with nothing new proven to cost nothing. Branch `jarvis-1.04-spend-count`.
-  Parked at `77c52a3` (WIP) while 1.02 r4 is built. Also in it: extraction
-  paid again for an unchanged conversation (a millisecond mark compared with
-  a microsecond message), and a landed planner answer that moves a section
-  causes one more paid planner call.
+- **1.04** — the count the caps read is the real one (first slice of Phase
+  2a). Offered as `02160d6` on `jarvis-1.04-spend-count`; with the Reviewer.
+  The code default cap is $3; a cache write is priced as one (one added
+  nullable column, `usage.cache_write_input_tokens`); a planner call that
+  never answered is recorded at an estimate; extraction no longer pays again
+  for an unchanged conversation (on main it does: a millisecond mark against
+  a microsecond message); his own move of a section, or a planner answer
+  that moves one, no longer costs a second planner call. Lands before 1.02
+  r5, which needs two of its functions.
+- **After 1.04, found by it and not fixed:** an understanding call the
+  provider fails or cuts leaves no usage row and is retried every 10 minutes
+  with no back-off (the largest request in the app; nothing of it reaches
+  the cap); suggestions' once-a-day gate is the usage row, so a failed call
+  reopens the day after a restart; an extraction answer that does not parse
+  is paid and not recorded. These go with "reserve before sending".
 - **1.05** — "asked means asked", the rest of what 1.03 began, built on main
   after 1.04: clarifications, understanding questions and nudges marked only
   after the hand-over; voice settles when the call really ran, not when the
