@@ -20,12 +20,23 @@ as you go."
   to a workshop board, twenty phases with what each must show, who does what,
   the spend limits, and the first task (1.01, a measured baseline).
 - The finding that orders the work: $139 of the $159 spent in the 30 days to
-  10-06 was background reading, and one chat call carried about 50,000 input
-  tokens. Cost and the prompt come before new behaviour.
+  10-06 was background reading. A chat turn cost $0.10 on the default model
+  and $0.50 on Fable (about 50,000 input tokens a turn, all before 09-22),
+  because some 15,600 tokens of instructions and tool schemas go out again on
+  every round. The spend gate comes first; the prompt is sized in 1.01.
 - Numbering starts over at 1.00. One accepted checkpoint is one cycle; the
   counter is an integer (100 is 1.00). `package.json` is 1.0.0.
 - `CLAUDE.md` points at the plan, states the numbering, says where worktrees
   live, and stops calling the Workspace "not built": the board is on main.
+- Round 2, after review. The Reviewer failed `1577ccd` on three claims and
+  was right: ticking a task on the board is not built (the row is only
+  marked), drag and resize exist at 768 px and wider only, and the token
+  figure was per turn on the dearest model, not per call. Corrected, with the
+  Reviewer's file and line references. The version is `1.0.N` with no leading
+  zero, and there are no tags.
+- Kiron the same day: background work stays at $3 a day or less (the
+  all-background cap on Heroku went from the $4 default to $3, release v62);
+  the Findit team may build an API; he is on the highest Claude plan.
 - No product code changed. App spend: $0.
 
 ---
