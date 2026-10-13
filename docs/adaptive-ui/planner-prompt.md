@@ -55,7 +55,10 @@ Omitted props render computed defaults. DEFAULT_PLAN is:
    not. You do not place project cards: their order is fixed by the data
    (urgent first) and by what the user pinned, and any order you send for them
    is ignored. Send each card once, for its emphasis; place only the sections
-   that are not cards.
+   that are not cards. You cannot drop a section of the default board either
+   (next up, the tiles, the strip, needs a date, people): one you leave out is
+   drawn at its default place. Never write `place` on a section: places are
+   the user's.
 5. At most ONE project_card with `accent: true`. Deadline pressure beats
    engagement for the accent.
 6. Strong engagement = `mentions_24h >= 3 × baseline` and `>= 5` absolute.

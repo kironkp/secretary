@@ -62,11 +62,12 @@ CHI'09, Lavie & Meyer IJHCS'10, Google A2UI's declarative-over-codegen design):
    Color meaning (deadline pressure) is fixed by the design system, never by the planner.
 6. **Model output is data, never markup.** No planner string may reach
    `innerHTML`/JSX children unescaped. Unknown components/props are rejected.
-7. **User overrides beat the planner:** a section the user placed is PINNED
-   and stays where he put it (§2, composition: a pin is applied to every plan,
-   not checked against it). A pin holds the PLACE only; emphasis (variant,
-   accent, what is unfolded) stays the system's on a pinned card too. The
-   user's own edit may move anything, pinned or not;
+7. **User overrides beat the planner:** a section the user placed stays at
+   its place on the board he was told (§2, composition: his placements are
+   applied to every plan, not checked against it). A place is a position
+   only; emphasis (variant, accent, what is unfolded) stays the system's on
+   a placed card too. The user's own request may move anything, placed or
+   not;
    in `calm_mode` the system plan is DEFAULT_PLAN unconditionally (no rules,
    no planner), composed like any other: what he placed, hid and banned
    still holds (v1.02; until then calm mode dropped his arrangement while it
@@ -110,104 +111,119 @@ A plan whose head is the default (nobody arranged it) is measured against the
 NEW default for movement and removals (§3 invariants 3 and 8): a product
 change to the default is not a system-initiated move.
 
-### Composition (v1.02): a render is composed, not chosen
+### Composition (v1.02 r5): a render is composed, not chosen
 
-What is on screen is put together at every render from four things, in this
-order. No stored plan is "kept as it stands".
+What is on screen is put together at every render. Three rounds of this rule
+were offered on examples and failed on states no example had; since r5 the
+gate is a property test, `tests/board-walk.test.ts`, a seeded random walk over
+every way the board can change, with a model of its own.
+
+**What a render is made of, in this order.**
 
 1. **Today's system plan**: the planner's plan for exactly these signals when
-   there is one, else the rules plan, else the stored plan's own sections
-   that are not cards, with today's rules cards (when a system move was
-   refused: nothing of the system's moves, and the cards are still today's),
-   else DEFAULT_PLAN. From it
-   come the emphasis (variant, accent, what is unfolded), the whys, the
-   banner, and the places of the sections that are not cards. Whatever card
-   order it carries is ignored. A why that rule 1 wrote counts days, so it is
-   written again with today's count at every render, from whatever plan it
-   is read (a stored plan served from the cache, a plan he saved, a
-   planner's that kept it): the cache is keyed by `days_left`, which ticks at
-   the hour the task is due, and the chip counts calendar days, which tick at
-   midnight. The hash is not changed for this, so it costs no planner call.
-2. **The sections the user placed, put back where he put them.** A pin holds
-   the section's place on the board: the n-th section from the top, n counted
-   when it was pinned, the banner not counted; a section pinned in the
-   board's last place holds last; with fewer than n sections it is last. n is
-   stored with the section in the stored plan (`place`), so it does not drift
-   when cards come and go. The unpinned sequence is built first (the system's
-   non-card sections in the system's order, the card run where the system's
-   first card sits), then each pinned section goes in at its place, lowest n
-   first. What he placed stays; a system move lands around it: with his list
-   pinned on top, the timeline that rule 3 sends to the top is second. A
-   section he added with `edit_layout_plan` is a placed section too: its spec
-   is kept in the stored plan and it is put at its place. Two sections he
-   placed at the same place keep the order the stored plan has them in: the
-   one placed later has the place, the earlier one sits next to it (the list
-   sent to the top, then Needs a date sent to the top: Needs a date, the
-   list). A place is counted from the top, so a section he later places
-   above an earlier pin does not push that pin down. A card he pinned does
-   not say where the card run goes: the system's first card he did not pin
-   does. That is one rule in one place (`ownSections`, lib/layout/compose.ts:
-   a plan's sections without the banner and without what he placed), and
-   every system plan is read through it, the held one included (r4: the held
-   plan found the run by its first card, his pinned list on top was that
-   card, and the whole board went under the cards).
-3. **The cards he did not place, in data order**: every active project and
-   list has a card unless he hid it, in the default order above (urgent
-   first, then the one urgency order, lists last), flowing around the pinned
-   sections. A project made today has a card today; an archived one has none.
-4. **His hides and bans**, then **presence** (invariant 4): a hidden card is
-   back while its project is urgent.
+   there is one, else the rules plan, else (when a move of the system's own
+   was refused) the stored board's own sections that are not cards, held,
+   with today's rules cards; else DEFAULT_PLAN. From it come the emphasis,
+   the whys, the banner and the order of the sections that are not cards.
+   Whatever card order it carries is ignored: the system never places a card.
+2. **Everything that belongs is drawn.** A card for every active project and
+   list; every section of the default board; every section he added. If the
+   system's plan or the stored board lacks one, it is drawn at its default
+   place. A planner cannot drop a default section, as it cannot drop a card.
+3. **The cards he did not place, in data order** (urgent first, then the one
+   urgency order, lists last), in one run where the system's plan has it.
+4. **What he placed, at its place.** A place is a position on the board he
+   was last told (below). Top-counted sections go in in place order, each at
+   its place; then bottom-counted ones, each at its place from the end. On a
+   board too short for a place they keep the order he was told: none goes in
+   front of one already put in.
+5. **His hides and bans.** Nothing he hid is drawn, nor any component he
+   banned, on any path. One exception (invariant 4, presence): a card he hid
+   is back while its project is urgent, saying so.
 
-The stored row supplies only: where his pins sit, the baseline for rationing
-the system's own non-card moves (invariant 3), the planner's plan for the
-signals it was written for, and history. A stored plan counts as today's
-system plan only while its `signals_hash` equals today's: the hash carries
-each project's deadline, `days_left`, open and done counts and subproject
-count, the engagement counts, the schedule-talk share and question count,
-`days_since_layout_change`, the pinned sections, calm mode, the count of
-items missing dates and the next hard commitment. When any of those changes
-the rules plan is today's and the planner is asked again in the background.
-So a planner's banner or why counts as today's only for the signals it was
-written for: a banner changes the section order, the day count starts at its
-writing, and the hash changes when that count next ticks, 24 hours later at
-the latest. Until then invariant 8 keeps it (a removal waits a day). The
-planner's answer is stored for the signals it was asked about also when the
-board itself did not change with them: the head is stamped with those
-signals before the call.
+**A place is a position on the board he was told.** Every request of his goes
+through ONE function (`lib/layout/request.ts`): both tools, the pin button,
+unpin, Put it back, the Settings page lifting a hide or a ban or removing a
+pin, and the preference tool's pin. It starts from what an open shows now;
+changes the state in memory; runs on that state exactly what an open runs;
+checks that the board bears out what is about to be said (the section is on
+the board, or off it); and only then writes, and answers with that board. If
+the check fails, nothing is written and the reply says why in the section's
+name, never its key.
 
-**A stated limit: what the system moved does not go back by itself.** When
-the hash changes, the rules plan is today's candidate, and it is refused
-whenever it would move one of the system's own sections without a why
-(invariant 3). Going back to the default place has no why. So after rule 3
-has sent the strip to the top, it stays there when the talk about dates
-stops, still saying "You've been talking dates all day"; a planner's banner
-stays, past its day, if that planner plan had also moved a section; and a
-section he unpinned that is not a card stays where he had put it. In each
-case the stored sections are held and only the cards are today's. This is
-as it was before v1.02 for rule 3. The fix (a section the system moved goes
-back when its reason stops, and that return needs no why) is task 1.06.
+- Up one and down one swap with the neighbour, whatever it is. The top is the
+  first place under the banner. The bottom is the end.
+- After every request, the place of EVERY section he has placed is read again
+  from the board he was just told. So places are distinct: they are positions
+  on one real board. There is no tie to break and no special "last".
+- A place counts from the bottom when nothing "upper" stands below it on that
+  board, where upper means a card he has not placed, or one of the system's
+  sections that belong above the cards (next up, the tiles, the strip).
+  Otherwise it counts from the top. So "to the bottom" stays the bottom when
+  a project is added, and "to the top" stays the top. On a board with
+  nothing upper at all, everything counts from the bottom; a project made
+  later has its card above.
+- Known cost, accepted: a place remembered past the end of a board that has
+  grown short is read again as where the section stands the next time he
+  speaks.
+- Rows stored before r5, and a pin kept as a `pin_section` preference: the
+  place is read once from the stored order at the first open and written
+  back. It is the only read of the stored order for a place. The preference
+  row is then marked and no longer read as a pin (it is left, not deleted).
+  A pin has one home: the place written on the section in the stored board,
+  with its key in the row's `pinned`. Settings lists pins from there, and its
+  remove is a request like any other.
 
-Who pins: `arrange_dashboard`'s moves, `edit_layout_plan`'s `move` and `add`,
-and the pin button on a section. `show` does not pin (a card he un-hid was not
-placed by him). `add` of something he had hidden is a show: the hide is
-lifted and nothing is pinned, when the board has that section anyway (a
-project's card, a section of the default board); a section the board does
-not have by itself is added and pinned as any other, with its hide lifted.
-Unpinning a card lets it follow the data again, and a card that carries a
-place and is no longer pinned never says where the card run goes. Unpinning
-another section leaves it at its place: the place stored with it goes on
-holding it until he moves it, hides it or uses Undo (the limit above; it
-returns by itself in 1.06). "The top" is under the banner for both tools: a
-section sent to the first place sits just below it, and the banner is never
-pushed down and lost. The model is told the board as it renders now, not as
-it was last stored (the briefing's DASHBOARD line and `get_current_plan`), so
-a position it reads is a position `edit_layout_plan` will find. Hiding, the section leaving the board, the pin button, and
-Undo of the move that made it remove a pin (Undo puts back the previous
-version of the board, its pins included). `remove` in `edit_layout_plan` is a hide, for a card or any
-other section. No tool answers that a change was applied when the next render
-will not show it; the one limit is a size or accent set with `set_props`,
-which lasts until his data next changes (emphasis is the system's; a variant
-he asked for gets a durable home in a later task), and the tool says so.
+**Show, add back, unpin: where the system has it.** A card goes where the
+data puts it; another section goes to its default place among the system's
+sections on the board. (Where a planner had it is not kept for a section
+that was his while the plan was made; that returns with the split below.)
+Nothing remembers the index a section had when it was hidden. A section he
+ADDED is always placed: unpin does not apply to it and says so; hidden and
+shown again it comes back placed at the end, as the bare component, because
+its props lived only on the board.
+
+**The stored row, and the one door.** The stored row is still a composed
+board. It is read through one door, and this is everything that comes
+through it:
+- the places written on what he placed;
+- the system's own order of the sections that are not cards: the board
+  without the banner, without the cards and without what he placed
+  (`ownSections`);
+- when the stored board is served again for the same signals: its emphasis,
+  its banner, its reason line, and a size he set with `set_props`.
+Two properties are required and tested at every step of the walk: composing
+the board that was just stored gives that same board, section for section;
+and an open with nothing changed writes nothing. Every why the composition
+itself writes (the count under a deadline, "Back on your board") is written
+and recognised in one place and written again or dropped at each render; it
+is never read back as the system's.
+The split of this row into the system's plan and his placements, with the
+composed board never read back, is the next Overview task. It also takes
+"Put it back" stepping through data re-sorts and the extra planner call.
+
+**Rationing (invariants 3 and 8) measures the system against the system.**
+Only sections that were the system's in the stored row AND are the system's
+now are compared. A section that changes hands in either direction (he pins
+it, unpins it, hides it, shows it) is neither moved nor removed, so none of
+his own requests gets a plan refused or held. The rules plan has banned
+components taken out before it is judged, so a ban does not hold the plan
+either. The layout clock is read on the same projection, so his own move
+does not spend the system's daily ration.
+
+**A stated limit: what the system moved does not go back by itself.** After
+the strip has been sent to the top it stays there when the talk about dates
+stops, still giving that reason, and a planner's banner stays past its day
+if that plan had also moved a section: going back has no why, and a move
+without one is refused. As before v1.02 for the strip. Task 1.06.
+
+**Put it back** is a request: the earlier row's board and its placements,
+today's hides, through an open, written, answered. It does not bring back
+what he hid; hides live outside the versions.
+
+No tool answers that a change was applied when the next render will not show
+it; the one limit is a size or accent set with `set_props`, which lasts until
+his data next changes, and the tool says so.
 
 Adding a component = bump registry version + add prop schema + add render fn +
 mention in planner prompt. Never mid-session.
