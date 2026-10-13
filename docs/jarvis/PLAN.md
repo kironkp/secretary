@@ -22,14 +22,25 @@ beside me in a workshop."*
   (`fbcccef`) fixed both, confirmed on screen, and FAILED on the pin rule
   itself: two sections he placed at one place swap at every open once the
   board is shorter than that place. **Third FAIL: the loop was stopped (§4)
-  and the approach changed.** `v1.02 r5` is contracted, two days, to start
-  when 1.04 has landed. What is different: the rule was drafted twice and
-  read by both the Executor and the Reviewer against the code BEFORE being
-  contracted; a seeded random-walk property test is written first, must
-  fail on `fbcccef`, and is the gate before any offer; the Reviewer reads
-  that walker for width before the fix is judged. Not done by anyone
-  independent: a browser pass on real data; the Reviewer's session refuses
-  to copy the database and Kiron's say is needed.
+  and the approach changed.** What is different in `v1.02 r5`: the rule was
+  drafted twice and read by both the Executor and the Reviewer against the
+  code BEFORE being contracted; a seeded random-walk property test was
+  written first, fails on `fbcccef`, and is the gate before any offer; the
+  Reviewer read that walker for width before the fix was judged. **Offered
+  2026-10-13 at `393de92`, with the Reviewer.** The Executor's claims, not
+  yet checked by the Reviewer: the walk that gave 1,348 complaints on
+  `fbcccef` gives none; a long run of 120 walks of 30 steps gives none; 62
+  of 62 mutants caught; a planner that writes a banner every time is asked
+  once and then not again while nothing changes. Asked of the Reviewer
+  beyond the contract: seven decisions the Executor made alone (the two
+  that matter most: a returning default section goes where today's rules
+  plan has it, and invariant 8 reads `sections_new_today` instead of the
+  clock); a database written by main opened by r5; a rollback to v65
+  reading a row r5 wrote; whether the schema changes. Found on main while
+  building it and live until this lands: the layout clock reads only the
+  newest ten stored rows, so on a busy day a system move can happen twice.
+  Not done by anyone independent: a browser pass on real data; the
+  Reviewer's session refuses to copy the database and Kiron's say is needed.
 - **1.03** — a page load no longer cancels a promised follow-up. Accepted and
   live: `7073e9a`, Heroku v64, 2026-10-12.
 - **1.04** — the count the caps read is the real one (first slice of Phase
@@ -46,7 +57,13 @@ beside me in a workshop."*
   on the dearest model, no usage row and no back-off, so neither cap sees it
   (the shape of the night that made the fail-safe). With it: suggestions'
   once-a-day gate surviving a failed call and a restart; an extraction
-  answer that does not parse being recorded. Later, small: the slow loop's
+  answer that does not parse being recorded. Sent to the Executor
+  2026-10-13 in two parts: counting every sent call is 1.04's rule carried
+  over and is being built; the waits (30 minutes, 2 hours, then 6 hours
+  after a failure, worked out from stored rows so a restart changes
+  nothing; an unparsed conversation tried at most 3 times while unchanged)
+  are a DRAFT, to be answered with a diagnosis and probed by the Reviewer
+  before they are contracted. Later, small: the slow loop's
   tool answers "building" on Heroku, where it cannot run at all.
 - **1.05** — "asked means asked", the rest of what 1.03 began, built on main
   after 1.04: clarifications, understanding questions and nudges marked only
