@@ -3,7 +3,7 @@
 // via tools. Runs incrementally — only messages after conversations.extractedAt
 // are scanned — and everything it writes is deduped and tagged source='inferred'.
 import { z } from "zod";
-import { and, asc, desc, eq, gt, gte, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   checkins,
@@ -506,7 +506,14 @@ async function extractOnce(
       eq(messagesTable.conversationId, conversationId),
       eq(messagesTable.userId, userId),
     ];
-    if (conv.extractedAt) conds.push(gt(messagesTable.createdAt, conv.extractedAt));
+    // The mark is compared inside the database, against the stored value
+    // (docs/spend/SPEC.md §4, v1.04). Read into the app it keeps only
+    // milliseconds, while a message is stored to the microsecond: compared
+    // that way, the last message read was "after the mark" for ever, every
+    // run read it again, and a run with nothing new paid for a read.
+    if (conv.extractedAt) {
+      conds.push(sql`${messagesTable.createdAt} > (select extracted_at from conversations where id = ${conversationId})`);
+    }
     const rows = await db
       .select()
       .from(messagesTable)
@@ -537,7 +544,7 @@ async function extractOnce(
       .from(projectsTable)
       .where(and(eq(projectsTable.userId, userId), neOp(projectsTable.status, "archived")));
 
-    const markerTime = rows[rows.length - 1].createdAt;
+    const lastRead = rows[rows.length - 1];
     const { result, inputTokens, outputTokens, model } = await extractFromTranscript({
       transcript,
       timezone,
@@ -552,9 +559,12 @@ async function extractOnce(
 
     const summary = await applyExtraction(userId, conversationId, result);
 
+    // The mark is the last message's own stored time, copied inside the
+    // database so nothing is lost on the way (its time as the app read it is
+    // the fallback only if the message has been deleted meanwhile).
     await db
       .update(conversations)
-      .set({ extractedAt: markerTime })
+      .set({ extractedAt: sql`coalesce((select created_at from messages where id = ${lastRead.id}), ${lastRead.createdAt})` })
       .where(eq(conversations.id, conversationId));
     // Priced, so the spend line and the alert see it (a bare insert left
     // cost_usd null, which every reader counts as $0).
