@@ -67,7 +67,11 @@ CHI'09, Lavie & Meyer IJHCS'10, Google A2UI's declarative-over-codegen design):
    not checked against it). A pin holds the PLACE only; emphasis (variant,
    accent, what is unfolded) stays the system's on a pinned card too. The
    user's own edit may move anything, pinned or not;
-   `calm_mode` renders DEFAULT_PLAN unconditionally; one-tap revert to previous plan.
+   in `calm_mode` the system plan is DEFAULT_PLAN unconditionally (no rules,
+   no planner), composed like any other: what he placed, hid and banned
+   still holds (v1.02; until then calm mode dropped his arrangement while it
+   was on, and a tool that moved a section answered "applied" to nothing);
+   one-tap revert to previous plan.
    Every revert is logged (it's a labeled wrong prediction — our accuracy metric).
 8. **Mid-session mutation is diff-shaped.** While the dashboard is open, new plans
    apply as animated in-place diffs (sections fade/slide, numbers tick). System-
@@ -113,7 +117,9 @@ order. No stored plan is "kept as it stands".
 
 1. **Today's system plan**: the planner's plan for exactly these signals when
    there is one, else the rules plan, else the stored plan's own sections
-   (when a system move was refused: nothing moves), else DEFAULT_PLAN. From it
+   that are not cards, with today's rules cards (when a system move was
+   refused: nothing of the system's moves, and the cards are still today's),
+   else DEFAULT_PLAN. From it
    come the emphasis (variant, accent, what is unfolded), the whys, the
    banner, and the places of the sections that are not cards. Whatever card
    order it carries is ignored.
