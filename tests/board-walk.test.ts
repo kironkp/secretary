@@ -4,6 +4,19 @@
 // a state no example had: two sections he placed meeting at one place on a
 // board that had since grown shorter. Examples cannot be the gate again.
 //
+// WHAT THE MODEL ASSUMES ABOUT THE CARDS (since the fix after the first
+// offer of r5): after a request everything else keeps the order he saw,
+// except that the cards he has not placed stand where the rule puts them on
+// the list as it now is: the place with the fewest of the system's sections
+// on the wrong side of them, nearest to where they stood. The model works
+// that out with its own count after its own list operation
+// (cardsWhereTheRulePutsThem); it does not call the product's runPlace or
+// share a helper with it. On the usual order nothing moves. On a board the
+// system has crossed (the tiles under the cards, Needs a date above them) a
+// request that takes away or brings back one of next up, the tiles, Needs a
+// date or People can move the cards to the other side of the tiles; the
+// summary counts how often the walk stood there.
+//
 // THE WALKER HAS A MODEL OF ITS OWN. Before a request it opens the board
 // itself, applies the request to that list the plain way (up and down swap
 // with the neighbour; the top is the first place under the banner; the bottom
@@ -215,6 +228,35 @@ function placeInto(flow: string[], told: Told[]): string[] {
   }
   return seq;
 }
+const BELONGS_ABOVE = ["hero_next_up", "stat_row"];
+const BELONGS_BELOW = ["date_chase", "people_index"];
+/** How many of the system's sections are on the wrong side of the cards when the run stands after `at` of them. The walker's own count. */
+const wrongSide = (system: string[], at: number) => system.filter((k, i) => (BELONGS_ABOVE.includes(k) && i >= at) || (BELONGS_BELOW.includes(k) && i < at)).length;
+/** The fewest there can be on that list, whatever place the run takes. Above zero, the system's order is crossed. */
+const fewestWrong = (system: string[]) => Math.min(...Array.from({ length: system.length + 1 }, (_, at) => wrongSide(system, at)));
+/**
+ * After a request everything else keeps the order he saw, except that the
+ * cards stand where the rule puts them on the board as it now is (SPEC §2):
+ * the cards he has not placed, as one run, at the place among the system's
+ * sections with the fewest on the wrong side; among such places the nearest
+ * to where the run stood; the upper one at equal distance. What he placed is
+ * then put back at the places read off the board the request asked for.
+ * The walker's own code and its own count: nothing here is the product's.
+ */
+function cardsWhereTheRulePutsThem(board: string[], placed: string[]): string[] {
+  const banner = board.includes(BANNER) ? [BANNER] : [];
+  const rest = without(board, BANNER).filter((k) => !placed.includes(k));
+  const cards = rest.filter(isCard);
+  if (!cards.length) return board;
+  const system = rest.filter((k) => !isCard(k));
+  const stood = rest.findIndex(isCard);
+  let best = 0;
+  for (let at = 1; at <= system.length; at++) {
+    const [now, was] = [wrongSide(system, at), wrongSide(system, best)];
+    if (now < was || (now === was && Math.abs(at - stood) < Math.abs(best - stood))) best = at;
+  }
+  return [...banner, ...placeInto([...system.slice(0, best), ...cards, ...system.slice(best)], readPlaces(board, placed))];
+}
 const canon = (value: unknown): unknown =>
   Array.isArray(value) ? value.map(canon) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value as Record<string, unknown>).filter(([, v]) => v !== undefined).toSorted(([a], [b]) => (a < b ? -1 : 1)).map(([k, v]) => [k, canon(v)])) : value;
 /** A board as whole sections: the component, its props, its why and its place. */
@@ -353,9 +395,8 @@ async function walk(index: number) {
     if (cardAt.length && cardAt.at(-1)! - cardAt[0] + 1 !== cardAt.length) complain("4 the right way up", `${why}: the cards are not one run: ${row(rest)}`);
     if (cardAt.length) {
       const system = rest.filter((k) => !isCard(k));
-      const wrongSide = (at: number) => system.filter((k, i) => (["hero_next_up", "stat_row"].includes(k) && i >= at) || (["date_chase", "people_index"].includes(k) && i < at)).length;
-      const fewest = Math.min(...Array.from({ length: system.length + 1 }, (_, at) => wrongSide(at)));
-      if (wrongSide(cardAt[0]) !== fewest) complain("4 the right way up", `${why}: ${wrongSide(cardAt[0])} of the system's sections are on the wrong side of the cards where ${fewest} would do: ${row(rest)}`);
+      const [here, fewest] = [wrongSide(system, cardAt[0]), fewestWrong(system)];
+      if (here !== fewest) complain("4 the right way up", `${why}: ${here} of the system's sections are on the wrong side of the cards where ${fewest} would do: ${row(rest)}`);
     }
     // 5. What he placed stands where the rule puts it among today's other sections: exactly.
     const expected = placeInto(rest, here);
@@ -414,6 +455,19 @@ async function walk(index: number) {
    */
   const afterRequest = async (what: string, before: string[], expected: string[] | null, subject: string[], reply: string[] | null, placedNow: string[], heldBefore: string, extra?: (first: LayoutPlan) => string | null) => {
     const stored = keysOf((await head()).spec as LayoutPlan);
+    if (expected) {
+      // The list as the request leaves it, then the cards where the rule puts them on that list. Counted for the
+      // summary: how often a request of his changed the system's list on a crossed board, and how often the cards moved.
+      const asked = expected;
+      const placedOn = placedNow.filter((k) => asked.includes(k));
+      const systemOf = (list: string[], his: string[]) => without(list, BANNER).filter((k) => !isCard(k) && !his.includes(k));
+      const [was, now] = [systemOf(before, placedSet()), systemOf(asked, placedOn)];
+      expected = cardsWhereTheRulePutsThem(asked, placedOn);
+      if (was.toSorted().join() !== now.toSorted().join() && (fewestWrong(was) > 0 || fewestWrong(now) > 0)) {
+        counts.set("on a crossed board, a request changed the system's list", (counts.get("on a crossed board, a request changed the system's list") ?? 0) + 1);
+        if (expected.join() !== asked.join()) counts.set("on a crossed board, the cards moved with it", (counts.get("on a crossed board, the cards moved with it") ?? 0) + 1);
+      }
+    }
     // What he placed, and where, is read off the board the request asks for (the model's) BEFORE the product is opened.
     if (expected) told = readPlaces(expected, placedNow.filter((k) => expected.includes(k)));
     const first = await openTwice(what, { firstMayStore: false, retell: expected ? undefined : placedNow });
