@@ -68,6 +68,20 @@ whether the code runs.
   Executor proposes rule changes to the Planner (Kiron agreed, 2026-10-06).
 
 
+## The plan, and cycle versions (2026-10-12)
+- `docs/jarvis/PLAN.md` is the roadmap, the current task and the next action.
+  Read its "Now" section before starting work.
+- Kiron: "commit versions with the numbers 1.00 1.01 etc to git hub as you
+  go." One accepted checkpoint is one cycle: its final commit is titled
+  `v1.NN: …`, has a LOGBOOK entry headed `v1.NN`, sets `package.json` to
+  `1.0.NN`, and is tagged `v1.NN` once it is on main. Review rounds are
+  `WIP 1.NN r1`, `r2` on the task branch: pushed, but not versions.
+- Secretary worktrees go under `~/code/secretary-extras/worktrees/`, not loose
+  in `~/code`. `touch sim/.disabled` in a new worktree before its first
+  commit: the post-commit hook otherwise starts the simulator, which makes
+  real model calls.
+
+
 ## North star: JARVIS
 - The goal is ONE persistent intelligent system you talk to — it knows the
   user's information, can act on it, and fluidly manipulates a visual
@@ -128,7 +142,11 @@ whether the code runs.
 - Full spec: docs/adaptive-ui/SPEC.md — source of truth. To change behavior,
   update the spec first, then the code.
 
-## The Workspace (proposed, not built)
+## The Workspace (partly built, not yet the main surface)
+- On main as of 2026-10-12: the board, drag, resize, collapse, focus, undo,
+  widgets bound to live data, and ticking a task in place. Not on main: voice
+  control of it (WIP on `sec-a008a-workspace`) and the merge with Dashboard.
+  It is reached from Settings › More screens.
 - `docs/workspace/SPEC.md` is the plan for the surface that replaces the Canvas:
   a board of draggable, resizable widgets bound to LIVE data, driven equally by
   voice and touch. The Canvas itself stays untouched until the Workspace wins,

@@ -7,6 +7,29 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 ---
 
+## v1.00 — The JARVIS plan (2026-10-12)
+
+this commit
+
+Kiron: "I want Secretary to feel like having Jarvis beside me in a workshop."
+And: "make sure to commit versions with the numbers 1.00 1.01 etc to git hub
+as you go."
+
+- `docs/jarvis/PLAN.md`: what is true today (read from the code and from the
+  10-06 production usage file; nothing was run), the smallest changes that get
+  to a workshop board, twenty phases with what each must show, who does what,
+  the spend limits, and the first task (1.01, a measured baseline).
+- The finding that orders the work: $139 of the $159 spent in the 30 days to
+  10-06 was background reading, and one chat call carried about 50,000 input
+  tokens. Cost and the prompt come before new behaviour.
+- Numbering starts over at 1.00. One accepted checkpoint is one cycle; the
+  counter is an integer (100 is 1.00). `package.json` is 1.0.0.
+- `CLAUDE.md` points at the plan, states the numbering, says where worktrees
+  live, and stops calling the Workspace "not built": the board is on main.
+- No product code changed. App spend: $0.
+
+---
+
 ## v0.33 — A timeline you can move things on (2026-10-06)
 
 Kiron, on the Timeline: "make it usable… showing progress per project…
