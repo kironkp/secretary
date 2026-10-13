@@ -27,16 +27,27 @@ beside me in a workshop."*
   code BEFORE being contracted; a seeded random-walk property test was
   written first, fails on `fbcccef`, and is the gate before any offer; the
   Reviewer read that walker for width before the fix was judged. **Offered
-  2026-10-13 at `393de92`, with the Reviewer.** The Executor's claims, not
-  yet checked by the Reviewer: the walk that gave 1,348 complaints on
-  `fbcccef` gives none; a long run of 120 walks of 30 steps gives none; 62
-  of 62 mutants caught; a planner that writes a banner every time is asked
-  once and then not again while nothing changes. Asked of the Reviewer
-  beyond the contract: seven decisions the Executor made alone (the two
-  that matter most: a returning default section goes where today's rules
-  plan has it, and invariant 8 reads `sections_new_today` instead of the
-  clock); a database written by main opened by r5; a rollback to v65
-  reading a row r5 wrote; whether the schema changes. Found on main while
+  2026-10-13 at `393de92`; that commit will not ship. No verdict was
+  given on it.** The Executor's own pass on a copy of his real board, and
+  the Reviewer on made-up data, both found that a system plan with a card
+  listed first (the shape main's planner writes) draws every card above
+  next up and the tiles: for up to a day when it lands, and on any later
+  day a planner answers that way. Two smaller things with rows main
+  wrote: a place read one too high because a retired section was counted,
+  and a hide of an archived project that Settings could no longer lift.
+  All three are being fixed on top of `393de92`, walker first, and r5 is
+  offered again at the new tip. The bound, as ruled after the Reviewer
+  probed my draft: the card run goes after the last of the system's next
+  up and tiles, and before the first Needs a date or People standing below
+  that point; the top wins; the strip stays free. Checked by the Reviewer
+  on `393de92` and holding: the CI-exact run, the committed walk (0
+  complaints where `fbcccef` gave 1,348), their own walk on a new seed,
+  their probes from rounds 2 to 4, no schema change, a rollback to v65
+  (main draws its default board, nothing deleted), and five of the seven
+  decisions the Executor made alone. Still open with the Reviewer: the
+  other two decisions, the chip across a real midnight, their mutants.
+  Named, not fixed: a place is a position, so a section he placed in the
+  middle may get new neighbours when the card run moves. Found on main while
   building it and live until this lands: the layout clock reads only the
   newest ten stored rows, so on a busy day a system move can happen twice.
   Not done by anyone independent: a browser pass on real data; the
