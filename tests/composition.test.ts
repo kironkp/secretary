@@ -374,6 +374,15 @@ describe("movement is measured without the cards and without his pins (invariant
     expect(movementReasons(moved, ctx(signals, { previousPlan: stored }))).toEqual(['moved section "timeline" has no why']);
   });
 
+  it("the held path accepts a stored row that carries the store's mark (the plan schema is strict, and the mark is not part of a plan)", async () => {
+    const stored: LayoutPlan = { ...compose(defaultPlan(signals), signals), plan_id: "llm-x", composed: true, sections: [{ component: "focus_banner", props: { text: "Two things are late", tone: "serious" } }, ...compose(defaultPlan(signals), signals).sections] };
+    const today = structuredClone(signals);
+    today.context.sections_new_today = ["focus_banner"];
+    const res = await render(today, stored);
+    expect(res.source).toBe("previous");
+    expect(keys(res.plan)[0]).toBe("focus_banner");
+  });
+
   it("what he hid or banned is not 'removed by the system', even while the stored board still has it", () => {
     // The system is measured against the system: a section that changes
     // hands is neither moved nor removed.

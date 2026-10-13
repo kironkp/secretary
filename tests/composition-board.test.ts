@@ -969,6 +969,117 @@ describe("the request function, case by case", { timeout: 30_000 }, () => {
     expect(await hideRows(b.id)).toHaveLength(0);
   });
 
+  it("every row this version stores is marked, by every path that stores one, so Put it back is not refused the day after a planner's answer", async () => {
+    const b = await board(3);
+    const mark = async () => ((await b.head()).spec as LayoutPlan).composed;
+    await b.render(); // an open's row
+    expect(await mark()).toBe(true);
+    await b.arrange([{ op: "move_to_top", section: "shopping list" }]); // a request's row
+    expect(await mark()).toBe(true);
+    await b.newTask("Atlas");
+    const before = (await b.head()).version;
+    await b.landBanner(); // the open's row for the new situation, then the planner's refinement row
+    const rows = await db.select().from(layoutSpecs).where(eq(layoutSpecs.userId, b.id));
+    expect(rows.length).toBeGreaterThan(before);
+    for (const row of rows) expect((row.spec as LayoutPlan).composed, `version ${row.version}`).toBe(true);
+    expect(((await b.head()).spec as LayoutPlan).sections[0].component).toBe("focus_banner");
+    // Put it back from the planner's row, and again (the row Put it back writes is marked too).
+    expect(await requestBoard(b.id, { revert: true })).toMatchObject({ ok: true });
+    expect(await mark()).toBe(true);
+    expect(await requestBoard(b.id, { revert: true })).toMatchObject({ ok: true });
+  });
+
+  it("unpin sends a section of the usual board back where the system has it, and a card back to the data", async () => {
+    const b = await board(3);
+    await b.render();
+    const start = await b.keys();
+    await b.arrange([{ op: "move_to_top", section: "needs a date" }, { op: "move_to_bottom", section: "Atlas" }]);
+    const moved = await b.keys();
+    expect(moved[0]).toBe("date_chase");
+    expect(moved.at(-1)).toBe(b.card("Atlas"));
+    expect(await pin(b.id, "date_chase", false)).toBe(true);
+    expect(await pin(b.id, b.card("Atlas"), false)).toBe(true);
+    expect(await b.keys()).toEqual(start);
+    expect((await b.head()).pinned).toEqual([]);
+  });
+
+  it("the pin button on something that is not on the board, and a move of the banner, are refused in words of their own", async () => {
+    const b = await board(3);
+    await b.render();
+    await b.arrange([{ op: "hide", section: "people" }]);
+    expect(await requestBoard(b.id, { ops: [{ op: "pin", key: "people_index" }] })).toMatchObject({ ok: false, error: expect.stringContaining("no people on the dashboard to pin") });
+    await b.newTask("Atlas");
+    await b.landBanner();
+    const before = await b.keys();
+    expect(before[0]).toBe("focus_banner");
+    const version = (await b.head()).version;
+    for (const to of ["bottom", "down"] as const) {
+      expect(await requestBoard(b.id, { ops: [{ op: "move", key: "focus_banner", to }] })).toMatchObject({ ok: false, error: expect.stringContaining("The banner is always first") });
+    }
+    expect(((await b.arrange([{ op: "move_to_bottom", section: "banner" }])).result as { applied?: boolean; error?: string }).error).toMatch(/banner is always first/);
+    expect((await b.head()).version).toBe(version);
+    expect(await b.keys()).toEqual(before);
+    // The section under the banner cannot go above it either: up one from there changes nothing.
+    await b.arrange([{ op: "move_up", section: "next up" }]);
+    expect((await b.keys()).slice(0, 2)).toEqual(["focus_banner", "hero_next_up"]);
+  });
+
+  it("hidden and shown in one request, something he had placed is let go: it is back where the system has it, not where he had put it", async () => {
+    const b = await board(3);
+    await b.render();
+    const start = await b.keys();
+    await b.arrange([{ op: "move_to_top", section: "Grove" }]);
+    expect((await b.keys())[0]).toBe(b.card("Grove"));
+    expect((await b.arrange([{ op: "hide", section: "Grove" }, { op: "show", section: "Grove" }])).result).toMatchObject({ applied: true });
+    expect(await b.keys()).toEqual(start);
+    expect((await b.head()).pinned).toEqual([]);
+  });
+
+  it("a hide lifted while its component is banned: the hide goes, the section stays off, and lifting the ban later brings it back", async () => {
+    const b = await board(3);
+    await b.render();
+    await b.chatEdit([{ op: "add", component: "kanban", at: 1 }]);
+    await b.arrange([{ op: "hide", section: "kanban" }]);
+    await executeTool(tools(b.id), "set_layout_preference", { kind: "ban_component", component: "kanban" });
+    const [hide] = await hideRows(b.id);
+    expect(await requestBoard(b.id, { liftPreference: hide.id })).toMatchObject({ ok: true }); // not refused as a show of something banned
+    expect(await hideRows(b.id)).toHaveLength(0);
+    expect(await b.keys()).not.toContain("kanban");
+    await executeTool(tools(b.id), "set_layout_preference", { kind: "ban_component", component: "kanban", remove: true });
+    expect((await b.keys()).at(-1)).toBe("kanban");
+  });
+
+  it("on a board the system has crossed, a request that takes away what stood between can move the cards: the tiles sunk, Needs a date banned", async () => {
+    // The rule is worked out on the board as it now is (SPEC §2). A planner
+    // sank the tiles to the bottom, with a reason, and left the cards where
+    // they were: right, while Needs a date or People stands between them.
+    const b = await board(3);
+    await b.render();
+    await b.nextDay();
+    await b.newTask("Atlas");
+    const bundle = await computeCurrentPlan(b.id);
+    await persistPlan(b.id, bundle, {
+      call: async () => {
+        lastPlannerUsage.model = "claude-sonnet-5";
+        lastPlannerUsage.input = 4_000;
+        lastPlannerUsage.output = 800;
+        const plan = defaultPlan(bundle.signals);
+        const tiles = { component: "stat_row", props: { tiles: [{ value: "3", label: "late" }] }, why: "The numbers matter less today" };
+        return JSON.stringify({ ...plan, plan_id: "p", reason_summary: "A busy week", sections: [...plan.sections.filter((s) => s.component !== "stat_row"), tiles] });
+      },
+    });
+    const cards = b.cardsOf(await b.keys());
+    expect(await b.keys()).toEqual(["hero_next_up", "timeline", ...cards, "date_chase", "people_index", "stat_row"]);
+    // People hidden: Needs a date still stands between the cards and the tiles, and nothing else moves.
+    await b.arrange([{ op: "hide", section: "people" }]);
+    expect(await b.keys()).toEqual(["hero_next_up", "timeline", ...cards, "date_chase", "stat_row"]);
+    // Needs a date banned: nothing belongs below the cards any more, so they stand under the tiles. The reply is that board.
+    const said = (await executeTool(tools(b.id), "set_layout_preference", { kind: "ban_component", component: "date_chase" })).result as { stored?: boolean };
+    expect(said.stored).toBe(true);
+    expect(await b.keys()).toEqual(["hero_next_up", "timeline", "stat_row", ...cards]);
+    expect(await b.keys()).toEqual(["hero_next_up", "timeline", "stat_row", ...cards]);
+  });
+
   it("a ban works like a hide, nothing brings the section back while it stands, and lifting it brings back a section he had added, at the end", async () => {
     const b = await board(3);
     await b.render();

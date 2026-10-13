@@ -21,7 +21,7 @@ import { planFromRules } from "./plan-from-rules";
 import { defaultPlan, isUrgent, sectionKey, urgencyLabel, type LayoutPlan, type PlanSection } from "./plan";
 import { asStored, hashOnceStored, loadState, markPinPreferences, openOn, placedOn, planContent, type BoardState } from "./plan-store";
 import { REGISTRY_COMPONENTS, REGISTRY_VERSION } from "./registry";
-import { layoutChanged, signalsHash } from "./signals";
+import { signalsHash } from "./signals";
 import type { LayoutPreference } from "./validator";
 
 const BANNER = "focus_banner";
@@ -121,7 +121,7 @@ export async function requestBoard(userId: string, request: BoardRequest): Promi
     if (!earlier.composed) return refuse("The board before this one is from before the last update, so it cannot be put back. Nothing was changed.");
     sections = structuredClone(earlier.sections);
     reason = earlier.reason_summary ?? null;
-    placed = new Set([...placedOn(earlier), ...rows[1].pinned]);
+    placed = new Set(placedOn(earlier)); // a row of this version: what he placed carries its place
   } else {
     // What an open shows now: the composition writes its place on everything he placed.
     const now = (await openOn(state)).plan;
@@ -131,7 +131,6 @@ export async function requestBoard(userId: string, request: BoardRequest): Promi
   }
   const has = (key: string) => sections.some((s) => sectionKey(s) === key);
   const take = (key: string) => sections.splice(sections.findIndex((s) => sectionKey(s) === key), 1)[0];
-  const top = () => (sections[0]?.component === BANNER ? 1 : 0);
   const bring = (key: string) => {
     hides.delete(key);
     claims.present.add(key);
@@ -216,10 +215,12 @@ export async function requestBoard(userId: string, request: BoardRequest): Promi
       if (op.to === "up" || op.to === "down") {
         // One step is a swap with the neighbour, whatever it is.
         const other = op.to === "up" ? from - 1 : from + 1;
-        if (other >= top() && other < sections.length) [sections[from], sections[other]] = [sections[other], sections[from]];
+        // (Swapped with the banner, it is put back under it just below: the banner is first whatever a request did.)
+        if (other >= 0 && other < sections.length) [sections[from], sections[other]] = [sections[other], sections[from]];
+        sections = bannerFirst(sections);
       } else {
         const moved = take(key);
-        sections.splice(op.to === "top" ? top() : op.to === "bottom" ? sections.length : Math.min(op.to.index, sections.length), 0, moved);
+        sections.splice(op.to === "top" ? 0 : op.to === "bottom" ? sections.length : Math.min(op.to.index, sections.length), 0, moved);
         sections = bannerFirst(sections);
       }
       placed.add(key);
@@ -250,11 +251,12 @@ export async function requestBoard(userId: string, request: BoardRequest): Promi
     const on = new Set(list.map((s) => sectionKey(s)));
     const pinned = [...placed].filter((key) => on.has(key) && key !== BANNER);
     const draft: LayoutPlan = { plan_id, reason_summary: reason, sections: places === "read" ? written(list, new Set(pinned)) : list };
-    // The state as it will be once written: this board is the stored one, for
-    // exactly these signals, with these pins and preferences, and with the
-    // layout clock as this row leaves it.
-    const resets = state.head !== null && layoutChanged(state.head, { spec: draft, pinned });
-    const after = { ...signals, context: { ...signals.context, pinned_sections: pinned, ...(resets ? { days_since_layout_change: 0 } : {}) } };
+    // The state as it will be once written: this board is the stored one,
+    // for exactly these signals, with these pins and preferences. (Served
+    // again for the same signals, a stored board is composed without the
+    // layout clock being read; the row is stored under the hash the next
+    // open works out, clock and all, where it is written below.)
+    const after = { ...signals, context: { ...signals.context, pinned_sections: pinned } };
     const next: BoardState = {
       ...state,
       signals: after,
