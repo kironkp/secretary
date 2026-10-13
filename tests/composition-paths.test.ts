@@ -458,6 +458,52 @@ describe("where the card run goes is one rule", () => {
       expect(keys(compose(letGo, signals, letGo, []))).toEqual(["hero_next_up", "stat_row", "timeline", ...run, "date_chase", "people_index"]);
     });
 
+    describe("a hidden section is not counted, and the run does not land one off for it: each board composed twice", () => {
+      // The place is worked out, and the board cut, on the same list: the
+      // sections that will be drawn. A hidden one above where the cards go
+      // (next up, the strip) or below (Needs a date) shifts nothing.
+      const tiles: PlanSection = { component: "stat_row", props: { tiles: [{ value: "3", label: "late" }] }, why: "The numbers matter less today" };
+      const [H, , T, D, P] = rest;
+      const PLANS: [string, PlanSection[], Record<string, string[]>][] = [
+        [
+          "the usual order",
+          plan.sections,
+          {
+            hero_next_up: ["stat_row", "timeline", "cards", "date_chase", "people_index"],
+            timeline: ["hero_next_up", "stat_row", "cards", "date_chase", "people_index"],
+            date_chase: ["hero_next_up", "stat_row", "timeline", "cards", "people_index"],
+          },
+        ],
+        [
+          "the usual order, the plan's cards first",
+          [...cards, ...rest],
+          {
+            hero_next_up: ["stat_row", "cards", "timeline", "date_chase", "people_index"],
+            timeline: ["hero_next_up", "stat_row", "cards", "date_chase", "people_index"],
+            date_chase: ["hero_next_up", "stat_row", "cards", "timeline", "people_index"],
+          },
+        ],
+        [
+          "crossed: a planner sank the tiles to the bottom",
+          [H, T, ...cards, D, P, tiles],
+          {
+            hero_next_up: ["timeline", "cards", "date_chase", "people_index", "stat_row"],
+            timeline: ["hero_next_up", "cards", "date_chase", "people_index", "stat_row"],
+            date_chase: ["hero_next_up", "timeline", "cards", "people_index", "stat_row"],
+          },
+        ],
+      ];
+      describe.each(PLANS)("%s", (_name, sections, expected) => {
+        it.each(Object.keys(expected))("with %s hidden", (hiddenKey) => {
+          const system: LayoutPlan = { plan_id: "llm-x", reason_summary: null, sections };
+          const preferences: LayoutPreference[] = [{ kind: "hide_section", value: { section: hiddenKey } }];
+          const once = compose(system, signals, null, [], preferences);
+          expect(keys(once)).toEqual(expected[hiddenKey].flatMap((k) => (k === "cards" ? run : [k])));
+          expect(keys(compose(once, signals, once, [], preferences))).toEqual(keys(once));
+        });
+      });
+    });
+
     it("the system's own order may have the run right under the tiles, the strip below it (main's default)", () => {
       const mains: LayoutPlan = { plan_id: "plan-old", reason_summary: null, sections: [...rest.slice(0, 2), ...cards, ...rest.slice(2)] };
       expect(keys(compose(mains, signals, mains, []))).toEqual(bounded);
