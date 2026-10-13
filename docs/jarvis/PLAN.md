@@ -246,7 +246,11 @@ beside me in a workshop."*
   or files of its own (files hang on messages); a project has no order
   column; the task dialog shows Project, Status, Due, Priority, Notes,
   Reminders, Heard, From. Each task below starts with a diagnosis, and
-  the two with a new screen start with a mockup he approves.
+  the two with a new screen start with a mockup he approves. Drawn
+  2026-10-13 with made-up content (the task screen, the project list
+  with its grab handle, the roadmap on a phone and on a wide screen) and
+  sent to him; not approved yet, and nothing is built from it until he
+  says so.
   - **1.10** — a task reads like a reminder. The model writes field
     labels into a task's notes (owner, dependency, effort, next action,
     evidence, status of record): "completely unnecessary for me to
