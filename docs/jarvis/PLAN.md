@@ -7,8 +7,8 @@ beside me in a workshop."*
 
 ## Now
 
-- **Cycle counter: 105.** 1.00 and 1.03 are accepted; 1.01, 1.02 and 1.04 are
-  open; 1.05 is contracted. See §9.
+- **Cycle counter: 106.** 1.00 and 1.03 are accepted; 1.01 and 1.02 are open;
+  1.04, 1.05 and 1.06 are contracted, in that order. See §9.
 - **1.00** — this plan. Accepted and live: `34fc1f1`, Heroku v63, 2026-10-12.
 - **1.01** — the measured baseline, `docs/jarvis/BASELINE.md`. Measured and
   checked by the Reviewer, except production: the Executor's session is refused
@@ -16,38 +16,44 @@ beside me in a workshop."*
   This branch (`jarvis-1.01-plan`) is merged into it when it is offered.
 - **1.02** — the Overview round (A007), rebuilt on `jarvis-1.02-overview-r2`
   from main with made-up fixture names. The first offer (`3eb1142`, branch
-  `jarvis-1.02-overview`) FAILED and stays untouched. `aced086` restated
-  invariant 4; `v1.02 r3` (where a card sits, below; merged with main; package
-  version stays 1.0.3) is with the Executor.
+  `jarvis-1.02-overview`) FAILED and stays untouched. `v1.02 r3` is with the
+  Executor, about two days: the render becomes composed instead of chosen
+  (below). Merged with main; package version stays 1.0.3.
 - **1.03** — a page load no longer cancels a promised follow-up. Accepted and
   live: `7073e9a`, Heroku v64, 2026-10-12.
 - **1.04** — the background bill counted right (first slice of Phase 2a): the
   code default cap is $3, cache writes priced as cache writes (needs an added
   column for the write count), a call that timed out still recorded, a sweep
   with nothing new proven to cost nothing. Branch `jarvis-1.04-spend-count`.
-  With the Executor after 1.02 r3.
+  After 1.02 r3.
 - **1.05** — "asked means asked", the rest of what 1.03 began, built on main
   after 1.04: clarifications, understanding questions and nudges marked only
   after the hand-over; voice settles when the call really ran, not when the
   token was minted (the Reviewer proved a call that never connects still
   loses the promise); three tests the Reviewer's mutants showed missing.
+- **1.06** — one day count on the Overview (calendar days in his zone;
+  `days_left` today is whole 24-hour periods, so something due tomorrow
+  morning reads as today), and a size he sets on one card survives (in 1.02
+  it lasts until the next render). Goes before 1.04 if the day mismatch
+  shows on screen.
 - **Next:** reserve before sending so two requests cannot overshoot, and email
   attachments retried when there is room. Then the Workspace branch rebuilt
   on main after 1.02.
 - **Where a card sits on the Overview, since 1.02** (the binding text is
-  `docs/adaptive-ui/SPEC.md` §2 and §3 once 1.02 lands). Late work or a week
-  or less to go makes a project urgent; a list never is. Every urgent project
-  has a card: a plan the system writes is refused if it lacks one, and a
-  stored plan that has come to lack one gets the card added after the last
-  urgent card with a why. A section Kiron placed is pinned and stays where he
-  put it. Every card he did not place follows the data at every render,
-  urgent first and then the one urgency order, flowing around the pinned
-  ones. The system never places a card: the rules and the planner choose
-  emphasis, the banner and what is unfolded, and the rules' emphasis is
-  recomputed at every render because a why is about today. Plan ids play no
-  part. Days are calendar days in his zone. No fixed position: "above the
-  fold" is gone. The rule was restated three times in one evening; each
-  earlier version froze a board the Reviewer could then show going stale.
+  `docs/adaptive-ui/SPEC.md` §2 and §3 once 1.02 lands). Each render is
+  composed: today's system plan (emphasis, banner, places of sections that
+  are not cards), then the sections Kiron placed put back where he put them,
+  then the cards he did not place in data order around those (urgent first,
+  then the one urgency order), then his hides, then presence. A pin holds a
+  slot: k-th card from the top, or last. The set of cards is the data's:
+  every active project and list has one unless he hid it, and a hidden card
+  returns while its project is urgent (late work, or a week or less to go; a
+  list never is). The system never places or drops a card. A stored plan is
+  only his pins, the baseline for rationing the system's other moves, the
+  planner's cache and history. Plan ids play no part. No fixed position:
+  "above the fold" is gone. The rule was restated three times in one evening
+  before the Executor's diagnosis showed it needed this pipeline, not a
+  validator fix.
 - **Not decided:** whether the understanding loop should read an open,
   past-due follow-up as missed (since 1.03 the word appears only after a
   session raised it).
