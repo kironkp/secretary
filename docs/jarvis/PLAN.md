@@ -17,7 +17,7 @@ beside me in a workshop."*
 - **1.02** — the Overview round (A007), rebuilt on `jarvis-1.02-overview-r2`
   from main with made-up fixture names. The first offer (`3eb1142`, branch
   `jarvis-1.02-overview`) FAILED and stays untouched. `aced086` restated
-  invariant 4; `v1.02 r3` (whose order it is, below; merged with main; package
+  invariant 4; `v1.02 r3` (where a card sits, below; merged with main; package
   version stays 1.0.3) is with the Executor.
 - **1.03** — a page load no longer cancels a promised follow-up. Accepted and
   live: `7073e9a`, Heroku v64, 2026-10-12.
@@ -34,17 +34,20 @@ beside me in a workshop."*
 - **Next:** reserve before sending so two requests cannot overshoot, and email
   attachments retried when there is room. Then the Workspace branch rebuilt
   on main after 1.02.
-- **Whose order the Overview is, since 1.02** (the binding text is
+- **Where a card sits on the Overview, since 1.02** (the binding text is
   `docs/adaptive-ui/SPEC.md` §2 and §3 once 1.02 lands). Late work or a week
   or less to go makes a project urgent; a list never is. Every urgent project
   has a card: a plan the system writes is refused if it lacks one, and a
   stored plan that has come to lack one gets the card added after the last
-  urgent card with a why, nothing else moving. A board is **his** when Kiron
-  arranged it (plan id `user-…` or `chat-…`) or pinned something; his order
-  is kept as it stands. On every other board the system does not place cards:
-  they follow the data at every render, urgent first, then the one urgency
-  order, and the rules and the planner choose only emphasis, the banner and
-  what is unfolded. No fixed position: "above the fold" is gone.
+  urgent card with a why. A section Kiron placed is pinned and stays where he
+  put it. Every card he did not place follows the data at every render,
+  urgent first and then the one urgency order, flowing around the pinned
+  ones. The system never places a card: the rules and the planner choose
+  emphasis, the banner and what is unfolded, and the rules' emphasis is
+  recomputed at every render because a why is about today. Plan ids play no
+  part. Days are calendar days in his zone. No fixed position: "above the
+  fold" is gone. The rule was restated three times in one evening; each
+  earlier version froze a board the Reviewer could then show going stale.
 - **Not decided:** whether the understanding loop should read an open,
   past-due follow-up as missed (since 1.03 the word appears only after a
   session raised it).
