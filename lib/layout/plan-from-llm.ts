@@ -12,8 +12,16 @@ import { defaultPlan, type LayoutPlan, type PlanSection } from "./plan";
 import { planFromRules } from "./plan-from-rules";
 import { signalsHash, type Signals } from "./signals";
 import { movementReasons, validatePlan, withoutBanned, type LayoutPreference } from "./validator";
+import { estimateSentTokens, mayHaveBeenBilled } from "@/lib/unanswered";
 
-export type PlannerCall = (systemPrompt: string, signalsJson: string) => Promise<string>;
+/**
+ * A planner call. `signal` aborts the request when the app stops waiting for
+ * it; `modelName` names the model, so a call that never answers can still be
+ * counted against the right rate (docs/spend/SPEC.md §1.2).
+ */
+export type PlannerCall = ((systemPrompt: string, signalsJson: string, signal?: AbortSignal) => Promise<string>) & {
+  modelName?: string;
+};
 
 let promptCache: string | null = null;
 export function plannerPrompt(): string {
@@ -26,8 +34,12 @@ export function plannerPrompt(): string {
 
 // The LLM runs in the background (persistPlan), never on the render path —
 // measured nano latency ~5s; Claude at low effort can take longer. This is the
-// background budget, not a render stall.
+// background budget, not a render stall. PLANNER_TIMEOUT_MS overrides it.
 const LLM_TIMEOUT_MS = 60000;
+const plannerTimeoutMs = (): number => {
+  const n = Number(process.env.PLANNER_TIMEOUT_MS);
+  return Number.isFinite(n) && n > 0 ? n : LLM_TIMEOUT_MS;
+};
 
 /** What the last planner call cost. The planner runs in the background on
  *  every dashboard render whose signals changed, so it is real recurring
@@ -45,21 +57,27 @@ function notePlannerUsage(model: string, input: number, output: number) {
   lastPlannerUsage.output = output;
 }
 
-export const livePlannerCall: PlannerCall = async (systemPrompt, signalsJson) => {
-  const response = await openai.responses.create({
-    model: PLANNER_MODEL,
-    instructions: systemPrompt,
-    input: `Emit the LayoutPlan as a json object for these SIGNALS:\n${signalsJson}`,
-    text: { format: { type: "json_object" } },
-    temperature: 0.2,
-  });
-  notePlannerUsage(
-    PLANNER_MODEL,
-    response.usage?.input_tokens ?? 0,
-    response.usage?.output_tokens ?? 0
-  );
-  return response.output_text ?? "";
-};
+export const livePlannerCall: PlannerCall = Object.assign(
+  async (systemPrompt: string, signalsJson: string, signal?: AbortSignal) => {
+    const response = await openai.responses.create(
+      {
+        model: PLANNER_MODEL,
+        instructions: systemPrompt,
+        input: `Emit the LayoutPlan as a json object for these SIGNALS:\n${signalsJson}`,
+        text: { format: { type: "json_object" } },
+        temperature: 0.2,
+      },
+      { signal }
+    );
+    notePlannerUsage(
+      PLANNER_MODEL,
+      response.usage?.input_tokens ?? 0,
+      response.usage?.output_tokens ?? 0
+    );
+    return response.output_text ?? "";
+  },
+  { modelName: PLANNER_MODEL }
+);
 
 /**
  * Claude planner (CLAUDE_BRAIN): user-chosen model, effort clamped to low —
@@ -67,19 +85,22 @@ export const livePlannerCall: PlannerCall = async (systemPrompt, signalsJson) =>
  * gatekeeper either way. Throws on refusal; planWithFallback's catch → rules.
  */
 export function claudePlannerCall(client: Anthropic, model: string): PlannerCall {
-  return async (systemPrompt, signalsJson) => {
-    const response = await client.messages.create({
-      model,
-      max_tokens: 16000,
-      system: systemPrompt,
-      messages: [
-        {
-          role: "user",
-          content: `Emit the LayoutPlan as a single JSON object for these SIGNALS. Respond with ONLY the JSON — no markdown fences, no prose.\n${signalsJson}`,
-        },
-      ],
-      output_config: { effort: "low" },
-    });
+  const call = async (systemPrompt: string, signalsJson: string, signal?: AbortSignal) => {
+    const response = await client.messages.create(
+      {
+        model,
+        max_tokens: 16000,
+        system: systemPrompt,
+        messages: [
+          {
+            role: "user",
+            content: `Emit the LayoutPlan as a single JSON object for these SIGNALS. Respond with ONLY the JSON — no markdown fences, no prose.\n${signalsJson}`,
+          },
+        ],
+        output_config: { effort: "low" },
+      },
+      { signal }
+    );
     notePlannerUsage(model, response.usage.input_tokens, response.usage.output_tokens);
     if (response.stop_reason === "refusal") throw new Error("claude refusal");
     const text = response.content
@@ -88,6 +109,7 @@ export function claudePlannerCall(client: Anthropic, model: string): PlannerCall
       .join("");
     return text.trim().replace(/^```(?:json)?\s*/, "").replace(/\s*```$/, "");
   };
+  return Object.assign(call, { modelName: model });
 }
 
 /** In-memory plan cache (SPEC §6): signals-hash + registry version. The
@@ -120,6 +142,12 @@ export async function planWithFallback(
   source: "llm" | "llm-cache" | "rules" | "previous" | "default";
   /** A live planner call returned (and was paid for), whatever became of its plan. */
   called?: boolean;
+  /**
+   * A live planner call was sent and did not come back (our timeout, a
+   * dropped connection): what was sent, as a floor, for the usage row
+   * (docs/spend/SPEC.md §1.2).
+   */
+  unanswered?: { model: string | null; inputTokens: number };
 }> {
   const ctx = {
     signals,
@@ -153,6 +181,7 @@ export async function planWithFallback(
     return movementReasons(composed, ctx).length ? null : { system, composed };
   };
   let called = false;
+  let unanswered: { model: string | null; inputTokens: number } | undefined;
 
   if (opts.llmEnabled !== false) {
     const cached = planCache.get(key);
@@ -160,25 +189,34 @@ export async function planWithFallback(
       const ok = accept(serverId(cached));
       if (ok) return { plan: ok.composed, source: "llm-cache" };
     }
+    const call = opts.call ?? livePlannerCall;
+    // Approved dynamic components join the prompt's registry table at load
+    // time (SPEC v1.3c) — the prompt file on disk is never mutated.
+    const prompt = opts.dynamicComponents?.length
+      ? `${plannerPrompt()}\n## Approved dynamic components (also valid, props-less)\n${opts.dynamicComponents
+          .map((d) => `| ${d.name} | — | ${d.description} |`)
+          .join("\n")}\n`
+      : plannerPrompt();
+    const signalsJson = JSON.stringify(signals);
+    // When the app stops waiting, the request is aborted too: a call left
+    // running would be billed for an answer nobody reads, and would report
+    // its usage into whichever call came next.
+    const abort = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // What this call costs is what it reports, not a figure left over from
+    // an earlier call.
+    lastPlannerUsage.model = null;
+    lastPlannerUsage.input = 0;
+    lastPlannerUsage.output = 0;
     try {
-      const call = opts.call ?? livePlannerCall;
-      // Approved dynamic components join the prompt's registry table at load
-      // time (SPEC v1.3c) — the prompt file on disk is never mutated.
-      const prompt = opts.dynamicComponents?.length
-        ? `${plannerPrompt()}\n## Approved dynamic components (also valid, props-less)\n${opts.dynamicComponents
-            .map((d) => `| ${d.name} | — | ${d.description} |`)
-            .join("\n")}\n`
-        : plannerPrompt();
-      // What this call costs is what it reports, not a figure left over
-      // from an earlier call.
-      lastPlannerUsage.model = null;
-      lastPlannerUsage.input = 0;
-      lastPlannerUsage.output = 0;
       const raw = await Promise.race([
-        call(prompt, JSON.stringify(signals)),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("planner timeout")), LLM_TIMEOUT_MS)
-        ),
+        call(prompt, signalsJson, abort.signal),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            abort.abort();
+            reject(new Error("planner timeout"));
+          }, plannerTimeoutMs());
+        }),
       ]);
       // It answered, so it was paid for, whether or not the answer validates.
       called = true;
@@ -193,15 +231,25 @@ export async function planWithFallback(
         planCache.set(key, serverId(ok.system));
         return { plan: { ...ok.composed, plan_id: `llm-${key}` }, source: "llm", called };
       }
-    } catch {
-      // fall through to rules
+    } catch (e) {
+      // Fall through to the rules. First, the money (docs/spend/SPEC.md
+      // §1.2): a call that reported its usage and then threw (a refusal) was
+      // answered and is billed as it reported. One that reported nothing was
+      // sent and never came back; unless the provider refused it outright,
+      // what was sent is counted.
+      if (lastPlannerUsage.model) called = true;
+      else if (mayHaveBeenBilled(e)) {
+        unanswered = { model: call.modelName ?? null, inputTokens: estimateSentTokens([prompt, signalsJson]) };
+      }
+    } finally {
+      clearTimeout(timer);
     }
   }
 
   // Without what he banned: a ban of his does not get the rules plan refused.
   const rulesPlan = withoutBanned(planFromRules(signals), opts.preferences);
   const rules = accept(rulesPlan);
-  if (rules) return { plan: rules.composed, source: "rules", called };
+  if (rules) return { plan: rules.composed, source: "rules", called, unanswered };
 
   // The rules plan would move or remove something of the system's that is
   // rationed today. Nothing of the system's moves then: the stored plan's
@@ -229,10 +277,10 @@ export async function planWithFallback(
       ],
     };
     const v = validatePlan(withoutBanned(standing, opts.preferences), { ...ctx, skipMovement: true });
-    if (v.ok) return { plan: compose(v.plan), source: "previous", called };
+    if (v.ok) return { plan: compose(v.plan), source: "previous", called, unanswered };
   }
 
-  return { plan: compose(defaultPlan(signals)), source: "default", called };
+  return { plan: compose(defaultPlan(signals)), source: "default", called, unanswered };
 }
 
 /** test hook */

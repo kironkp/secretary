@@ -22,6 +22,12 @@ export type TokenRate = {
   output: number;
   /** Discounted rate for re-read (cached) input. */
   cachedInput?: number;
+  /**
+   * Writing input to the prompt cache costs MORE than fresh input, by how
+   * long the cache is kept (Anthropic: 1.25 times for 5 minutes, 2 times for
+   * an hour). Absent for a provider that does not charge for a write.
+   */
+  cacheWrite?: { "5m": number; "1h": number };
 };
 
 /** Dollars per minute of audio. */
@@ -94,8 +100,30 @@ const CARD_2026_09: RateCard = {
   },
 };
 
+/**
+ * Cache writes get their own rate (v1.04, docs/spend/SPEC.md §1.1). Read on
+ * 2026-10-12 from https://platform.claude.com/docs/en/about-claude/pricing,
+ * the table "Base input / 5m cache writes / 1h cache writes / Cache hits /
+ * Output", dollars per million tokens: Fable 5 10 / 12.50 / 20 / 1 / 50,
+ * Opus 5 5 / 6.25 / 10 / 0.50 / 25, Sonnet 5 2 / 2.50 / 4 / 0.20 / 10. The
+ * same page states the rule: a 5-minute write is 1.25 times the base input
+ * price, a 1-hour write 2 times. Nothing else changed from the card before;
+ * a new card, not an edit, so a row from September is priced as it was.
+ */
+const CARD_2026_10: RateCard = {
+  ...CARD_2026_09,
+  effectiveFrom: "2026-10-12",
+  asOf: "2026-10-12",
+  rates: {
+    ...CARD_2026_09.rates,
+    "claude-fable-5": { kind: "per_token", input: 10, output: 50, cachedInput: 1.0, cacheWrite: { "5m": 12.5, "1h": 20 } },
+    "claude-opus-5": { kind: "per_token", input: 5, output: 25, cachedInput: 0.5, cacheWrite: { "5m": 6.25, "1h": 10 } },
+    "claude-sonnet-5": { kind: "per_token", input: 2, output: 10, cachedInput: 0.2, cacheWrite: { "5m": 2.5, "1h": 4 } },
+  },
+};
+
 /** Newest LAST. Append, never edit. */
-const CARDS: RateCard[] = [CARD_2026_09];
+const CARDS: RateCard[] = [CARD_2026_09, CARD_2026_10];
 
 /** The most expensive per-token rate we know of, used when a model is unknown
  *  so an unpriced call reads as "look at me", never as free. */
@@ -140,6 +168,10 @@ export type PricedInput = {
   audioInputTokens?: number | null;
   audioOutputTokens?: number | null;
   cachedInputTokens?: number | null;
+  /** Of inputTokens, how many were WRITTEN to the prompt cache (billed above the input rate). */
+  cacheWriteInputTokens?: number | null;
+  /** How long that cache is kept. Unknown is priced as the dearer one. */
+  cacheWriteLifetime?: "5m" | "1h" | null;
   at?: Date;
 };
 
@@ -187,18 +219,31 @@ export function priceUsage(row: PricedInput): Priced {
     return { usd, known, estimated: false };
   }
 
-  // per_token
+  // per_token: input is three kinds, each at its own rate. inputTokens is
+  // the total of all three; the read and the written parts are told apart.
   const cached = Math.min(row.cachedInputTokens ?? 0, row.inputTokens);
-  const fresh = row.inputTokens - cached;
+  const written = Math.min(Math.max(0, row.cacheWriteInputTokens ?? 0), row.inputTokens - cached);
+  const fresh = row.inputTokens - cached - written;
+  // A write whose price is not on the card, or whose lifetime nobody said,
+  // is priced as the dearer candidate: the 1-hour rate, or twice the input
+  // rate (what a 1-hour write is). Too high is the honest way to be wrong.
+  const lifetime = row.cacheWriteLifetime ?? null;
+  const writeRate = rate.cacheWrite ? rate.cacheWrite[lifetime ?? "1h"] : rate.input * 2;
+  const writeGuessed = written > 0 && (!rate.cacheWrite || lifetime === null);
   const usd =
     (fresh / PER_M) * rate.input +
     (cached / PER_M) * (rate.cachedInput ?? rate.input) +
+    (written / PER_M) * writeRate +
     (row.outputTokens / PER_M) * rate.output;
   return {
     usd,
     known,
-    estimated: !known,
-    note: known ? undefined : `no rate for "${row.model ?? "unknown"}" — priced at the ceiling`,
+    estimated: !known || writeGuessed,
+    note: !known
+      ? `no rate for "${row.model ?? "unknown"}" — priced at the ceiling`
+      : writeGuessed
+        ? "cache write priced at the dearer rate: its rate or its lifetime is not known"
+        : undefined,
   };
 }
 

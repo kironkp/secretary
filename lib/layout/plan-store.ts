@@ -9,7 +9,7 @@ import { REGISTRY_VERSION } from "./registry";
 import { composePlan } from "./compose";
 import { defaultPlan, sectionKey, type LayoutPlan } from "./plan";
 import { planWithFallback, type PlannerCall } from "./plan-from-llm";
-import { computeSignals, signalsHash, type Signals } from "./signals";
+import { computeSignals, layoutChanged, signalsHash, type Signals } from "./signals";
 import { listDynamicComponents, openPriorityWishes } from "./slow-loop";
 import type { LayoutPreference } from "./validator";
 
@@ -41,6 +41,23 @@ export async function getPreferences(userId: string): Promise<LayoutPreference[]
     .from(layoutPreferences)
     .where(eq(layoutPreferences.userId, userId));
   return rows;
+}
+
+/**
+ * The hash a plan about to be stored will be found under at the next render,
+ * if nothing else changes (docs/spend/SPEC.md §4, v1.04). A stored plan in
+ * which the system changed the layout resets the layout clock, and the clock
+ * is in the hash: stored under the hash of the signals as they were BEFORE
+ * it, the row that answered a situation made the next open look like a new
+ * one, and the planner was asked again. So a row that resets the clock is
+ * stored under the hash with the clock already reset. The pins are in the
+ * hash too, and a row carries its own: `pinned` are the keys of what he has
+ * placed on this plan. `previous` is the row it follows.
+ */
+export function hashOnceStored(signals: Signals, plan: LayoutPlan, previous: { spec: LayoutPlan; pinned: string[] } | null, pinned: string[]): string {
+  const resets = previous !== null && layoutChanged(previous, { spec: plan, pinned });
+  const context = { ...signals.context, pinned_sections: pinned, ...(resets ? { days_since_layout_change: 0 } : {}) };
+  return signalsHash({ ...signals, context }, REGISTRY_VERSION);
 }
 
 /** Everything an open reads: his signals, the stored row, his preferences. */
@@ -188,9 +205,15 @@ export async function persistPlan(
      * Without it, a refinement that came back unchanged (or invalid) left
      * the head's hash stale, and every new process paid for it again.
      */
+    // What this call itself stored the render's plan under, when it stored
+    // one: the hash the next open will compute (hashOnceStored), which is
+    // not `hash` when that row reset the layout clock. Such a row is this
+    // situation's, and must not be stamped back to the hash from before it.
+    let storedUnder: string | null = null;
+    const forThisSituation = (stored: string | null | undefined) => stored === hash || (storedUnder !== null && stored === storedUnder);
     const stamp = async () => {
       const head = await getPlanHead(userId);
-      if (head && head.signalsHash !== hash && planContent(head.spec as LayoutPlan) === planContent(bundle.plan)) {
+      if (head && !forThisSituation(head.signalsHash) && planContent(head.spec as LayoutPlan) === planContent(bundle.plan)) {
         await db.update(layoutSpecs).set({ signalsHash: hash }).where(eq(layoutSpecs.id, head.id));
       }
     };
@@ -198,6 +221,7 @@ export async function persistPlan(
       const head = await getPlanHead(userId);
       // Re-check under the fresh head (two renders can race; last write wins).
       if (!head || planContent(head.spec as LayoutPlan) !== planContent(bundle.plan)) {
+        storedUnder = hashOnceStored(bundle.signals, bundle.plan, head ? { spec: head.spec as LayoutPlan, pinned: head.pinned } : null, placedOn(bundle.plan));
         await db.insert(layoutSpecs).values({
           userId,
           version: (head?.version ?? 0) + 1,
@@ -205,7 +229,7 @@ export async function persistPlan(
           // What he placed is what carries a place on this board (one home for a pin, SPEC §2).
           pinned: placedOn(bundle.plan),
           kind: "plan",
-          signalsHash: hash,
+          signalsHash: storedUnder,
           reasonSummary: bundle.plan.reason_summary ?? null,
           outcome: "accepted",
         });
@@ -257,19 +281,24 @@ export async function persistPlan(
           outputTokens: lastPlannerUsage.output,
         });
       }
+    } else if (refined.unanswered) {
+      // Sent, and it never came back: counted at what was sent, so the cap
+      // sees it (docs/spend/SPEC.md §1.2).
+      const { recordUnanswered } = await import("@/lib/unanswered");
+      await recordUnanswered({ userId, kind: "layout", ...refined.unanswered });
     }
     if (refined.source !== "llm" && refined.source !== "llm-cache") return await stamp();
     if (planContent(refined.plan) === planContent(bundle.plan)) return await stamp();
     const head = await getPlanHead(userId);
     // Only land the refinement if the situation hasn't moved on meanwhile.
-    if (head?.signalsHash && head.signalsHash !== hash) return;
+    if (head?.signalsHash && !forThisSituation(head.signalsHash)) return;
     await db.insert(layoutSpecs).values({
       userId,
       version: (head?.version ?? 0) + 1,
       spec: refined.plan,
       pinned: placedOn(refined.plan),
       kind: "plan",
-      signalsHash: hash,
+      signalsHash: hashOnceStored(bundle.signals, refined.plan, head ? { spec: head.spec as LayoutPlan, pinned: head.pinned } : null, placedOn(refined.plan)),
       reasonSummary: refined.plan.reason_summary ?? null,
       outcome: "accepted",
     });

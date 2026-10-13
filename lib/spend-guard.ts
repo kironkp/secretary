@@ -113,8 +113,13 @@ export type PaidKind =
 /** The user's own turn: what SPEND_KILL still lets through. */
 const USER_TURN: readonly PaidKind[] = ["chat", "voice", "transcribe", "speech"];
 
-/** All background work may spend this much in 24 hours. 0 turns it off. */
-export const backgroundDailyCapUsd = () => envUsd("BACKGROUND_DAILY_CAP_USD", 4, true);
+/**
+ * All background work may spend this much in 24 hours. 0 turns it off. $3
+ * since v1.04 (it was $4): production has had 3 set since 2026-10-12, and a
+ * default looser than what production runs is a trap for the next
+ * environment (docs/spend/SPEC.md §2).
+ */
+export const backgroundDailyCapUsd = () => envUsd("BACKGROUND_DAILY_CAP_USD", 3, true);
 /** SPEND_KILL=true: no paid call but the user's own chat or voice turn. */
 export const spendKill = () => process.env.SPEND_KILL === "true";
 

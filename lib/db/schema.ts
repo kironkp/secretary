@@ -938,6 +938,11 @@ export const usage = pgTable("usage", {
   // Re-read input is a tenth the price; counting it as fresh overstates spend
   // and hides the benefit of caching.
   cachedInputTokens: integer("cached_input_tokens"),
+  // Of input_tokens, how many were WRITTEN to the prompt cache: billed above
+  // the input rate (docs/spend/SPEC.md §1.1). Empty on rows from before
+  // v1.04, which were priced with the write counted as fresh input and are
+  // not rewritten.
+  cacheWriteInputTokens: integer("cache_write_input_tokens"),
   // Dollars, computed at insert from lib/pricing.ts. Stored rather than
   // derived so a historical row keeps the price that was actually charged when
   // the rate card changes.

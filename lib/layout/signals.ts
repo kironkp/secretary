@@ -1,7 +1,7 @@
 // Signals (SPEC §4): the planner's entire view of the user's situation,
 // computed from existing data. Pure consumers (planFromRules, validator) take
 // this object; only computeSignals touches the database.
-import { and, desc, eq, gte, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gte, lt, or, sql } from "drizzle-orm";
 import { daysFromToday, isOpenWork } from "@/lib/due";
 import { db } from "@/lib/db";
 import { events, layoutSpecs, messages, projects, tasks, user } from "@/lib/db/schema";
@@ -149,9 +149,20 @@ export async function computeSignals(userId: string, now = new Date()): Promise<
           createdAt: layoutSpecs.createdAt,
         })
         .from(layoutSpecs)
-        .where(and(eq(layoutSpecs.userId, userId), eq(layoutSpecs.kind, "plan")))
+        // The newest rows, and every row of the last two days: the layout
+        // clock below is exact about "today" however many rows a day wrote.
+        .where(
+          and(
+            eq(layoutSpecs.userId, userId),
+            eq(layoutSpecs.kind, "plan"),
+            or(
+              gte(layoutSpecs.createdAt, new Date(now.getTime() - 2 * 86400000)),
+              gte(layoutSpecs.version, sql`(select coalesce(max(version), 0) - 9 from layout_specs where user_id = ${userId} and kind = 'plan')`)
+            )
+          )
+        )
         .orderBy(desc(layoutSpecs.version))
-        .limit(10),
+        .limit(CLOCK_ROWS),
     ]);
 
   const active = projectRows.filter((p) => p.status === "active");
@@ -227,26 +238,21 @@ export async function computeSignals(userId: string, now = new Date()): Promise<
   const nextEvent = eventRows.toSorted((a, b) => a.startsAt.getTime() - b.startsAt.getTime())[0];
   const density14d = eventRows.filter((e) => e.startsAt < in14d).length / 14;
 
-  // days_since_layout_change: days since the newest stored plan whose section
-  // ORDER differs from its predecessor's (emphasis-only changes don't count).
-  // The project cards are left out (SPEC §3 invariant 3, v1.02): they follow
-  // the data, so a card changing place is not a layout change. Counting them
-  // reset this clock on every re-sort, and the clock is in the signals hash,
-  // so each re-sort also paid for a second planner call.
+  // days_since_layout_change: days since the newest stored plan in which the
+  // SYSTEM changed the layout (layoutChanged, below): the system measured
+  // against the system, as the rationing is (SPEC §2, v1.02 r5).
   let daysSinceChange = Number.MAX_SAFE_INTEGER;
-  const orders = headRows.map((r) => {
-    const sections = (r.spec as { sections?: { component: string; props?: Record<string, unknown> }[] })
-      ?.sections ?? [];
-    return sections
-      .filter((s) => s.component !== "project_card")
-      .map((s) => s.component)
-      .join("|");
-  });
   for (let i = 0; i < headRows.length - 1; i++) {
-    if (orders[i] !== orders[i + 1]) {
+    if (layoutChanged(headRows[i + 1], headRows[i])) {
       daysSinceChange = dayDiff(now, headRows[i].createdAt);
       break;
     }
+  }
+  // Only so many rows are read. If two days wrote more than that and none of
+  // those read changed the layout, the last change is no newer than the
+  // oldest of them: counted from that row, never as "never".
+  if (daysSinceChange === Number.MAX_SAFE_INTEGER && headRows.length === CLOCK_ROWS) {
+    daysSinceChange = dayDiff(now, headRows[headRows.length - 1].createdAt);
   }
 
   const hour = now.getHours();
@@ -317,14 +323,62 @@ export async function computeSignals(userId: string, now = new Date()): Promise<
   };
 }
 
-/** Cache/decision-log key (SPEC §6): signals minus timestamps + registry version. */
+/** How many stored rows the layout clock reads at most (the newest ten, and all of the last two days). */
+const CLOCK_ROWS = 150;
+
+/** A stored row as the layout clock reads it. */
+type StoredBoard = { spec: unknown; pinned?: string[] | null };
+type StoredSection = { component: string; props?: Record<string, unknown>; place?: unknown };
+
+/** The sections of the default board that are not cards: his to hide and show, never the system's to add or drop. */
+export const DEFAULT_COMPONENTS: ReadonlySet<string> = new Set(["hero_next_up", "stat_row", "timeline", "date_chase", "people_index"]);
+
+/**
+ * Whether the SYSTEM changed the layout between two stored boards, the older
+ * and the newer (SPEC §2, v1.02 r5). The system is measured against the
+ * system: only the sections that are the system's on both boards are
+ * compared. Not the project cards, which follow the data. Not the banner,
+ * which is always first when there is one: it comes and goes with the
+ * planner's reading of the day, and counted, a planner that writes one every
+ * time it is asked paid for a call a day for ever. Not what he placed (it
+ * carries its place, or is on the row's pins). And not a section of the
+ * default board coming or going, which only he can do (a hide, a show, a
+ * ban). So none of his own requests spends the system's ration.
+ *
+ * What is left: the system's sections in a different order, or a section
+ * outside the default board that the system added or took away. One
+ * function, because the store asks the same question before it writes a row
+ * (hashOnceStored, lib/layout/plan-store.ts): will this row reset the clock?
+ */
+export function layoutChanged(older: StoredBoard, newer: StoredBoard): boolean {
+  const read = (board: StoredBoard) => {
+    const sections = ((board.spec as { sections?: StoredSection[] } | null)?.sections ?? []).filter(
+      (s) => s.component !== "project_card" && s.component !== "focus_banner"
+    );
+    const his = new Set([...sections.filter((s) => s.place !== undefined && s.place !== null).map((s) => s.component), ...(board.pinned ?? [])]);
+    return { his, systems: sections.map((s) => s.component).filter((c) => !his.has(c)) };
+  };
+  const [a, b] = [read(older), read(newer)];
+  const common = (list: string[], other: string[]) => list.filter((c) => other.includes(c)).join("|");
+  if (common(a.systems, b.systems) !== common(b.systems, a.systems)) return true;
+  const extra = (c: string) => !DEFAULT_COMPONENTS.has(c);
+  return a.systems.some((c) => extra(c) && !b.systems.includes(c) && !b.his.has(c)) || b.systems.some((c) => extra(c) && !a.systems.includes(c) && !a.his.has(c));
+}
+
+/**
+ * Cache/decision-log key (SPEC §6): signals minus timestamps + registry
+ * version. Of the layout clock it carries only what the rules read, whether
+ * a reorder is allowed yet (docs/spend/SPEC.md §4, v1.04): as a raw count of
+ * days it made every day after a change of layout a new situation, and a
+ * paid planner call.
+ */
 export function signalsHash(signals: Signals, registryVersion: number): string {
   const stable = JSON.stringify({
     v: registryVersion,
     p: signals.projects.map((p) => [p.id, p.deadline, p.days_left, p.open_count, p.done_count, p.subprojects.length]),
     e: Object.entries(signals.engagement).map(([id, e]) => [id, e.mentions_24h, e.baseline_mentions]),
     c: [signals.conversation.schedule_word_share, signals.conversation.questions_today.length],
-    x: [signals.context.days_since_layout_change, signals.context.pinned_sections, signals.context.calm_mode],
+    x: [signals.context.days_since_layout_change >= 1, signals.context.pinned_sections, signals.context.calm_mode],
     d: [signals.pending.items_missing_dates.length, signals.calendar.next_hard_commitment],
   });
   let h = 0;

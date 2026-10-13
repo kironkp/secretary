@@ -18,9 +18,9 @@ import { layoutPreferences, layoutSpecs, projects } from "@/lib/db/schema";
 import { bannerFirst, readPlaces } from "./compose";
 import { nameOfKey, type NamedProject } from "./names";
 import { defaultPlan, isUrgent, sectionKey, urgencyLabel, type LayoutPlan, type PlanSection } from "./plan";
-import { loadState, markPinPreferences, openOn, placedOn, type BoardState } from "./plan-store";
+import { hashOnceStored, loadState, markPinPreferences, openOn, placedOn, type BoardState } from "./plan-store";
 import { REGISTRY_COMPONENTS, REGISTRY_VERSION } from "./registry";
-import { signalsHash } from "./signals";
+import { layoutChanged, signalsHash } from "./signals";
 import type { LayoutPreference } from "./validator";
 
 const BANNER = "focus_banner";
@@ -233,8 +233,10 @@ export async function requestBoard(userId: string, request: BoardRequest): Promi
     const pinned = [...placed].filter((key) => on.has(key) && key !== BANNER);
     const draft: LayoutPlan = { plan_id, reason_summary: reason, sections: written(list, new Set(pinned)) };
     // The state as it will be once written: this board is the stored one, for
-    // exactly these signals, with these pins and preferences.
-    const after = { ...signals, context: { ...signals.context, pinned_sections: pinned } };
+    // exactly these signals, with these pins and preferences, and with the
+    // layout clock as this row leaves it.
+    const resets = state.head !== null && layoutChanged(state.head, { spec: draft, pinned });
+    const after = { ...signals, context: { ...signals.context, pinned_sections: pinned, ...(resets ? { days_since_layout_change: 0 } : {}) } };
     const next: BoardState = {
       ...state,
       signals: after,
@@ -304,7 +306,10 @@ export async function requestBoard(userId: string, request: BoardRequest): Promi
     spec: plan,
     pinned: stillPlaced,
     kind: "plan",
-    signalsHash: signalsHash({ ...signals, context: { ...signals.context, pinned_sections: stillPlaced } }, REGISTRY_VERSION),
+    // Under the hash the next open will work out for it (its own pins, the
+    // clock as this row leaves it): that open serves this very board, and the
+    // planner is not asked about a situation it has already answered.
+    signalsHash: hashOnceStored(signals, plan, head ? { spec: head.spec, pinned: head.pinned } : null, stillPlaced),
     reasonSummary: plan.reason_summary ?? null,
     outcome: "accepted",
   });

@@ -74,6 +74,8 @@ export type InterpretCall = ((input: { system: string; user: string }) => Promis
   /** Every input token billed, the cached part included (run.ts ModelCall says the same). */
   inputTokens: number;
   cachedInputTokens?: number;
+  /** Claude only: the part of inputTokens written to the prompt cache. */
+  cacheWriteInputTokens?: number;
   outputTokens: number;
 }>) &
   CallMeta;
@@ -295,11 +297,13 @@ async function claudeInterpretCall(userId: string): Promise<InterpretCall | null
     }
     const usage = response.usage;
     const cached = usage.cache_read_input_tokens ?? 0;
+    const written = usage.cache_creation_input_tokens ?? 0;
     return {
       output: response.parsed_output,
       model,
-      inputTokens: usage.input_tokens + (usage.cache_creation_input_tokens ?? 0) + cached,
+      inputTokens: usage.input_tokens + written + cached,
       cachedInputTokens: cached,
+      cacheWriteInputTokens: written,
       outputTokens: usage.output_tokens,
     };
   }, meta);
@@ -451,6 +455,7 @@ export async function interpretAnswer(
     inputTokens: result.inputTokens,
     outputTokens: result.outputTokens,
     cachedInputTokens: result.cachedInputTokens ?? 0,
+    cacheWriteInputTokens: result.cacheWriteInputTokens ?? null,
   });
 
   const parsed = interpretationOut.safeParse(result.output);

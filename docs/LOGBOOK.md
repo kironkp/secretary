@@ -216,6 +216,109 @@ understand all the whats". sec rev's round 2 (SEC-A007).
 
 ---
 
+## v1.04 — The count the caps read is the real one (2026-10-13)
+
+`3fec218`, `bb3a6c8`, `e222577`, `01e1759`, `418cf17` (the spec, docs/spend/SPEC.md,
+new: until now the spend rules lived only in code comments), `42d550f`,
+`9dd88ac`, `8f3ffd0`, `77c52a3`, `c323d19`, `a05c8e6` (the code and its
+tests), this commit
+
+Kiron, 2026-09-25, after a night of background reading cost about $40: "If
+an app spends so much we need a fail safe." A fail safe reads a count. This
+version is about the count: what was missing from it, what was priced too
+low in it, and what was paid for twice.
+
+- The cap on all background work is $3 a day when nothing sets it. It was
+  $4 in code and 3 on production; a default looser than what production
+  runs is a trap for the next environment. With both daily caps at $3,
+  understanding alone reaching $3 pauses all background work, and the push
+  that goes out is "Background work paused".
+- A cache write is priced as a cache write. Anthropic bills input written
+  to the prompt cache above the input rate (1.25 times for a 5-minute
+  cache, 2 times for an hour); the app counted it as plain input. The first
+  call of a chat turn that writes 20,000 tokens was recorded at $0.275 and
+  costs $0.325. A new rate card (2026-10-12, appended, not edited) has the
+  write rates, with the page and the day they were read. The lifetime the
+  app asks for is said in one place, lib/prompt-cache.ts; every request
+  takes its marker from there and the price is read from the same line.
+  When the lifetime or the rate is not known, the dearer one is charged and
+  the row is marked estimated.
+  The database: one column is added to `usage`,
+  `cache_write_input_tokens`, a whole number that may be empty. Nothing is
+  backfilled, renamed or removed, and no stored cost is rewritten. Applied
+  to a copy in main's shape with a row in it: the row kept its cost.
+- A planner call that was sent and never came back is counted. If the app
+  stopped waiting, or the connection dropped, nothing was recorded, so no
+  cap could see it. Now a row is written at what was sent (one token for
+  every two bytes; this app's requests measure 2.4 to 3.0 characters a
+  token, so that errs high), with no output guessed, marked estimated. A
+  refusal before any work (a rate limit, a bad key) writes nothing. An
+  answer that came back and was then refused is billed as it reported.
+  When the app stops waiting it also cancels the request.
+  This is done for the dashboard planner only. The others, read on this
+  branch, each leave no row when a call does not come back:
+
+  | Where | No answer | Answered, then thrown away |
+  |---|---|---|
+  | Inbound email, reading an attachment (lib/email-intake.ts:144) | no row | recorded |
+  | Suggestions (lib/secretary/suggestions.ts:129) | no row | no row when the answer does not parse; and after a restart the once-a-day gate is that row, so a failed day can be paid for again |
+  | Extraction (lib/secretary/extraction.ts:138, :214) | no row | Claude: recorded. OpenAI: no row when it does not parse. Either: no row when applying the answer fails |
+  | Understanding run (lib/understanding/run.ts:296, :388) | no row, and the sweep tries the same project again every 10 minutes | recorded |
+  | One-sentence read (lib/understanding/interpret.ts:285, :327) | no row | Claude refusing or returning nothing: no row |
+
+  The understanding run is the one that matters most: the largest request,
+  retried by every sweep, and none of it reaches the cap.
+- Work nobody asked for costs nothing when nothing changed. A new test
+  runs each kind of background work for real, twice over the same data and
+  once more as a new process would. Extraction failed it. The "read up to
+  here" mark was written back from the app, which keeps milliseconds, while
+  a message is stored to the microsecond, so the last message read was
+  "after the mark" for ever: extracting one unchanged conversation three
+  times made three paid calls, and every later read sent the last message
+  again. The mark is now written and compared inside the database.
+- A row written because of a change that is already known is not a new
+  situation. The planner is asked when a hash of his situation changes.
+  That hash held the number of days since the layout last changed, and
+  every stored plan that changes the order of the board resets that
+  number; it held his pins too, and his own move changes them. So the row
+  that answered a situation changed the hash it was stored under. Planner
+  calls for one change, the same day over three opens, then on each of the
+  four days after (two opens a day), with a planner that answers:
+
+  | The change | Before | After |
+  |---|---|---|
+  | He moves a card | 1, then 1 every day | 0, then 1 the next day, then 0 |
+  | He moves a section that is not a card | 1, then 1 every day | 0, then 1 the next day, then 0 |
+  | A planner answer adds a banner | 2, then 2, 1, 1, 1 | 1, then 1, 1, 0, 0 |
+  | A planner answer moves a section | 2, then 1 every day | 1, then 1 the next day, then 0 |
+
+  The hash now holds what the rules read from the clock (whether a reorder
+  is allowed yet), and a row is stored under the hash the next open will
+  work out for it. The one call on the day after a change of layout is
+  left on purpose: from that day the rules may reorder again, and the
+  planner is asked about that. Because the hash is made differently, the
+  first open after this ships asks the planner once.
+  Also here, because none of the above could be tested without it: a
+  planner answer was thrown away whenever his data changed and the board
+  did not (v1.02 carries the same line).
+- Found and not changed: the estimate an understanding run makes of its own
+  cost before it starts assumes 3 characters a token and says that errs
+  high; on this app's requests it errs low (2.4 to 3.0 measured). The old
+  layout generator (lib/layout/generator.ts) has no caller left, and its
+  usage row had no cost. The slow loop writes no usage row because it runs
+  on the claude.ai login with the API key removed, which bills nothing to
+  the API.
+- Checks: 1,198 tests, the production build, 62 browser specs on local
+  Chromium, all the way CI runs them. Each of 66 behaviours taken out in
+  turn failed a test. The same measurements were run on main and on this
+  branch: extracting one unchanged conversation three times, 3 paid calls
+  on main and 1 here; the 20,000-token cache write, $0.275 on main and
+  $0.325 here; a planner call whose connection drops, no row on main and
+  one estimated row here; and the planner calls in the table above. App
+  spend: $0.
+
+---
+
 ## v1.03 — A promised follow-up is asked (2026-10-12)
 
 `a03e399` (the spec), `bb4e929` (the code), this commit

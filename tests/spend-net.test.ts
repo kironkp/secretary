@@ -1,4 +1,4 @@
-// SEC-A004: the global safety net. BACKGROUND_DAILY_CAP_USD (default $4) over
+// SEC-A004: the global safety net. BACKGROUND_DAILY_CAP_USD (default $3 since v1.04; it was $4) over
 // everything that runs with no one asking; SPEND_KILL=true refuses every paid
 // call but the user's own chat or voice turn. Either pushes once a day. OpenAI
 // is a counting fake here; nothing leaves the machine.
@@ -57,14 +57,14 @@ afterAll(async () => {
   for (const id of users) await db.delete(user).where(eq(user.id, id));
 });
 
-describe("BACKGROUND_DAILY_CAP_USD: all background work together, $4 a day by default", () => {
+describe("BACKGROUND_DAILY_CAP_USD: all background work together, $3 a day by default", () => {
   it("counts understanding, extraction and suggestions together; not chat, not a web search", async () => {
-    expect(backgroundDailyCapUsd()).toBe(4);
+    expect(backgroundDailyCapUsd()).toBe(3);
     const userId = await newUser();
     await spend(userId, "chat", 10);
     await spend(userId, "other", 10, "gpt-5.4-mini"); // search_web
     expect((await paidCallAllowed(userId, "extraction")).ok).toBe(true);
-    await spend(userId, "understanding", 2);
+    await spend(userId, "understanding", 1.5);
     await spend(userId, "extraction", 1);
     expect((await paidCallAllowed(userId, "extraction")).ok).toBe(true);
     await spend(userId, "other", 1, "gpt-5.5"); // suggestions
