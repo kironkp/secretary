@@ -193,6 +193,20 @@ name, never its key.
 - Known cost, accepted: a place remembered past the end of a board that has
   grown short is read again as where the section stands the next time he
   speaks.
+- **After a request the cards stand where the rule puts them.** Everything
+  else keeps the order he saw; the cards he has not placed stand where the
+  rule above puts them on the board as it now is. On the usual order
+  nothing moves. On a board where the system has moved the tiles under the
+  cards, or Needs a date above them, a request that takes away or brings
+  back one of next up, the tiles, Needs a date or People (hide, show, ban,
+  lift, pin, unpin, remove, add back) can move the cards to the other side
+  of the tiles. Pin is the oddest of these: "Pin this section here" on
+  Needs a date makes it his, so it is no longer one of the system's
+  sections the cards are counted against. The reply shows him the board he
+  gets. The plain consequence: the system can keep the tiles under the
+  cards only while Needs a date or People stands between them. A limit
+  until the split (1.07), when a section a planner moved with a reason can
+  be told apart.
 - **A place is a position, not a neighbour.** When the card run moves (the
   bound above, a rule sending the strip up), a section he placed in the
   middle of the board keeps its count from the top or the bottom and may
