@@ -128,7 +128,14 @@ order. No stored plan is "kept as it stands".
    first. What he placed stays; a system move lands around it: with his list
    pinned on top, the timeline that rule 3 sends to the top is second. A
    section he added with `edit_layout_plan` is a placed section too: its spec
-   is kept in the stored plan and it is put at its place.
+   is kept in the stored plan and it is put at its place. Two sections he
+   placed at the same place keep the order the stored plan has them in: the
+   one placed later has the place, the earlier one sits next to it (the list
+   sent to the top, then Needs a date sent to the top: Needs a date, the
+   list). A place is counted from the top, so a section he later places
+   above an earlier pin does not push that pin down. A card he pinned does
+   not say where the card run goes: the system's first card he did not pin
+   does.
 3. **The cards he did not place, in data order**: every active project and
    list has a card unless he hid it, in the default order above (urgent
    first, then the one urgency order, lists last), flowing around the pinned
@@ -145,6 +152,13 @@ count, the engagement counts, the schedule-talk share and question count,
 `days_since_layout_change`, the pinned sections, calm mode, the count of
 items missing dates and the next hard commitment. When any of those changes
 the rules plan is today's and the planner is asked again in the background.
+So a planner's banner or why is shown only for the signals it was written
+for: a banner changes the section order, the day count starts at its
+writing, and the hash changes when that count next ticks, 24 hours later at
+the latest. Until then invariant 8 keeps it (a removal waits a day); after
+that it is gone unless the planner writes it again. The planner's answer is
+stored for the signals it was asked about also when the board itself did not
+change with them: the head is stamped with those signals before the call.
 
 Who pins: `arrange_dashboard`'s moves, `edit_layout_plan`'s `move` and `add`,
 and the pin button on a section. `show` does not pin (a card he un-hid was not
