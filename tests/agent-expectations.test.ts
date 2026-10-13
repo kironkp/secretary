@@ -8,6 +8,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { expectations, user } from "@/lib/db/schema";
 import { buildBriefing } from "@/lib/secretary/briefing";
+import { settleFollowUps } from "@/lib/secretary/expectations";
 import { isQuietHours } from "@/lib/secretary/persona";
 import { executeTool } from "@/lib/secretary/tools";
 
@@ -45,11 +46,12 @@ describe("expectations lifecycle", () => {
     await executeTool(ctx, "update_task", { task: "CPO 2073", status: "in_progress" });
     const [row] = await db.select().from(expectations).where(eq(expectations.userId, U.id));
     expect(row.status).toBe("cleared");
-    const briefing = await buildBriefing(U.id, ctx.timezone);
+    const briefing = await buildBriefing(U.id, ctx.timezone, { consumeNudges: true });
     expect(briefing.text).not.toContain("EXPECTATIONS MISSED");
+    expect(briefing.followUps).toEqual([]);
   });
 
-  it("misses fire at session start: batched into ONE ping, citing stakes, marked missed", async () => {
+  it("misses fire at session start: batched into ONE ping, citing stakes; missed once handed over", async () => {
     await executeTool(ctx, "create_expectation", {
       commitment: "CPO 2073 signed by Teresa",
       expected_update_by: hoursAgo(3),
@@ -60,7 +62,13 @@ describe("expectations lifecycle", () => {
       commitment: "CalCard payment confirmed with Walter",
       expected_update_by: hoursAgo(1),
     });
-    const briefing = await buildBriefing(U.id, ctx.timezone);
+    // A briefing that opens no session (a page load, the card, a consultation)
+    // neither shows them nor touches them (v1.03).
+    const passive = await buildBriefing(U.id, ctx.timezone);
+    expect(passive.text).not.toContain("EXPECTATIONS MISSED");
+    expect(passive.followUps).toEqual([]);
+
+    const briefing = await buildBriefing(U.id, ctx.timezone, { consumeNudges: true });
     const pingHeaders = briefing.text.match(/EXPECTATIONS MISSED/g) ?? [];
     expect(pingHeaders).toHaveLength(1); // batched — one ping, never a barrage
     expect(briefing.text).toContain("ONE combined question");
@@ -69,11 +77,36 @@ describe("expectations lifecycle", () => {
     expect(briefing.text).toContain("STAKES: miss reconcile → strike from HQ");
     expect(briefing.text).toContain("on_miss: escalate");
 
-    const rows = await db
-      .select()
-      .from(expectations)
-      .where(and(eq(expectations.userId, U.id), eq(expectations.status, "missed")));
-    expect(rows).toHaveLength(2);
+    // Building it changed nothing: they are missed only once whoever handed
+    // the briefing to the model says so.
+    const missed = () =>
+      db
+        .select()
+        .from(expectations)
+        .where(and(eq(expectations.userId, U.id), eq(expectations.status, "missed")));
+    expect(await missed()).toHaveLength(0);
+    expect(briefing.followUps).toHaveLength(2);
+    await settleFollowUps(U.id, briefing.followUps);
+    expect(await missed()).toHaveLength(2);
+    // And they are not raised a second time.
+    const next = await buildBriefing(U.id, ctx.timezone, { consumeNudges: true });
+    expect(next.text).not.toContain("EXPECTATIONS MISSED");
+  });
+
+  it("settling leaves alone a follow-up the user cleared in the meantime", async () => {
+    const { result } = await executeTool(ctx, "create_expectation", {
+      commitment: "settle-after-clear probe",
+      expected_update_by: hoursAgo(2),
+      task: "CPO 2073",
+    });
+    const id = (result as { expectation_id: string }).expectation_id;
+    const briefing = await buildBriefing(U.id, ctx.timezone, { consumeNudges: true });
+    expect(briefing.followUps).toContain(id);
+    // The report lands between the build and the hand-over.
+    await executeTool(ctx, "update_task", { task: "CPO 2073", status: "in_progress" });
+    await settleFollowUps(U.id, briefing.followUps);
+    const [row] = await db.select().from(expectations).where(eq(expectations.id, id));
+    expect(row.status).toBe("cleared");
   });
 
   it("quiet hours hold the ping instead of firing it at the user", async () => {
@@ -85,7 +118,7 @@ describe("expectations lifecycle", () => {
       commitment: "quiet-hours probe",
       expected_update_by: hoursAgo(1),
     });
-    const briefing = await buildBriefing(U.id, ctx.timezone);
+    const briefing = await buildBriefing(U.id, ctx.timezone, { consumeNudges: true });
     expect(briefing.text).toContain("quiet hours");
     expect(briefing.text).toContain("do NOT open with these");
   });
