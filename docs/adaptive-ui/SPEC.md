@@ -132,23 +132,33 @@ every way the board can change, with a model of its own.
    place. A planner cannot drop a default section, as it cannot drop a card.
 3. **The cards he did not place, in data order** (urgent first, then the one
    urgency order, lists last), in one run where the system's plan has it.
-   The right way up, whatever that plan says: the run goes after the last of
-   the system's next up and tiles, and before the first Needs a date or
-   People that stands below that point. Top wins: a planner may move one of
-   the system's sections with a reason (Needs a date raised above next up,
-   the tiles sunk under it), and the two halves cannot then both hold; the
-   planner keeps that freedom and the composition is total. "The system's"
-   is each section on its own: with next up his and at the bottom, the
-   bound is the tiles. It is worked out on the list the composition cuts
-   on, hidden sections included, and in one place (`runPlace`), which the
-   held path asks too.
-   The strip is not part of the bound. Bounded, the run lands right under
-   the tiles and above the strip. (A planner on main put urgent cards above
-   next up; read as "the run starts at the first card", such a plan put
-   every card above next up. On the day this version lands, with main's row
-   held, the run under the tiles and the strip under the cards is main's
-   own look; the next rules plan has the strip above the cards, with no
-   reason given, because the cards are outside the movement measure.)
+   The right way up, whatever that plan says: **the cards go where the
+   fewest of the system's sections end up on the wrong side of them.** Take
+   the system's own sections that are not cards, in its order (hidden ones
+   included, his left out). Next up and the tiles belong above the cards;
+   Needs a date and People belong below; the strip is neither. For each
+   place the run could go, count the above-sections that would be under
+   the cards plus the below-sections that would be over them. The run goes
+   at a place with the lowest count; among those, the nearest to where the
+   plan had it (its first own card; a plan with no card of its own, under
+   the strip); at equal distance, the upper one. Worked out in one place
+   (`runPlace`), which the held path asks too. Total: nothing is refused,
+   and a planner keeps its freedom to move one of the system's sections
+   with a reason.
+   With the system's order the usual one, that is: never above next up or
+   the tiles, never below Needs a date or People, and a plan that lists its
+   cards first has them right under the tiles, above the strip. With a
+   crossing (a planner raises Needs a date above next up, or sinks the
+   tiles to the bottom) no place has a count of zero, and the run stays as
+   near as it can to where the plan had it: the tiles sunk and the cards
+   left where they were is a board that is right, and is left alone.
+   (Why: a planner on main put urgent cards above next up; read as "the run
+   starts at the first card", such a plan put every card above next up, and
+   cards listed last went under People. On the day this version lands, with
+   main's row held, the run under the tiles and the strip under the cards
+   is main's own look; the next rules plan has the strip above the cards,
+   with no reason given, because the cards are outside the movement
+   measure.)
 4. **What he placed, at its place.** A place is a position on the board he
    was last told (below). Top-counted sections go in in place order, each at
    its place; then bottom-counted ones, each at its place from the end. On a
@@ -187,10 +197,13 @@ name, never its key.
   bound above, a rule sending the strip up), a section he placed in the
   middle of the board keeps its count from the top or the bottom and may
   get new neighbours.
-- **Rows main wrote.** What he placed with the voice tool or the pin button
-  is on the row's pins and stays where he put it; its place is read once
-  from the stored order, without the components retired since (main still
-  stored them, the page does not draw them). A card he moved above next up
+- **Rows main wrote.** A component retired since (main still stored it, the
+  page draws nothing for it) is taken out of a stored row wherever the row
+  is read as a board: at the composition's door, for the row as the system
+  plan and for the row as where his places are, so it is on no board, in no
+  count of places, and not told to the model. What he placed with the
+  voice tool or the pin button is on the row's pins and stays where he put
+  it; its place is read once from that stored order. A card he moved above next up
   with main's chat tool was never pinned on main: it is read as the
   system's, follows the data, and does not say where the run goes. Main
   lost that move at the next change in his data anyway.
@@ -296,7 +309,14 @@ without one is refused. As before v1.02 for the strip. Task 1.06.
 
 **Put it back** is a request: the earlier row's board, with what he had
 placed on it at the places that row wrote, on today's data and under today's
-hides; through an open, written, answered, and every place read again. It
+hides; through an open, written, answered, and every place read again.
+It does not step behind the first board stored under this version: a row
+written before it is not a board Put it back returns to, and the request is
+refused in plain words with nothing written (every row stored since carries
+a mark, `composed`, and a row without it is from before). The first open
+after the update was not a request of his, and reading main's row as a
+board through this path lost a pin he had. One undo step is lost at the
+update. It
 does not bring back what he hid: **Put it back does not undo a hide or a
 show**; hides live outside the versions. A section he had added that the
 earlier board does not have goes with it, whether he added it since or only
