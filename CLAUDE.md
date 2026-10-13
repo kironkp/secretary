@@ -68,6 +68,29 @@ whether the code runs.
   Executor proposes rule changes to the Planner (Kiron agreed, 2026-10-06).
 
 
+## The plan, and cycle versions (2026-10-12)
+- `docs/jarvis/PLAN.md` is the roadmap, the current task and the next action.
+  Read its "Now" section before starting work.
+- Where the plan disagrees with the 2026-09-15 READ FIRST block above, the
+  plan wins: production is up, and new work follows the plan, not "fix the
+  Canvas first". Still true from that block: Heroku is the source of truth
+  and `com.secretary.dailysync` stays disabled.
+- Kiron: "commit versions with the numbers 1.00 1.01 etc to git hub as you
+  go." One accepted checkpoint is one cycle, and "accepted" means the
+  Reviewer's VERDICT is PASS. The commit the Executor offers as final is
+  itself titled `v1.NN: …` and carries the LOGBOOK entry headed `v1.NN` and
+  the version in `package.json` and `package-lock.json` (two places):
+  `1.0.N`, no leading zero, so 1.01 is `1.0.1` and 1.10 is `1.0.10`.
+- A FAIL means another commit on top, titled `v1.NN r2: …`. Nothing is
+  retitled, squashed or rewritten; the PASS names the range and the Planner
+  pushes that exact SHA to main, as the Pushing rules say. Unfinished work
+  pushed along the way is `WIP 1.NN …` and is not a version. No git tags.
+- Secretary worktrees go under `~/code/secretary-extras/worktrees/`, not loose
+  in `~/code`. `touch sim/.disabled` in a new worktree before its first
+  commit: the post-commit hook otherwise starts the simulator, which makes
+  real model calls.
+
+
 ## North star: JARVIS
 - The goal is ONE persistent intelligent system you talk to — it knows the
   user's information, can act on it, and fluidly manipulates a visual
@@ -128,7 +151,14 @@ whether the code runs.
 - Full spec: docs/adaptive-ui/SPEC.md — source of truth. To change behavior,
   update the spec first, then the code.
 
-## The Workspace (proposed, not built)
+## The Workspace (partly built, not yet the main surface)
+- On main as of 2026-10-12: the board, collapse, focus, undo, and widgets
+  that show live data. Drag and resize exist at 768 px and wider only; on a
+  phone the board is one stacked column. Not built anywhere: ticking a task
+  on the board (the row is marked, nothing handles the tap), adding a row,
+  keyboard control. Not on main: voice control (WIP on
+  `sec-a008a-workspace`) and the merge with Dashboard. It is reached from
+  Settings › More screens.
 - `docs/workspace/SPEC.md` is the plan for the surface that replaces the Canvas:
   a board of draggable, resizable widgets bound to LIVE data, driven equally by
   voice and touch. The Canvas itself stays untouched until the Workspace wins,
