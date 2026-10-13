@@ -125,7 +125,7 @@ const REFUSAL_SAYS: Record<string, RegExp> = {
   "hiding what is already hidden": /There's no /,
   "a section that is not on the board": /There's no /,
   "adding what is already on the board": /already on the dashboard/,
-  "a card for something that is not on the board": /has no card on the dashboard/,
+  "a card for something that is not on the board": /has no card on the dashboard|There's no /,
   "a subproject has no card": /has no card on the dashboard|There's no /,
   "a section he added cannot be unpinned": /stays where you put it/,
   "he asked never to be shown it": /never to be shown/,
@@ -522,6 +522,8 @@ async function walk(index: number) {
     for (const { op, key } of ops) {
       const onBoard = (model ?? before).includes(key);
       if (op !== "hide" && banned.has(key.split(":")[0])) predicted.push("he asked never to be shown it");
+      // A card he hid whose project has since been archived: there is no card to show or to move.
+      if (op !== "hide" && isCard(key) && ![...ids.values()].some((pid) => `project_card:${pid}` === key)) predicted.push("a card for something that is not on the board");
       // The last word about a section wins: an urgent card hidden and then shown in the same request is not hidden.
       if (op === "hide" && isCard(key) && urgent.has(key) && ops.findLast((o) => o.key === key)?.op === "hide") predicted.push("an urgent card cannot be hidden");
       if (op === "hide" && !onBoard) predicted.push("hiding what is already hidden");
