@@ -79,6 +79,23 @@ describe("what counts as urgent", () => {
   });
 });
 
+describe("the default puts urgent cards first, whatever makes them urgent", () => {
+  it("a project urgent only by a date the order key does not see (an event in five days) still comes before the quiet cards", () => {
+    const signals = board(2);
+    // Nothing of its own is dated, so the urgency order alone would sort it with
+    // the undated projects, after "Quiet two" (40 days out).
+    const meeting: ProjectSignal = { ...project("Meeting week", null), days_left: 5 };
+    signals.projects.push(meeting);
+    signals.engagement[meeting.id] = { mentions_24h: 0, baseline_mentions: 2, last_touched: "2026-08-05T12:00:00Z" };
+    expect(isUrgent(meeting)).toBe(true);
+    const ids = cards(defaultPlan(signals));
+    expect(ids.indexOf("meeting-week")).toBeLessThan(ids.indexOf("quiet-two"));
+    expect(ids.slice(0, 4).toSorted()).toEqual(["late-a", "late-b", "meeting-week", "soon"]);
+    expect(reasonsOf(validatePlan(defaultPlan(signals), ctx(signals)))).toBe("ok");
+    expect(reasonsOf(validatePlan(planFromRules(signals), ctx(signals)))).toBe("ok");
+  });
+});
+
 describe.each([5, 6, 9])("a board with %i late projects", (late) => {
   const signals = board(late);
 
@@ -224,6 +241,51 @@ describe("a board left as it stands is what renders", () => {
     expect(res.source).toBe("previous");
     expect(res.plan.sections.map(sectionKey)).toEqual(arranged.sections.map(sectionKey));
     expect(cards(res.plan)[0]).toBe("shopping");
+  });
+});
+
+describe("the stored plan kept as it stands is not judged as a planner's plan", () => {
+  it("a pinned board whose plan is still named default keeps its order when the rules plan is refused", async () => {
+    const signals = board(5);
+    signals.context.days_since_layout_change = 3;
+    // He pinned Needs a date just under the hero; nothing else was arranged, so the plan is still "default".
+    const base = defaultPlan(signals);
+    const chase = base.sections.find((s) => s.component === "date_chase")!;
+    const stored: LayoutPlan = { ...base, sections: [base.sections[0], chase, ...base.sections.slice(1).filter((s) => s !== chase)] };
+    const res = await planWithFallback(signals, { previousPlan: stored, preferences: [], pinnedSections: ["date_chase"], llmEnabled: false });
+    expect(res.source).toBe("previous");
+    expect(res.plan.sections.map(sectionKey)).toEqual(stored.sections.map(sectionKey));
+  });
+
+  it("its whys are its own: kept, a why on an unchanged section stays; in a planner's plan it is stripped", () => {
+    const signals = board(5);
+    const base = defaultPlan(signals);
+    const noted: LayoutPlan = { ...base, plan_id: "user-abc", sections: base.sections.map((s) => (s.component === "stat_row" ? { ...s, why: "You asked for the numbers up here" } : s)) };
+    const kept = validatePlan(noted, ctx(signals, { previousPlan: noted, kept: true }));
+    expect(kept.ok && kept.plan.sections.find((s) => s.component === "stat_row")?.why).toBe("You asked for the numbers up here");
+    const planners = validatePlan({ ...noted, plan_id: "rules-x" }, ctx(signals, { previousPlan: noted }));
+    expect(planners.ok && planners.plan.sections.find((s) => s.component === "stat_row")?.why).toBeUndefined();
+  });
+
+  it("a card added below a pinned section, or above one, does not count as the pin moving", async () => {
+    const signals = board(5);
+    signals.context.days_since_layout_change = 3;
+    // The list on top and Needs a date sent to the very bottom, both pinned where he put them.
+    const top = listOnTop(signals);
+    const chase = top.sections.find((s) => s.component === "date_chase")!;
+    const arranged: LayoutPlan = { ...top, sections: [...top.sections.filter((s) => s !== chase), chase] };
+    const stored: LayoutPlan = { ...arranged, sections: arranged.sections.filter((s) => s.props?.project_id !== "late-c") };
+    const res = await planWithFallback(signals, {
+      previousPlan: stored,
+      preferences: [],
+      pinnedSections: ["project_card:shopping", "date_chase"],
+      llmEnabled: false,
+    });
+    expect(res.source).toBe("previous");
+    const keys = res.plan.sections.map(sectionKey);
+    expect(keys.filter((k) => k !== "project_card:late-c")).toEqual(stored.sections.map(sectionKey));
+    expect(keys.at(-1)).toBe("date_chase");
+    expect(keys).toContain("project_card:late-c");
   });
 });
 

@@ -170,5 +170,12 @@ describe("a card he hid comes back when its project goes late", () => {
     const again = await computeCurrentPlan(b.id);
     expect(again.plan.sections.map(sectionKey)).toEqual(keys);
     expect(again.changed).toBe(false);
+    // Also when nothing has changed since and the stored plan is served as it
+    // is (no planner of any kind): his "hide" must not take the card away again.
+    await persistPlan(b.id, again);
+    const served = await computeCurrentPlan(b.id);
+    expect(served.wantsLlmRefinement).toBe(false);
+    expect(served.plan.sections.map(sectionKey)).toEqual(keys);
+    expect(served.changed).toBe(false);
   });
 });
