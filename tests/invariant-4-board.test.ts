@@ -16,6 +16,8 @@ import { layoutPreferences, layoutSpecs, projects, tasks, usage, user } from "@/
 import { defaultPlan, isUrgent, sectionKey, type LayoutPlan } from "@/lib/layout/plan";
 import { clearPlanCache, lastPlannerUsage } from "@/lib/layout/plan-from-llm";
 import { computeCurrentPlan, getPlanHead, persistPlan } from "@/lib/layout/plan-store";
+import { REGISTRY_VERSION } from "@/lib/layout/registry";
+import { computeSignals, signalsHash } from "@/lib/layout/signals";
 import { executeTool, liveTurnContext } from "@/lib/secretary/tools";
 
 const TZ = "America/Los_Angeles";
@@ -141,6 +143,64 @@ describe.each([5, 6, 9])("a board with %i late projects", (late) => {
     const { result } = await b.arrange([{ op: "hide", section: "Atlas" }]);
     expect((result as { error?: string }).error).toMatch(/urgent project "Atlas" \(2d late\) would have no card/);
     expect((await getPlanHead(b.id))!.version).toBe(before!.version);
+  });
+});
+
+describe("a stored plan the system wrote, with a quiet card ahead of late work, is not kept", () => {
+  /** His board with a planner's plan stored three days ago: a quiet project's card above every late one. */
+  async function withPlannerPlan(plan_id = "llm-old") {
+    const b = await board(5);
+    const signals = await computeSignals(b.id);
+    const base = defaultPlan(signals);
+    const quiet = base.sections.find((s) => s.props?.project_id === b.ids.Iris)!;
+    const firstCard = base.sections.findIndex((s) => s.component === "project_card");
+    const rest = base.sections.filter((s) => s !== quiet);
+    const stored: LayoutPlan = { plan_id, reason_summary: "Iris first today", sections: [...rest.slice(0, firstCard), { ...quiet, why: "You asked about it" }, ...rest.slice(firstCard)] };
+    const [row] = await db
+      .insert(layoutSpecs)
+      .values({ userId: b.id, version: 1, spec: stored, pinned: [], kind: "plan", signalsHash: "an-older-situation", reasonSummary: stored.reason_summary, outcome: "accepted", createdAt: day(-3) })
+      .returning();
+    return { b, stored, row, defaultCards: base.sections.filter((s) => s.component === "project_card").map(sectionKey) };
+  }
+  const cardKeys = (plan: LayoutPlan) => plan.sections.filter((s) => s.component === "project_card").map(sectionKey);
+
+  it("the default renders, urgent first; then it is the stored head, with no why anywhere, and the planner's plan does not come back", async () => {
+    const { b, defaultCards } = await withPlannerPlan();
+    const bundle = await computeCurrentPlan(b.id);
+    expect(bundle.plan.plan_id).toBe("default");
+    expect(cardKeys(bundle.plan)).toEqual(defaultCards);
+    expect(bundle.plan.sections.some((s) => s.why)).toBe(false);
+    expect(bundle.plan.reason_summary ?? null).toBeNull();
+    expect(bundle.changed).toBe(true);
+
+    // What the dashboard stores after it renders: the default becomes the head; the planner's plan is history.
+    await persistPlan(b.id, bundle);
+    const head = (await getPlanHead(b.id))!;
+    expect(head.version).toBe(2);
+    expect((head.spec as LayoutPlan).plan_id).toBe("default");
+    expect(await db.select().from(layoutSpecs).where(eq(layoutSpecs.userId, b.id))).toHaveLength(2);
+
+    // The pair is gone (the late work is finished): the old planner plan stays in history.
+    await db.update(tasks).set({ status: "done", completedAt: new Date() }).where(eq(tasks.userId, b.id));
+    const later = await computeCurrentPlan(b.id);
+    expect(later.plan.plan_id).toBe("default");
+    expect(cardKeys(later.plan)[0]).not.toBe(b.card("Iris"));
+  });
+
+  it("the same when nothing has changed since it was stored: it is not served from the cache", async () => {
+    const { b, row, defaultCards } = await withPlannerPlan();
+    await db.update(layoutSpecs).set({ signalsHash: signalsHash(await computeSignals(b.id), REGISTRY_VERSION) }).where(eq(layoutSpecs.id, row.id));
+    const bundle = await computeCurrentPlan(b.id);
+    expect(cardKeys(bundle.plan)).toEqual(defaultCards);
+  });
+
+  it("arranged by him, the very same stored plan renders as stored; so does the planner's with one pin of his", async () => {
+    const mine = await withPlannerPlan("user-abc");
+    expect((await computeCurrentPlan(mine.b.id)).plan.sections.map(sectionKey)).toEqual(mine.stored.sections.map(sectionKey));
+
+    const pinned = await withPlannerPlan();
+    await db.update(layoutSpecs).set({ pinned: ["stat_row"] }).where(eq(layoutSpecs.id, pinned.row.id));
+    expect((await computeCurrentPlan(pinned.b.id)).plan.sections.map(sectionKey)).toEqual(pinned.stored.sections.map(sectionKey));
   });
 });
 

@@ -120,6 +120,33 @@ export function withUrgentCards(plan: LayoutPlan, signals: Signals): LayoutPlan 
   return { ...plan, sections };
 }
 
+/** Is a project card that is not urgent ahead of one that is, anywhere among the plan's cards? */
+export function quietAheadOfUrgent(plan: LayoutPlan, signals: Signals): boolean {
+  const urgent = new Set(signals.projects.filter(isUrgent).map((p) => p.id));
+  let quietSeen = false;
+  for (const s of plan.sections) {
+    if (s.component !== "project_card") continue;
+    if (!urgent.has(String(s.props?.project_id ?? ""))) quietSeen = true;
+    else if (quietSeen) return true;
+  }
+  return false;
+}
+
+/**
+ * Whether a STORED plan is kept as it stands (SPEC §3 invariant 4, v1.02).
+ * Always when its order is the user's own: he arranged it (the arrange tool
+ * and the chat edit name their plans user-… and chat-…), or it carries a pin
+ * of his. A plan the system wrote (planner, rules, default) only while it has
+ * no card that is not urgent ahead of an urgent one, counting the cards an
+ * urgent project is owed; once it has, it is not kept and the default is
+ * shown, like any other stored plan that fails. The system's own stale order
+ * is nobody's to protect.
+ */
+export function standsAsStored(plan: LayoutPlan, pins: string[], signals: Signals): boolean {
+  const users = /^(user|chat)-/.test(plan.plan_id) || plan.sections.some((s) => pins.includes(sectionKey(s)));
+  return users || !quietAheadOfUrgent(withUrgentCards(plan, signals), signals);
+}
+
 /**
  * DEFAULT_PLAN (SPEC §2): also the fallback and the calm-mode plan. Depends on
  * the user's active projects, so it's a function of signals. Deterministic:

@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { openai, PLANNER_MODEL } from "@/lib/openai";
 import type Anthropic from "@anthropic-ai/sdk";
 import { REGISTRY_VERSION } from "./registry";
-import { defaultPlan, withUrgentCards, type LayoutPlan } from "./plan";
+import { defaultPlan, standsAsStored, withUrgentCards, type LayoutPlan } from "./plan";
 import { planFromRules } from "./plan-from-rules";
 import { signalsHash, type Signals } from "./signals";
 import { applyBans, validatePlan, type LayoutPreference } from "./validator";
@@ -190,7 +190,15 @@ export async function planWithFallback(
   // not judged as a new plan: nothing in it moved, and the order in it may be
   // the user's own. If a project went late since it was stored, its card is
   // added rather than the whole arrangement being thrown away for lacking it.
-  if (opts.previousPlan) {
+  // That holds for a plan the user arranged or pinned. A plan the system
+  // wrote is kept only while no card that is not urgent sits ahead of an
+  // urgent one; a planner's order from weeks ago is not kept over late work,
+  // and the default below is shown instead.
+  const pins = [
+    ...opts.pinnedSections,
+    ...opts.preferences.filter((p) => p.kind === "pin_section").map((p) => p.value.section),
+  ];
+  if (opts.previousPlan && standsAsStored(opts.previousPlan, pins, signals)) {
     const prev = validatePlan(withUrgentCards(opts.previousPlan, signals), { ...ctx, kept: true });
     if (prev.ok) return { plan: finish(prev.plan), source: "previous", called };
   }

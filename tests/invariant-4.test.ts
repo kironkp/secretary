@@ -244,6 +244,80 @@ describe("a board left as it stands is what renders", () => {
   });
 });
 
+describe("a stored plan is kept as it stands only when the user made it", () => {
+  const signals = board(5);
+  signals.context.days_since_layout_change = 3;
+  const first = cards(defaultPlan(signals))[0];
+  // A quiet project's card above every late one: by the planner, by him, or pinned.
+  const quietOnTop = (plan_id: string): LayoutPlan => ({ ...moveBefore(defaultPlan(signals), "quiet-one", first), plan_id });
+  const render = (previousPlan: LayoutPlan, pinnedSections: string[] = []) =>
+    planWithFallback(signals, { previousPlan, preferences: [], pinnedSections, llmEnabled: false });
+
+  it("(a) the system wrote it: not kept, and the default renders, urgent first", async () => {
+    for (const id of ["llm-abc", "rules-abc", "plan-20260917", "default"]) {
+      const res = await render(quietOnTop(id));
+      expect(res.source, id).toBe(id === "default" ? "rules" : "default");
+      expect(cards(res.plan), id).toEqual(cards(defaultPlan(signals)));
+      expect(cards(res.plan)[0], id).not.toBe("quiet-one");
+    }
+  });
+
+  it("(b) the same plan arranged by him, by the arrange tool or in the chat, renders as stored", async () => {
+    for (const id of ["user-abc", "chat-abc"]) {
+      const stored = quietOnTop(id);
+      const res = await render(stored);
+      expect(res.source, id).toBe("previous");
+      expect(res.plan.sections.map(sectionKey), id).toEqual(stored.sections.map(sectionKey));
+    }
+  });
+
+  it("(c) the same system plan with one pin of his renders as stored", async () => {
+    const stored = quietOnTop("llm-abc");
+    const res = await render(stored, ["stat_row"]);
+    expect(res.source).toBe("previous");
+    expect(res.plan.sections.map(sectionKey)).toEqual(stored.sections.map(sectionKey));
+    // A pin on a section that is not on this plan is not a pin on this plan.
+    expect((await render(stored, ["kanban"])).source).toBe("default");
+    // And a pin kept as a preference counts like one stored with the plan.
+    const viaPreference = await planWithFallback(signals, {
+      previousPlan: stored,
+      preferences: [{ kind: "pin_section", value: { section: "stat_row" } }],
+      pinnedSections: [],
+      llmEnabled: false,
+    });
+    expect(viaPreference.source).toBe("previous");
+  });
+
+  it("(d) a system plan with no such pair is kept: the planner's work is not thrown away for nothing", async () => {
+    const base = defaultPlan(signals);
+    const strip = base.sections.find((s) => s.component === "timeline")!;
+    // The planner put the strip on top and made the cards compact; the cards are still urgent first.
+    const stored: LayoutPlan = {
+      plan_id: "llm-abc",
+      reason_summary: "Dates all day",
+      sections: [{ ...strip, why: "You have been talking dates" }, ...base.sections.filter((s) => s !== strip).map((s) => (s.component === "project_card" ? { ...s, props: { ...s.props, variant: "compact" } } : s))],
+    };
+    const res = await render(stored);
+    expect(res.source).toBe("previous");
+    expect(res.plan.sections.map(sectionKey)).toEqual(stored.sections.map(sectionKey));
+    expect(res.plan.reason_summary).toBe("Dates all day");
+  });
+
+  it("a system plan that only has the pair because a project went late since is not kept either", async () => {
+    // Stored when nothing was late: quiet cards only. Now one project is late.
+    const calm: LayoutPlan = { plan_id: "llm-abc", reason_summary: null, sections: [{ component: "hero_next_up" }, card("quiet-one"), card("quiet-two"), { component: "date_chase" }] };
+    const one = board(1);
+    one.projects = one.projects.filter((p) => ["late-a", "quiet-one", "quiet-two"].includes(p.id));
+    one.context.days_since_layout_change = 3;
+    const res = await planWithFallback(one, { previousPlan: calm, preferences: [], pinnedSections: [], llmEnabled: false });
+    expect(cards(res.plan)[0]).toBe("late-a");
+    // Arranged by him, the same board is kept, with the late card added at the end of his cards.
+    const his = await planWithFallback(one, { previousPlan: { ...calm, plan_id: "user-abc" }, preferences: [], pinnedSections: [], llmEnabled: false });
+    expect(his.source).toBe("previous");
+    expect(cards(his.plan)).toEqual(["quiet-one", "quiet-two", "late-a"]);
+  });
+});
+
 describe("the stored plan kept as it stands is not judged as a planner's plan", () => {
   it("a pinned board whose plan is still named default keeps its order when the rules plan is refused", async () => {
     const signals = board(5);
