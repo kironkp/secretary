@@ -122,7 +122,12 @@ order. No stored plan is "kept as it stands".
    else DEFAULT_PLAN. From it
    come the emphasis (variant, accent, what is unfolded), the whys, the
    banner, and the places of the sections that are not cards. Whatever card
-   order it carries is ignored.
+   order it carries is ignored. A why that rule 1 wrote counts days, so it is
+   written again with today's count at every render, from whatever plan it
+   is read (a stored plan served from the cache, a plan he saved, a
+   planner's that kept it): the cache is keyed by `days_left`, which ticks at
+   the hour the task is due, and the chip counts calendar days, which tick at
+   midnight. The hash is not changed for this, so it costs no planner call.
 2. **The sections the user placed, put back where he put them.** A pin holds
    the section's place on the board: the n-th section from the top, n counted
    when it was pinned, the banner not counted; a section pinned in the
@@ -141,7 +146,11 @@ order. No stored plan is "kept as it stands".
    list). A place is counted from the top, so a section he later places
    above an earlier pin does not push that pin down. A card he pinned does
    not say where the card run goes: the system's first card he did not pin
-   does.
+   does. That is one rule in one place (`ownSections`, lib/layout/compose.ts:
+   a plan's sections without the banner and without what he placed), and
+   every system plan is read through it, the held one included (r4: the held
+   plan found the run by its first card, his pinned list on top was that
+   card, and the whole board went under the cards).
 3. **The cards he did not place, in data order**: every active project and
    list has a card unless he hid it, in the default order above (urgent
    first, then the one urgency order, lists last), flowing around the pinned
@@ -158,17 +167,34 @@ count, the engagement counts, the schedule-talk share and question count,
 `days_since_layout_change`, the pinned sections, calm mode, the count of
 items missing dates and the next hard commitment. When any of those changes
 the rules plan is today's and the planner is asked again in the background.
-So a planner's banner or why is shown only for the signals it was written
-for: a banner changes the section order, the day count starts at its
+So a planner's banner or why counts as today's only for the signals it was
+written for: a banner changes the section order, the day count starts at its
 writing, and the hash changes when that count next ticks, 24 hours later at
-the latest. Until then invariant 8 keeps it (a removal waits a day); after
-that it is gone unless the planner writes it again. The planner's answer is
-stored for the signals it was asked about also when the board itself did not
-change with them: the head is stamped with those signals before the call.
+the latest. Until then invariant 8 keeps it (a removal waits a day). The
+planner's answer is stored for the signals it was asked about also when the
+board itself did not change with them: the head is stamped with those
+signals before the call.
+
+**A stated limit: what the system moved does not go back by itself.** When
+the hash changes, the rules plan is today's candidate, and it is refused
+whenever it would move one of the system's own sections without a why
+(invariant 3). Going back to the default place has no why. So after rule 3
+has sent the strip to the top, it stays there when the talk about dates
+stops, still saying "You've been talking dates all day"; a planner's banner
+stays, past its day, if that planner plan had also moved a section; and a
+section he unpinned that is not a card stays where he had put it. In each
+case the stored sections are held and only the cards are today's. This is
+as it was before v1.02 for rule 3. The fix (a section the system moved goes
+back when its reason stops, and that return needs no why) is task 1.06.
 
 Who pins: `arrange_dashboard`'s moves, `edit_layout_plan`'s `move` and `add`,
 and the pin button on a section. `show` does not pin (a card he un-hid was not
-placed by him). Hiding, the section leaving the board, the pin button, and
+placed by him). `add` of something he had hidden is a show: the hide is
+lifted and nothing is pinned, when the board has that section anyway (a
+project's card, a section of the default board); a section the board does
+not have by itself is added and pinned as any other, with its hide lifted.
+Unpinning a card lets it follow the data again; unpinning another section
+leaves it where it is (the limit above). Hiding, the section leaving the board, the pin button, and
 Undo of the move that made it remove a pin (Undo puts back the previous
 version of the board, its pins included). `remove` in `edit_layout_plan` is a hide, for a card or any
 other section. No tool answers that a change was applied when the next render
