@@ -590,9 +590,10 @@ async function walk(index: number) {
       } else if (r.chance(0.2) && board.length > 2) {
         const second = r.pick(board.filter((k) => k !== key));
         const op2 = r.pick(["move_to_top", "hide", "move_to_bottom", "show"] as const);
-        moves.push(`arrange ${op} ${short(key)} + ${op2} ${short(second)}`);
+        const sent = r.chance(0.3) ? [{ op: "hide", key }, { op: "show", key }] : [{ op, key }, { op: op2, key: second }];
+        moves.push(`arrange ${sent.map((o) => `${o.op} ${short(o.key)}`).join(" + ")}`); // what is sent, not what was first drawn
         count("arrange, two operations");
-        await arrange(r.chance(0.3) ? [{ op: "hide", key }, { op: "show", key }] : [{ op, key }, { op: op2, key: second }]);
+        await arrange(sent);
       } else {
         moves.push(`arrange ${op} ${short(key)}`);
         count(`arrange ${op}`);
@@ -657,6 +658,8 @@ async function walk(index: number) {
         // is off the board by a hide or a ban of today's (those live outside the versions, and bring it back when lifted).
         const [hiddenToday, bannedToday] = [await hiddenNow(), await bannedNow()];
         for (const key of [...added]) if (!told.some((t) => t.key === key) && !hiddenToday.has(key) && !bannedToday.has(key)) added.delete(key);
+        // And the other way: a section the earlier board had because he added it is his again (Put it back twice is a redo).
+        for (const t of told) if (!isCard(t.key) && !DEFAULT_SECTIONS.includes(t.key)) added.add(t.key);
         await remember();
         const first = await openTwice("put it back", { firstMayStore: false });
         // Put it back is a request: after it, what he placed is read again from the board he was told.
@@ -798,6 +801,9 @@ async function walk(index: number) {
         moves.push(`data: ${name} archived`);
         await db.update(projects).set({ status: "archived" }).where(eq(projects.id, ids.get(name)!));
         archived.set(name, ids.get(name)!);
+        // A place goes with its section: his card's place is gone for good with the first board worked out without
+        // it (the opens just below). Back from the archive, the card follows the data.
+        told = told.filter((t) => t.key !== `project_card:${ids.get(name)!}`);
         ids.delete(name);
       } else if (kind === "back from the archive" && archived.size) {
         const name = r.pick([...archived.keys()]);
