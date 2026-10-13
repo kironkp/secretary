@@ -7,20 +7,26 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 ---
 
-## v1.02 — A clear Overview (2026-10-12)
+## v1.02 — A clear Overview (2026-10-13)
 
 `b980803` (the round as one commit: written 2026-10-06 as v0.34 and parked,
 because node would not start that day and nothing was run; verified
 2026-10-12 and first offered on another branch); round 2: `a42f04e` (the
-spec), `fab811d`, `b4c455a`, `aced086`; round 3, the rule that stands:
-`b4a8101`, `3242945`, `2d7dbbb`, `69e8d18` (the spec, each before its code),
-`6f8b750`, `8bb8ff6`, `341de68` (the code and its tests), `d32121f` (offered
-as r3, failed in review); round 4: `529267d`, `82ed926` (the spec),
-`3ca19d4`, `0edabb6`, `40d40a4`, `2cf9015`, `0a9ade0` (the code and its
-tests), this commit. `132b183`,
-`1d7d798` and `ccd57ef` are an earlier round-3 rule that composition
-replaced; `f23e56c` merges main, which had v1.03 by then. The package
-version stays 1.0.3, because 1.03 landed first.
+spec), `fab811d`, `b4c455a`, `aced086`; round 3: `b4a8101`, `3242945`,
+`2d7dbbb`, `69e8d18` (the spec, each before its code), `6f8b750`, `8bb8ff6`,
+`341de68`, `d32121f` (offered as r3, failed in review); round 4: `529267d`,
+`82ed926` (the spec), `3ca19d4`, `0edabb6`, `40d40a4`, `2cf9015`, `0a9ade0`,
+`fbcccef` (offered as r4, failed in review: the third, so the approach was
+changed before another line was written); round 5, the rule that stands:
+`15387da`, `a2cc196` (the walker, written first and pushed red), `8159b10`,
+`78888cd` (the spec), `c1b3372`, `7eb6430`, `9350ba1`, `846a985`, `fd774cb`
+`03e590c` (the code), `739aaf4`, `7c62bce`, `a28447c` (the walker's own
+corrections), `293e8ff`, `b234174`, `b7d0bb9`, `d9ffec1` (the older tests
+brought to the new rule, and new ones), `0abae38`, `f559056` (the browser
+specs), this commit. `132b183`, `1d7d798`
+and `ccd57ef` are an earlier round-3 rule that composition replaced;
+`f23e56c` merges main with v1.03 and `b3aa8fe` with v1.04, so the package
+version is 1.0.4.
 
 Kiron on the Overview: "make it make sense", "a random graph", "I don't
 understand all the whats". sec rev's round 2 (SEC-A007).
@@ -73,119 +79,115 @@ understand all the whats". sec rev's round 2 (SEC-A007).
   board the cards, the strip and the Timeline were then compared with an
   order worked out by hand in SQL, at 393, 820 and 1440 wide: one order on
   all three, the most overdue project first.
-- Rounds 2 and 3, after review. **How the Overview is put together changed,
-  for a reason, not to pass a test.** Until now one plan was chosen (the
-  planner's, the rules', the stored one, the default) and shown as it stood,
-  and "nothing urgent disappears" meant "urgent cards in the first 8
-  sections". Once late work counted as urgent that could not be met: with
-  six late projects the default refused itself and every arrange request
-  was refused. Two attempts at a rule about card order on a chosen plan
-  each broke the same way on a board nobody had arranged: as soon as any
-  rule fired, a card the data had moved looked like the system moving it
-  without a reason, the plan was refused, and the order stopped following
-  his data. So a render is now composed, every time
-  (docs/adaptive-ui/SPEC.md §2 "Composition", lib/layout/compose.ts):
-  - Today's system plan gives the emphasis (size, accent, what is
-    unfolded), the reasons, the banner and where the sections that are not
-    cards sit. Whatever card order it has is ignored: the system never
-    places a card. A planner cannot drop a card either.
-  - What he placed stays where he put it. A move by voice, tap or chat, a
-    section added in the chat, and the pin button each pin the section at
-    its place on the board: the n-th from the top, or last. The place is
-    stored with the section, so it does not drift when cards come and go.
-    A system move lands around it: with his list on top, the strip that
-    "you have been talking dates" sends up is second.
-  - Every card he did not place follows his data at every render: urgent
-    first, then the one urgency order, lists last. A project made today has
-    a card today; an archived one has none.
-  - Then his hides and bans. A card he hid is back while its project is
-    urgent, in its place by the data, saying "Back on your board"; hiding
-    an urgent card is refused. Urgent is late open work or a date within
-    the week; a list never is. There is no fixed position any more.
-  - What follows from it. "You keep talking about this" no longer moves a
-    card; it unfolds it and says why. Rationing counts only the sections
-    that are the system's to place, so a re-sort is not a layout change and
-    one change in his data is at most one planner call, not two. Calm mode
-    is the default with no rule and no planner, and what he placed, hid
-    and banned still holds in it (before, his arrangement vanished while
-    calm mode was on). "Put it back" restores the previous board's pins
-    with it, so undoing a move also lets the section go.
-  - No tool says "applied" to something the next render does not show.
-    Tested for every operation of both tools: top, up, down, bottom, hide,
-    show; move, remove, add, set size. In the chat tool, remove is a hide
-    (it used to come back at the next render), an added section is kept as
-    a placed one, and adding what is already there or does not exist is
-    refused in plain words. Show does not pin.
-  - The reason chip under a deadline counts calendar days in his zone, like
-    the date beside it: "Due today", "Due tomorrow", "Due in 3 days". In
-    the evening it used to say "Due in 0 days" next to "tomorrow". The
-    thresholds still count 24-hour periods; one count everywhere is 1.06.
+- **How the Overview is put together** (rounds 2 to 5, after review; this
+  is the rule as it now stands, docs/adaptive-ui/SPEC.md §2). What is on
+  screen is put together at every open, not picked from stored plans:
+  today's system plan gives the emphasis, the reasons, the banner and the
+  order of the sections that are not cards; a card for every active project
+  and list, and every section of the usual board, is drawn; the cards he
+  did not place are in data order (late first, then the nearest date, lists
+  last); what he placed goes back at its place; then his hides and bans.
+  A hidden card is back while its project is urgent, and says so.
+- **A place is a position on the board he was told.** Every request of his
+  goes through one function (lib/layout/request.ts): the voice tool, the
+  chat tool, the pin button, unpin, Put it back, Settings lifting a hide or
+  a ban or removing a pin, the preference tool's pin and ban. It starts
+  from what an open shows now, applies what he asked, runs what an open
+  runs on that, checks that the board bears out what is about to be said,
+  and only then stores it and answers with that board. Up and down swap
+  with the neighbour; the top is under the banner; the bottom is the end.
+  After every request the place of everything he has placed is read again
+  from that board, counted from the top, or from the bottom when no card
+  of the run and none of the upper sections stands below it: "to the
+  bottom" stays the bottom when a project is made.
+  Rounds 3 and 4 kept a number per pin. Two pins could hold the same
+  number, the tie was broken by the stored order, and on a board that had
+  grown short the two turned over at every open. That rule is gone.
+- Show, add back and unpin put a section where the system has it: a card by
+  the data, another section where today's rules have it, with everything
+  else in the order he saw. A section he added himself is always placed
+  (unpin says so; hidden and shown again it comes back at the end). A ban
+  works like a hide, and lifting it brings back a section he had added.
+  A place goes with its section: archived, banned or hidden, the pin is
+  gone for good, and a card that comes back follows the data. Put it back
+  is a request too: the earlier board with its places, on today's data and
+  today's hides. It does not undo a hide or a show, which leaves one odd
+  case, written in the spec: add a section, hide it, show it, Put it back,
+  and it is gone, not hidden.
+- A pin has one home: the place written on the section in the stored
+  board. Settings lists what he placed from there, by name, and its remove
+  is the same request as the button's. Pins kept as a preference before
+  this version are given their place at the first open; the preference row
+  is marked and left, not deleted, and no longer read.
+- The system is measured against the system. Rationing (no system move the
+  same day, no move without a reason) compares only the sections that were
+  the system's before and still are, so none of his own requests gets a
+  plan refused or held, and a ban does not either. The layout clock reads
+  the same thing, the system's own order: not the cards, not the banner,
+  not what he placed, not a section coming or going. What the system added
+  today (a banner, a section a planner added) still stays today, by its
+  own list and no longer by the clock.
+- **Found on main, and live until this lands: the layout clock read only
+  the newest ten stored versions.** A new version is stored whenever
+  anything on the board changes, a reason's wording included. After the
+  system had moved a section, the ninth such version the same day pushed
+  that move out of sight: the clock read "never changed", so the system
+  was free to move sections again the same day, and the dashboard planner
+  was asked (and paid) again because the situation looked new. What he
+  would have seen: on a busy day, the strip or a banner changing place or
+  going twice in one day, where the rule says once. The clock now reads
+  every version of the last two days. tests/spend-clock.test.ts has the
+  case; it fails on main.
+- Planner calls, counted with a planner that answers every time: his own
+  move of a card or a section costs none, that day or after (v1.04: one the
+  next day). A planner that writes a banner every time it is asked, with
+  nothing else changing: none after the first day (v1.04: one a day for
+  ever, because the banner's version reset the clock and the clock turning
+  over was a new situation).
+- A committed deadline already past says how late it is ("3 days late"),
+  where it said "Due today". A size asked for in calm mode is refused in
+  those words, where the tool said it was set. The pin button on the page
+  shows the board the request was answered with, and a refusal's reason.
+- **The gate is a walker, not examples** (tests/board-walk.test.ts). Three
+  rounds were offered on examples and failed on a state no example had. The
+  walker makes boards of 0 to 9 projects and takes seeded random steps
+  through everything that can change the board: both tools (one or several
+  operations), the pin button, Put it back, calm mode, Settings lifts, bans,
+  the next day, planner answers good and bad, the rules' own moves, his
+  data. It has a model of its own: before a request it applies the request
+  to the board the plain way and requires the reply, the stored board and
+  the next open to be that board, section for section. After every step it
+  opens the board twice and asks the standing questions (banner first,
+  nothing twice, a card for every project, cards by the data, the right way
+  up, what he placed at its place, hidden and banned off, what belongs
+  drawn and nothing else, an unchanged open stores nothing, composing the
+  stored board gives the same board).
+  On round 4's code the first forty walks (24 steps each) made 19 kinds of
+  complaint, 1,348 in all, and every one of the forty failed. On this
+  version the same walks from the same seed make none, and neither do 120
+  walks of 30 steps.
+  The walker itself was wrong in places, each fixed in its own commit with
+  a line saying what it had wrong (`739aaf4`, `7c62bce`, `a28447c`); the
+  first two were read by the Reviewer before this was offered.
 - Found on the way, and fixed because the rule could not be tested without
   it: a planner answer was paid for and thrown away whenever his data
   changed and the board did not (the stored plan still carried the older
-  situation's stamp, so the answer was taken for a stale one). And one that
-  the old rule caused: a planner's banner from weeks ago could stay on the
-  board for good, because the plan that would replace it was refused for
-  its card order. That cause is gone; a banner can still outstay its day in
-  one case, stated under the limits below.
-- Round 4, after review. Round 3 was failed on two things it had newly
-  broken, both confirmed in a browser by the Reviewer.
-  - With his list pinned on top, the board turned upside down whenever the
-    stored sections were being held (the rules plan refused: a planner's
-    banner the same day, or after "you have been talking dates" had moved
-    the strip): his list, then every card, then next up, the tiles and the
-    strip underneath. The held plan found where the cards go by "the first
-    card in the stored plan", and that was his. Where the cards go is now
-    one rule in one place, read the same way for every plan: a plan's own
-    sections are its sections without the banner and without what he
-    placed, and a card that carries a place he gave it never says where the
-    cards go, pinned or let go.
-  - The reason chip said "Due tomorrow" the next morning, beside "today"
-    everywhere else on the card. The stored plan is reused as long as the
-    count of whole 24 hours to the due time has not moved; the chip counts
-    calendar days, which move at midnight. A reason that counts days is now
-    written again with today's count at every render, from whatever plan it
-    is read. Nothing the planner is keyed by changed, so this costs no call:
-    one dated task over an evening, the next morning and its due hour is two
-    planner calls, as before.
-  - Also from the review. Adding back something he had hidden is a show
-    (the hide is lifted, nothing is pinned). "The top" is under the banner
-    for both tools; a move to the first place in the chat used to push the
-    banner down, where it was dropped. Both tools now check, before writing
-    anything, that the board as it will render bears out what they are
-    about to say, and change nothing when it does not (a card for a project
-    that is not on the board, a subproject's card). The model is told the
-    board as it renders now, not as it was last stored: a project that went
-    late since the Dashboard was last opened had already moved, and a
-    position the model read landed on the wrong section. The pin button
-    says only "Unpin".
-  - How it got past round 3: every pin shape was tested on the fresh path
-    and none on the held one, and the chip was checked on the evening it
-    was written. tests/composition-paths.test.ts now renders every pin
-    shape on every path a render can take (the rules plan fresh, the stored
-    plan from the cache, a planner's plan and its copy in memory, held by a
-    banner, held after the strip was moved, the default, calm mode), with
-    the data changing underneath, then again as the board was stored before
-    this version, then with everything unpinned. With round 3's defect put
-    back it fails on both held paths.
+  situation's stamp, so the answer was taken for a stale one).
 - Limits, known and not hidden. What the system moved does not go back by
   itself: after the strip has been sent to the top it stays there when the
-  talk about dates stops, still giving that reason; a planner's banner
-  stays past its day if that plan had also moved a section; and a section
-  he unpins that is not a card stays at its place (a card he unpins follows
-  the data again). Going back has no reason to give, and a move without a
-  reason is refused. As before this version for the strip; the fix is 1.06.
-  A size or accent he sets on one card lasts
-  until his data next changes; the tool tells the model to say "for now"
-  (a lasting home for it is 1.06). A place is counted from the top, so
-  something he later places above an earlier pin does not push that pin
-  down. A board he arranged in the chat before this round has no pins, so
-  its cards follow the data now; one arranged by voice or tap keeps its
-  pins. A section he placed stays placed until he moves it again, hides
-  it, or uses "Put it back" straight away: there is no "let it go back"
-  by voice yet, and the pin button only shows under a mouse. With a
-  component banned, the rules plan is refused whole, as before this round;
-  the cards still get today's emphasis.
+  talk about dates stops, still giving that reason, and a planner's banner
+  stays past its day if that plan had also moved a section. Going back has
+  no reason to give, and a move without a reason is refused. The fix is
+  1.06. A size or accent he sets on one card lasts until his data next
+  changes; the tool tells the model to say "for now" (1.06). The stored
+  version is still the whole board as shown, read back through one door;
+  splitting it into the system's plan and his placements is the next
+  Overview task, and with it Put it back stepping over versions that only
+  re-sorted, and where a planner had a section that was his at the time. A
+  place remembered past the end of a board that has grown short is read
+  again as where the section stands the next time he asks for anything.
+  There is no "let it go back" by voice yet, and the pin button only shows
+  under a mouse.
 - Seen in the browser and not fixed here: a card with nothing to draw, and
   a section with nothing in it, still counts as a place on the board. On
   the local copy "Needs a date, up one" moved it above a card that draws
@@ -198,20 +200,17 @@ understand all the whats". sec rev's round 2 (SEC-A007).
   date, days are his calendar days, a project's own deadline is read, a
   Timeline lane is ordered by its due day, and a list never takes a cell
   among the project cards.
-- Checks: 2,433 tests, the production build, 71 browser specs on local
-  Chromium (the new one has a pin), all the way CI runs them. Each of 117
-  behaviours taken out in turn failed a test, two of them only after a test
-  was written for them. The Reviewer's own probe files, run unchanged: the
-  round-2 file as before (14 of 16; the two expect the whole board to stand
-  still when a project goes late), the round-3 file 6 of 8 (the two expect
-  the strip's reason to be gone once the talk about dates has stopped,
-  which is the limit above and 1.06). In a real browser on a local copy of
-  the real board: five pin shapes, each on a board held by a planner's
-  banner and on a board held after the strip was moved, at tablet width and
-  three of them at phone width. Every time the banner was first, what was
-  placed was at its place, and next up, the tiles and the strip were above
-  the cards. Not seen by me on a real clock: the chip the morning after;
-  that is a test with the clock moved, through the real render and store.
+- Checks: 2,518 tests, the production build, 73 browser specs on local
+  Chromium (three with something he placed: sent to the top by the tool,
+  pinned and let go with the pin button, listed and removed in Settings),
+  all the way CI runs them. Each of 62 behaviours of the new rule taken out
+  in turn failed a test: 42 as the tests stood, 19 only after an example
+  was written for them (the long walk reached them, the eight walks the
+  suite runs did not), and one after two checks that did the same job were
+  made one. One more changed nothing when taken out, was dead code, and is
+  gone. Not seen by me on a real clock: the chip the morning after; that is
+  a test with the clock moved, through the real render and store. Not run
+  against a copy of his real board this round, as round 4 was.
   App spend: $0.
 
 ---
