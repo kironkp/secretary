@@ -983,6 +983,11 @@ async function walk(index: number, scripted = false) {
         if (kind.endsWith("the cards last")) return answer([banner, ...noCards, ...cards]);
         return answer([banner, ...crossed]);
       }
+      // (Scripted only.) Needs a date sunk under People, with a reason, the cards first. After it was raised it is
+      // the one section read as moved; People cannot carry a reason (its props are the default's, and it is stripped).
+      if (kind === "needs a date last, the cards first") {
+        return answer([banner, ...cards, ...others.filter((x) => x.component !== "date_chase"), { component: "date_chase", props: { item_ids: [] }, why: "Dates can wait this week" }]);
+      }
       if (kind === "a banner and the strip to the top") return answer([banner, strip, ...rest]);
       if (kind === "without a default section") return answer([banner, ...plan.sections.filter((s) => s.component !== "people_index")]);
       if (kind === "the cards backwards") return answer([banner, ...plan.sections.filter((s) => s.component !== "project_card").slice(0, 3), ...plan.sections.filter((s) => s.component === "project_card").toReversed(), ...plan.sections.filter((s) => s.component !== "project_card").slice(3)]);
@@ -1324,7 +1329,7 @@ async function walk(index: number, scripted = false) {
     }
   };
   // --- a scripted walk: after its few steps, one scripted move ----------------------------
-  // (Three of them, below; one is drawn for each scripted walk.)
+  // (Four of them, below; one is drawn for each scripted walk.)
   // Walked into on purpose, after the Reviewer's seed 27182818 found it by chance: a section of the usual board
   // hidden, a planner's answer the next day, something pinned, the hidden section brought back by a move, then
   // Put it back, twice. The earlier board lacks the section (it was hidden then); today it is not hidden, so
@@ -1398,6 +1403,57 @@ async function walk(index: number, scripted = false) {
     const systems = systemsOn(await boardNow(), placedSet());
     if (waiting && systems.includes("timeline") && systems[0] !== "timeline" && !(await calmNow())) complain("the rule's waiting move lands after his request", `${key} ${way}: ${row(systems)}`);
   };
+  // The Reviewer's two boards (the third defect of r5, and one 472c2a7 already had). A card of his stands among the
+  // cards, and a request moves the run to the other side of a section. His place was a number read off the list
+  // the request built; the count then moved the cards, and his card was left behind under another neighbour.
+  // One: a planner has Needs a date above next up and the cards on top of both; he hides Needs a date, and the
+  // cards go under next up. Two: next up and the tiles hidden; a planner has the cards above the strip and Needs
+  // a date under People (two answers: raised, then sunk); he talks dates, a day on, and the board is held; next up
+  // is shown, comes back under the strip, and the cards go under it.
+  const hisAmongTheCardsWhenTheyMove = async () => {
+    const pinsACard = async () => {
+      const run = (await boardNow()).filter((k) => isCard(k) && !placedSet().includes(k));
+      if (run.length < 3) return false;
+      await pin(run[1], true, "button");
+      return placedSet().includes(run[1]);
+    };
+    /** How many of the system's sections stand above the run, the named one aside. */
+    const overTheRun = async (named: string) => without(await boardNow(), BANNER).filter((k) => !placedSet().includes(k) && k !== named).findIndex(isCard);
+    const request = async (op: { op: string; key: string }) => {
+      const over = await overTheRun(op.key);
+      nothingElseChanges = true;
+      await arrange([op]);
+      nothingElseChanges = false;
+      const now = await overTheRun(op.key);
+      if (over !== -1 && now !== -1 && now !== over) count("scripted: ... and the cards did move, with a card of his among them");
+    };
+    if (rs.chance(0.5)) {
+      moves.push("scripted: the next day; needs a date raised, the cards first; a card pinned among the cards; needs a date hidden, and shown");
+      count("scripted: his card among the cards on a crossed board, and Needs a date is hidden");
+      await nextDay();
+      await plannerAnswers("needs a date raised, the cards first");
+      if (!(await pinsACard()) || !(await boardNow()).includes("date_chase") || placedSet().includes("date_chase")) return;
+      await request({ op: "hide", key: "date_chase" });
+      if ((await hiddenNow()).has("date_chase")) await request({ op: "show", key: "date_chase" });
+    } else {
+      moves.push("scripted: next up and the tiles hidden; needs a date raised, then sunk under People, the cards first; a card pinned among the cards; he asks about dates; the next day; next up shown");
+      count("scripted: his card among the cards on a board a planner rearranged, and next up is shown");
+      for (const key of ["stat_row", "hero_next_up"]) {
+        if ((await boardNow()).includes(key) && !placedSet().includes(key)) await arrange([{ op: "hide", key }]);
+      }
+      await nextDay();
+      await plannerAnswers("needs a date raised, the cards first");
+      await nextDay();
+      await plannerAnswers("needs a date last, the cards first");
+      if (!(await pinsACard())) return;
+      await says("when is the deadline?");
+      await openTwice("rules: he asks about dates", { firstMayStore: true });
+      await nextDay();
+      if ((await sourceNow()) === "previous") count("scripted: ... and the planner's board was held");
+      if ((await hiddenNow()).has("hero_next_up")) await request({ op: "show", key: "hero_next_up" });
+    }
+    await somethingElseChanges("scripted: after it, his data changes");
+  };
   const onBoard = without(await boardNow(), BANNER);
   if (scripted && onBoard.length) {
     if ((await computeCurrentPlan(id)).signals.context.calm_mode) {
@@ -1408,7 +1464,7 @@ async function walk(index: number, scripted = false) {
     }
     // (The round trips first, on the board the few steps left: nearer the default board than a whole walk leaves it.)
     await roundTrips();
-    await rs.pick([backOntoABoardWithoutIt, backUnderTheStrip, besideAWaitingMove])();
+    await rs.pick([backOntoABoardWithoutIt, backUnderTheStrip, besideAWaitingMove, hisAmongTheCardsWhenTheyMove])();
   }
   await roundTrips();
   return { complaints, moves, counts, refusals, size, storedBoard: await marked() };
