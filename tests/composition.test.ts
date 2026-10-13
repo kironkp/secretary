@@ -95,6 +95,14 @@ describe("what counts as urgent", () => {
   });
 });
 
+describe("the default order of the cards", () => {
+  it("urgent by a date the calendar count does not see (an event in three days) comes before a project due later", () => {
+    const signals = board(0);
+    signals.projects = [project("Later", 9), { ...project("Event soon", null), days_left: 3 }, project("Quiet", null), project("Groceries", -3, "list")];
+    expect(cards(defaultPlan(signals))).toEqual(["event-soon", "later", "quiet", "groceries"]);
+  });
+});
+
 describe.each([5, 6, 9])("a board with %i late projects", (late) => {
   const signals = board(late);
 
@@ -167,6 +175,9 @@ describe("presence (invariant 4)", () => {
     const back = compose(defaultPlan(late), late, quiet, [], hide);
     expect(cards(back)).toEqual(cards(defaultPlan(late)));
     expect(cardOf(back, "quiet-one")?.why).toBe("Back on your board: it has late work");
+    // Back on the board it is not a section he placed: it goes on following the data.
+    const later = changed(late, redate("quiet-three", -20));
+    expect(cards(compose(defaultPlan(later), later, back, [], hide))).toEqual(cards(defaultPlan(later)));
     const soon = changed(signals, redate("quiet-one", 2));
     expect(cardOf(compose(defaultPlan(soon), soon, quiet, [], hide), "quiet-one")?.why).toBe("Back on your board: it is due within a week");
   });
@@ -291,6 +302,19 @@ describe("when a system move is refused and the stored sections are held", () =>
     expect(res.plan.sections[0]).toMatchObject({ component: "focus_banner" });
     expect(cards(res.plan)[0]).toBe("brand-new");
     expect(cards(res.plan)).toEqual(cards(defaultPlan(sameDay)));
+  });
+
+  it("what he placed and hid holds on the held plan too: his list on top under the banner, the tiles hidden", async () => {
+    const base = stored();
+    const withPin = pinnedAt({ ...base, sections: base.sections.filter((s) => s.component !== "focus_banner") }, "project_card:shopping", 0);
+    const held: LayoutPlan = { ...withPin, sections: [base.sections[0], ...withPin.sections] };
+    const sameDay = changed(before, redate("quiet-three", -20));
+    sameDay.context.days_since_layout_change = 0;
+    const res = await render(sameDay, held, ["project_card:shopping"], [{ kind: "hide_section", value: { section: "stat_row" } }]);
+    expect(res.source).toBe("previous");
+    expect(keys(res.plan).slice(0, 2)).toEqual(["focus_banner", "project_card:shopping"]);
+    expect(keys(res.plan)).not.toContain("stat_row");
+    expect(cards(res.plan).slice(1)).toEqual(cards(defaultPlan(sameDay)).filter((id) => id !== "shopping"));
   });
 
   it("the cards carry today's emphasis, not the stored plan's: rule 1's why is today's count", async () => {

@@ -91,12 +91,12 @@ export function urgencyLabel(p: ProjectSignal): string {
 
 /**
  * The order of the cards the user did not place (SPEC §2): urgent projects
- * first, then the rest, each in the one urgency order; lists last.
+ * first, then the rest, each in the one urgency order. Lists come last
+ * without a term of their own: a list is never urgent, and the urgency
+ * order (lib/project-order.ts) puts lists after projects.
  */
 export const cardOrder = (a: ProjectSignal, b: ProjectSignal): number =>
-  Number(a.kind === "list") - Number(b.kind === "list") ||
-  Number(isUrgent(b)) - Number(isUrgent(a)) ||
-  byUrgency(urgencyOf(a), urgencyOf(b));
+  Number(isUrgent(b)) - Number(isUrgent(a)) || byUrgency(urgencyOf(a), urgencyOf(b));
 
 /** The why on a card the user hid that is back because its project is urgent (invariant 4, presence). */
 export function backOnBoardWhy(p: ProjectSignal): string {
