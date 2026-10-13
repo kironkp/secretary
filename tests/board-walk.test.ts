@@ -87,6 +87,19 @@
 // of today's keeps off it. Two refusals the model predicts: a request about
 // a component he banned, and a size asked for in calm mode.
 //
+// WHERE THE WALK STANDS. The last five defects were all found on a board in
+// one of a few states, so the tally counts them, step by step: a crossing
+// (the system's own sections on the wrong side of each other); the strip
+// under the cards; something of his at or above next up and the tiles; and,
+// request by request, a section of the system's coming or going, on any
+// board and on such a board; and Put it back onto a board that lacks a
+// section of the usual board. BOARD_BIAS=1 makes the walk stand there more
+// often: on a board in none of those states it has a planner cross it or
+// put the cards above the strip; it takes sections of the usual board off
+// and brings them back; it presses Put it back more, and straight after a
+// section came back. Without it the walk draws exactly what it drew before
+// the switch was there.
+//
 // BOARD_WALKS, BOARD_STEPS and BOARD_SEED size the run; BOARD_PRINT=all
 // prints every complaint. The suite runs a small one; the long one
 // (BOARD_WALKS=120 BOARD_STEPS=30) is run before an offer. A failing walk
@@ -95,7 +108,7 @@
 process.env.TZ = "UTC";
 
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { and, eq, inArray, like, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, like, sql } from "drizzle-orm";
 
 const session = vi.hoisted(() => {
   process.env.ADAPTIVE_V2 = "true"; // the layout route reads it when it is loaded
@@ -125,6 +138,7 @@ const WALKS = Number(process.env.BOARD_WALKS ?? 8);
 const STEPS = Number(process.env.BOARD_STEPS ?? 16);
 const SEED = Number(process.env.BOARD_SEED ?? 20261013);
 const PRINT_ALL = process.env.BOARD_PRINT === "all";
+const BIAS = Boolean(process.env.BOARD_BIAS);
 const NAMES = ["Atlas", "Birch", "Cedar", "Dune", "Ember", "Fjord", "Grove", "Harbor", "Iris"];
 const NEW_NAMES = ["Juniper", "Kestrel", "Larch", "Maple", "Nettle", "Oakum", "Pippin", "Quince"];
 /** What the voice tool calls each section when it reads the board back (lib/layout/arrange.ts). */
@@ -510,6 +524,7 @@ async function walk(index: number, scripted = false) {
    */
   const afterRequest = async (what: string, before: string[], expected: string[] | null, subject: string[], reply: string[] | null, placedNow: string[], heldBefore: string, extra?: (first: LayoutPlan) => string | null) => {
     const stored = keysOf((await head()).spec as LayoutPlan);
+    const [stood, systemsBefore] = [standsOn(before, placedSet()), systemsOf(before, placedSet())];
     if (expected) {
       // The list as the request leaves it, then the cards where the rule puts them on that list. Counted for the
       // summary: how often a request of his changed the system's list on a crossed board, and how often the cards moved.
@@ -539,6 +554,10 @@ async function walk(index: number, scripted = false) {
     if (stored.join() !== board.join()) complain("7 the stored board is the next open", `${what}: stored ${row(stored)} | open ${row(board)}`);
     const said = extra?.(first.bundle.plan);
     if (said) complain("the reply's own claim", `${what}: ${said}`);
+    if (systemsOf(board, placedSet()) !== systemsBefore) {
+      count("requests: a section of the system's came or went");
+      if (stood.crossing || stood.stripUnder || stood.hisOnTop) count("requests: ... on a board in one of those states");
+    }
     history[history.length - 1] = told.map((t) => ({ ...t }));
     // Asked here, before the open below lets a rule's waiting move land: that move resets the layout clock, and the
     // rules plan is then held for the day by the rule's own doing, not by his request. (The ban's check stood after
@@ -706,9 +725,12 @@ async function walk(index: number, scripted = false) {
     moves.push("put it back");
     count("put it back");
     const n = await versions();
+    const [, earlier] = await db.select({ spec: layoutSpecs.spec }).from(layoutSpecs).where(eq(layoutSpecs.userId, id)).orderBy(desc(layoutSpecs.version)).limit(2);
     const res = await route({ action: "revert" });
     if (!res.ok) refused(res.json.error ?? "no reason given", n < 2 ? "nothing to put back" : null);
     else {
+      const [was, hiddenToday0, bannedToday0] = [keysOf(earlier.spec as LayoutPlan), await hiddenNow(), await bannedNow()];
+      if (DEFAULT_SECTIONS.some((k) => !was.includes(k) && !hiddenToday0.has(k) && !bannedToday0.has(k))) count("put it back onto a board that lacks a section of the usual board");
       // The walker's own history: what he had placed, and where, one stored version back.
       told = (history[history.length - 2] ?? []).filter((t) => !isCard(t.key) || [...ids.values()].some((pid) => `project_card:${pid}` === t.key)).map((t) => ({ ...t }));
       // A section he added goes back with the board: one the earlier board did not have is no longer on it, unless it
@@ -814,12 +836,96 @@ async function walk(index: number, scripted = false) {
     const [conv] = await db.insert(conversations).values({ userId: id, mode: "text" }).returning();
     await db.insert(messages).values(Array.from({ length: 6 }, (_, i) => ({ userId: id, conversationId: conv.id, role: "user" as const, content: `${text} ${MARK} (${i})`, mode: "text" as const })));
   };
+  /** A section of the usual board taken off and brought back, one of the ways he can. */
+  const WAYS = ["hidden, shown", "hidden and shown in one request", "hidden, added back", "hidden, the hide lifted in Settings", "pinned, let go", "banned, the ban lifted"] as const;
+  const hidesOf = async (key: string) => (await db.select().from(layoutPreferences).where(eq(layoutPreferences.userId, id))).filter((p) => p.kind === "hide_section" && (p.value as Record<string, string>).section === key);
+  const offAndBack = async (key: string, way: (typeof WAYS)[number]) => {
+    if (way === "hidden and shown in one request") return arrange([{ op: "hide", key }, { op: "show", key }]);
+    if (way === "pinned, let go") {
+      await pin(key, true, "button");
+      return pin(key, false, "button");
+    }
+    if (way === "banned, the ban lifted") {
+      await ban(key, false);
+      return ban(key, true);
+    }
+    await arrange([{ op: "hide", key }]);
+    if (way === "hidden, shown") return arrange([{ op: "show", key }]);
+    if (way === "hidden, added back") return edit([{ op: "add", component: key, at: rs.int(4) }]);
+    for (const pref of await hidesOf(key)) await lift(pref);
+  };
+  /** What stands on the board he sees: the strip under the cards; a rule's move of the strip still to come. */
+  const stripUnderTheCards = async () => {
+    const body = without(await boardNow(), BANNER).filter((k) => !placedSet().includes(k));
+    return body.includes("timeline") && body.some(isCard) && body.indexOf("timeline") > body.findLastIndex(isCard);
+  };
+  const stripIsWaiting = async () => {
+    const [order, board] = [(await systemOrder()).filter((k) => !isCard(k) && k !== BANNER), without(await boardNow(), BANNER).filter((k) => !isCard(k) && !placedSet().includes(k))];
+    return order[0] === "timeline" && board.includes("timeline") && board[0] !== "timeline" && (await sourceNow()) === "rules";
+  };
+  /** Where a board stands: the states the last five defects were found in. */
+  const standsOn = (list: string[], his: string[]) => {
+    const body = without(list, BANNER);
+    const rest = body.filter((k) => !his.includes(k));
+    return {
+      crossing: fewestWrong(rest.filter((k) => !isCard(k))) > 0,
+      stripUnder: rest.includes("timeline") && rest.some(isCard) && rest.indexOf("timeline") > rest.findLastIndex(isCard),
+      hisOnTop: body.slice(0, Math.max(body.indexOf("hero_next_up"), body.indexOf("stat_row")) + 1).some((k) => his.includes(k)),
+    };
+  };
+  const systemsOf = (list: string[], his: string[]) => without(list, BANNER).filter((k) => !isCard(k) && !his.includes(k)).toSorted().join();
   // --- the walk ------------------------------------------------------------------------
   await openTwice("the first open", { firstMayStore: true });
   for (let step = 0; step < steps; step++) {
     const full = await boardNow();
     const board = without(full, BANNER);
     const hidden = [...(await hiddenNow())];
+    const stands = standsOn(full, placedSet());
+    count("steps");
+    if (stands.crossing) count("stands: on a crossing");
+    if (stands.stripUnder) count("stands: with the strip under the cards");
+    if (stands.hisOnTop) count("stands: with something of his at or above next up and the tiles");
+    if (["hero_next_up", "stat_row"].some((k) => full.includes(k) && placedSet().includes(k))) count("stands: with next up or the tiles his");
+    if (BIAS && board.length) {
+      const b = r.next();
+      if (!stands.crossing && !stands.stripUnder && b < 0.3) {
+        // Onto such a board: a day on (a planner may move a section a day after the layout last changed), a planner's
+        // answer that crosses the board or leaves the strip under the cards.
+        moves.push("biased: onto a crossed board, or the strip under the cards");
+        await nextDay();
+        await plannerAnswers(r.pick([...CROSSINGS, "every card first, the rest as it stands", "every card first, the rest as it stands", "every card first, the rest as it stands"]));
+        continue;
+      }
+      if (b < 0.62) {
+        // A section of the usual board comes or goes, one of the ways he can.
+        const off = DEFAULT_SECTIONS.filter((k) => !full.includes(k));
+        const key = off.length && r.chance(0.5) ? r.pick(off) : r.pick(DEFAULT_SECTIONS);
+        const banned = (await bannedNow()).has(key);
+        const isHis = placedSet().includes(key);
+        const what = !full.includes(key) ? (banned ? "the ban lifted" : r.pick(["shown", "added back", "the hide lifted in Settings", "moved onto the board"])) : r.pick(["off and back", "off and back", "hidden", isHis ? "let go" : "pinned", "moved", "banned"]);
+        moves.push(`biased: ${key} ${what}`);
+        count("biased: a section of the usual board comes or goes");
+        if (what === "the ban lifted") await ban(key, true);
+        else if (what === "shown") await arrange([{ op: "show", key }]);
+        else if (what === "added back") await edit([{ op: "add", component: key, at: r.int(4) }]);
+        else if (what === "the hide lifted in Settings") for (const pref of await hidesOf(key)) await lift(pref);
+        else if (what === "moved onto the board" || what === "moved") await arrange([{ op: r.pick(["move_up", "move_down", "move_to_top", "move_to_bottom"] as const), key }]);
+        else if (what === "off and back") await offAndBack(key, r.pick(WAYS));
+        else if (what === "hidden") await arrange([{ op: "hide", key }]);
+        else if (what === "banned") await ban(key, false);
+        else await pin(key, !isHis, "button");
+        // Straight after a section came back, Put it back goes onto a board that lacks it.
+        if (["the ban lifted", "shown", "added back", "the hide lifted in Settings", "moved onto the board", "off and back"].includes(what) && r.chance(0.35)) {
+          await putItBack();
+          if (r.chance(0.5)) await putItBack();
+        }
+        continue;
+      }
+      if (b < 0.7) {
+        await putItBack();
+        continue;
+      }
+    }
     const draw = r.next();
     const placedOnBoard = told.filter((t) => board.includes(t.key));
     if (!board.length) break;
@@ -1011,33 +1117,6 @@ async function walk(index: number, scripted = false) {
     if ((await hiddenNow()).has(gone)) await arrange([{ op, key: gone }]);
     await putItBack();
     await putItBack();
-  };
-  /** A section of the usual board taken off and brought back, one of the ways he can. */
-  const WAYS = ["hidden, shown", "hidden and shown in one request", "hidden, added back", "hidden, the hide lifted in Settings", "pinned, let go", "banned, the ban lifted"] as const;
-  const offAndBack = async (key: string, way: (typeof WAYS)[number]) => {
-    const hides = async () => (await db.select().from(layoutPreferences).where(eq(layoutPreferences.userId, id))).filter((p) => p.kind === "hide_section" && (p.value as Record<string, string>).section === key);
-    if (way === "hidden and shown in one request") return arrange([{ op: "hide", key }, { op: "show", key }]);
-    if (way === "pinned, let go") {
-      await pin(key, true, "button");
-      return pin(key, false, "button");
-    }
-    if (way === "banned, the ban lifted") {
-      await ban(key, false);
-      return ban(key, true);
-    }
-    await arrange([{ op: "hide", key }]);
-    if (way === "hidden, shown") return arrange([{ op: "show", key }]);
-    if (way === "hidden, added back") return edit([{ op: "add", component: key, at: rs.int(4) }]);
-    for (const pref of await hides()) await lift(pref);
-  };
-  /** What stands on the board he sees: the strip under the cards; a rule's move of the strip still to come. */
-  const stripUnderTheCards = async () => {
-    const body = without(await boardNow(), BANNER).filter((k) => !placedSet().includes(k));
-    return body.includes("timeline") && body.some(isCard) && body.indexOf("timeline") > body.findLastIndex(isCard);
-  };
-  const stripIsWaiting = async () => {
-    const [order, board] = [(await systemOrder()).filter((k) => !isCard(k) && k !== BANNER), without(await boardNow(), BANNER).filter((k) => !isCard(k) && !placedSet().includes(k))];
-    return order[0] === "timeline" && board.includes("timeline") && board[0] !== "timeline" && (await sourceNow()) === "rules";
   };
   // The Reviewer's seed 16180339 (walk 61): the strip under the cards on the board he sees (a planner's answer with
   // every card first), and Needs a date or People taken off and brought back. On 472c2a7 it came back under the last
