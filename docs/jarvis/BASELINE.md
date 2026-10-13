@@ -2,7 +2,12 @@
 
 Measured 2026-10-12 by the Executor, on commit `1577ccd` (`main` at `4189e4d`
 plus the plan). Task: `docs/jarvis/PLAN.md` §7 as amended at `0bcb25c`. No
-product code changed.
+product code changed. Corrected on the same day after the Reviewer's interim
+check, which re-ran the measurements and found them to hold.
+
+**This repository is public.** Nothing here names a project, a list, a task or
+a person; where data is described it is by count. Names are in the evidence
+folder only.
 
 Where things are:
 
@@ -17,9 +22,9 @@ Where things are:
 |---|---|---|
 | 1 | Does the toolchain run on this Mac? | Yes, all of it: typecheck, lint, 1,139 tests, the production build, and all 62 browser specs on Chromium. Only the WebKit (iPhone) browser run is CI-only. |
 | 2 | Spend since 2026-10-07 | **Not measured.** This session is not allowed to read the production database. One command for Kiron to run is in §2. The cap settings were read: one cap is set on Heroku (all background work, $3 a day); the rest are code defaults, and background reading is on. |
-| 3 | Where do a chat turn's tokens go? | One model round is **30,929 input tokens, and 62.5 % of it is the tool definitions.** A turn is usually two rounds, so about 62,000. The fixed part sent every round is now 30,485 tokens, not the 15,600 the code comment and the plan say. |
+| 3 | Where do a chat turn's tokens go? | One model round is **30,929 input tokens, and 62.5 % of it is the tool definitions.** A turn is usually two rounds, so about 62,000. A request is about a quarter larger than it was in September (about 24,300 then) and twice what the code comment says (15,600). |
 | 3 | Is caching hitting on the chat model? | **Yes, it hits on Fable** (tested: 23,670 tokens written, then read). The Fable rows with no cached tokens are older than the caching code. |
-| 4 | Screens | 24 screenshots at three sizes (§4). The Canvas throws a page error on load at tablet and desktop size; the Workspace board has widgets covering each other. |
+| 4 | Screens | 24 screenshots at three sizes (§4). The Canvas throws a page error on load, intermittently, at any size; the Workspace board has widgets covering each other. |
 | 5 | Workspace by hand | **Tablet (touch) and desktop (mouse): drag, resize and undo all worked first try and survived a reload.** Phone: one tidy column; collapse and tap work; drag does nothing while the screen says "Drag to arrange". Ticking a task is not built. No model call in any of it. |
 | 6 | The nine old reports | 1 fixed, 4 still broken, 3 partly fixed, 1 still missing (§6). |
 | 7 | AV event project, equipment list, shopping list | **Not measured** (production). The same command in §2 answers it. |
@@ -178,9 +183,17 @@ counts the same request at 30,925.
 | The user's message | 25 | 14 | 0.05 % |
 
 The first three rows, 30,485 tokens, are sent again on every round of a turn.
-**The plan and the code comment (`lib/secretary/chat-claude.ts:58-59`) put that
-at about 15,600 (6,000 of instructions, 9,500 of tools). It is twice that
-now:** 11,146 of instructions and briefing, 19,339 of tools.
+
+- **Against the code comment it is twice the size.** The comment at
+  `lib/secretary/chat-claude.ts:58-59` says about 15,600 (6,000 of
+  instructions, 9,500 of tools).
+- **Against September it is about a quarter larger.** The rows from the week
+  that comment was written show a request was already about 24,300 tokens
+  (next section), so the comment was low when it was written. The honest
+  growth is 24,300 to 30,485.
+- **The briefing figure is September's data**: 6,702 tokens for 8 projects and
+  102 tasks. Production's briefing today will be a different size; the tools
+  and the fixed instructions (23,783 together) will not.
 
 - The largest tool definitions, in characters: `update_task` 2,209,
   `arrange_canvas` 2,188, `edit_layout_plan` 1,793, `create_task` 1,707,
@@ -197,11 +210,25 @@ A usage row is one user turn: the route writes one row per turn
 (`app/api/chat/route.ts:338`) and the Claude loop adds up every round, up to
 eight (`lib/secretary/chat-claude.ts:10,97`).
 
-**A typical turn takes two rounds.** Rounds are not recorded anywhere, so this
-is read from the size of each row. The 31 chat turns in the local copy
-(09-06 to 09-10) fall into four clear groups at one, two, three and four times
-the request size of that week, about 24,300 tokens
-(`E/rounds-per-turn-local.txt`):
+**A typical turn takes two rounds.** Rounds are not recorded anywhere, so they
+are read from the rows, two ways.
+
+The better evidence is the cached count on the 8 Opus rows. Every round after
+the first reads the whole fixed part from the cache, so the cached count is a
+multiple of it:
+
+| Cached tokens on the row | Rows | Rounds |
+|---|---|---|
+| 24,260 – 24,876 (one fixed part) | 4 | 2 |
+| 39,802 (one fixed part, plus a partial read on the first round) | 1 | 2 |
+| 48,894 and 49,010 (two) | 2 | 3 |
+| 73,566 (three) | 1 | 4 |
+
+That also fixes the size of a request that week: about 24,300 to 24,900
+tokens. The 23 Fable rows have no cached count, so they are grouped by size
+alone. All 31 chat turns in the local copy fall into four clear groups at one,
+two, three and four times that size (`E/rounds-per-turn-local.txt`), and for
+the 8 Opus rows the two methods agree row for row:
 
 | Rounds | Turns (of 31) | Input tokens, those rows | The same turn at today's sizes |
 |---|---|---|---|
@@ -210,7 +237,8 @@ the request size of that week, about 24,300 tokens
 | 3 | 5 | 69,704 – 77,922 | about 93,000 |
 | 4 | 1 | 104,720 | about 124,000 |
 
-Mean 2.2 rounds. Beyond the copies of the fixed part, a two-round turn carried
+Mean 2.2 rounds. **This is a small sample: 31 turns over three days (09-08 to
+09-10).** Beyond the copies of the fixed part, a two-round turn carried
 only 917 to 2,817 tokens (history and message twice, one tool call and its
 result), measured on the four two-round Opus rows, where the cached count
 gives the fixed part exactly. So a two-round turn today is, in tokens: tools
@@ -283,11 +311,14 @@ What the pictures show:
 - **Canvas.** The instruction that was given to the painter is printed above
   the canvas: twelve lines at 820 wide, and at 393 wide it fills the entire
   first screen, so the canvas itself starts below the fold.
-- **Canvas throws a page error** on load: "Cannot read properties of null
-  (reading 'dataset')", 6 times at 820 wide and 4 times at 1440; none at 393
-  in this run, one in an earlier run at 390. The only such read in the canvas
-  code is `components/canvas/canvas-view.tsx:271`
-  (`doc.documentElement.dataset`). The other three screens log no errors.
+- **Canvas throws a page error on load, intermittently, at any size**:
+  "Cannot read properties of null (reading 'dataset')". It is a race, not a
+  size effect. My run threw 6 times at 820 wide, 4 at 1440 and none at 393; an
+  earlier run threw once at 390; the Reviewer's runs threw at all three sizes
+  in full Chromium, and once at 393 and never at the others in headless. The
+  read is `components/canvas/canvas-view.tsx:271` (and `:273`):
+  `doc.documentElement` is null for a frame whose document is not there yet.
+  The other three screens log no errors.
 
 ## 5. Hands on the Workspace
 
@@ -344,8 +375,9 @@ that counts for iOS.
 ## 6. The nine old reports
 
 Settled by reading the code at this commit; every line number below was
-checked against the file. Items 3 and 5 are also backed by §5 and §3. Nothing
-in this section was exercised in a browser except where it says so.
+checked against the file. Items 3 and 5 are also backed by §5 and §3, and the
+last part of item 9 was reproduced by the Reviewer. Nothing else in this
+section was exercised.
 
 | # | Report | Verdict | Evidence |
 |---|---|---|---|
@@ -357,7 +389,7 @@ in this section was exercised in a browser except where it says so.
 | 6 | Shopping-list duplicates | **Partly fixed** | The same item is refused (`lib/secretary/tools.ts:1155,1161`; test `tests/lists-dashboard.test.ts:61-63`). The match is exact after lower-casing and stripping "buy", "a", "some" (`lib/secretary/lists.ts:45-46`), so "towel" and "towels" would still be two rows; no test covers it. |
 | 7 | Findit integration | **Still missing** | No URL, client or setting for Findit anywhere in `lib`, `app`, `components` or `scripts`. The matches are comments (`lib/push.ts:1`, `scripts/funnel.mjs:12`) and the user's own project name. |
 | 8 | Repetitive duplicate, finished and stale questions | **Partly fixed** | Duplicate: fixed. A question has an identity hash (`lib/understanding/questions.ts:54`) and a settled one stays settled for 30 days (`lib/understanding/supersede.ts:101`). Finished: still broken. Ticking a task or closing it by voice only clears expectations (`app/api/tasks/[id]/route.ts:117`); the question resting on it closes only at the next successful model run (`questions.ts:394-399`). Stale: nothing retires an open question by age, and the briefing lists the same open ones every session (`lib/secretary/briefing.ts:626`). |
-| 9 | No useful initiative | **Still broken** | The only unprompted contact is a reminder push, and only for an item that carries a reminder time, on a device with notifications on (`instrumentation.ts:25`, `lib/push.ts:14`). There is no morning briefing and no schedule (`Procfile` has only `release` and `web`). The one follow-up that should open a conversation looks to be used up by loading a page: every page's chat dock (`app/(app)/layout.tsx:47`) calls `app/api/chat/bootstrap/route.ts:21`, which builds the briefing and so marks overdue expectations "missed" (`lib/secretary/briefing.ts:563-577`) while returning only the card (`route.ts:33`). Read, not run. |
+| 9 | No useful initiative | **Still broken** | The app contacts the user unprompted in three ways, all pushes: a reminder, only for an item that carries a reminder time (`instrumentation.ts:25`, `lib/push.ts:14`); a spend or cap alert (`alertOnce`, `lib/spend-guard.ts:208`); and a "Read your email" receipt when mail arrives (`lib/email-intake.ts:270`). None of them starts work or proposes anything. There is no morning briefing and no schedule (`Procfile` has only `release` and `web`). And the one follow-up that should open a conversation is used up by loading a page, **proven by the Reviewer**: every page's chat dock (`app/(app)/layout.tsx:47`) calls `app/api/chat/bootstrap/route.ts:21`, which builds the briefing and so turns an open, overdue expectation into "missed" (`lib/secretary/briefing.ts:563-583`) while returning only the card (`route.ts:33`); the next briefing then carries neither the opener nor the promise. `/api/briefing` and `consult_brain` build the briefing the same way. The fix is a later task. |
 
 One lead from the same reading that I did not verify: an edit may start from
 the visible blocks only, which would drop hidden blocks for good
@@ -373,8 +405,10 @@ What the old local copy says, for orientation only (September, before lists
 existed as a kind of project): 8 projects, none named for AV or an event; no
 lists; "AV" in 5 task titles, "gear" in 3, "camera" in 2, "equipment",
 "checklist" and "shopping" in 1 each. The AV work visible there is inventory
-tasks inside the Caltrans project. (`E/local-devcopy-queries.txt`, sections
-`projects` and `keyword_counts`.)
+tasks inside one of the 8 projects, not a project of its own.
+(`E/local-devcopy-queries.txt`, sections `projects` and `keyword_counts`.)
+
+When production's answer arrives it goes here as counts only.
 
 ## Could not measure
 
@@ -397,8 +431,14 @@ evidence folder.
 (cd E/ci && PGPORT=5440 PGDATA_DIR=E/pgdata node scripts/local-postgres.mjs)   # leave running
 E/ci-local.sh; E/ci-build.sh; E/ci-e2e.sh; E/ci-e2e-rev.sh; cat E/logs/summary.txt
 
+# The local copy and the built app are stopped. Start them on loopback only:
+(cd E/ci && PGPORT=5441 PGDATA_DIR=E/pgdata-devcopy node scripts/local-postgres.mjs)   # leave running
+(cd E/ci && DATABASE_URL=postgresql://postgres:postgres@localhost:5441/secretary OPENAI_API_KEY=placeholder \
+  BETTER_AUTH_SECRET=baseline-placeholder-secret BETTER_AUTH_URL=http://localhost:3112 UNDERSTANDING_DISABLED=true \
+  VOICE_DISABLED=true SLOW_LOOP_DISABLED=true SHOP_DISABLED=true ADAPTIVE_V2=true npx next start -H 127.0.0.1 -p 3112)
+
 # 2 and 7. Production, read-only: Kiron's command in §2.
-#    The same script against the local copy (port 5441, running):
+#    The same script against the local copy (port 5441):
 DATABASE_URL=postgresql://postgres:postgres@localhost:5441/secretary OWNER_EMAIL=<email> SINCE=2026-09-01 \
   node docs/jarvis/baseline/prod-readonly.mjs
 
@@ -408,7 +448,7 @@ DATABASE_URL=postgresql://postgres:postgres@localhost:5441/secretary OPENAI_API_
 #    The cache probe costs about $0.32 a run on Fable:
 #    MODEL=claude-fable-5 ANTHROPIC_API_KEY=... npx tsx docs/jarvis/baseline/cache-probe.ts
 
-# 4 and 5. Browser (the build is served on 3112 against the local copy, running)
+# 4 and 5. Browser (needs the two servers above)
 BASE_URL=http://localhost:3112 OWNER_EMAIL=<email> STATE=E/state-owner.json \
   DATABASE_URL=postgresql://postgres:postgres@localhost:5441/secretary node docs/jarvis/baseline/browser-signin.mjs
 BASE_URL=http://localhost:3112 STATE=E/state-owner.json OUT=E/screens node docs/jarvis/baseline/browser-screens.mjs
@@ -423,3 +463,9 @@ untouched; the hands-on runs then moved one widget and collapsed it, so a
 second hands-on run starts from that board, not the original. The server on
 3112 runs the CI build with placeholder keys, no push keys, and background
 reading disabled, so it can neither spend nor notify.
+
+During the measurements that server was started without `-H 127.0.0.1`, so it
+listened on every network interface for about half an hour (18:19 to 18:50), with a copy of
+September's data behind the app's sign-in. It is stopped now, and the start
+line above binds it to this Mac only. `browser-signin.mjs` and
+`browser-hands-on.mjs` refuse any address that is not localhost.

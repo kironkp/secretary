@@ -5,7 +5,7 @@
 // test bypass. So: sign a throwaway user up and in through the real routes
 // (the way e2e/global-setup.ts does), then point that session row at the
 // owner's user in the copy. The cookie is the server's own; only the copy's
-// session table is touched. Refuses any database that is not on localhost.
+// session table is touched. Refuses any database or app that is not on localhost.
 //
 //   BASE_URL=http://localhost:3112 OWNER_EMAIL=<email> STATE=<path>/state.json \
 //     DATABASE_URL=postgresql://postgres:postgres@localhost:5441/secretary \
@@ -16,6 +16,8 @@ import pg from "pg";
 const base = process.env.BASE_URL ?? "http://localhost:3112";
 const dbUrl = process.env.DATABASE_URL ?? "";
 if (!["localhost", "127.0.0.1"].includes(new URL(dbUrl).hostname)) throw new Error("local databases only");
+// The app too: this script signs a user up or changes a board, and must never do that to production.
+if (!["localhost", "127.0.0.1"].includes(new URL(base).hostname)) throw new Error("local apps only");
 
 const who = { email: "baseline-101@secretary.test", password: "baseline-password-not-a-secret", name: "Baseline" };
 const headers = { "Content-Type": "application/json", Origin: base };

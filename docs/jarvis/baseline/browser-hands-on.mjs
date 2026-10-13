@@ -17,6 +17,8 @@ const out = process.env.OUT ?? "hands-on";
 const profile = process.env.PROFILE ?? "phone";
 const dbUrl = process.env.DATABASE_URL ?? "";
 if (!["localhost", "127.0.0.1"].includes(new URL(dbUrl).hostname)) throw new Error("local databases only");
+// The app too: this script signs a user up or changes a board, and must never do that to production.
+if (!["localhost", "127.0.0.1"].includes(new URL(base).hostname)) throw new Error("local apps only");
 const executablePath =
   process.env.CHROMIUM ??
   `${process.env.HOME}/Library/Caches/ms-playwright/chromium-1194/chrome-mac/Chromium.app/Contents/MacOS/Chromium`;
