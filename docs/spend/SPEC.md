@@ -89,6 +89,11 @@ read-aloud are the user's own turn and are never stopped by a cap.
 - The all-background cap's default is $3 in code since v1.04, the same as
   the value production has had set since 2026-10-12. A default that is looser
   than what production runs is a trap for the next environment.
+- With both daily caps at their $3 defaults, understanding alone reaching
+  $3 stops all background work, and the push that goes out is the
+  all-background one ("Background work paused"), not the understanding one:
+  the wider cap is asked first. That is what production has done since
+  2026-10-12, when it was set to 3 there.
 - An understanding run counts as its own ceiling before it starts, and runs
   still reading count as theirs, so two runs that start together cannot both
   fit under the cap on the same spend.
