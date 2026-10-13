@@ -26,39 +26,48 @@ beside me in a workshop."*
   drafted twice and read by both the Executor and the Reviewer against the
   code BEFORE being contracted; a seeded random-walk property test was
   written first, fails on `fbcccef`, and is the gate before any offer; the
-  Reviewer read that walker for width before the fix was judged. **Offered
-  2026-10-13 at `393de92`; that commit will not ship. No verdict was
-  given on it.** The Executor's own pass on a copy of his real board, and
-  the Reviewer on made-up data, both found that a system plan with a card
-  listed first (the shape main's planner writes) draws every card above
-  next up and the tiles: for up to a day when it lands, and on any later
-  day a planner answers that way. Two smaller things with rows main
-  wrote: a place read one too high because a retired section was counted,
-  and a hide of an archived project that Settings could no longer lift.
-  All three are being fixed on top of `393de92`, walker first, and r5 is
-  offered again at the new tip. The rule for the card run, ruled after the
-  Reviewer probed two drafts (mine, then their own "top wins", which would
-  have broken a board where a planner had sunk the tiles): the cards go
-  where the fewest of the system's sections end up on the wrong side of
+  Reviewer read that walker for width before the fix was judged. Offered
+  2026-10-13 at `393de92`; no verdict was given on it and it will not
+  ship. **Offered again the same day at `472c2a7` (16 commits on top,
+  nothing amended), with the Reviewer.**
+  What was found between the two offers, and by whom. The Executor's pass
+  on a copy of his real board: a system plan with a card listed first (the
+  shape main's planner writes) drew every card above next up and the
+  tiles, for up to a day when it lands and on any later day a planner
+  answers that way. The Reviewer on rows written by main's code: a place
+  read one too high because a retired section was counted; a hide of an
+  archived project that Settings could not lift; Put it back onto a row
+  from before the update losing a pin and bringing the retired section
+  back. The Reviewer running the committed walk on seeds of their own:
+  hide-then-show of a section he added refused in one request; the stored
+  board not composing to itself on a crossed board with a hidden section;
+  three gaps in the walk's own model. So "the long run is clean" was true
+  of one seed; the offer now shows three, two of them the Reviewer's, and
+  the Reviewer runs fresh ones.
+  The rules that came out of it (spec, adaptive-ui): the cards go where
+  the fewest of the system's drawn sections end up on the wrong side of
   them (next up and the tiles belong above, Needs a date and People below,
-  the strip either side); among such places the nearest to where the plan
-  had them, the upper on a tie. Also found by the Reviewer running the
-  committed walk on a seed of their own: hiding and showing a section he
-  added in one request is refused, and two gaps in the walk's own model;
-  the long run is now required on three seeds, one the Reviewer's. Checked
-  by the Reviewer
-  on `393de92` and holding: the CI-exact run, the committed walk (0
-  complaints where `fbcccef` gave 1,348), their own walk on a new seed,
-  their probes from rounds 2 to 4, no schema change, a rollback to v65
-  (main draws its default board, nothing deleted), and five of the seven
-  decisions the Executor made alone. Still open with the Reviewer: the
-  other two decisions, the chip across a real midnight, their mutants.
-  Named, not fixed: a place is a position, so a section he placed in the
-  middle may get new neighbours when the card run moves. Found on main while
-  building it and live until this lands: the layout clock reads only the
-  newest ten stored rows, so on a busy day a system move can happen twice.
-  Not done by anyone independent: a browser pass on real data; the
-  Reviewer's session refuses to copy the database and Kiron's say is needed.
+  the strip either side), nearest to where the plan had them, the upper on
+  a tie; retired components are taken out wherever a stored row is read as
+  a board; every row this version stores carries a mark, and Put it back
+  refuses a row without one in plain words.
+  Limits written down, not fixed: on a board where the system has moved
+  the tiles under the cards or Needs a date above them, a request of his
+  that takes away or brings back one of those sections (a pin included)
+  can move the cards to the other side of the tiles (until the split,
+  1.07); a place is a position, so a section he placed in the middle may
+  get new neighbours when the cards move; one undo step is lost at the
+  update; after a rollback to v65 main reads no row this version stored
+  and draws its own board until he next arranges it (nothing deleted).
+  Claimed by the Executor for `472c2a7`, with the Reviewer to check:
+  CI-exact all green (2,558 tests, 73 browser specs); 85 of 85 mutants
+  caught; the three long runs at zero. Not repeated on the tip yet: the
+  pass on the copy of his real board (asked of the Executor, as the
+  landing day goes). Found on main while building it and live until this
+  lands: the layout clock reads only the newest ten stored rows, so on a
+  busy day a system move can happen twice. Not done by anyone
+  independent: a browser pass on real data; the Reviewer's session
+  refuses to copy the database and Kiron's say is needed.
 - **1.03** — a page load no longer cancels a promised follow-up. Accepted and
   live: `7073e9a`, Heroku v64, 2026-10-12.
 - **1.04** — the count the caps read is the real one (first slice of Phase
