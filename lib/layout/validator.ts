@@ -9,8 +9,12 @@
 //   project wins; ties keep the first. (Rejected-not-demoted was the
 //   alternative; demotion degrades more gracefully mid-conversation.)
 // - Invariant 4 has no fixed position (v1.02; it was "the first 8 sections"):
-//   an urgent project always has a card, and the system does not move a card
-//   that is not urgent ahead of one that is.
+//   an urgent project always has a card. Where cards sit is not checked here:
+//   the system never places one (lib/layout/compose.ts), so there is nothing
+//   to refuse.
+// - Movement (invariant 3) is measured on the sections that are not cards and
+//   that the user has not pinned: a card moving with the data is not a system
+//   move, and a pin is applied by the composition, not checked.
 import { PROP_SCHEMAS, RETIRED_COMPONENTS, isRegistryComponent, type RegistryComponent } from "./registry";
 import { isUrgent, layoutPlanSchema, sectionKey, urgencyLabel, type LayoutPlan, type PlanSection } from "./plan";
 import type { Signals } from "./signals";
@@ -32,11 +36,10 @@ export type ValidationContext = {
   /** User-initiated changes are exempt from movement rationing (invariant 3). */
   userInitiated?: boolean;
   /**
-   * The stored plan itself, kept as it stands (planWithFallback's last
-   * resort before the default). Nothing in it moved, so there is nothing to
-   * ration and no order to refuse (invariant 4), and its whys are its own.
+   * Leave movement (invariants 3 and 8) out: the caller measures it itself on
+   * the COMPOSED plan (movementReasons), after the user's pins are applied.
    */
-  kept?: boolean;
+  skipMovement?: boolean;
   /** Names of approved dynamic components (SPEC v1.3) — valid section names. */
   dynamicComponents?: string[];
 };
@@ -130,7 +133,7 @@ export function validatePlan(input: unknown, ctx: ValidationContext): Validation
       sections.push({ component, why: s.why });
       continue;
     }
-    sections.push({ component, props: props.data as Record<string, unknown>, why: s.why });
+    sections.push({ component, props: props.data as Record<string, unknown>, why: s.why, ...(s.place !== undefined ? { place: s.place } : {}) });
   }
   if (!sections.length) {
     return { ok: false, reasons: ["no valid sections left"], fallback: fallback() };
@@ -158,7 +161,7 @@ export function validatePlan(input: unknown, ctx: ValidationContext): Validation
   // — that's model self-talk, not a user-facing reason. Strip why from any
   // section whose props match its DEFAULT_PLAN counterpart.
   for (const s of plan.sections) {
-    if (!s.why || ctx.kept) continue;
+    if (!s.why) continue;
     const base = ctx.defaultPlan.sections.find((d) => sectionKey(d) === sectionKey(s));
     if (base && JSON.stringify(s.props ?? {}) === JSON.stringify(base.props ?? {})) {
       delete s.why;
@@ -201,107 +204,66 @@ export function validatePlan(input: unknown, ctx: ValidationContext): Validation
   }
 
   // Invariant 4 — nothing urgent disappears (SPEC §3, v1.02). Urgent is late
-  // open work or a date within the week (isUrgent); a list never is.
-  const urgent = new Map(ctx.signals.projects.filter(isUrgent).map((p) => [p.id, p]));
-  const cards = plan.sections
-    .filter((s) => s.component === "project_card")
-    .map((s) => String(s.props?.project_id ?? ""));
-  // Presence: an urgent project always has a card. Compact allowed; absent =
-  // rejected. (A STORED plan that has come to lack one is repaired before it
-  // gets here: withUrgentCards.)
-  for (const p of urgent.values()) {
+  // open work or a date within the week (isUrgent); a list never is. An
+  // urgent project always has a card: compact allowed, absent = rejected, for
+  // a planner's plan and for a user's request to hide it alike. Where the
+  // card sits is the composition's business, not this check's.
+  const cards = plan.sections.filter((s) => s.component === "project_card").map((s) => String(s.props?.project_id ?? ""));
+  for (const p of ctx.signals.projects.filter(isUrgent)) {
     if (!cards.includes(p.id)) reasons.push(`urgent project "${p.name}" (${urgencyLabel(p)}) would have no card`);
   }
-  // Order: a plan the SYSTEM writes may not move a card that is not urgent
-  // ahead of an urgent one. Judged on what it changed: a pair the plan it
-  // replaces already had in that order stands (the user may have made it),
-  // and with no plan to replace, any such pair is refused. A plan kept as it
-  // stands and a change the user asked for are never refused for order; there
-  // is no fixed position, so six late projects are as valid as one.
-  if (!ctx.userInitiated && !ctx.kept) {
-    const stood = new Map(
-      (ctx.previousPlan?.sections ?? [])
-        .filter((s) => s.component === "project_card")
-        .map((s, i) => [String(s.props?.project_id ?? ""), i] as const)
-    );
-    const nameOf = (id: string) => ctx.signals.projects.find((p) => p.id === id)?.name ?? id;
-    const refused = new Set<string>();
-    cards.forEach((quiet, i) => {
-      if (urgent.has(quiet)) return;
-      for (const later of cards.slice(i + 1)) {
-        if (!urgent.has(later) || refused.has(later)) continue;
-        const a = stood.get(quiet);
-        const b = stood.get(later);
-        if (a !== undefined && b !== undefined && a < b) continue;
-        refused.add(later);
-        reasons.push(`"${nameOf(quiet)}" is not urgent and would move ahead of urgent project "${urgent.get(later)!.name}" (${urgencyLabel(urgent.get(later)!)})`);
-      }
-    });
-  }
 
-  // Invariant 3 — movement is rationed for SYSTEM-initiated plans: reordering
-  // needs days_since_layout_change >= 1 AND a why on every moved section.
-  // (User-initiated changes are exempt — nothing the user asked for is a surprise.)
-  // A previous plan that is itself the default (nobody arranged it) is
-  // measured as the NEW default (SEC-A007): a product change to the default
-  // is not the planner moving things, and measuring against the old one
-  // would keep every unarranged board on it forever. A retired component's
-  // section is not on anyone's screen, so its absence is not a removal.
-  const baseline = ctx.previousPlan?.plan_id === "default" ? ctx.defaultPlan : ctx.previousPlan;
-  if (!ctx.userInitiated && !ctx.kept && baseline) {
-    const prevKeys = baseline.sections.filter((s) => !RETIRED_COMPONENTS.has(s.component)).map(sectionKey);
-    const newKeys = plan.sections.map(sectionKey);
-    // Invariant 8: same-day system plans may add or re-emphasize, but
-    // removals wait — a section the user saw today can't silently vanish.
-    if (ctx.signals.context.days_since_layout_change < 1) {
-      for (const key of prevKeys) {
-        if (!newKeys.includes(key)) {
-          reasons.push(`removal is rationed today: "${key}" would vanish`);
-        }
-      }
-    }
-    const common = new Set(prevKeys.filter((k) => newKeys.includes(k)));
-    const prevSeq = prevKeys.filter((k) => common.has(k));
-    const newSeq = newKeys.filter((k) => common.has(k));
-    if (prevSeq.join("|") !== newSeq.join("|")) {
-      if (ctx.signals.context.days_since_layout_change < 1) {
-        reasons.push("reordering is rationed: layout already changed today");
-      } else {
-        const kept = lcs(prevSeq, newSeq);
-        for (const s of plan.sections) {
-          const key = sectionKey(s);
-          if (common.has(key) && !kept.has(key) && !s.why) {
-            reasons.push(`moved section "${key}" has no why`);
-          }
-        }
-      }
-    }
-  }
-
-  // Invariant 7 — pinned sections keep position + variant vs the previous
-  // plan, against the PLANNERS. The user's own request moves what it moves:
-  // "put the shopping list at the top" shifts a pinned section down a place,
-  // and refusing that broke "user-initiated changes apply immediately".
-  if (ctx.previousPlan && !ctx.userInitiated && !ctx.kept) {
-    const pinKeys = new Set([
-      ...ctx.pinnedSections,
-      ...ctx.preferences.filter((p) => p.kind === "pin_section").map((p) => p.value.section),
-    ]);
-    // Positions count among the sections still drawn: a retired one between
-    // them moves nothing the user can see.
-    const shown = ctx.previousPlan.sections.filter((s) => !RETIRED_COMPONENTS.has(s.component));
-    for (const key of pinKeys) {
-      const oldIdx = shown.findIndex((s) => sectionKey(s) === key);
-      if (oldIdx === -1) continue;
-      const newIdx = plan.sections.findIndex((s) => sectionKey(s) === key);
-      const oldVariant = shown[oldIdx].props?.variant;
-      const newVariant = newIdx === -1 ? undefined : plan.sections[newIdx].props?.variant;
-      if (newIdx !== oldIdx || (oldVariant !== undefined && newVariant !== oldVariant)) {
-        reasons.push(`pinned section "${key}" moved or changed`);
-      }
-    }
-  }
+  if (!ctx.userInitiated && !ctx.skipMovement) reasons.push(...movementReasons(plan, ctx));
 
   if (reasons.length) return { ok: false, reasons, fallback: fallback() };
   return { ok: true, plan, warnings };
+}
+
+/**
+ * Invariants 3 and 8 — movement is rationed for SYSTEM-initiated plans:
+ * reordering needs days_since_layout_change >= 1 AND a why on every moved
+ * section, and same-day plans may not remove what the user saw today.
+ *
+ * Measured on the sections that are the system's to place (SPEC §3, v1.02):
+ * not the project cards, which follow the data and are never "moved by the
+ * system", and not the sections the user pinned, whose place is his and is
+ * applied by the composition. A previous plan that is itself the default
+ * (nobody arranged it) is measured as the NEW default (SEC-A007): a product
+ * change to the default is not the planner moving things. A retired
+ * component's section is not on anyone's screen, so its absence is not a
+ * removal.
+ */
+export function movementReasons(plan: LayoutPlan, ctx: ValidationContext): string[] {
+  const reasons: string[] = [];
+  const baseline = ctx.previousPlan?.plan_id === "default" ? ctx.defaultPlan : ctx.previousPlan;
+  if (!baseline) return reasons;
+  const pins = new Set([
+    ...ctx.pinnedSections,
+    ...ctx.preferences.filter((p) => p.kind === "pin_section").map((p) => p.value.section),
+  ]);
+  const systems = (s: PlanSection) => s.component !== "project_card" && !pins.has(sectionKey(s));
+  const prevKeys = baseline.sections.filter((s) => !RETIRED_COMPONENTS.has(s.component) && systems(s)).map(sectionKey);
+  const newKeys = plan.sections.filter(systems).map(sectionKey);
+  // Invariant 8: same-day system plans may add or re-emphasize, but
+  // removals wait — a section the user saw today can't silently vanish.
+  if (ctx.signals.context.days_since_layout_change < 1) {
+    for (const key of prevKeys) {
+      if (!newKeys.includes(key)) reasons.push(`removal is rationed today: "${key}" would vanish`);
+    }
+  }
+  const common = new Set(prevKeys.filter((k) => newKeys.includes(k)));
+  const prevSeq = prevKeys.filter((k) => common.has(k));
+  const newSeq = newKeys.filter((k) => common.has(k));
+  if (prevSeq.join("|") !== newSeq.join("|")) {
+    if (ctx.signals.context.days_since_layout_change < 1) {
+      reasons.push("reordering is rationed: layout already changed today");
+    } else {
+      const kept = lcs(prevSeq, newSeq);
+      for (const s of plan.sections) {
+        const key = sectionKey(s);
+        if (common.has(key) && !kept.has(key) && !s.why) reasons.push(`moved section "${key}" has no why`);
+      }
+    }
+  }
+  return reasons;
 }

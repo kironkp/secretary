@@ -2,7 +2,7 @@
 // applies rules in order; later rules may not violate earlier ones. Every
 // deviation carries a user-addressed `why` naming the signal.
 import { REGISTRY_VERSION } from "./registry";
-import { defaultPlan, isUrgent, type LayoutPlan, type PlanSection } from "./plan";
+import { defaultPlan, type LayoutPlan, type PlanSection } from "./plan";
 import {
   isStrongEngagement,
   isStrongScheduleTalk,
@@ -19,6 +19,22 @@ export function resolvePlan(
   if (signals.context.calm_mode) return defaultPlan(signals);
   return planner(signals);
 }
+
+/**
+ * Calendar days, in the user's zone, to the date that makes a project
+ * pressing: the count the date beside the chip uses (lib/due.ts). days_left
+ * counts whole 24-hour periods, so at 7 PM a task due tomorrow at 5 PM is
+ * "0 days" by it, and the chip said "Due in 0 days" beside "tomorrow".
+ * A committed deadline is the project's own date; otherwise the nearest date
+ * that is not already past; and for a fixture or an event with neither,
+ * days_left as before.
+ */
+function calendarDays(p: Signals["projects"][number]): number {
+  if (p.deadline_type === "committed" && typeof p.deadline_days === "number") return p.deadline_days;
+  const ahead = [p.soonest_days, p.deadline_days].filter((d): d is number => typeof d === "number" && d >= 0);
+  return ahead.length ? Math.min(...ahead) : (p.days_left ?? 0);
+}
+const dueWords = (days: number): string => (days <= 0 ? "Due today" : days === 1 ? "Due tomorrow" : `Due in ${days} days`);
 
 export function planFromRules(signals: Signals): LayoutPlan {
   const base = defaultPlan(signals);
@@ -45,7 +61,7 @@ export function planFromRules(signals: Signals): LayoutPlan {
     const card = cardOf(deadlineAccented.id);
     if (card) {
       card.props = { ...card.props, variant: "full", accent: true, inline_loops: true };
-      card.why = `Due in ${deadlineAccented.days_left} day${deadlineAccented.days_left === 1 ? "" : "s"}${
+      card.why = `${dueWords(calendarDays(deadlineAccented))}${
         deadlineAccented.deadline_type === "committed" ? " — you committed to this date" : ""
       }`;
     }
@@ -74,21 +90,9 @@ export function planFromRules(signals: Signals): LayoutPlan {
         accent: isAlsoDeadlineAccent ? true : !deadlineAccented,
       };
       card.why = `${e.mentions_24h} mentions today vs ${e.baseline_mentions} typical`;
-      if (canReorder) {
-        const from = plan.sections.indexOf(card);
-        plan.sections.splice(from, 1);
-        const heroIdx = plan.sections.findIndex((s) => s.component === "hero_next_up");
-        // Invariant 4: the system does not put a card that is not urgent
-        // ahead of an urgent one. An engaged project that is urgent goes to
-        // the top; one that is not stops just below the last urgent card.
-        const urgentIds = new Set(signals.projects.filter(isUrgent).map((p) => p.id));
-        const lastUrgent = plan.sections.findLastIndex(
-          (s) => s.component === "project_card" && urgentIds.has(String(s.props?.project_id))
-        );
-        const to = isUrgent(engaged) || lastUrgent === -1 ? heroIdx + 1 : lastUrgent + 1;
-        plan.sections.splice(to, 0, card);
-        reordered = to !== from;
-      }
+      // No move (v1.02): until then the card went to the top after a day.
+      // The system never places a card (SPEC §2, composition); the accent,
+      // the unfolded items and the why are how it says "this is the one".
     }
     firedRules.push(`${engaged.name} dominating the conversation`);
   }

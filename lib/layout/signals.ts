@@ -229,15 +229,17 @@ export async function computeSignals(userId: string, now = new Date()): Promise<
 
   // days_since_layout_change: days since the newest stored plan whose section
   // ORDER differs from its predecessor's (emphasis-only changes don't count).
+  // The project cards are left out (SPEC §3 invariant 3, v1.02): they follow
+  // the data, so a card changing place is not a layout change. Counting them
+  // reset this clock on every re-sort, and the clock is in the signals hash,
+  // so each re-sort also paid for a second planner call.
   let daysSinceChange = Number.MAX_SAFE_INTEGER;
   const orders = headRows.map((r) => {
     const sections = (r.spec as { sections?: { component: string; props?: Record<string, unknown> }[] })
       ?.sections ?? [];
     return sections
-      .map((s) => {
-        const pid = s.props?.project_id;
-        return typeof pid === "string" ? `${s.component}:${pid}` : s.component;
-      })
+      .filter((s) => s.component !== "project_card")
+      .map((s) => s.component)
       .join("|");
   });
   for (let i = 0; i < headRows.length - 1; i++) {

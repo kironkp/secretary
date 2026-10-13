@@ -6,11 +6,12 @@ import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { layoutPreferences, layoutSpecs } from "@/lib/db/schema";
 import { REGISTRY_VERSION } from "./registry";
-import { defaultPlan, sectionKey, standsAsStored, withUrgentCards, type LayoutPlan } from "./plan";
+import { composePlan, pinKeys, placeOn } from "./compose";
+import { defaultPlan, sectionKey, type LayoutPlan } from "./plan";
 import { planWithFallback, type PlannerCall } from "./plan-from-llm";
 import { computeSignals, signalsHash, type Signals } from "./signals";
 import { listDynamicComponents, openPriorityWishes } from "./slow-loop";
-import { applyBans, type LayoutPreference } from "./validator";
+import type { LayoutPreference } from "./validator";
 
 export type PlanBundle = {
   plan: LayoutPlan;
@@ -57,23 +58,27 @@ export async function computeCurrentPlan(userId: string): Promise<PlanBundle> {
   // latency (~5s) is far over the fast-loop budget to block a render on.
   let plan: LayoutPlan;
   let wantsLlmRefinement = false;
+  // What renders is composed (SPEC §2, v1.02; lib/layout/compose.ts): from a
+  // system plan come the emphasis and the places of the sections that are not
+  // cards; the sections he placed go back where he put them; the cards he did
+  // not place are in data order; then his hides, bans and presence. Every
+  // branch below ends in the same composition, so the order follows the data
+  // whichever plan it starts from.
+  const compose = (system: LayoutPlan): LayoutPlan =>
+    composePlan(system, { signals, stored: previousPlan, pinned: head?.pinned ?? [], preferences });
   if (signals.context.calm_mode) {
     // Invariant 7: DEFAULT_PLAN unconditionally — no planner of any kind.
-    // (Invariant 4 still holds: a hidden card is back while its project is late.)
-    plan = withUrgentCards(applyBans(defaultPlan(signals), preferences), signals);
+    plan = compose(defaultPlan(signals));
   } else if (
     head?.signalsHash &&
     head.signalsHash === signalsHash(signals, REGISTRY_VERSION) &&
-    previousPlan &&
-    // A plan the system wrote is not served from the cache once a card that
-    // is not urgent sits ahead of an urgent one (invariant 4): the chain
-    // below decides, and ends at the default.
-    standsAsStored(previousPlan, head.pinned ?? [], preferences, signals)
+    previousPlan
   ) {
-    // Durable cache (SPEC §6): same signals as the stored head → zero calls.
-    // The stored plan as it stands, plus the card of any urgent project it
-    // has come to lack (invariant 4).
-    plan = withUrgentCards(applyBans(previousPlan, preferences), signals);
+    // Durable cache (SPEC §6): the stored plan was written for exactly these
+    // signals, so it is today's system plan → zero calls. The hash does not
+    // carry everything the card order reads (a task's date edited into the
+    // past leaves it unchanged), which is why the cards are ordered here too.
+    plan = compose(previousPlan);
   } else {
     ({ plan } = await planWithFallback(signals, {
       previousPlan,
@@ -197,6 +202,11 @@ export async function persistPlan(
     // Background work under the global net (SPEND_KILL, the all-background cap).
     const { paidCallAllowed } = await import("@/lib/spend-guard");
     if (!(await paidCallAllowed(userId, "layout")).ok) return;
+    // The head may be this very plan under an older situation's hash (his data
+    // changed, the board did not, so no row was written above). Stamp it now:
+    // otherwise the answer about to be paid for is taken for one about a
+    // situation that has moved on, and thrown away (v1.02).
+    await stamp();
     const preferences = await getPreferences(userId);
     const { claudePlannerCall } = await import("./plan-from-llm");
     const refined = await planWithFallback(bundle.signals, {
@@ -273,9 +283,37 @@ export async function savePlanAsHead(
 }
 
 /**
+ * Save a plan the user just changed, as it will render (SPEC §2, composition).
+ * What he moved or added is PINNED at the place it has on that plan (the n-th
+ * section from the top, or last), and the plan is composed before it is
+ * stored: the answer a tool gives is then what the next render shows.
+ * `preferences` are his preferences as they stand after this change (a hide
+ * just made, a hide just lifted).
+ */
+export async function saveUsersPlan(
+  userId: string,
+  plan: LayoutPlan,
+  opts: { signals: Signals; placed: string[]; preferences: LayoutPreference[] }
+): Promise<{ version: number; plan: LayoutPlan }> {
+  const head = await getPlanHead(userId);
+  const sections = plan.sections.map((s) => {
+    const key = sectionKey(s);
+    return opts.placed.includes(key) ? { ...s, place: placeOn(plan.sections, key) ?? ("last" as const) } : s;
+  });
+  const placedPlan = { ...plan, sections };
+  const present = new Set(sections.map((s) => sectionKey(s)));
+  const pinned = [...pinKeys([...(head?.pinned ?? []), ...opts.placed], [])].filter((k) => present.has(k));
+  const composed = composePlan(placedPlan, { signals: opts.signals, stored: placedPlan, pinned, preferences: opts.preferences });
+  const version = await savePlanAsHead(userId, composed, opts.placed);
+  return { version, plan: composed };
+}
+
+/**
  * One-tap revert (SPEC §1 invariant 7): the previous plan becomes a new head
  * and the reverted head is labeled — every revert is a labeled wrong
- * prediction, our accuracy metric.
+ * prediction, our accuracy metric. The previous plan's PINS come back with
+ * it (v1.02): a pin holds a place now, so the pin a move made must go when
+ * the move is undone, or the section would hold its old place for good.
  */
 export async function revertPlan(userId: string): Promise<boolean> {
   const rows = await db
@@ -294,7 +332,7 @@ export async function revertPlan(userId: string): Promise<boolean> {
     userId,
     version: head.version + 1,
     spec: previous.spec as LayoutPlan,
-    pinned: head.pinned,
+    pinned: previous.pinned,
     kind: "plan",
     signalsHash: previous.signalsHash,
     reasonSummary: previous.reasonSummary,

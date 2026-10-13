@@ -8,7 +8,7 @@ import { Fragment, useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Pin, Sparkles, Undo2 } from "lucide-react";
 import type { LayoutPlan, PlanSection } from "@/lib/layout/plan";
-import { arrangedByUser, sectionKey } from "@/lib/layout/plan";
+import { sectionKey } from "@/lib/layout/plan";
 import { openDetail, type DocRow, type EventRow, type TaskRow } from "./shared";
 import { ProjectProgressStrip, pickTimelineProject } from "./timeline-board";
 import { buildLanes, datePresets, DEFAULT_FILTERS, pickedDay } from "@/lib/timeline";
@@ -504,7 +504,10 @@ export function PlanView({
     }
   };
 
-  const adapted = plan.plan_id !== "default";
+  // The line above the board: shown when the system adapted it, or when the
+  // user placed something on it (a pin is what "arranged by you" means now;
+  // plan ids say nothing about whose board it is, SPEC §2).
+  const adapted = plan.plan_id !== "default" || pinned.size > 0;
 
   return (
     <div className="space-y-4">
@@ -513,7 +516,7 @@ export function PlanView({
           <span className="inline-flex items-center gap-1.5">
             <Sparkles size={12} className="text-accent" aria-hidden />
             {/* A board the user arranged says so (SEC-A003b), not "for you". */}
-            {arrangedByUser(plan.plan_id) ? "Arranged by you" : (plan.reason_summary ?? "Arranged for you")}
+            {pinned.size > 0 ? "Arranged by you" : (plan.reason_summary ?? "Arranged for you")}
             {updatedAt && <span>· v{version}</span>}
           </span>
           <button

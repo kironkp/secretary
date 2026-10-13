@@ -4,7 +4,6 @@
 import { z } from "zod";
 import { isRegistryComponent, type RegistryComponent } from "./registry";
 import type { ProjectSignal, Signals } from "./signals";
-import type { LayoutPreference } from "./validator";
 import { byUrgency, type Urgency } from "@/lib/project-order";
 
 export const planSectionSchema = z
@@ -12,6 +11,10 @@ export const planSectionSchema = z
     component: z.string(), // registry membership checked by the validator (unknown → section dropped)
     props: z.record(z.string(), z.unknown()).optional(),
     why: z.string().max(140).optional(),
+    // Where the user pinned it (SPEC §2, composition): the n-th section from
+    // the top of the board, or its last place. Written by the app, never read
+    // from a planner.
+    place: z.union([z.number().int().min(0), z.literal("last")]).optional(),
   })
   .strict();
 
@@ -42,6 +45,8 @@ export type PlanSection = {
   component: RegistryComponent | (string & {});
   props?: Record<string, unknown>;
   why?: string;
+  /** A pinned section's place on the board (SPEC §2): n-th from the top, the banner not counted, or last. */
+  place?: number | "last";
 };
 export type WishlistEntry = { need: string; closest_component: string; signals: string };
 export type LayoutPlan = {
@@ -84,87 +89,19 @@ export function urgencyLabel(p: ProjectSignal): string {
   return typeof p.soonest_days === "number" && p.soonest_days < 0 ? `${-p.soonest_days}d late` : `${p.days_left}d`;
 }
 
-/** The cards' order: urgent projects first, then the rest, each in the one urgency order; lists last. */
-const cardOrder = (a: ProjectSignal, b: ProjectSignal): number =>
+/**
+ * The order of the cards the user did not place (SPEC §2): urgent projects
+ * first, then the rest, each in the one urgency order; lists last.
+ */
+export const cardOrder = (a: ProjectSignal, b: ProjectSignal): number =>
   Number(a.kind === "list") - Number(b.kind === "list") ||
   Number(isUrgent(b)) - Number(isUrgent(a)) ||
   byUrgency(urgencyOf(a), urgencyOf(b));
 
-/**
- * Invariant 4, presence (SPEC §3, v1.02): a plan that has come to lack the
- * card of an urgent project gets it back, and nothing else moves. The card
- * goes after the last urgent card (at the end of the cards when there is
- * none), with a why the user can read. This is how a stored plan is kept
- * when a project goes late after the user arranged the board, or after he
- * hid its card: the arrangement survives, and the late work is on screen.
- * Pure; returns the same plan when nothing is missing.
- */
-export function withUrgentCards(plan: LayoutPlan, signals: Signals): LayoutPlan {
-  const idOf = (s: PlanSection) => String(s.props?.project_id ?? "");
-  const urgent = signals.projects.filter(isUrgent);
-  const have = new Set(plan.sections.filter((s) => s.component === "project_card").map(idOf));
-  const missing = urgent.filter((p) => !have.has(p.id)).toSorted(cardOrder);
-  if (!missing.length) return plan;
-  const urgentIds = new Set(urgent.map((p) => p.id));
-  const sections = [...plan.sections];
-  for (const p of missing) {
-    const cards = sections.flatMap((s, i) => (s.component === "project_card" ? [i] : []));
-    const lastUrgent = cards.filter((i) => urgentIds.has(idOf(sections[i]))).at(-1);
-    const after = lastUrgent ?? cards.at(-1) ?? sections.length - 1;
-    const late = typeof p.soonest_days === "number" && p.soonest_days < 0;
-    sections.splice(after + 1, 0, {
-      component: "project_card",
-      props: { project_id: p.id, variant: "full" },
-      why: late ? "Back on your board: it has late work" : "Back on your board: it is due within a week",
-    });
-  }
-  return { ...plan, sections };
-}
-
-/** Is a project card that is not urgent ahead of one that is, anywhere among the plan's cards? */
-export function quietAheadOfUrgent(plan: LayoutPlan, signals: Signals): boolean {
-  const urgent = new Set(signals.projects.filter(isUrgent).map((p) => p.id));
-  let quietSeen = false;
-  for (const s of plan.sections) {
-    if (s.component !== "project_card") continue;
-    if (!urgent.has(String(s.props?.project_id ?? ""))) quietSeen = true;
-    else if (quietSeen) return true;
-  }
-  return false;
-}
-
-/**
- * The two names a plan the user arranged carries: arrange_dashboard (voice,
- * a tap) writes `user-…` (lib/layout/arrange.ts) and the chat's
- * edit_layout_plan writes `chat-…` (lib/secretary/tools.ts). Everything else
- * is the system's: `default`, `rules-…`, `llm-…`.
- */
-export const arrangedByUser = (planId: string): boolean => /^(user|chat)-/.test(planId);
-
-/**
- * Is this stored plan the user's own? The one place that says (SPEC §3
- * invariants 4 and 7): he arranged it (either name above; a chat edit pins
- * nothing, so the name is all it has), or it carries a pin of his, wherever
- * the pin is kept: on the plan's row (`pinned`) or as a pin_section
- * preference. A pin on a section that is not in the plan is not a pin on it.
- */
-export function isUsersPlan(plan: LayoutPlan, pinned: string[], preferences: LayoutPreference[]): boolean {
-  if (arrangedByUser(plan.plan_id)) return true;
-  const pins = new Set([...pinned, ...preferences.filter((p) => p.kind === "pin_section").map((p) => p.value.section)]);
-  return plan.sections.some((s) => pins.has(sectionKey(s)));
-}
-
-/**
- * Whether a STORED plan is kept as it stands (SPEC §3 invariant 4, v1.02).
- * Always when it is the user's own (isUsersPlan). A plan the system wrote
- * (planner, rules, default) only while it has no card that is not urgent
- * ahead of an urgent one, counting the cards an urgent project is owed;
- * once it has, it is not kept and the default is shown, like any other
- * stored plan that fails. The system's own stale order is nobody's to
- * protect.
- */
-export function standsAsStored(plan: LayoutPlan, pinned: string[], preferences: LayoutPreference[], signals: Signals): boolean {
-  return isUsersPlan(plan, pinned, preferences) || !quietAheadOfUrgent(withUrgentCards(plan, signals), signals);
+/** The why on a card the user hid that is back because its project is urgent (invariant 4, presence). */
+export function backOnBoardWhy(p: ProjectSignal): string {
+  const late = typeof p.soonest_days === "number" && p.soonest_days < 0;
+  return late ? "Back on your board: it has late work" : "Back on your board: it is due within a week";
 }
 
 /**

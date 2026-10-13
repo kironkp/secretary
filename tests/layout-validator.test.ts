@@ -1,6 +1,7 @@
 // F5 validator unit tests (SPEC §8) + the F7 ban-preference validator half.
 import { describe, expect, it } from "vitest";
 import { defaultPlan, sectionKey, type LayoutPlan } from "@/lib/layout/plan";
+import { composePlan } from "@/lib/layout/compose";
 import { planFromRules } from "@/lib/layout/plan-from-rules";
 import { validatePlan, type ValidationContext } from "@/lib/layout/validator";
 import { baseSignals } from "./fixtures/layout";
@@ -77,19 +78,21 @@ describe("F5 validator-rejects", () => {
     if (!res.ok) expect(res.fallback.sections.length).toBeGreaterThan(0);
   });
 
-  it("rejects a plan that moves a pinned section", () => {
+  it("does not judge where a pinned section is: the composition puts it back (invariant 7, v1.02)", () => {
     const signals = baseSignals();
     const previous = planFromRules(signals);
+    const pin = sectionKey(previous.sections[0]);
     const moved = structuredClone(previous);
     const [first] = moved.sections.splice(0, 1);
     moved.sections.push(first);
-    const res = validatePlan(moved, ctx({
-      signals,
-      previousPlan: previous,
-      pinnedSections: [sectionKey(previous.sections[0])],
-    }));
-    expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.reasons.join(" ")).toContain("pinned");
+    const res = validatePlan(moved, ctx({ signals, previousPlan: previous, pinnedSections: [pin] }));
+    expect(res.ok ? "ok" : res.reasons).toBe("ok");
+    if (!res.ok) return;
+    const composed = composePlan(res.plan, { signals, stored: previous, pinned: [pin], preferences: [] });
+    expect(sectionKey(composed.sections[0])).toBe(pin);
+    // Not pinned, the same move is the system's own, and is judged as one.
+    const unpinned = validatePlan(moved, ctx({ signals, previousPlan: previous }));
+    expect(unpinned.ok ? "ok" : unpinned.reasons.join(" ")).toMatch(/moved section "hero_next_up" has no why/);
   });
 });
 

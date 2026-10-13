@@ -7,10 +7,11 @@ import { join } from "node:path";
 import { openai, PLANNER_MODEL } from "@/lib/openai";
 import type Anthropic from "@anthropic-ai/sdk";
 import { REGISTRY_VERSION } from "./registry";
-import { defaultPlan, standsAsStored, withUrgentCards, type LayoutPlan } from "./plan";
+import { composePlan } from "./compose";
+import { defaultPlan, type LayoutPlan } from "./plan";
 import { planFromRules } from "./plan-from-rules";
 import { signalsHash, type Signals } from "./signals";
-import { applyBans, validatePlan, type LayoutPreference } from "./validator";
+import { movementReasons, validatePlan, type LayoutPreference } from "./validator";
 
 export type PlannerCall = (systemPrompt: string, signalsJson: string) => Promise<string>;
 
@@ -134,17 +135,28 @@ export async function planWithFallback(
   // previous plan named "default" as the default (SEC-A007), so a model that
   // wrote "default" would loosen the rationing for the plan after it.
   const serverId = (plan: LayoutPlan): LayoutPlan => ({ ...plan, plan_id: `llm-${key}` });
-  // Whatever plan leaves here: the user's bans and hidden sections come out,
-  // and then an urgent project's card goes back in if that took it away
-  // (invariant 4: a card he hid returns while its project is late).
-  const finish = (plan: LayoutPlan): LayoutPlan => withUrgentCards(applyBans(plan, opts.preferences), signals);
+  // What renders is COMPOSED from a system plan (SPEC §2, v1.02): its
+  // emphasis, whys, banner and non-card places; then the sections the user
+  // placed, back at their places; then the cards he did not place, in data
+  // order; then his hides, his bans and presence.
+  const compose = (system: LayoutPlan): LayoutPlan =>
+    composePlan(system, { signals, stored: opts.previousPlan, pinned: opts.pinnedSections, preferences: opts.preferences });
+  // A system plan is accepted when it is a valid plan and, once composed, it
+  // moves or removes nothing of the system's own that is rationed today.
+  // Movement is measured after the pins are applied and without the cards.
+  const accept = (raw: unknown): { system: LayoutPlan; composed: LayoutPlan } | null => {
+    const v = validatePlan(raw, { ...ctx, skipMovement: true });
+    if (!v.ok) return null;
+    const composed = compose(v.plan);
+    return movementReasons(composed, ctx).length ? null : { system: v.plan, composed };
+  };
   let called = false;
 
   if (opts.llmEnabled !== false) {
     const cached = planCache.get(key);
     if (cached) {
-      const v = validatePlan(serverId(cached), ctx);
-      if (v.ok) return { plan: finish(v.plan), source: "llm-cache" };
+      const ok = accept(serverId(cached));
+      if (ok) return { plan: ok.composed, source: "llm-cache" };
     }
     try {
       const call = opts.call ?? livePlannerCall;
@@ -168,38 +180,45 @@ export async function planWithFallback(
       ]);
       // It answered, so it was paid for, whether or not the answer validates.
       called = true;
-      const v = validatePlan(raw, ctx);
-      if (v.ok) {
-        const plan = serverId(v.plan);
+      const ok = accept(raw);
+      if (ok) {
+        // The cache keeps the planner's own plan, named by the server; it is
+        // composed again each time it is used.
         if (planCache.size >= CACHE_MAX) {
           const oldest = planCache.keys().next().value;
           if (oldest) planCache.delete(oldest);
         }
-        planCache.set(key, plan);
-        return { plan: finish(plan), source: "llm", called };
+        planCache.set(key, serverId(ok.system));
+        return { plan: { ...ok.composed, plan_id: `llm-${key}` }, source: "llm", called };
       }
     } catch {
       // fall through to rules
     }
   }
 
-  const rules = validatePlan(planFromRules(signals), ctx);
-  if (rules.ok) return { plan: finish(rules.plan), source: "rules", called };
+  const rulesPlan = planFromRules(signals);
+  const rules = accept(rulesPlan);
+  if (rules) return { plan: rules.composed, source: "rules", called };
 
-  // The stored plan, kept as it stands (SPEC §3 invariant 4, v1.02). It is
-  // not judged as a new plan: nothing in it moved, and the order in it may be
-  // the user's own. If a project went late since it was stored, its card is
-  // added rather than the whole arrangement being thrown away for lacking it.
-  // That holds for a plan the user arranged or pinned. A plan the system
-  // wrote is kept only while no card that is not urgent sits ahead of an
-  // urgent one; a planner's order from weeks ago is not kept over late work,
-  // and the default below is shown instead.
-  if (opts.previousPlan && standsAsStored(opts.previousPlan, opts.pinnedSections, opts.preferences, signals)) {
-    const prev = validatePlan(withUrgentCards(opts.previousPlan, signals), { ...ctx, kept: true });
-    if (prev.ok) return { plan: finish(prev.plan), source: "previous", called };
+  // The rules plan would move or remove something of the system's that is
+  // rationed today. Nothing moves then: the stored plan's own sections stay
+  // where they are, composed like any other system plan, with today's
+  // emphasis on the cards (a why is about today).
+  if (opts.previousPlan) {
+    const todays = new Map(
+      rulesPlan.sections.filter((s) => s.component === "project_card").map((s) => [String(s.props?.project_id ?? ""), s])
+    );
+    const standing: LayoutPlan = {
+      ...opts.previousPlan,
+      sections: opts.previousPlan.sections.map((s) =>
+        s.component === "project_card" ? (todays.get(String(s.props?.project_id ?? "")) ?? s) : s
+      ),
+    };
+    const v = validatePlan(standing, { ...ctx, skipMovement: true });
+    if (v.ok) return { plan: compose(v.plan), source: "previous", called };
   }
 
-  return { plan: finish(defaultPlan(signals)), source: "default", called };
+  return { plan: compose(defaultPlan(signals)), source: "default", called };
 }
 
 /** test hook */

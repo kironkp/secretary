@@ -13,6 +13,7 @@ import type { Signals } from "@/lib/layout/signals";
 import { datePresets, pickedDay } from "@/lib/timeline";
 import { byUrgency } from "@/lib/project-order";
 import { clearPlanCache, planWithFallback } from "@/lib/layout/plan-from-llm";
+import { composePlan } from "@/lib/layout/compose";
 import { baseSignals } from "./fixtures/layout";
 
 function ctx(overrides: Partial<ValidationContext> = {}): ValidationContext {
@@ -123,21 +124,30 @@ describe("the new default reaches a board nobody arranged", () => {
   });
 });
 
-describe("a board the user arranged keeps its order", () => {
-  /** Arranged by the user: the album first, the table pinned where it was. */
+describe("what the user placed on the old board stays where he put it", () => {
+  /** Arranged by the user: the album first, on the default as it was. */
   function arranged(signals: Signals): LayoutPlan {
     const old = oldDefault(signals);
     const album = old.sections.find((s) => s.props?.project_id === "album")!;
     return { ...old, plan_id: "user-abc", sections: [album, ...old.sections.filter((s) => s !== album)] };
   }
+  const composed = (system: LayoutPlan, signals: Signals, pinned: string[]) =>
+    composePlan(system, { signals, stored: arranged(signals), pinned, preferences: [] });
 
-  it("the planner may not reorder it: the new default is refused against it", () => {
+  it("the album he pinned on top is still on top; everything else is the new default, the same day too (v1.02)", () => {
     const signals = baseSignals();
     signals.context.days_since_layout_change = 0;
-    const res = validatePlan(defaultPlan(signals), ctx({ signals, previousPlan: arranged(signals) }));
-    expect(res.ok).toBe(false);
-    if (res.ok) return;
-    expect(res.reasons.join(" ")).toMatch(/reordering is rationed/);
+    const res = validatePlan(defaultPlan(signals), ctx({ signals, previousPlan: arranged(signals), pinnedSections: ["project_card:album"] }));
+    expect(res.ok ? "ok" : res.reasons).toBe("ok");
+    if (!res.ok) return;
+    const shown = keys(composed(res.plan, signals, ["project_card:album"]));
+    expect(shown[0]).toBe("project_card:album");
+    expect(shown.slice(1)).toEqual(keys(defaultPlan(signals)).filter((k) => k !== "project_card:album"));
+  });
+
+  it("a board that only has a name of his and no pin holds nothing: its cards follow the data", () => {
+    const signals = baseSignals();
+    expect(keys(composed(defaultPlan(signals), signals, []))).toEqual(keys(defaultPlan(signals)));
   });
 
   it("but the retired table leaving it is not a removal, and a pin on it blocks nothing", () => {
@@ -149,15 +159,15 @@ describe("a board the user arranged keeps its order", () => {
     expect(res.ok ? "ok" : res.reasons).toBe("ok");
   });
 
-  it("a pinned section that really moved is still refused", () => {
+  it("a system plan that has his pinned card somewhere else is not refused for it: the card goes back to its place", () => {
     const signals = baseSignals();
     const prev = arranged(signals);
     const shown = prev.sections.filter((s) => s.component !== "open_loops");
-    const moved = { ...prev, plan_id: "rules-z", sections: [shown[1], shown[0], ...shown.slice(2)].map((s) => ({ ...s, why: "x" })) };
+    const moved = { ...prev, plan_id: "rules-z", sections: [shown[1], shown[0], ...shown.slice(2)] };
     const res = validatePlan(moved, ctx({ signals, previousPlan: prev, pinnedSections: ["project_card:album"] }));
-    expect(res.ok).toBe(false);
-    if (res.ok) return;
-    expect(res.reasons.join(" ")).toMatch(/pinned section "project_card:album" moved/);
+    expect(res.ok ? "ok" : res.reasons).toBe("ok");
+    if (!res.ok) return;
+    expect(keys(composed(res.plan, signals, ["project_card:album"]))[0]).toBe("project_card:album");
   });
 });
 
@@ -233,7 +243,7 @@ describe("one urgency order for cards, strip and Timeline (sec rev: late first)"
     expect(res.reasons.join(" ")).toMatch(/urgent project "caltrans" \(5d late\) would have no card/);
   });
 
-  it("and the system may not put a card that is not urgent ahead of it (tests/invariant-4.test.ts has the rest)", () => {
+  it("and where a system plan has that card does not matter: composed, the cards are in data order (tests/composition.test.ts has the rest)", () => {
     const signals = baseSignals();
     signals.projects[3] = { ...signals.projects[3], soonest_days: -5 };
     const plan = defaultPlan(signals);
@@ -243,9 +253,10 @@ describe("one urgency order for cards, strip and Timeline (sec rev: late first)"
     const rest = plan.sections.filter((s) => s !== late);
     const pushedDown = { ...plan, sections: [...rest.slice(0, lastCard), late, ...rest.slice(lastCard)] };
     const res = validatePlan(pushedDown, ctx({ signals }));
-    expect(res.ok).toBe(false);
-    if (res.ok) return;
-    expect(res.reasons.join(" ")).toMatch(/is not urgent and would move ahead of urgent project "caltrans" \(5d late\)/);
+    expect(res.ok ? "ok" : res.reasons).toBe("ok");
+    if (!res.ok) return;
+    const shown = composePlan(res.plan, { signals, stored: null, pinned: [], preferences: [] });
+    expect(keys(shown)).toEqual(keys(plan));
   });
 });
 

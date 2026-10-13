@@ -1,6 +1,6 @@
 // Golden fixtures F1–F4, F6 (SPEC §8) over planFromRules + resolvePlan.
 import { describe, expect, it, vi } from "vitest";
-import { defaultPlan, sectionKey, sectionOrder, type LayoutPlan } from "@/lib/layout/plan";
+import { defaultPlan, sectionOrder, type LayoutPlan } from "@/lib/layout/plan";
 import { planFromRules, resolvePlan } from "@/lib/layout/plan-from-rules";
 import { baseSignals } from "./fixtures/layout";
 
@@ -69,11 +69,10 @@ describe("F3a engagement-promote", () => {
   };
   const plan = planFromRules(signals);
 
-  it("accents patent full with inline loops, right after the hero", () => {
-    const heroIdx = plan.sections.findIndex((s) => s.component === "hero_next_up");
-    const card = plan.sections[heroIdx + 1];
-    expect(sectionKey(card)).toBe("project_card:patent");
+  it("accents patent full with inline loops, and leaves it where the data has it (v1.02: the system never places a card)", () => {
+    const card = cardFor(plan, "patent")!;
     expect(card.props).toMatchObject({ accent: true, variant: "full", inline_loops: true });
+    expect(sectionOrder(plan)).toBe(sectionOrder(defaultPlan(signals)));
   });
   it("says why, naming both numbers, and keeps exactly one accent", () => {
     const card = cardFor(plan, "patent")!;

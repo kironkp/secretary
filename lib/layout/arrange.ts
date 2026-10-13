@@ -12,7 +12,7 @@ import { and, eq, ne, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { layoutPreferences, projects } from "@/lib/db/schema";
 import { titleSimilarity } from "@/lib/secretary/dedupe";
-import { computeCurrentPlan, getPreferences, savePlanAsHead } from "./plan-store";
+import { computeCurrentPlan, getPreferences, saveUsersPlan } from "./plan-store";
 import { defaultPlan, sectionKey, type LayoutPlan, type PlanSection } from "./plan";
 import { listDynamicComponents } from "./slow-loop";
 import { validatePlan } from "./validator";
@@ -148,7 +148,8 @@ export async function arrangeDashboard(userId: string, ops: ArrangeOp[]): Promis
       continue;
     }
     if (op.op === "show") {
-      pins.add(hit.key);
+      // Showing is not placing (SPEC §2): a card he un-hid goes where the
+      // data puts it, a section where the system has it. Only a move pins.
       changed.push(`showed ${hit.names[0]}`);
       continue;
     }
@@ -200,8 +201,17 @@ export async function arrangeDashboard(userId: string, ops: ArrangeOp[]): Promis
         .values({ userId, kind: "hide_section", value: { section: key, at: String(hideAt.get(key) ?? "") } });
     }
   }
-  const version = await savePlanAsHead(userId, v.plan, [...pins]);
-  return { ok: true, version, sections: v.plan.sections.map((s) => named(s).names[0]), changed };
+  // Stored as it will render: what he moved is pinned at its place, and the
+  // cards he did not place are where the data puts them (SPEC §2).
+  const saved = await saveUsersPlan(userId, v.plan, {
+    signals: bundle.signals,
+    placed: [...pins],
+    preferences: [
+      ...prefs.filter((p) => !(p.kind === "hide_section" && unhide.includes(p.value.section))),
+      ...hide.filter((key) => !hiddenNow.has(key)).map((key) => ({ kind: "hide_section" as const, value: { section: key } })),
+    ],
+  });
+  return { ok: true, version: saved.version, sections: saved.plan.sections.map((s) => named(s).names[0]), changed };
 }
 
 /** The board's sections as people call them, top to bottom (for the briefing). */

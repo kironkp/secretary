@@ -52,7 +52,7 @@ import { carriesMail, claimProposal, confirmable, markUntrusted, placeOf, propos
 import { recordUsage } from "@/lib/usage";
 import { paidCallAllowed } from "@/lib/spend-guard";
 import { defaultPlan, sectionKey, type LayoutPlan, type PlanSection } from "@/lib/layout/plan";
-import { getPlanHead, getPreferences, savePlanAsHead } from "@/lib/layout/plan-store";
+import { computeCurrentPlan, getPlanHead, getPreferences, savePlanAsHead, saveUsersPlan } from "@/lib/layout/plan-store";
 import { REGISTRY_COMPONENTS, REGISTRY_VERSION } from "@/lib/layout/registry";
 import { computeSignals } from "@/lib/layout/signals";
 import { applyBans, validatePlan } from "@/lib/layout/validator";
@@ -2426,28 +2426,41 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
 
   async edit_layout_plan(ctx, args) {
     const a = toolSchemas.edit_layout_plan.parse(args);
-    const [head, prefs, signals] = await Promise.all([
-      getPlanHead(ctx.userId),
-      getPreferences(ctx.userId),
-      computeSignals(ctx.userId),
-    ]);
-    const current = head ? (head.spec as LayoutPlan) : defaultPlan(signals);
+    // The board as it renders now (composed: SPEC §2), not the stored row.
+    const [bundle, prefs] = await Promise.all([computeCurrentPlan(ctx.userId), getPreferences(ctx.userId)]);
+    const { signals } = bundle;
+    const current = bundle.plan;
     const sections: PlanSection[] = structuredClone(current.sections);
+    // What he placed (a move, an add) is pinned at its place; what he removed
+    // is hidden, the way arrange_dashboard hides. Anything else would answer
+    // "applied" and be gone at the next render.
+    const placed = new Set<string>();
+    const hide = new Map<string, number>();
+    let sized = false;
 
     for (const op of a.operations) {
       if (op.op === "add") {
         const section = { component: op.component, props: op.props } as PlanSection;
-        sections.splice(op.at ?? sections.length, 0, section);
+        if (sections.some((s) => sectionKey(s) === sectionKey(section))) {
+          return { result: { error: `"${sectionKey(section)}" is already on the dashboard. Move it instead.` } };
+        }
+        sections.splice(Math.min(op.at ?? sections.length, sections.length), 0, section);
+        placed.add(sectionKey(section));
         continue;
       }
       const idx = sections.findIndex((s) => sectionKey(s) === op.section);
       if (idx === -1) return { result: { error: `No section "${op.section}" in the current plan` } };
-      if (op.op === "remove") sections.splice(idx, 1);
-      else if (op.op === "move") {
+      if (op.op === "remove") {
+        sections.splice(idx, 1);
+        hide.set(op.section, idx);
+        placed.delete(op.section);
+      } else if (op.op === "move") {
         const [s] = sections.splice(idx, 1);
         sections.splice(Math.min(op.to, sections.length), 0, s);
+        placed.add(op.section);
       } else if (op.op === "set_props") {
         sections[idx] = { ...sections[idx], props: { ...sections[idx].props, ...op.props } };
+        sized = true;
       }
     }
 
@@ -2456,13 +2469,14 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
       reason_summary: current.reason_summary ?? null,
       sections,
     };
-    // User-initiated: pins and movement rationing don't constrain the user's
-    // own request (invariant 3), but structural rules and preferences still do.
+    // User-initiated: movement rationing doesn't constrain the user's own
+    // request (invariant 3), but structural rules and preferences still do
+    // (hiding an urgent project's card is refused like any hide of it).
     const dynamic = await listDynamicComponents(ctx.userId);
     const v = validatePlan(candidate, {
       signals,
       previousPlan: current,
-      preferences: prefs,
+      preferences: prefs.filter((p) => p.kind !== "hide_section"),
       pinnedSections: [],
       defaultPlan: defaultPlan(signals),
       userInitiated: true,
@@ -2475,9 +2489,32 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         },
       };
     }
-    const version = await savePlanAsHead(ctx.userId, v.plan);
+    // A section the validator dropped (an unknown component) was not placed.
+    const kept = new Set(v.plan.sections.map((s) => sectionKey(s)));
+    const dropped = [...placed].filter((k) => !kept.has(k));
+    if (dropped.length) {
+      return { result: { error: `There is no "${dropped.join('", "')}" to put on the dashboard. Nothing was changed.` } };
+    }
+    const already = new Set(prefs.filter((p) => p.kind === "hide_section").map((p) => p.value.section));
+    const newlyHidden = [...hide].filter(([key]) => !already.has(key));
+    for (const [key, at] of newlyHidden) {
+      await db.insert(layoutPreferences).values({ userId: ctx.userId, kind: "hide_section", value: { section: key, at: String(at) } });
+    }
+    const saved = await saveUsersPlan(ctx.userId, v.plan, {
+      signals,
+      placed: [...placed],
+      preferences: [...prefs, ...newlyHidden.map(([key]) => ({ kind: "hide_section" as const, value: { section: key } }))],
+    });
     return {
-      result: { applied: true, version, sections: v.plan.sections.map((s) => sectionKey(s)) },
+      result: {
+        applied: true,
+        version: saved.version,
+        sections: saved.plan.sections.map((s) => sectionKey(s)),
+        ...(hide.size ? { hidden: [...hide.keys()], hidden_note: "Hidden, not deleted: it stays off the dashboard until the user asks to show it." } : {}),
+        // Emphasis is the system's and follows the data (SPEC §2): do not
+        // tell the user a size or accent is saved for good.
+        ...(sized ? { size_note: "A size or accent set this way lasts until the user's data next changes; it is not a lasting setting yet. Say 'for now'." } : {}),
+      },
       toast: { icon: "layout", text: "Dashboard rearranged" },
     };
   },
