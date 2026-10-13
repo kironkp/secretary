@@ -674,6 +674,12 @@ describe("what a tool says it did is on the composed board, or nothing is change
     await b.newTask("Iris", -40);
     const later = await b.keys();
     expect(later.filter((k) => !k.startsWith("project_card:"))).toEqual(start.filter((k) => !k.startsWith("project_card:")));
+
+    // A hide from before the place was recorded with it: the section still comes back at its own place, not at the end.
+    await db.insert(layoutPreferences).values({ userId: b.id, kind: "hide_section", value: { section: "stat_row" } });
+    expect(await b.keys()).not.toContain("stat_row");
+    expect((await b.chatEdit([{ op: "add", component: "stat_row" }])).result).toMatchObject({ applied: true, shown: ["stat_row"] });
+    expect((await b.keys()).filter((k) => !k.startsWith("project_card:"))).toEqual(start.filter((k) => !k.startsWith("project_card:")));
   });
 
   it("adding back a section the board does not have by itself: its hide is lifted and it is placed, like any add", async () => {

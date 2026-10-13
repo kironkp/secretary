@@ -219,9 +219,26 @@ describe.each(PATHS)("on the path: $name", (path) => {
   });
 
   describe.each(SHAPES)("%s", (_shape, pins) => {
-    const stored = pins.reduce((plan, pin) => pinned(plan, pin), base);
+    const withPlaces = pins.reduce((plan, pin) => pinned(plan, pin), base);
     const pinnedKeys = pins.map((p) => p.key);
-    const places = new Map(stored.sections.filter((s) => s.place !== undefined).map((s) => [sectionKey(s), s.place!]));
+    const places = new Map(withPlaces.sections.filter((s) => s.place !== undefined).map((s) => [sectionKey(s), s.place!]));
+    // The same board as it was stored before v1.02, and as the pin button
+    // leaves it until the next render: the pinned sections are where he put
+    // them, and no place is written on them yet.
+    const asBefore: LayoutPlan = { ...withPlaces, sections: withPlaces.sections.map((s) => ({ component: s.component, ...(s.props ? { props: s.props } : {}), ...(s.why ? { why: s.why } : {}) })) };
+    const stored = withPlaces;
+
+    it.each(pins.length ? CHANGES : [])("stored before v1.02, with no place written on what he pinned: %s", async (_change, change) => {
+      const after = (path.today ?? ((s) => s))(changed(before, change));
+      const preferences = path.preferences ?? [];
+      const res = await path.render(after, asBefore, pinnedKeys, preferences);
+      clearPlanCache(); // the second render is its own, not the first one's planner answer from memory
+      const withPlace = await path.render(after, withPlaces, pinnedKeys, preferences);
+      // Read from where each pinned section stands, it is the same board, and the place is written from now on.
+      expect(keys(res.plan)).toEqual(keys(withPlace.plan));
+      expect(res.source).toBe(withPlace.source);
+      for (const s of res.plan.sections) if (pinnedKeys.includes(sectionKey(s))) expect(s.place, sectionKey(s)).toBe(places.get(sectionKey(s)));
+    });
 
     it.each(CHANGES)("%s", async (_change, change) => {
       const after = (path.today ?? ((s) => s))(changed(before, change));
