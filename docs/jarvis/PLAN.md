@@ -96,7 +96,17 @@ beside me in a workshop."*
   between two readings is settled by reading as moved a section the
   rules can move or one that carries a reason on the board. Before it
   writes, a request also checks it has not turned an accepted board into
-  a held one (a guard; his request is applied either way). Named limits:
+  a held one (a guard; his request is applied either way). The guard and
+  the walk ask it for EVERY order the rules can produce, not only
+  today's, because the Reviewer then stepped time for real beside a
+  control board and found what no check in the round had looked for: on
+  `472c2a7`, 45 of 260 futures are held by a hide-and-show alone, one
+  step later. The everyday one: on the day a rule sends the strip up, he
+  hides and shows next up, and from the next day the system's plan is
+  frozen. Two more sentences came from it: on a board that is not held a
+  returning section takes its usual side of a section the plan is about
+  to move, and when that section is itself the one coming back it comes
+  back where it stood (the system's move lands by itself). Named limits:
   on a board a planner crossed, some sections come back on the other side
   of the moved one; a planner answer that leaves a default section out on
   such a board can be refused and its one call is thrown away (measured:
