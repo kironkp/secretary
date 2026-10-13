@@ -272,9 +272,11 @@ function acceptedAgainst(system: string[], rules: (typeof RULES_ORDERS)[number])
  * mode, the usual order). Of the system's sections on the board, those in
  * step with that order are the ones a plan in it would not move. The section
  * goes directly under the last of them that precedes it in the order; with
- * none, directly above the first that follows it; with nothing of the
- * system's on the board but cards, in front of those; on a board with
- * nothing of the system's at all, first under the banner.
+ * none, above the first that follows it, in front of the cards standing
+ * there and of what he placed among them (under the nearest of the system's
+ * sections above, if one stands there); with nothing of the system's on the
+ * board but cards, in front of those; on a board with nothing of the
+ * system's at all, first under the banner.
  * If no order is accepted (a planner has moved something), the order is
  * today's (`todays`, taken from the product: the rules are not what this
  * walk tests), and of two sections that could each be read as the one out
@@ -304,7 +306,8 @@ function returnModel(board: string[], key: string, placed: string[], todays: str
   const above = order.slice(0, Math.max(0, here)).findLast((k) => kept.includes(k));
   const below = order.slice(here + 1).find((k) => kept.includes(k));
   const firstOwn = rest.findIndex(own);
-  const at = above ? rest.indexOf(above) + 1 : below ? rest.indexOf(below) : firstOwn !== -1 ? firstOwn : rest[0] === BANNER ? 1 : 0;
+  const over = below ? rest.slice(0, rest.indexOf(below)).findLastIndex((k) => own(k) && !isCard(k)) : -1;
+  const at = above ? rest.indexOf(above) + 1 : below ? (over !== -1 ? over + 1 : firstOwn) : firstOwn !== -1 ? firstOwn : rest[0] === BANNER ? 1 : 0;
   return insertAt(rest, key, at);
 }
 /** The places of what he placed, read off a board he was told: from the bottom when nothing upper stands below. */
