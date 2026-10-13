@@ -38,8 +38,30 @@ CHI'09, Lavie & Meyer IJHCS'10, Google A2UI's declarative-over-codegen design):
    section. **User-initiated changes (a chat request, a pin, a tap) apply
    immediately, always.** The rationing exists to protect spatial memory from
    surprises; nothing the user asked for is a surprise.
-4. **Nothing urgent disappears.** Items with `days_left <= 7` must render above
-   the fold in every plan. Compact allowed; absent = plan rejected.
+4. **Nothing urgent disappears.** A project is *urgent* when it has late open
+   work or `days_left <= 7`. A list is never urgent.
+   - **Presence.** An urgent project is never absent from a plan. A plan the
+     SYSTEM writes (rules, planner) without its card is rejected; compact is
+     allowed. A STORED plan that has come to lack one (a project went late
+     after the user arranged the board, or after he hid its card) is
+     repaired, not rejected: the card is added after the last urgent card (at
+     the end of the cards when there is none) with a user-visible `why`, and
+     nothing else moves. A hidden card coming back because it went late is
+     right; the rest of his board moving is not.
+   - **Order.** A plan the SYSTEM writes may not move a project card that is
+     not urgent ahead of one that is. It is judged on what it CHANGED: the
+     plan is refused only for a pair (a card that is not urgent before an
+     urgent one) that the plan it replaces did not already have in that
+     order. With no plan to replace, any such pair is refused; DEFAULT_PLAN
+     puts the urgent cards first, so it has none. A list's card is a card
+     that is not urgent.
+   - A plan left as it stands is never refused for its order, and neither is
+     an order the user made (invariant 7; §2). A change the user asked for is
+     never refused under the order rule.
+   - There is no fixed position. Until v1.02 the rule was "above the fold"
+     (the first 8 sections): with six urgent projects no plan could meet it,
+     so the default and the rules plan were themselves refused, and it
+     refused the user's own requests ("put the shopping list at the top").
 5. **At most one `accent: true` project card per plan.** Accent = attention.
    Color meaning (deadline pressure) is fixed by the design system, never by the planner.
 6. **Model output is data, never markup.** No planner string may reach
@@ -77,6 +99,11 @@ version number; the validator loads prop-schemas from it.
 
 `DEFAULT_PLAN` (also the fallback and calm mode), since registry v3:
 `[hero_next_up, stat_row, timeline(21, false), project_card × each active project (full), project_card × each list, date_chase(all missing), people_index]`
+
+The project cards: urgent projects first (invariant 4's meaning of urgent),
+then the rest, each group in the one urgency order every screen uses
+(`lib/project-order.ts`: late first by how late, then the nearest date or
+deadline, then no date, then name); lists after them.
 
 A plan whose head is the default (nobody arranged it) is measured against the
 NEW default for movement and removals (§3 invariants 3 and 8): a product
@@ -220,7 +247,7 @@ the prompt file on disk.
 ```
 
 Props are validated per-component against the registry (second pass, not in the
-JSON Schema above). Semantic rules (invariants 3–5, urgency-above-fold, pinned
+JSON Schema above). Semantic rules (invariants 3–5, urgency, pinned
 sections) are a third validation pass. **Validator returns
 `{ok: true, plan} | {ok: false, reasons[], fallback: plan}` and MUST be pure and
 unit-tested.**
@@ -285,7 +312,9 @@ in order (later rules may not violate earlier invariants):
    only the soonest (invariant 5); others full variant.
 2. **Engagement:** strongest strong-engagement project → accent + full +
    `inline_loops`. If `days_since_layout_change >= 1`, also move its card to
-   position after `hero_next_up` with `why: "N mentions today vs M typical"`.
+   position after `hero_next_up` with `why: "N mentions today vs M typical"`;
+   a card that is not urgent stops just below the last urgent card instead
+   (invariant 4: the system does not put it ahead of urgent work).
    Engagement accent loses to deadline accent when both fire (deadline wins;
    engaged project still gets full + inline_loops).
 3. **Schedule-talk:** strong schedule-talk → `timeline` gets `expanded: true`,
@@ -596,7 +625,8 @@ calm_mode false. Each fixture overrides only what it names.
 **F2 timeline-day** — `schedule_word_share: 0.42`, `questions_today` includes 3
 schedule questions.
 → first section is `timeline` with `expanded: true, span_days: 14` and a `why`;
-patent card still above the fold (invariant 4: days_left 3); patent keeps accent
+patent card still on the board, ahead of every card that is not urgent
+(invariant 4: days_left 3); patent keeps accent
 (rule 1 beats rule 3's compacting); non-accented cards `compact`.
 
 **F3a engagement-promote** — `engagement.patent.mentions_24h: 14`.
