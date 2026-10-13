@@ -24,10 +24,13 @@
 // through their route handler. Their limits, accepted and named here:
 // - the planner's answers include the ones that would turn the board over:
 //   cards above next up (every card first; main's shape, cards in two runs),
-//   cards last of all, and the two moves of a system section a planner may
-//   really make (Needs a date raised above next up, the tiles sunk under
-//   it, each with props and a reason, or it never lands). The composition
-//   has to keep the board the right way up whatever a planner writes;
+//   cards last of all, and the two crossings a planner may really make
+//   (Needs a date raised above next up, the tiles sunk to the bottom, each
+//   with props and a reason, or it never lands), each with the cards first,
+//   where they were, and last. The composition has to keep the board the
+//   right way up whatever a planner writes: check 4 counts, on the board he
+//   sees, the system's sections on the wrong side of the cards, and asks
+//   that no other place for the run would have fewer;
 // - the planner's ANSWER is put in through persistPlan's `call` seam (the
 //   budget is $0); everything after the answer is the real code. A planner's
 //   plan served again from the in-memory cache is not reached by the walk; it
@@ -94,6 +97,15 @@ const SAID: Record<string, string> = { focus_banner: "banner", hero_next_up: "ne
 const DEFAULT_SECTIONS = ["hero_next_up", "stat_row", "timeline", "date_chase", "people_index"];
 const ADDABLE = ["kanban", "coming_up", "documents", "suggested_zone"];
 const BANNER = "focus_banner";
+/** Planner answers that move one of the system's sections across the cards' side of the board, with the cards in each of three places. */
+const CROSSINGS = [
+  "needs a date raised, the cards first",
+  "needs a date raised, the cards where they were",
+  "needs a date raised, the cards last",
+  "the tiles sunk, the cards first",
+  "the tiles sunk, the cards where they were",
+  "the tiles sunk, the cards last",
+] as const;
 /** What each refusal the model predicts has to say: a keyword of its reason, so one refusal cannot pass for another. */
 const REFUSAL_SAYS: Record<string, RegExp> = {
   "an urgent card cannot be hidden": /urgent project/,
@@ -333,17 +345,17 @@ async function walk(index: number) {
     const free = (list: string[]) => list.filter((k) => isCard(k) && !placedKeys.includes(k));
     const byData = free(keysOf(defaultPlan(signals))).filter((k) => board.includes(k));
     if (free(board).join() !== byData.join()) complain("3 cards by the data", `${why}: ${row(free(board))} | by the data: ${row(byData)}`);
-    // 4. The right way up, in the spec's words: without the banner and what he placed, the cards are one run; the
-    // run is after the last of the system's next up and tiles, and before the first Needs a date or People that
-    // stands below that point. Top wins: a planner may raise Needs a date above next up, or sink the tiles under
-    // it, and the run is then under the tiles all the same.
+    // 4. The right way up, in the spec's words: without the banner and what he placed, the cards are one run, and the
+    // run stands where the fewest of the system's sections are on the wrong side of it (next up and the tiles belong
+    // above the cards, Needs a date and People below; the strip is neither). Counted here on the board he sees.
     const rest = body.filter((k) => !placedKeys.includes(k));
     const cardAt = rest.map((k, i) => (isCard(k) ? i : -1)).filter((i) => i >= 0);
     if (cardAt.length && cardAt.at(-1)! - cardAt[0] + 1 !== cardAt.length) complain("4 the right way up", `${why}: the cards are not one run: ${row(rest)}`);
     if (cardAt.length) {
-      const top = Math.max(rest.indexOf("hero_next_up"), rest.indexOf("stat_row"));
-      for (const above of ["hero_next_up", "stat_row"]) if (rest.includes(above) && rest.indexOf(above) > cardAt[0]) complain("4 the right way up", `${why}: ${above} is under the cards: ${row(rest)}`);
-      for (const below of ["date_chase", "people_index"]) if (rest.indexOf(below) > top && rest.indexOf(below) < cardAt.at(-1)!) complain("4 the right way up", `${why}: ${below} is above the cards: ${row(rest)}`);
+      const system = rest.filter((k) => !isCard(k));
+      const wrongSide = (at: number) => system.filter((k, i) => (["hero_next_up", "stat_row"].includes(k) && i >= at) || (["date_chase", "people_index"].includes(k) && i < at)).length;
+      const fewest = Math.min(...Array.from({ length: system.length + 1 }, (_, at) => wrongSide(at)));
+      if (wrongSide(cardAt[0]) !== fewest) complain("4 the right way up", `${why}: ${wrongSide(cardAt[0])} of the system's sections are on the wrong side of the cards where ${fewest} would do: ${row(rest)}`);
     }
     // 5. What he placed stands where the rule puts it among today's other sections: exactly.
     const expected = placeInto(rest, here);
@@ -721,7 +733,7 @@ async function walk(index: number) {
       await openTwice("the next day", { firstMayStore: true });
     } else if (draw < 0.8) {
       // A planner answer lands. Most are a banner; some move the strip; some are answers a planner should not give.
-      const kind = r.pick(["a banner", "a banner", "a banner and the strip to the top", "a banner and the strip to the top", "without a default section", "the cards backwards", "a place written on a section", "not a plan at all", "every card first", "the cards in two runs", "the cards last of all", "needs a date raised above next up", "the tiles sunk under needs a date"] as const);
+      const kind = r.pick(["a banner", "a banner", "a banner and the strip to the top", "a banner and the strip to the top", "without a default section", "the cards backwards", "a place written on a section", "not a plan at all", "every card first", "the cards in two runs", "the cards last of all", ...CROSSINGS] as const);
       moves.push(`a planner answer: ${kind}`);
       count(`a planner answer: ${kind}`);
       const names = [...ids.keys()];
@@ -743,13 +755,19 @@ async function walk(index: number) {
         if (kind === "the cards last of all") return answer([banner, ...others, ...cards]);
         // A planner may move one of the system's sections, with a reason, a day after the layout last changed. Props
         // go with it: a reason on a section left exactly as the default has it is stripped, and the move then refused.
-        const without = (component: string) => plan.sections.filter((s) => s.component !== component);
-        if (kind === "needs a date raised above next up") return answer([banner, { component: "date_chase", props: { item_ids: [] }, why: "Several things have no date" }, ...without("date_chase")]);
-        if (kind === "the tiles sunk under needs a date") {
-          const tiles: PlanSection = { component: "stat_row", props: { tiles: [{ value: "3", label: "late" }] }, why: "The numbers matter less today" };
-          const list = without("stat_row");
-          const at = list.findIndex((s) => s.component === "date_chase") + 1;
-          return answer([banner, ...list.slice(0, at), tiles, ...list.slice(at)]);
+        // Both crossings (Needs a date raised above next up; the tiles sunk to the bottom), each with the cards
+        // first, where they were, and last.
+        if ((CROSSINGS as readonly string[]).includes(kind)) {
+          const raised = kind.startsWith("needs a date raised");
+          const moved: PlanSection = raised
+            ? { component: "date_chase", props: { item_ids: [] }, why: "Several things have no date" }
+            : { component: "stat_row", props: { tiles: [{ value: "3", label: "late" }] }, why: "The numbers matter less today" };
+          const kept = plan.sections.filter((s) => s.component !== moved.component);
+          const crossed = raised ? [moved, ...kept] : [...kept, moved];
+          const noCards = crossed.filter((s) => s.component !== "project_card");
+          if (kind.endsWith("the cards first")) return answer([banner, ...cards, ...noCards]);
+          if (kind.endsWith("the cards last")) return answer([banner, ...noCards, ...cards]);
+          return answer([banner, ...crossed]);
         }
         if (kind === "a banner and the strip to the top") return answer([banner, strip, ...rest]);
         if (kind === "without a default section") return answer([banner, ...plan.sections.filter((s) => s.component !== "people_index")]);
