@@ -72,7 +72,8 @@ Until v1.04 such a call left no row at all, so the caps could not see it.
   does not validate) was answered: it is recorded as it reported, not
   estimated.
 - When the app stops waiting for a call, it aborts the request as well. A
-  call left running is billed for an answer nobody reads.
+  call left running is billed for an answer nobody reads. For the dashboard
+  planner the wait is 60 seconds, or `PLANNER_TIMEOUT_MS`.
 - v1.04 does this for the dashboard planner. The other background call
   sites are listed in the LOGBOOK entry with what each leaves today.
 
