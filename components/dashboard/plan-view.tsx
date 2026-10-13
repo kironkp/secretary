@@ -387,21 +387,40 @@ export function PlanView({
     );
   }, [projects, tasks, timezone]);
   const [pinned, setPinned] = useState<Set<string>>(new Set(initialPinned));
+  // What he has placed is the server's to say: when a request has been
+  // answered and the board comes back, the pins are the ones on that board.
+  const [pinsFrom, setPinsFrom] = useState(initialPinned);
+  if (pinsFrom !== initialPinned) {
+    setPinsFrom(initialPinned);
+    setPinned(new Set(initialPinned));
+  }
   const [reverting, setReverting] = useState(false);
+  /** Why the last pin or unpin was not done, in the server's words. */
+  const [pinRefused, setPinRefused] = useState<string | null>(null);
 
+  // The pin button is a request about the board like any other (SPEC §2): the
+  // board that comes back is the one it was answered with (an unpinned
+  // section goes where the system has it), and a refusal says why.
   const togglePin = async (key: string) => {
     const next = !pinned.has(key);
-    setPinned((p) => {
-      const s = new Set(p);
-      if (next) s.add(key);
-      else s.delete(key);
-      return s;
-    });
-    await fetch("/api/layout", {
+    const set = (on: boolean) =>
+      setPinned((p) => {
+        const s = new Set(p);
+        if (on) s.add(key);
+        else s.delete(key);
+        return s;
+      });
+    setPinRefused(null);
+    set(next);
+    const res = await fetch("/api/layout", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "pin", component: key, pinned: next }),
     });
+    if (res.ok) return router.refresh();
+    set(!next);
+    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    setPinRefused(body?.error ?? "That could not be changed.");
   };
 
   const revert = async () => {
@@ -528,6 +547,11 @@ export function PlanView({
           </button>
         </div>
       )}
+      {pinRefused && (
+        <p role="status" className="text-xs text-muted">
+          {pinRefused}
+        </p>
+      )}
       {groupCards(plan.sections, projects, (s) => cardDraws(s, projects, tasks, events)).map((group) =>
         group.kind === "cards" ? (
           // Consecutive project cards share one grid (SEC-A007): two across on
@@ -564,6 +588,7 @@ export function PlanView({
             <button
               onClick={() => togglePin(key)}
               title={pinned.has(key) ? "Unpin" : "Pin this section here"}
+              aria-label={pinned.has(key) ? "Unpin" : "Pin this section here"}
               className={`absolute -left-6 top-1 hidden group-hover:block ${
                 pinned.has(key) ? "text-accent" : "text-muted hover:text-ink"
               }`}

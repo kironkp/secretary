@@ -7,6 +7,10 @@
 // directly under it, the line above the board says the board is arranged by
 // him, and all of that is still so after a reload. Then "Put it back" is
 // tapped, and the list is no longer on top.
+//
+// And the pin button (v1.02 r5): a section pinned where it stands is his
+// (the line says so, the board does not move); unpinned, the page shows the
+// board the request was answered with, without a reload.
 import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
 
 const STAMP = Date.now();
@@ -73,5 +77,34 @@ test("a list sent to the top by the real tool is on top, next up is right under 
   await expect(page.locator("section[data-section]").first()).toHaveAttribute("data-section", "hero_next_up");
   expect(await board(page)).toEqual(before);
   await page.reload();
+  expect(await board(page)).toEqual(before);
+});
+
+test("the pin button: pinned where it stands the board does not move; unpinned, it is back as it was, and the page shows it without a reload", async ({ page }) => {
+  await page.goto("/dashboard");
+  const before = await board(page);
+  const card = `project_card:${listId}`;
+  const section = () => page.locator(`section[data-section="${card}"]`);
+  await expect(section()).toBeVisible();
+  // The button shows on hover only, in the page's left margin (letting go
+  // from a phone is a later task), so it is pressed through its click
+  // handler: the page's own code from there on (the request, the board
+  // that comes back).
+  await section().locator('button[aria-label="Pin this section here"]').dispatchEvent("click");
+  await expect(section().locator('button[aria-label="Unpin"]')).toBeAttached();
+  await expect(page.getByText("Arranged by you")).toBeVisible();
+  expect(await board(page)).toEqual(before);
+  // It is stored: a reload has the same board, and the list is still his.
+  await page.reload();
+  await expect(section().locator('button[aria-label="Unpin"]')).toBeAttached();
+  await expect(page.getByText("Arranged by you")).toBeVisible();
+  expect(await board(page)).toEqual(before);
+
+  // Let go, a list goes back where the data has it, which is where it stood.
+  await section().locator('button[aria-label="Unpin"]').dispatchEvent("click");
+  await expect(section().locator('button[aria-label="Pin this section here"]')).toBeAttached();
+  expect(await board(page)).toEqual(before);
+  await page.reload();
+  await expect(section().locator('button[aria-label="Pin this section here"]')).toBeAttached();
   expect(await board(page)).toEqual(before);
 });
