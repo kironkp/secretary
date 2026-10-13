@@ -26,7 +26,19 @@
 // - the route handlers run with a faked session;
 // - "the next day" is stored versions made two days old; the chip's own test
 //   (at the end of this file) moves the clock with a faked Date, because a
-//   browser's clock can be moved and the server's cannot.
+//   browser's clock can be moved and the server's cannot;
+// - the chip test decides whether rule 1 "fires" from the product's own
+//   signals and thresholds, so a rule that wrongly stops firing would not
+//   show there (the thresholds are task 1.06's).
+//
+// A Settings lift, a ban and Put it back are requests like the others (since
+// r5 they go through the one function): the walker's model says what board
+// he is told, and what he placed is read again from that board. A ban is
+// modelled as a hide of the component's section; a lift as a show (a section
+// he had put there himself comes back placed, at the end). After Put it back
+// the sections he added are the earlier board's, with those a hide or a ban
+// of today's keeps off it. Two refusals the model predicts: a request about
+// a component he banned, and a size asked for in calm mode.
 //
 // BOARD_WALKS, BOARD_STEPS and BOARD_SEED size the run; BOARD_PRINT=all
 // prints every complaint. The suite runs a small one; the long one
@@ -375,8 +387,10 @@ async function walk(index: number) {
     let placedNow = placedSet();
     const subject: string[] = [];
     let expectRefusal: string | null = null;
+    const banned = await bannedNow();
     for (const { op, key } of ops) {
       const onBoard = (model ?? before).includes(key);
+      if (op !== "hide" && banned.has(key.split(":")[0])) expectRefusal ??= "he asked never to be shown it";
       if (op === "hide" && isCard(key) && urgent.has(key)) expectRefusal ??= "an urgent card cannot be hidden";
       if (op === "hide" && !onBoard) expectRefusal ??= "hiding what is already hidden";
       subject.push(key);
@@ -401,6 +415,8 @@ async function walk(index: number) {
     const hidden = await hiddenNow();
     const urgent = new Set((await computeCurrentPlan(id)).signals.projects.filter(isUrgent).map((p) => `project_card:${p.id}`));
     const heldBefore = await sourceNow();
+    const banned = await bannedNow();
+    const calm = (await computeCurrentPlan(id)).signals.context.calm_mode;
     let model: string[] | null = before;
     let placedNow = placedSet();
     const subject: string[] = [];
@@ -411,7 +427,8 @@ async function walk(index: number) {
       const onBoard = (model ?? before).includes(key);
       subject.push(key);
       if (o.op === "add") {
-        if (onBoard) expectRefusal ??= "adding what is already on the board";
+        if (banned.has(key.split(":")[0])) expectRefusal ??= "he asked never to be shown it";
+        else if (onBoard) expectRefusal ??= "adding what is already on the board";
         else if (isCard(key) && !ids.has(nameOf(key).replace(/ list$/, ""))) expectRefusal ??= "a card for something that is not on the board";
         else if (hidden.has(key) && !added.has(key)) model = null; // a show: where the system has it
         else {
@@ -430,6 +447,8 @@ async function walk(index: number) {
         placedNow = without(placedNow, key);
       }
       if (o.op === "move") placedNow = [...new Set([...placedNow, key])];
+      // Calm mode shows every section the plain way: a size cannot show there, and the honest answer is no.
+      if (o.op === "set_props" && calm) expectRefusal ??= "a size is not set in calm mode";
       if (o.op === "set_props") sized = { key, variant: String(o.props?.variant) };
       model = model ? editModel(model, o, key) : null;
     }
@@ -559,9 +578,15 @@ async function walk(index: number) {
       else {
         // The walker's own history: what he had placed, and where, one stored version back.
         told = (history[history.length - 2] ?? []).filter((t) => !isCard(t.key) || [...ids.values()].some((pid) => `project_card:${pid}` === t.key)).map((t) => ({ ...t }));
+        // A section he added goes back with the board: one the earlier board did not have is no longer on it, unless it
+        // is off the board by a hide or a ban of today's (those live outside the versions, and bring it back when lifted).
+        const [hiddenToday, bannedToday] = [await hiddenNow(), await bannedNow()];
+        for (const key of [...added]) if (!told.some((t) => t.key === key) && !hiddenToday.has(key) && !bannedToday.has(key)) added.delete(key);
         await remember();
+        const first = await openTwice("put it back", { firstMayStore: false });
+        // Put it back is a request: after it, what he placed is read again from the board he was told.
+        told = readPlaces(first.board, placedSet().filter((k) => first.board.includes(k)));
         history[history.length - 1] = told.map((t) => ({ ...t }));
-        await openTwice("put it back", { firstMayStore: false });
       }
     } else if (draw < 0.6) {
       const enabled = !(await computeCurrentPlan(id)).signals.context.calm_mode;
@@ -570,21 +595,25 @@ async function walk(index: number) {
       await route({ action: "calm_mode", enabled });
       await openTwice("calm mode", { firstMayStore: true });
     } else if (draw < 0.64) {
-      // Settings lifts a hide or a ban: a request like the others; the section goes where the system has it.
+      // Settings lifts a hide or a ban: a request like the others. A section he had put on the board himself comes
+      // back placed, at the end; anything else goes where the system has it; under a ban or a hide still standing, nothing comes.
       const all = (await db.select().from(layoutPreferences).where(eq(layoutPreferences.userId, id))).filter((p) => p.kind === "hide_section" || p.kind === "ban_component");
       if (all.length) {
         const pref = r.pick(all);
         const value = pref.value as Record<string, string>;
         const key = value.section ?? value.component;
         const before = await boardNow();
+        const heldBefore = await sourceNow();
+        const stillOff = pref.kind === "hide_section" ? (await bannedNow()).has(key.split(":")[0]) : (await hiddenNow()).has(key);
         moves.push(`settings lifts ${pref.kind} ${short(key)}`);
         count("settings lifts a preference");
-        await route({ action: "remove_preference", id: pref.id });
-        if (pref.kind === "hide_section" && added.has(key)) told = [...told, { key, from: "bottom", n: 0 }]; // back, placed at the end
-        const first = await openTwice("settings lifts a preference", { firstMayStore: false });
-        const others = (list: string[]) => list.filter((k) => k !== key && !(pref.kind === "ban_component" && k.split(":")[0] === key));
-        if (others(first.board).join() !== others(before).join()) complain("everything else kept its order", `settings lifts ${pref.kind}: ${row(others(first.board))} | before ${row(others(before))}`);
-        told = readPlaces(first.board, placedSet().filter((k) => first.board.includes(k)));
+        const res = await route({ action: "remove_preference", id: pref.id });
+        if (!res.ok) refused(res.json.error ?? "no reason given", null);
+        else {
+          const his = added.has(key) && !stillOff;
+          const expected = stillOff ? before : his ? [...before, key] : null;
+          await afterRequest(`settings lifts ${pref.kind} ${short(key)}`, before, expected, [key], null, his ? [...new Set([...placedSet(), key])] : placedSet(), heldBefore);
+        }
       }
     } else if (draw < 0.69) {
       const banned = [...(await bannedNow())];
@@ -592,12 +621,18 @@ async function walk(index: number) {
       const component = remove ? r.pick(banned) : r.pick(["people_index", "stat_row", "kanban", "date_chase", "coming_up"]);
       moves.push(`${remove ? "unban" : "ban"} ${component}`);
       count(remove ? "unban" : "ban");
+      const before = await boardNow();
       const heldBefore = await sourceNow();
+      const stillHidden = (await hiddenNow()).has(component);
       const res = (await executeTool(ctx, "set_layout_preference", { kind: "ban_component", component, ...(remove ? { remove: true } : {}) })).result as { error?: string };
       if (res.error) refused(res.error, null);
       else {
-        if (!remove) told = told.filter((t) => t.key !== component);
-        await openTwice(`${remove ? "unban" : "ban"} ${component}`, { firstMayStore: true });
+        // A ban is a hide of the component's section: the board he saw without it, everything else in order, its place
+        // gone. Lifted, a section he had put there himself comes back placed, at the end; another goes where the system has it.
+        const his = remove && added.has(component) && !stillHidden;
+        const expected = remove ? (stillHidden ? before : his ? [...before, component] : null) : without(before, component);
+        const placedNow = remove ? (his ? [...new Set([...placedSet(), component])] : placedSet()) : without(placedSet(), component);
+        await afterRequest(`${remove ? "unban" : "ban"} ${component}`, before, expected, [component], null, placedNow, heldBefore);
         if (heldBefore !== "previous" && (await sourceNow()) === "previous") complain("a ban alone does not hold the plan", `${remove ? "unban" : "ban"} ${component}`);
       }
     } else if (draw < 0.73) {
