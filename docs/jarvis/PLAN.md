@@ -36,10 +36,17 @@ beside me in a workshop."*
   wrote: a place read one too high because a retired section was counted,
   and a hide of an archived project that Settings could no longer lift.
   All three are being fixed on top of `393de92`, walker first, and r5 is
-  offered again at the new tip. The bound, as ruled after the Reviewer
-  probed my draft: the card run goes after the last of the system's next
-  up and tiles, and before the first Needs a date or People standing below
-  that point; the top wins; the strip stays free. Checked by the Reviewer
+  offered again at the new tip. The rule for the card run, ruled after the
+  Reviewer probed two drafts (mine, then their own "top wins", which would
+  have broken a board where a planner had sunk the tiles): the cards go
+  where the fewest of the system's sections end up on the wrong side of
+  them (next up and the tiles belong above, Needs a date and People below,
+  the strip either side); among such places the nearest to where the plan
+  had them, the upper on a tie. Also found by the Reviewer running the
+  committed walk on a seed of their own: hiding and showing a section he
+  added in one request is refused, and two gaps in the walk's own model;
+  the long run is now required on three seeds, one the Reviewer's. Checked
+  by the Reviewer
   on `393de92` and holding: the CI-exact run, the committed walk (0
   complaints where `fbcccef` gave 1,348), their own walk on a new seed,
   their probes from rounds 2 to 4, no schema change, a rollback to v65
