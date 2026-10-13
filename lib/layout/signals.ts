@@ -210,16 +210,7 @@ export async function computeSignals(userId: string, now = new Date()): Promise<
   // days_since_layout_change: days since the newest stored plan whose section
   // ORDER differs from its predecessor's (emphasis-only changes don't count).
   let daysSinceChange = Number.MAX_SAFE_INTEGER;
-  const orders = headRows.map((r) => {
-    const sections = (r.spec as { sections?: { component: string; props?: Record<string, unknown> }[] })
-      ?.sections ?? [];
-    return sections
-      .map((s) => {
-        const pid = s.props?.project_id;
-        return typeof pid === "string" ? `${s.component}:${pid}` : s.component;
-      })
-      .join("|");
-  });
+  const orders = headRows.map((r) => layoutOrder(r.spec));
   for (let i = 0; i < headRows.length - 1; i++) {
     if (orders[i] !== orders[i + 1]) {
       daysSinceChange = dayDiff(now, headRows[i].createdAt);
@@ -293,14 +284,37 @@ export async function computeSignals(userId: string, now = new Date()): Promise<
   };
 }
 
-/** Cache/decision-log key (SPEC §6): signals minus timestamps + registry version. */
+/**
+ * The order of a stored plan as the layout clock reads it: a stored plan
+ * whose order differs from the one before it is a change of layout, and
+ * resets days_since_layout_change. One function, because the store asks the
+ * same question before it writes a row (lib/layout/plan-store.ts): will this
+ * row reset the clock?
+ */
+export function layoutOrder(spec: unknown): string {
+  const sections = (spec as { sections?: { component: string; props?: Record<string, unknown> }[] } | null)?.sections ?? [];
+  return sections
+    .map((s) => {
+      const pid = s.props?.project_id;
+      return typeof pid === "string" ? `${s.component}:${pid}` : s.component;
+    })
+    .join("|");
+}
+
+/**
+ * Cache/decision-log key (SPEC §6): signals minus timestamps + registry
+ * version. Of the layout clock it carries only what the rules read, whether
+ * a reorder is allowed yet (docs/spend/SPEC.md §4, v1.04): as a raw count of
+ * days it made every day after a change of layout a new situation, and a
+ * paid planner call.
+ */
 export function signalsHash(signals: Signals, registryVersion: number): string {
   const stable = JSON.stringify({
     v: registryVersion,
     p: signals.projects.map((p) => [p.id, p.deadline, p.days_left, p.open_count, p.done_count, p.subprojects.length]),
     e: Object.entries(signals.engagement).map(([id, e]) => [id, e.mentions_24h, e.baseline_mentions]),
     c: [signals.conversation.schedule_word_share, signals.conversation.questions_today.length],
-    x: [signals.context.days_since_layout_change, signals.context.pinned_sections, signals.context.calm_mode],
+    x: [signals.context.days_since_layout_change >= 1, signals.context.pinned_sections, signals.context.calm_mode],
     d: [signals.pending.items_missing_dates.length, signals.calendar.next_hard_commitment],
   });
   let h = 0;

@@ -149,9 +149,12 @@ Now:
 
 What it costs in planner calls, for one change, with a planner that answers:
 a move of a card or of another section by the user, none; a planner answer
-that adds a banner or moves a section, the one call that produced it; a day
-passing after a change of layout, one (the rules may reorder again, which is
-a real change in what the board can do), and none on the days after.
+that adds a banner or moves a section, the one call that produced it. Each
+change of layout is followed by one call the first time the Dashboard is
+opened on a later day (a reorder is allowed again, which is a real change in
+what the board can do), and none on the days after that. So a banner the
+rules take away the next day is three calls over three days, where it was
+two on the first day and one on every day after for good.
 
 The mark is the reason for "inside the database": until v1.04 it was read
 into the app, where a timestamp keeps milliseconds, and written back. The
