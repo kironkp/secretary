@@ -29,8 +29,7 @@ typical"), present on every section that deviates from DEFAULT_PLAN.
 | hero_next_up | event_id? | next hard commitment card |
 | stat_row | tiles?: {value,label,tone?}[] max 5 | omit tiles → computed stats |
 | project_card | project_id, variant: full\|compact\|nested, accent?, inline_loops? | one card per project |
-| timeline | span_days: 14\|21\|35, expanded | deadline-pressure overview |
-| open_loops | group_by: project\|date, include_done | the grouped work table |
+| timeline | span_days: 14\|21\|35, expanded | the projects progress strip (progress, next date, late); expanded = every project as a grid |
 | date_chase | item_ids?: string[] | "needs a date" strip |
 | people_index | — | |
 | documents | — | living document cards |
@@ -40,7 +39,7 @@ typical"), present on every section that deviates from DEFAULT_PLAN.
 | suggested_zone | — | |
 
 Omitted props render computed defaults. DEFAULT_PLAN is:
-`[hero_next_up, stat_row, project_card × each active project (full), timeline(21, false), open_loops(project, true), date_chase, people_index]`
+`[hero_next_up, stat_row, timeline(21, false), project_card × each active project (full, most urgent first; lists last), date_chase, people_index]`
 
 ## The 10 hard rules
 
@@ -50,13 +49,14 @@ Omitted props render computed defaults. DEFAULT_PLAN is:
 3. Emphasis (variant/accent/expand) is free every plan. Reordering sections is
    allowed ONLY when `context.days_since_layout_change >= 1`, and every moved
    section carries a `why`.
-4. Nothing urgent disappears: every project with `days_left <= 7` keeps its
-   project_card within the first 8 sections. Compact is fine; absent is not.
+4. Nothing urgent disappears: every project with `days_left <= 7`, or with
+   late open work (`soonest_days < 0`), keeps its project_card within the
+   first 8 sections. Compact is fine; absent is not.
 5. At most ONE project_card with `accent: true`. Deadline pressure beats
    engagement for the accent.
 6. Strong engagement = `mentions_24h >= 3 × baseline` and `>= 5` absolute.
    Strong schedule-talk = `schedule_word_share >= 0.3` or ≥ 3 schedule
-   questions today → expanded 14-day timeline near the top.
+   questions today → the expanded progress strip (timeline) near the top.
 7. Respect `context.pinned_sections`: those keep their current position and
    variant exactly.
 8. `calm_mode` never reaches you (the app short-circuits), but if in doubt

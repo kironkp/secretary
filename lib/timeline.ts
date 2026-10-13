@@ -4,6 +4,7 @@
 // to due) or single dates; one-off events as bars; the days are his calendar
 // days (lib/due.ts). The shell owns all geometry: nothing here calls a model.
 import { localDay } from "@/lib/due";
+import { byUrgency } from "@/lib/project-order";
 import { parseInTz, wallTimeInTz } from "@/lib/time";
 
 export type Zoom = "week" | "month" | "quarter";
@@ -74,13 +75,20 @@ export type Lane = {
   /** The project's own extent: earliest start or due to latest due or deadline. */
   from: number | null;
   to: number | null;
+  /** Its earliest open due day, late or not, whatever the filter shows: the order key. */
+  soonest: number | null;
   deadline: { day: number; committed: boolean } | null;
 };
 
 export type Filters = { project: string | "all"; status: "open" | "late" | "done" | "all"; events: boolean };
 export const DEFAULT_FILTERS: Filters = { project: "all", status: "open", events: true };
 
-/** A task's place: a bar from its start to its due day, or a single date. */
+/**
+ * A task's place: a bar from its start to its due day, or a single date. A
+ * start on the due day itself is allowed (update_task refuses only a start
+ * AFTER the due) and is a one-day bar: it says "this is planned", which a
+ * bare due date does not (sec rev G5).
+ */
 export function taskItem(t: TlTask, tz: string, today: number): Item | null {
   if (!t.dueAt) return null;
   const to = localDay(new Date(t.dueAt), tz);
@@ -91,7 +99,7 @@ export function taskItem(t: TlTask, tz: string, today: number): Item | null {
     title: t.title,
     from: start !== null && start <= to ? start : to,
     to,
-    bar: start !== null && start < to,
+    bar: start !== null && start <= to,
     late: isOpen(t) && to < today,
     done: t.status === "done",
     task: t,
@@ -143,6 +151,7 @@ export function buildLanes(
         late: false,
         from: null,
         to: null,
+        soonest: null,
         deadline: p?.deadline ? { day: localDay(new Date(p.deadline), tz), committed: p.deadlineKind === "committed" } : null,
       };
       lanes.set(key, lane);
@@ -159,6 +168,7 @@ export function buildLanes(
     if (!item) continue;
     if (item.late) lane.late = true;
     if (isOpen(t)) {
+      lane.soonest = lane.soonest === null ? item.to : Math.min(lane.soonest, item.to);
       lane.from = lane.from === null ? item.from : Math.min(lane.from, item.from);
       lane.to = lane.to === null ? item.to : Math.max(lane.to, item.to);
     }
@@ -172,10 +182,16 @@ export function buildLanes(
     if (lane.deadline) lane.to = lane.to === null ? lane.deadline.day : Math.max(lane.to, lane.deadline.day);
     lane.items.sort((a, b) => a.from - b.from || a.to - b.to || a.title.localeCompare(b.title));
   }
-  const nearest = (l: Lane) => Math.min(...l.items.filter((i) => i.kind === "task" && !i.done).map((i) => i.to), Infinity);
+  // The order the Overview's cards use too (lib/project-order.ts): late
+  // first by how late, then the nearest date or deadline, then undated.
+  const urgency = (l: Lane) => ({
+    name: l.name,
+    soonest: l.soonest === null ? null : l.soonest - today,
+    deadline: l.deadline ? l.deadline.day - today : null,
+  });
   return [...lanes.values()]
     .filter((l) => (filters.project === "all" ? l.total > 0 || l.items.length > 0 : l.id === filters.project))
-    .sort((a, b) => Number(b.late) - Number(a.late) || nearest(a) - nearest(b) || a.name.localeCompare(b.name));
+    .sort((a, b) => byUrgency(urgency(a), urgency(b)));
 }
 
 /** Open tasks with no date: the No date tray (filtered by project like the lanes). */
@@ -246,4 +262,23 @@ export function moved(item: Item, grip: Grip, days: number, tz: string): Record<
 /** Reminders move with what they remind about: every one by the same days. */
 export function shiftedReminders(reminders: string[], days: number, tz: string): string[] {
   return reminders.map((r) => shiftDays(r, days, tz));
+}
+
+/**
+ * Needs a date's one-tap choices (SEC-A007), as due instants at 5 PM on his
+ * calendar days: today, tomorrow, and next week (the coming Monday; a week
+ * on from a Monday).
+ */
+export function datePresets(tz: string, now: Date): { today: string; tomorrow: string; nextWeek: string } {
+  const today = localDay(now, tz);
+  const weekday = new Date(today * 86_400_000).getUTCDay(); // 0 Sunday … 6 Saturday
+  const toMonday = (8 - weekday) % 7 || 7;
+  return { today: atDay(today, tz), tomorrow: atDay(today + 1, tz), nextWeek: atDay(today + toMonday, tz) };
+}
+
+/** A picked calendar date ("2026-10-12", as a date input gives it) at 5 PM in his zone. */
+export function pickedDay(ymd: string, tz: string): string | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
+  if (!m) return null;
+  return atDay(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) / 86_400_000, tz);
 }

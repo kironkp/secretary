@@ -3,7 +3,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { clearPlanCache, planWithFallback } from "@/lib/layout/plan-from-llm";
+import { cacheKey, clearPlanCache, planWithFallback } from "@/lib/layout/plan-from-llm";
 import { defaultPlan } from "@/lib/layout/plan";
 import { baseSignals } from "./fixtures/layout";
 
@@ -19,9 +19,13 @@ describe("planWithFallback", () => {
     const signals = baseSignals();
     const first = await planWithFallback(signals, { ...opts, call });
     expect(first.source).toBe("llm");
-    expect(first.plan.plan_id).toBe("llm-recorded-1");
+    // Named by the server from the signals it answered (SEC-A007), not by the
+    // model: the recorded response calls itself "llm-recorded-1".
+    expect(JSON.parse(recorded).plan_id).toBe("llm-recorded-1");
+    expect(first.plan.plan_id).toBe(`llm-${cacheKey(signals)}`);
     const second = await planWithFallback(signals, { ...opts, call });
     expect(second.source).toBe("llm-cache");
+    expect(second.plan.plan_id).toBe(first.plan.plan_id);
     expect(call).toHaveBeenCalledTimes(1); // quiet repeat costs zero calls
   });
 

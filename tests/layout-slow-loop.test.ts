@@ -21,6 +21,7 @@ import { defaultPlan } from "@/lib/layout/plan";
 import { validatePlan } from "@/lib/layout/validator";
 import { executeTool } from "@/lib/secretary/tools";
 import { baseSignals } from "./fixtures/layout";
+import { REGISTRY_VERSION } from "@/lib/layout/registry";
 
 const U = { id: `test-slowloop-${crypto.randomUUID()}`, email: `sl-${Date.now()}@f8.test` };
 const ctx = { userId: U.id, timezone: "America/Los_Angeles" };
@@ -116,7 +117,8 @@ describe("proposal lifecycle", () => {
 
   it("approve hot-registers: version bump, validator accepts it, template interpolates sanitized", async () => {
     const res = await approveProposal(U.id, PROPOSAL);
-    expect(res).toMatchObject({ ok: true, registryVersion: 3 });
+    // One past the built-in registry (v3 since SEC-A007).
+    expect(res).toMatchObject({ ok: true, registryVersion: REGISTRY_VERSION + 1 });
     // proposal dir consumed
     expect(existsSync(join(PROPOSED_DIR, PROPOSAL))).toBe(false);
 

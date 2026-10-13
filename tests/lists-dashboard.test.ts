@@ -192,7 +192,8 @@ describe("arrange_dashboard: 'can you put the shopping list at the top of the da
   it("hide stays hidden when the data changes; show brings it back", async () => {
     const userId = await newUser(["Caltrans"]);
     const hid = await executeTool(call(userId), "arrange_dashboard", { operations: [{ op: "hide", section: "the timeline" }] });
-    expect(hid.result).toMatchObject({ applied: true, read_back: "Done: hid timeline." });
+    // "The timeline" is the projects progress strip since SEC-A007, and is read back by that name.
+    expect(hid.result).toMatchObject({ applied: true, read_back: "Done: hid project progress." });
     expect(keys((await getPlanHead(userId))!.spec as LayoutPlan)).not.toContain("timeline");
     // New work changes the signals, so the board is planned again.
     await executeTool(call(userId), "create_task", { title: "Send the CPO", project: "Caltrans" });

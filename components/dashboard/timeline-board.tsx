@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronRight, Lock } from "lucide-react";
-import { localDay } from "@/lib/due";
+import { dueLabel, localDay } from "@/lib/due";
 import {
   atDay,
   buildLanes,
@@ -55,6 +55,32 @@ function readSettings(): string | null {
     return null;
   }
 }
+/**
+ * Open the Timeline on one project (SEC-A007: a tap on Overview's progress
+ * strip). The Timeline's project filter is a per-device setting, so this sets
+ * it, keeping the device's zoom and other filters.
+ */
+export function pickTimelineProject(projectId: string) {
+  let current: Partial<Settings> = {};
+  try {
+    const raw = readSettings();
+    current = raw ? (JSON.parse(raw) as Partial<Settings>) : {};
+  } catch {
+    /* start from the defaults */
+  }
+  const next: Settings = {
+    zoom: current.zoom && current.zoom in PX_PER_DAY ? current.zoom : DEFAULT_SETTINGS.zoom,
+    filters: { ...DEFAULT_FILTERS, ...(current.filters ?? {}), project: projectId },
+    collapsed: Array.isArray(current.collapsed) ? current.collapsed : [],
+  };
+  try {
+    window.localStorage.setItem(KEY, JSON.stringify(next));
+  } catch {
+    /* not remembered; the Timeline opens unfiltered */
+  }
+  window.dispatchEvent(new Event(STORE_EVENT));
+}
+
 function useSettings(): [Settings, (next: Settings) => void] {
   const raw = useSyncExternalStore(
     (cb) => {
@@ -794,13 +820,59 @@ export function ProjectProgressStrip({
   lanes,
   active,
   onPick,
+  compact = false,
+  timezone,
 }: {
   lanes: Lane[];
   active: string | "all";
   onPick: (id: string) => void;
+  /** One swipeable row of chips (Overview, SEC-A007) instead of a grid. */
+  compact?: boolean;
+  /** With it, each chip also says its next open date (lib/due.ts words). */
+  timezone?: string;
 }) {
   const shown = lanes.filter((l) => l.total > 0);
   if (shown.length === 0) return null;
+  const next = (l: Lane): string | null => {
+    if (!timezone) return null;
+    const soonest = l.items
+      .filter((i): i is Extract<Item, { kind: "task" }> => i.kind === "task" && !i.done)
+      .toSorted((a, b) => a.to - b.to)[0];
+    return soonest?.task.dueAt ? dueLabel(new Date(soonest.task.dueAt), timezone) : null;
+  };
+  if (compact) {
+    return (
+      <div data-testid="progress-strip" className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+        {shown.map((l) => {
+          const pct = Math.round((l.done / l.total) * 100);
+          const when = next(l);
+          return (
+            <button
+              key={l.id}
+              data-project={l.id}
+              onClick={() => onPick(l.id)}
+              className="flex min-h-11 w-44 flex-none flex-col justify-center gap-1 rounded-xl border border-edge bg-surface px-3 py-2 text-left hover:border-faint"
+            >
+              <span className="flex w-full items-center gap-1.5">
+                <span className="h-2 w-2 flex-none rounded-full" style={{ background: l.color ?? "var(--color-accent)" }} />
+                <span className="min-w-0 flex-1 truncate text-xs font-semibold">{l.name}</span>
+                <span className={`flex-none text-[11px] ${l.late ? "font-semibold text-danger" : "text-faint"}`}>
+                  {l.done}/{l.total}
+                </span>
+              </span>
+              <span className="block h-1 w-full overflow-hidden rounded-full bg-surface-2">
+                <span className={`block h-full ${l.late ? "bg-danger" : "bg-ok"}`} style={{ width: `${pct}%` }} />
+              </span>
+              <span className={`text-[11px] ${l.late ? "text-danger" : "text-faint"}`}>
+                {/* The soonest open date says it: "3 days late", "tomorrow", "Fri". */}
+                {when ? (l.late ? when : `next ${when}`) : l.late ? "late" : "no dates"}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
   return (
     <div
       data-testid="progress-strip"

@@ -7,6 +7,67 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 ---
 
+## v1.02 — A clear Overview (2026-10-12)
+
+`7a53974` to `de5dc87` (written 2026-10-06 as v0.34 and parked: node would not
+start that day, so nothing was run), `a4b8966`, this commit
+
+Kiron on the Overview: "make it make sense", "a random graph", "I don't
+understand all the whats". sec rev's round 2 (SEC-A007).
+
+- One thing once. The WHAT / WHEN / HEARD table that repeated every task
+  under the project cards is gone from Overview (it is the List view), and
+  so is the 5-week chart. In its place, a strip of the projects: each with
+  its progress, its next date or how late it is, one tap opening the
+  Timeline on that project.
+- The project cards use the width: two across on the iPad, three on a
+  desktop, most urgent first, lists (Shopping) after them.
+- Needs a date sets a date where it stands: tap a task, then Today,
+  Tomorrow, Next week or a picked day, and it is saved at once (5 PM that
+  day), with Undo. It goes through the same move as a Timeline drag
+  (update_task), never a raw write.
+- Board, List and Calendar have project chips: All, then the projects most
+  recently active first. The choice is remembered on the device.
+- The inline task table's headers are plain words: Task, Due, Added.
+- Why his board never changed: the plan schema allowed 14 sections, and a
+  board carries a card per project. Nine projects and a list make 15, so
+  his default never validated and every render fell back to the stored
+  plan. The cap is 40. And a default nobody arranged is now measured as the
+  new default, so a change to it is not treated as the planner moving
+  things; a board the user arranged or pinned keeps its order.
+- Under the hood: registry v3 (open_loops retired; a stored plan naming it
+  just drops it), signals carry a project's real kind, and the browser
+  tests run the Overview production runs (the LayoutPlan board).
+- From sec rev's A009 review: a Workspace lede is dimmed only when a field
+  a run reads changed (a digest of the project's tasks stored with the
+  record), so a Timeline drag of a planned start no longer leaves it
+  "Being re-read" for good; the task stamp's field list is pinned to the
+  task's fields; a start on the due day is allowed and drawn as a one-day
+  bar; an event's Undo runs in a transaction.
+- One order for projects on every screen (review fix): the cards, the strip
+  and the Timeline sort with the same code. Late first by how late, then the
+  nearest date or the project's own deadline, then no date, lists last. A
+  late project's card is kept above the fold like an urgent one.
+- A planner's plan is named by the server, never by the model, and a planner
+  call is billed even when its plan is refused (review fixes). A call that
+  reports no tokens is not billed with the figures of the call before it.
+- Run for the first time on 10-12, the way CI runs it. One test failed, an
+  older one that still expected the model's own plan name. The Timeline's
+  lane order had no test at all (putting the old sort back passed
+  everything); it has two now. Then each fix was taken out in turn, and a
+  test failed every time: 11 of 11.
+- Found by looking at real data in a browser, not by a test: a project with
+  nothing to draw (nothing open, nothing finished this week, no event coming)
+  still took a cell in the card grid and left a hole the width of a card
+  between two projects. It gets no cell now. On a local copy of the real
+  board the cards, the strip and the Timeline were then compared with an
+  order worked out by hand in SQL, at 393, 820 and 1440 wide: one order on
+  all three, the most overdue project first.
+- Checks: 1,176 tests, the production build, 70 browser specs on local
+  Chromium. App spend: $0.
+
+---
+
 ## v1.00 — The JARVIS plan (2026-10-12)
 
 this commit

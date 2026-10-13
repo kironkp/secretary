@@ -1060,19 +1060,25 @@ export function ProjectGrid({
   events,
   crossing,
   onDone,
+  single = false,
+  unfolded = false,
 }: {
   tasks: TaskRow[];
   events: EventRow[];
   crossing: Set<string>;
   onDone: (id: string) => void;
+  /** One project's card, the full width of its cell: the plan's grid lays the cards out (SEC-A007). */
+  single?: boolean;
+  /** Every open item listed, not the first three (a plan's inline_loops, SEC-A007). */
+  unfolded?: boolean;
 }) {
   const projects = useMemo(() => buildProjects(tasks, events), [tasks, events]);
   // "+ N more" is a real control: tap to unfold the full task list in place.
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [expanded, setExpanded] = useState<Set<string>>(() => (unfolded ? new Set(buildProjects(tasks, events).map((p) => p.name)) : new Set()));
   if (projects.length === 0) return null;
 
   return (
-    <div className="grid gap-3 md:grid-cols-2">
+    <div className={single ? "grid gap-3" : "grid gap-3 md:grid-cols-2"}>
       {projects.map((p) => {
         const total = p.open.length + p.doneCount;
         const donePct = total === 0 ? 0 : Math.round((p.doneCount / total) * 100);
@@ -1343,10 +1349,11 @@ export function OpenLoopsTable({
     <div className="overflow-x-auto rounded-2xl border border-edge bg-surface">
       <table className="w-full min-w-[560px] border-collapse text-sm">
         <thead>
-          <tr className="bg-surface-2 text-left text-[11px] uppercase tracking-[0.08em] text-faint">
-            <th className="w-[55%] px-4 py-2.5 font-semibold">What</th>
-            <th className="w-[25%] px-4 py-2.5 font-semibold">When</th>
-            <th className="px-4 py-2.5 font-semibold">Heard</th>
+          {/* Plain words (SEC-A007, Kiron: "I don't understand all the whats"). */}
+          <tr className="bg-surface-2 text-left text-xs text-muted">
+            <th className="w-[55%] px-4 py-2.5 font-semibold">Task</th>
+            <th className="w-[25%] px-4 py-2.5 font-semibold">Due</th>
+            <th className="px-4 py-2.5 font-semibold">Added</th>
           </tr>
         </thead>
         <tbody>

@@ -13,7 +13,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { projects, records, tasks, user } from "@/lib/db/schema";
 import type { ProjectRecord } from "@/lib/understanding/types";
-import { ledesFor } from "@/lib/understanding/words";
+import { ledesFor, taskDigests } from "@/lib/understanding/words";
 import { CPO_TZ, seedCpoScenario, type CpoIds } from "./fixtures/understanding";
 
 const U = {
@@ -151,5 +151,38 @@ describe("ledesFor", () => {
 
   it("returns {} for a user with no records", async () => {
     expect(await ledesFor(`nobody-${crypto.randomUUID()}`)).toEqual({});
+  });
+});
+
+describe("ledesFor with the task digest (SEC-A007, sec rev: a start drag left a lede dimmed for good)", () => {
+  const albumTask = async () =>
+    (await db.select().from(tasks).where(and(eq(tasks.userId, U.id), eq(tasks.projectId, ids.album))))[0];
+  beforeAll(async () => {
+    // The Album record as a run writes it now: with the digest of what it read.
+    const digest = (await taskDigests(U.id, [ids.album])).get(ids.album)!;
+    await db
+      .update(records)
+      .set({ words: sql`${records.words} || ${JSON.stringify({ taskDigest: digest })}::jsonb` })
+      .where(and(eq(records.userId, U.id), eq(records.projectId, ids.album)));
+  });
+
+  it("a Timeline drag of the planned start (updated_at moves too, far past the record) leaves it fresh", async () => {
+    const t = await albumTask();
+    await db.update(tasks).set({ startAt: hoursFromNow(48), updatedAt: hoursFromNow(5) }).where(eq(tasks.id, t.id));
+    const ledes = await ledesFor(U.id);
+    expect(ledes["due-today"].stale).toBe(false);
+    expect(ledes.shared.stale).toBe(false);
+  });
+
+  it("a field a run reads changing dims it", async () => {
+    const t = await albumTask();
+    await db.update(tasks).set({ notes: "The mastering engineer wants the stems by Friday." }).where(eq(tasks.id, t.id));
+    expect((await ledesFor(U.id))["due-today"].stale).toBe(true);
+  });
+
+  it("a digest is per project: another project's change does not reach it", async () => {
+    const before = (await taskDigests(U.id, [ids.album, ids.caltrans])).get(ids.album);
+    await db.update(tasks).set({ notes: "Teresa called back." }).where(eq(tasks.id, ids.checkCpo));
+    expect((await taskDigests(U.id, [ids.album])).get(ids.album)).toBe(before);
   });
 });

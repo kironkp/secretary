@@ -5,9 +5,11 @@
 // never waits for a run (§8, "never on read"): it ships whatever ledes are
 // stored, and marks the ones the world has moved past as stale so the client
 // can dim them until the next sweep writes fresh ones.
+import { createHash } from "node:crypto";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { records, tasks } from "@/lib/db/schema";
+import { taskStamp, toTask } from "./gather";
 
 export type Lede = {
   /** The lede as the run wrote it. Shown in full; never cut. */
@@ -16,6 +18,13 @@ export type Lede = {
    * True when a task of the lede's project changed after the record was
    * written (§7: "the client renders a stale lede dimmed until the fresh one
    * lands"). The text may still name a row that has since moved on.
+   *
+   * Since SEC-A007 "changed" means a field a run reads (taskDigests below,
+   * stored on the record when the run read its inputs), not updated_at: a
+   * Timeline drag of a planned start bumps updated_at and is not news, so no
+   * re-read comes, and the lede stayed dimmed "Being re-read" for good. A
+   * record from before the digest keeps the updated_at rule below until its
+   * next run or unchanged sweep writes one.
    *
    * This is an approximation of "the inputs the lede was written from
    * changed", not the hash compare §7 describes. The exact answer is the
@@ -52,6 +61,43 @@ export type Lede = {
  * every open tab, and the records of a user with many projects would
  * otherwise cost a round trip each on every poll.
  */
+/**
+ * One digest per project of its tasks as a run reads them: every field
+ * gather.ts stamps (all but id and updated_at, so not the planned start),
+ * over every task of the project, in id order. Written on the record when a
+ * run reads, compared on the board's poll.
+ */
+export async function taskDigests(userId: string, projectIds: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (projectIds.length === 0) return out;
+  const rows = await db
+    .select({
+      projectId: tasks.projectId,
+      id: tasks.id,
+      title: tasks.title,
+      notes: tasks.notes,
+      status: tasks.status,
+      stages: tasks.stages,
+      blockedReason: tasks.blockedReason,
+      stakes: tasks.stakes,
+      source: tasks.source,
+      recurrence: tasks.recurrence,
+      dueAt: tasks.dueAt,
+      completedAt: tasks.completedAt,
+      createdAt: tasks.createdAt,
+      updatedAt: tasks.updatedAt,
+    })
+    .from(tasks)
+    .where(and(eq(tasks.userId, userId), inArray(tasks.projectId, projectIds)))
+    .orderBy(tasks.id);
+  const stamps = new Map<string, [string, string][]>(projectIds.map((id) => [id, []]));
+  for (const r of rows) stamps.get(r.projectId ?? "")?.push([r.id, taskStamp(toTask(r))]);
+  for (const [projectId, list] of stamps) {
+    out.set(projectId, createHash("sha256").update(JSON.stringify(list)).digest("hex").slice(0, 16));
+  }
+  return out;
+}
+
 export async function ledesFor(userId: string): Promise<Record<string, Lede>> {
   const rows = await db
     .select({ projectId: records.projectId, words: records.words, updatedAt: records.updatedAt })
@@ -63,7 +109,14 @@ export async function ledesFor(userId: string): Promise<Record<string, Lede>> {
   const carrying = rows.filter((r) => Object.keys(r.words?.ledes ?? {}).length > 0);
   if (carrying.length === 0) return {};
 
-  const newest = await db
+  // The digest where the record has one; updated_at for a record from before it.
+  const digested = carrying.filter((r) => typeof r.words?.taskDigest === "string");
+  const undigested = carrying.filter((r) => typeof r.words?.taskDigest !== "string");
+  const digestNow = await taskDigests(
+    userId,
+    digested.map((r) => r.projectId)
+  );
+  const newest = undigested.length === 0 ? [] : await db
     .select({
       projectId: tasks.projectId,
       // mapWith the column so the driver's timestamp string becomes a Date
@@ -76,7 +129,7 @@ export async function ledesFor(userId: string): Promise<Record<string, Lede>> {
         eq(tasks.userId, userId),
         inArray(
           tasks.projectId,
-          carrying.map((r) => r.projectId)
+          undigested.map((r) => r.projectId)
         )
       )
     )
@@ -92,7 +145,10 @@ export async function ledesFor(userId: string): Promise<Record<string, Lede>> {
   for (const r of carrying) {
     const at = r.updatedAt.getTime();
     const latestTask = newestTaskAt.get(r.projectId);
-    const stale = latestTask !== undefined && latestTask > at;
+    const stale =
+      typeof r.words?.taskDigest === "string"
+        ? digestNow.get(r.projectId) !== r.words.taskDigest
+        : latestTask !== undefined && latestTask > at;
     for (const [widgetId, text] of Object.entries(r.words?.ledes ?? {})) {
       if (typeof text !== "string" || text.trim() === "") continue;
       const prev = writtenAt.get(widgetId);

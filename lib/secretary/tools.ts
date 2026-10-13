@@ -323,17 +323,29 @@ export async function restoreEventMove(
   userId: string,
   ticket: Extract<UndoTicket, { kind: "event" }>
 ): Promise<{ event_id: string; google?: string; google_problem?: string } | { error: string }> {
-  const [row] = await db.select().from(events).where(and(eq(events.id, ticket.id), eq(events.userId, userId)));
-  if (!row) return { error: "Not found" };
-  if (row.startsAt.toISOString() !== ticket.after.startsAt || isoOrNull(row.endsAt) !== ticket.after.endsAt) {
-    return { error: MOVED_SINCE };
-  }
-  const b = ticket.before;
-  const [restored] = await db
-    .update(events)
-    .set({ startsAt: new Date(b.startsAt), endsAt: b.endsAt ? new Date(b.endsAt) : null, reminders: b.reminders })
-    .where(and(eq(events.id, ticket.id), eq(events.userId, userId)))
-    .returning();
+  // The check and the restore in one transaction (sec rev), like a task's;
+  // Google is told after it commits, never from inside it.
+  type Restore = { error: string } | { restored: typeof events.$inferSelect };
+  const outcome = await db.transaction(async (tx): Promise<Restore> => {
+    const [row] = await tx
+      .select()
+      .from(events)
+      .where(and(eq(events.id, ticket.id), eq(events.userId, userId)))
+      .for("update");
+    if (!row) return { error: "Not found" };
+    if (row.startsAt.toISOString() !== ticket.after.startsAt || isoOrNull(row.endsAt) !== ticket.after.endsAt) {
+      return { error: MOVED_SINCE };
+    }
+    const b = ticket.before;
+    const [restored] = await tx
+      .update(events)
+      .set({ startsAt: new Date(b.startsAt), endsAt: b.endsAt ? new Date(b.endsAt) : null, reminders: b.reminders })
+      .where(and(eq(events.id, ticket.id), eq(events.userId, userId)))
+      .returning();
+    return { restored };
+  });
+  if ("error" in outcome) return { error: outcome.error };
+  const restored = outcome.restored;
   const google = restored.googleEventId ? await sendToGoogle(userId, restored) : null;
   return {
     event_id: restored.id,

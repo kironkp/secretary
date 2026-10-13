@@ -19,6 +19,7 @@ import { records, understandingRuns } from "@/lib/db/schema";
 import { anthropicClientFor, BRAIN_EFFORTS, type BrainEffort, type KeySource } from "@/lib/anthropic";
 import { recordUsage } from "@/lib/usage";
 import { gatherAll, gatherProject, hashBundle, legacyHashBundle } from "./gather";
+import { taskDigests } from "./words";
 import {
   CHECKING_LINE,
   STORING_LINE,
@@ -952,13 +953,25 @@ async function runOnce(
   const legacyHash = legacyHashBundle(bundle);
 
   const [previous] = await db
-    .select({ inputsHash: records.inputsHash, body: records.body })
+    .select({ inputsHash: records.inputsHash, body: records.body, words: records.words })
     .from(records)
     .where(and(eq(records.userId, userId), eq(records.projectId, projectId)))
     .limit(1);
+  // A record from before the lede digest (SEC-A007) gets one the first time
+  // it is found unchanged: its inputs are the ones it was written from, so
+  // its ledes are as fresh as they were. No model call.
+  const backfillDigest = async () => {
+    if (opts.dryRun || typeof previous?.words?.taskDigest === "string") return;
+    const digest = (await taskDigests(userId, [projectId])).get(projectId);
+    await db
+      .update(records)
+      .set({ words: sql`${records.words} || ${JSON.stringify({ taskDigest: digest })}::jsonb` })
+      .where(and(eq(records.userId, userId), eq(records.projectId, projectId)));
+  };
   if (!opts.force && previous?.inputsHash === inputsHash) {
     // The sweep's normal state (SPEC §8); not logged, or the log would be
     // nothing but this.
+    await backfillDigest();
     return { status: "skipped", reason: "unchanged" };
   }
   // Stored under the old formula (before SEC-A009) on inputs that have not
@@ -971,6 +984,7 @@ async function runOnce(
         .set({ inputsHash })
         .where(and(eq(records.userId, userId), eq(records.projectId, projectId)));
     }
+    await backfillDigest();
     return { status: "skipped", reason: "unchanged" };
   }
 
@@ -1051,6 +1065,11 @@ async function runOnce(
       return { status: "skipped", reason: "budget" };
     }
   }
+
+  // The project's tasks as this run reads them, for the ledes' staleness
+  // (words.ts): taken before the model call, so an edit made while it thinks
+  // still dims what it writes.
+  const digestAtRead = (await taskDigests(userId, [projectId])).get(projectId);
 
   // --- the model -----------------------------------------------------------
   const model = opts.model ?? (await modelCallFor(userId));
@@ -1274,7 +1293,7 @@ async function runOnce(
   // the model returned there is replaced with the stored list.
   const asked = previous?.body.asked ?? bundle.previousRecord?.asked ?? [];
   const body: ProjectRecord = { ...output.record, asked };
-  const words = { todayLine: output.words.todayLine, ledes: output.words.ledes };
+  const words = { todayLine: output.words.todayLine, ledes: output.words.ledes, ...(digestAtRead ? { taskDigest: digestAtRead } : {}) };
 
   const [stored] = await db
     .insert(records)

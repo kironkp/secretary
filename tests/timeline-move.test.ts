@@ -136,6 +136,16 @@ describe("a drag is update_task: the dates, the postponed count, the reminders",
     expect(after.postponedCount).toBe(before.postponedCount);
   });
 
+  it("a start on the due date itself is allowed (sec rev G5)", async () => {
+    const res = await post(move, { kind: "task", id: ids.stems, start_at: "2026-10-09T19:00:00.000Z" });
+    expect(res.status).toBe(200);
+    expect((await taskRow(ids.stems)).startAt!.toISOString()).toBe("2026-10-09T19:00:00.000Z");
+    // One millisecond later is after it: refused, and the start stays.
+    expect((await post(move, { kind: "task", id: ids.stems, start_at: "2026-10-09T19:00:00.001Z" })).status).toBe(422);
+    expect((await taskRow(ids.stems)).startAt!.toISOString()).toBe("2026-10-09T19:00:00.000Z");
+    await post(move, { kind: "task", id: ids.stems, start_at: null });
+  });
+
   it("a start after the due date is refused, and nothing changes", async () => {
     const before = await taskRow(ids.stems);
     const res = await post(move, { kind: "task", id: ids.stems, start_at: "2026-10-20T16:00:00.000Z" });

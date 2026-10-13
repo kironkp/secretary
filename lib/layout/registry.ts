@@ -7,7 +7,10 @@
 // Never mid-session. Generated code never registers itself.
 import { z } from "zod";
 
-export const REGISTRY_VERSION = 2;
+// v3 (SEC-A007): open_loops retired (it repeated every task on the project
+// cards, and it is the List view); timeline renders the projects progress
+// strip instead of the 5-week chart.
+export const REGISTRY_VERSION = 3;
 
 // Props are optional throughout (SPEC §2 v1.2 note): a section with omitted
 // props renders its computed-from-data default, which is what DEFAULT_PLAN
@@ -50,12 +53,6 @@ export const PROP_SCHEMAS = {
       expanded: z.boolean().default(false),
     })
     .strict(),
-  open_loops: z
-    .object({
-      group_by: z.enum(["project", "date"]).default("project"),
-      include_done: z.boolean().default(true),
-    })
-    .strict(),
   date_chase: z.object({ item_ids: z.array(z.string()).optional() }).strict(),
   people_index: z.object({}).strict(),
   // Pre-existing zones kept as registry members (Decision 2):
@@ -67,6 +64,14 @@ export const PROP_SCHEMAS = {
 } as const;
 
 export const REGISTRY_COMPONENTS = Object.keys(PROP_SCHEMAS) as RegistryComponent[];
+
+/**
+ * Components a stored plan may still carry from an older registry. They are
+ * dropped like any unknown name, and their absence never counts as a removal
+ * the user would notice, nor as a pinned section that moved: nothing renders
+ * them any more.
+ */
+export const RETIRED_COMPONENTS: ReadonlySet<string> = new Set(["open_loops"]);
 export type RegistryComponent = keyof typeof PROP_SCHEMAS;
 
 export function isRegistryComponent(name: unknown): name is RegistryComponent {

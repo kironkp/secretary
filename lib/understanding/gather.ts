@@ -311,7 +311,7 @@ const taskColumns = {
   total: sql<string>`count(*) over()`,
 };
 
-const toTask = (r: TaskRow): BundleTask => ({
+export const toTask = (r: Omit<TaskRow, "total">): BundleTask => ({
   id: r.id,
   title: r.title,
   notes: r.notes,
@@ -636,24 +636,31 @@ export function hashBundle(bundle: Bundle): string {
   return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
 }
 
-/** Every field of a task a run reads (BundleTask, minus its timestamps of record). */
-function taskStamp(t: Bundle["tasksOpen"][number]): string {
+/**
+ * Every field of a task a run reads: BundleTask minus its id and its time of
+ * record (SEC-A009). A Record over exactly those keys, so a field added to
+ * BundleTask is a type error here until it is stamped (or deliberately left
+ * out above): a field a run reads can never silently stop counting as news.
+ * The key order is the stamp's order; changing it changes every hash.
+ */
+const STAMPED: Record<Exclude<keyof BundleTask, "id" | "updatedAt">, true> = {
+  title: true,
+  notes: true,
+  status: true,
+  stages: true,
+  blockedReason: true,
+  stakes: true,
+  source: true,
+  recurrence: true,
+  dueAt: true,
+  completedAt: true,
+  createdAt: true,
+};
+export const TASK_STAMP_FIELDS = Object.keys(STAMPED) as (keyof typeof STAMPED)[];
+
+export function taskStamp(t: BundleTask): string {
   return createHash("sha256")
-    .update(
-      JSON.stringify([
-        t.title,
-        t.notes,
-        t.status,
-        t.stages,
-        t.blockedReason,
-        t.stakes,
-        t.source,
-        t.recurrence,
-        t.dueAt,
-        t.completedAt,
-        t.createdAt,
-      ])
-    )
+    .update(JSON.stringify(TASK_STAMP_FIELDS.map((f) => t[f])))
     .digest("hex")
     .slice(0, 16);
 }

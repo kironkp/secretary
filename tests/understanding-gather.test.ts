@@ -19,7 +19,7 @@ import {
   user,
   workspaces,
 } from "@/lib/db/schema";
-import { gatherAll, gatherProject, hashBundle, nearDated } from "@/lib/understanding/gather";
+import { gatherAll, gatherProject, hashBundle, nearDated, TASK_STAMP_FIELDS, taskStamp } from "@/lib/understanding/gather";
 import { recordSchema, type ProjectRecord } from "@/lib/understanding/types";
 import { getBoard } from "@/lib/workspace/store";
 
@@ -537,6 +537,44 @@ describe("hashBundle", () => {
       const ev = (b: B) => [{ ...b.events[0], startsAt: daysFromNow(1).toISOString() }];
       expect(hashBundle(due(tomorrow!, daysFromNow(30), ev(tomorrow!)))).not.toBe(hashBundle(due(today!, daysFromNow(30), ev(today!))));
     }
+  });
+
+  it("every field of a task a run reads changes the hash; only id and updated_at are left out (sec rev G1/G2)", async () => {
+    const before = (await gather())!;
+    const task = before.tasksOpen[0];
+    // The stamp covers exactly the task's fields but its identity and its time of record.
+    expect([...TASK_STAMP_FIELDS, "id", "updatedAt"].sort()).toEqual(Object.keys(task).sort());
+    const changed = (v: unknown): unknown =>
+      Array.isArray(v) ? [...v, { name: "One more stage", done: false }] : typeof v === "string" && /^\d{4}-\d\d-\d\dT/.test(v) ? new Date(Date.parse(v) + 86_400_000).toISOString() : v === null ? "set now" : `${String(v)} (changed)`;
+    for (const field of TASK_STAMP_FIELDS) {
+      const after = structuredClone(before);
+      (after.tasksOpen[0] as Record<string, unknown>)[field] = changed(task[field]);
+      expect(hashBundle(after), field).not.toBe(hashBundle(before));
+    }
+    // And the two left out do not.
+    const touched = structuredClone(before);
+    touched.tasksOpen[0].updatedAt = new Date(Date.parse(task.updatedAt) + 60_000).toISOString();
+    expect(hashBundle(touched)).toBe(hashBundle(before));
+  });
+
+  it("a task's stamp is pinned: reordering or renaming its fields would re-read every project", () => {
+    expect(
+      taskStamp({
+        id: "t1",
+        title: "Master the title track",
+        notes: null,
+        status: "todo",
+        stages: [{ name: "Mix", done: true }],
+        blockedReason: null,
+        stakes: null,
+        source: "spoken",
+        recurrence: null,
+        dueAt: "2026-10-09T00:00:00.000Z",
+        completedAt: null,
+        createdAt: "2026-09-01T12:00:00.000Z",
+        updatedAt: "2026-10-01T12:00:00.000Z",
+      })
+    ).toBe("2b00cbd556ebfe82"); // the formula live since 4189e4d (main), recomputed by hand
   });
 
   it("changes when a field a run reads changes, not when only updated_at or the planned start moves (SEC-A009)", async () => {
