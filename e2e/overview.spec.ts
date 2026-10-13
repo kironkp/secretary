@@ -65,6 +65,9 @@ test("Needs a date: tap the task, tap Tomorrow; dated through the move route wit
   await touch(page, chase.locator(`[data-chase="${ids.undated}"]`));
   const choices = chase.getByRole("group", { name: `A date for ${UNDATED}` });
   await expect(choices).toBeVisible();
+  // The day picker says what it is: "Pick…" beside the system's own date field.
+  await expect(choices.getByText("Pick…")).toBeVisible();
+  await expect(choices.getByLabel("Pick a date")).toBeVisible();
 
   const moved = page.waitForRequest((r) => r.url().endsWith("/api/timeline/move") && r.method() === "POST");
   await touch(page, choices.getByRole("button", { name: "Tomorrow" }));

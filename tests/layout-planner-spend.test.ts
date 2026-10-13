@@ -89,5 +89,24 @@ describe("a planner answer the validator refuses is still paid for (sec rev, SEC
     expect(rows[0]).toMatchObject({ model: "claude-sonnet-5", inputTokens: 4_000, outputTokens: 800 });
     expect(Number(rows[0].costUsd)).toBeGreaterThan(0);
   });
+
+  it("a call that reports no tokens is not billed with the figures of the call before it", async () => {
+    // One user's planner reports its tokens and is refused.
+    const first = await newUser();
+    await persistPlan(first, await computeCurrentPlan(first), {
+      call: async () => {
+        lastPlannerUsage.model = "claude-sonnet-5";
+        lastPlannerUsage.input = 4_000;
+        lastPlannerUsage.output = 800;
+        return "not a plan";
+      },
+    });
+    // The next call answers without reporting anything: what the first one
+    // left behind must not be billed to this user.
+    const second = await newUser();
+    await persistPlan(second, await computeCurrentPlan(second), { call: async () => "not a plan either" });
+    expect(await db.select().from(usage).where(and(eq(usage.userId, first), eq(usage.kind, "layout")))).toHaveLength(1);
+    expect(await db.select().from(usage).where(and(eq(usage.userId, second), eq(usage.kind, "layout")))).toHaveLength(0);
+  });
 });
 

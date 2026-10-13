@@ -23,6 +23,7 @@ import {
   ProjectGrid,
   StatTiles,
   SuggestedZone,
+  buildProjects,
 } from "./zones";
 
 export type PlanProject = {
@@ -524,7 +525,7 @@ export function PlanView({
           </button>
         </div>
       )}
-      {groupCards(plan.sections, projects).map((group) =>
+      {groupCards(plan.sections, projects, (s) => cardDraws(s, projects, tasks, events)).map((group) =>
         group.kind === "cards" ? (
           // Consecutive project cards share one grid (SEC-A007): two across on
           // an iPad, three on a desktop. The shell owns the geometry; an
@@ -572,16 +573,47 @@ export function PlanView({
   }
 }
 
-type Group =
+export type Group =
   | { kind: "cards"; at: number; sections: { section: PlanSection; i: number }[] }
   | { kind: "one"; section: PlanSection; i: number };
 
-/** Runs of project cards (not lists) become one grid; everything else stands alone. */
-function groupCards(sections: PlanSection[], projects: PlanProject[]): Group[] {
+/**
+ * Whether a project's card has anything to draw (ProjectCardSection above):
+ * a full card is ProjectGrid's, which shows a project only while it has open
+ * work, something finished this week or an event coming (buildProjects). A
+ * compact card always draws its row, and a nested one its subprojects.
+ */
+export function cardDraws(section: PlanSection, projects: PlanProject[], tasks: TaskRow[], events: EventRow[]): boolean {
+  const id = String(section.props?.project_id ?? "");
+  if (!projects.some((p) => p.id === id)) return false;
+  const variant = String(section.props?.variant ?? "full");
+  if (variant === "compact") return true;
+  const childIds = projects.filter((p) => p.parentId === id).map((p) => p.id);
+  if (variant === "nested" && childIds.length > 0) return true;
+  return (
+    buildProjects(
+      tasks.filter((t) => t.projectId === id || childIds.includes(t.projectId ?? "")),
+      events.filter((e) => e.projectId === id)
+    ).length > 0
+  );
+}
+
+/**
+ * Runs of project cards (not lists) become one grid; everything else stands
+ * alone. A card with nothing to draw gets no cell: an empty cell is a hole in
+ * the grid (seen on real data, 2026-10-12: a project with nothing open sat
+ * between two that had work, and left a gap the width of a card).
+ */
+export function groupCards(
+  sections: PlanSection[],
+  projects: PlanProject[],
+  draws: (section: PlanSection) => boolean = () => true
+): Group[] {
   const lists = new Set(projects.filter((p) => p.kind === "list").map((p) => p.id));
   const groups: Group[] = [];
   sections.forEach((section, i) => {
     const card = section.component === "project_card" && !lists.has(String(section.props?.project_id ?? ""));
+    if (card && !draws(section)) return;
     const last = groups[groups.length - 1];
     if (card && last?.kind === "cards") last.sections.push({ section, i });
     else if (card) groups.push({ kind: "cards", at: i, sections: [{ section, i }] });

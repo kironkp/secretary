@@ -190,3 +190,43 @@ describe("moves: what a drag of the body or an edge changes", () => {
     expect(moved(e, "start", 5, TZ)).toBeNull();
   });
 });
+
+describe("lanes in the one urgency order (SEC-A007, lib/project-order.ts)", () => {
+  const P = (id: string, name: string, deadline: string | null = null): TlProject => ({
+    id,
+    name,
+    color: null,
+    deadline,
+    deadlineKind: deadline ? "committed" : null,
+  });
+
+  it("a project with nothing dated sorts by its own deadline: after late work, before a later date", () => {
+    const lanes = buildLanes(
+      [P("alpha", "Alpha"), P("beta", "Beta", "2026-10-08T19:00:00Z"), P("gamma", "Gamma")],
+      [
+        task({ projectId: "alpha", dueAt: "2026-10-16T19:00:00Z" }), // in 10 days
+        task({ projectId: "beta" }), // no date of its own; the project is due in 2 days
+        task({ projectId: "gamma", dueAt: "2026-10-03T19:00:00Z" }), // 3 days late
+      ],
+      [],
+      TZ,
+      NOW,
+      DEFAULT_FILTERS
+    );
+    expect(lanes.map((l) => l.name)).toEqual(["Gamma", "Beta", "Alpha"]);
+  });
+
+  it("the order is the same whatever the status filter shows", () => {
+    const projects = [P("alpha", "Alpha"), P("zeta", "Zeta")];
+    const tasks = [
+      task({ projectId: "alpha", dueAt: "2026-10-04T19:00:00Z" }), // 2 days late
+      task({ projectId: "alpha", status: "done", dueAt: "2026-10-01T19:00:00Z" }),
+      task({ projectId: "zeta", dueAt: "2026-09-27T19:00:00Z" }), // 9 days late
+      task({ projectId: "zeta", status: "done", dueAt: "2026-10-01T19:00:00Z" }),
+    ];
+    for (const status of ["open", "late", "done", "all"] as const) {
+      const lanes = buildLanes(projects, tasks, [], TZ, NOW, { ...DEFAULT_FILTERS, status });
+      expect(lanes.map((l) => l.name), `status filter: ${status}`).toEqual(["Zeta", "Alpha"]);
+    }
+  });
+});
