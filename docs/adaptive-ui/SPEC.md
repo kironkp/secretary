@@ -144,7 +144,7 @@ every way the board can change, with a model of its own.
 **A place is a position on the board he was told.** Every request of his goes
 through ONE function (`lib/layout/request.ts`): both tools, the pin button,
 unpin, Put it back, the Settings page lifting a hide or a ban or removing a
-pin, and the preference tool's pin. It starts from what an open shows now;
+pin, and the preference tool's pin and its ban. It starts from what an open shows now;
 changes the state in memory; runs on that state exactly what an open runs;
 checks that the board bears out what is about to be said (the section is on
 the board, or off it); and only then writes, and answers with that board. If
@@ -166,6 +166,11 @@ name, never its key.
 - Known cost, accepted: a place remembered past the end of a board that has
   grown short is read again as where the section stands the next time he
   speaks.
+- **A place goes with its section.** When a section he placed leaves the
+  board (its project is archived, its component banned, he hides it), its
+  place is gone for good, with the first board worked out without it.
+  Brought back, a card follows the data and a section of the usual board
+  goes to its default place.
 - Rows stored before r5, and a pin kept as a `pin_section` preference: the
   place is read once from the stored order at the first open and written
   back. It is the only read of the stored order for a place. The preference
@@ -178,10 +183,20 @@ name, never its key.
 data puts it; another section goes to its default place among the system's
 sections on the board. (Where a planner had it is not kept for a section
 that was his while the plan was made; that returns with the split below.)
-Nothing remembers the index a section had when it was hidden. A section he
-ADDED is always placed: unpin does not apply to it and says so; hidden and
+Everything else keeps the order he saw: the section goes in under the
+system's section it follows there, and the places of what he placed are read
+again. Nothing remembers the index a section had when it was hidden. A
+section he ADDED (or any section outside the default board that he has
+placed) is always placed: unpin does not apply to it and says so; hidden and
 shown again it comes back placed at the end, as the bare component, because
 its props lived only on the board.
+
+**A ban is a request too**, and works like a hide of that component's
+section: the board he saw without it, everything else in order. Nothing can
+be shown, moved or added while he has banned it; the reply says so. The ban
+remembers a section he had put on the board himself, so lifting it (by voice
+or in Settings) brings that section back, placed at the end; a section of
+the usual board comes back where the system has it.
 
 **The stored row, and the one door.** The stored row is still a composed
 board. It is read through one door, and this is everything that comes
@@ -208,8 +223,25 @@ now are compared. A section that changes hands in either direction (he pins
 it, unpins it, hides it, shows it) is neither moved nor removed, so none of
 his own requests gets a plan refused or held. The rules plan has banned
 components taken out before it is judged, so a ban does not hold the plan
-either. The layout clock is read on the same projection, so his own move
-does not spend the system's daily ration.
+either.
+
+**The layout clock** (`days_since_layout_change`) is read on the same
+projection (`layoutChanged`, `lib/layout/signals.ts`). A stored row changes
+the layout when the system's own sections are in a different order than on
+the row before, or when a section outside the default board that was the
+system's came or went. Not counted: the project cards (they follow the
+data); the banner (always first when there is one; counted, a planner that
+writes one every time it is asked was paid for once a day for ever);
+anything he placed; a section of the default board coming or going (only
+he can hide or show one). So his own request does not spend the system's
+daily ration, and a request is stored under the hash the next open works
+out (`hashOnceStored`), so the planner is not asked about a board it has
+already answered. The clock reads every stored row of the last two days,
+not the newest ten: ten rows in one day used to push that day's change out
+of sight, the clock read "never", and the ration was open again.
+One imprecision, stated: he hides or bans a section the PLANNER had added;
+the rows cannot tell that from the system taking it away, so it counts as
+a change (one more planner call the next day).
 
 **A stated limit: what the system moved does not go back by itself.** After
 the strip has been sent to the top it stays there when the talk about dates
@@ -217,13 +249,17 @@ stops, still giving that reason, and a planner's banner stays past its day
 if that plan had also moved a section: going back has no why, and a move
 without one is refused. As before v1.02 for the strip. Task 1.06.
 
-**Put it back** is a request: the earlier row's board and its placements,
-today's hides, through an open, written, answered. It does not bring back
-what he hid; hides live outside the versions.
+**Put it back** is a request: the earlier row's board, with what he had
+placed on it at the places that row wrote, on today's data and under today's
+hides; through an open, written, answered, and every place read again. It
+does not bring back what he hid; hides live outside the versions. A section
+he had added that the earlier board does not have goes with it (whether he
+added it since or only had it hidden then); he asks for it again.
 
 No tool answers that a change was applied when the next render will not show
-it; the one limit is a size or accent set with `set_props`, which lasts until
-his data next changes, and the tool says so.
+it. A size or accent set with `set_props` is checked on the board like any
+other claim: it lasts until his data next changes, and the tool says so; in
+calm mode, where every section is shown the plain way, it is refused.
 
 Adding a component = bump registry version + add prop schema + add render fn +
 mention in planner prompt. Never mid-session.
