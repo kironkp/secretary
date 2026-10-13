@@ -555,7 +555,7 @@ export function PlanView({
         const content = render(section);
         if (content === null) return null;
         return (
-          <section key={`${key}-${i}`} className="group relative">
+          <section key={`${key}-${i}`} data-section={key} className="group relative">
             {section.why && (
               <div className="mb-1.5">
                 <WhyChip why={section.why} />

@@ -17,6 +17,7 @@ import { clearPlanCache, lastPlannerUsage } from "@/lib/layout/plan-from-llm";
 import { composeUsersPlan, computeCurrentPlan, getPlanHead, persistPlan, revertPlan, setPinned, unmetClaims } from "@/lib/layout/plan-store";
 import { REGISTRY_VERSION } from "@/lib/layout/registry";
 import { computeSignals, signalsHash } from "@/lib/layout/signals";
+import { buildBriefing } from "@/lib/secretary/briefing";
 import { executeTool, liveTurnContext } from "@/lib/secretary/tools";
 
 const TZ = "America/Los_Angeles";
@@ -60,6 +61,22 @@ async function board(late: number) {
     cardsOf,
     arrange: (operations: { op: string; section: string }[]) => executeTool(ctx, "arrange_dashboard", { operations }),
     chatEdit: (operations: Record<string, unknown>[]) => executeTool(ctx, "edit_layout_plan", { operations }),
+    /** What the model reads when it asks for the board. */
+    readPlan: async () => (await executeTool(ctx, "get_current_plan", {})).result as { sections: { position: number; key: string }[]; pinned: string[] },
+    /** The planner answers this render's situation with the default plus a banner, and its answer is stored. */
+    landBanner: async () => {
+      const bundle = await computeCurrentPlan(id);
+      await persistPlan(id, bundle, {
+        call: async () => {
+          lastPlannerUsage.model = "claude-sonnet-5";
+          lastPlannerUsage.input = 4_000;
+          lastPlannerUsage.output = 800;
+          const plan = defaultPlan(bundle.signals);
+          return JSON.stringify({ ...plan, plan_id: "p", reason_summary: "A busy week", sections: [{ component: "focus_banner", props: { text: "Five things are late", tone: "serious" } }, ...plan.sections] });
+        },
+      });
+      return bundle.plan.sections.map(sectionKey);
+    },
     head: async () => (await getPlanHead(id))!,
     /** Something changes in his data, so the next render is a new situation. */
     newTask: (project: string, due: number | null = null) =>
@@ -719,5 +736,90 @@ describe("what a tool says it did is on the composed board, or nothing is change
     // And when it is where it was put.
     const key = sectionKey(plan.sections.at(-1)!);
     expect(unmetClaims(composeUsersPlan(moved, { ...change, placed: [key] }, []), { placed: [key], placedOn: moved })).toEqual([]);
+  });
+});
+
+describe("with a planner that answers at every open", () => {
+  it("his list on top, six opens, his data changing before the fourth: every one is the right way up", async () => {
+    const b = await board(5);
+    await b.render();
+    await b.arrange([{ op: "move_to_top", section: "shopping list" }]);
+    await b.nextDay();
+    await b.newTask("Atlas");
+    for (let open = 1; open <= 6; open++) {
+      if (open === 4) await b.newTask("Iris", -40);
+      const shown = await b.landBanner();
+      const body = shown.filter((k) => k !== "focus_banner");
+      expect(body.slice(0, 4), `open ${open}`).toEqual([b.card("Shopping"), "hero_next_up", "stat_row", "timeline"]);
+      expect(body.slice(-2), `open ${open}`).toEqual(["date_chase", "people_index"]);
+      expect(shown.indexOf("focus_banner"), `open ${open}`).toBeLessThanOrEqual(0);
+      await expectCardsFollowData(b, shown, [b.card("Shopping")]);
+    }
+    // And a card he put between the tiles and the strip does not push the strip under the cards.
+    const c = await board(5);
+    const start = await c.keys();
+    const firstCard = start.find((k) => k.startsWith("project_card:"))!;
+    await c.chatEdit([{ op: "move", section: firstCard, to: start.indexOf("timeline") }]);
+    await c.nextDay();
+    await c.newTask("Atlas");
+    for (let open = 1; open <= 4; open++) {
+      if (open === 3) await c.newTask("Iris", -40);
+      const body = (await c.landBanner()).filter((k) => k !== "focus_banner");
+      expect(body.slice(0, 4), `open ${open}`).toEqual(["hero_next_up", "stat_row", firstCard, "timeline"]);
+      expect(body[4], `open ${open}`).toMatch(/^project_card:/);
+    }
+  });
+});
+
+describe("'the top' is under the banner for both tools", () => {
+  it("with a banner on the board: a card moved to position 0 in the chat, a section sent to the top by voice and a section added at 0 are each just below it, and the banner is still there", async () => {
+    const b = await board(5);
+    await b.render();
+    await b.nextDay();
+    await b.newTask("Atlas");
+    await b.landBanner();
+    expect((await b.keys())[0]).toBe("focus_banner");
+
+    const moved = (await b.chatEdit([{ op: "move", section: b.card("Iris"), to: 0 }])).result as { applied?: boolean; sections: string[] };
+    expect(moved.applied).toBe(true);
+    expect(moved.sections.slice(0, 2)).toEqual(["focus_banner", b.card("Iris")]);
+    expect((await b.keys()).slice(0, 2)).toEqual(["focus_banner", b.card("Iris")]);
+
+    expect((await b.arrange([{ op: "move_to_top", section: "needs a date" }])).result).toMatchObject({ applied: true });
+    expect((await b.keys()).slice(0, 3)).toEqual(["focus_banner", "date_chase", b.card("Iris")]);
+
+    expect((await b.chatEdit([{ op: "add", component: "kanban", at: 0 }])).result).toMatchObject({ applied: true });
+    const shown = await b.keys();
+    expect(shown.slice(0, 2)).toEqual(["focus_banner", "kanban"]);
+    expect(shown.filter((k) => k === "focus_banner")).toHaveLength(1);
+  });
+});
+
+describe("the model is told the board as it renders now, not as it was last stored", () => {
+  it("his data changes and the Dashboard is not opened: the briefing and get_current_plan have today's order, and a move by position lands where it was meant", async () => {
+    const b = await board(3);
+    await b.render();
+    const stored = ((await b.head()).spec as LayoutPlan).sections.map(sectionKey);
+    // A quiet project goes late. Nobody opens the Dashboard.
+    await b.newTask("Iris", -40);
+    expect(((await b.head()).spec as LayoutPlan).sections.map(sectionKey)).toEqual(stored);
+    expect(b.cardsOf(stored)[0]).not.toBe(b.card("Iris"));
+
+    const briefing = await buildBriefing(b.id, TZ, { consumeNudges: false });
+    const line = briefing.text.split("\n").find((l) => l.startsWith("DASHBOARD"))!;
+    const named = NAMES.filter((n) => line.includes(n)).toSorted((x, y) => line.indexOf(x) - line.indexOf(y));
+    expect(named[0]).toBe("Iris");
+
+    const plan = await b.readPlan();
+    const cards = plan.sections.filter((s) => s.key.startsWith("project_card:"));
+    expect(cards[0].key).toBe(b.card("Iris"));
+    expect(plan.sections.map((s) => s.position)).toEqual(plan.sections.map((_, i) => i));
+
+    // "Put Harbor above Iris": the position the model just read for Iris.
+    const iris = plan.sections.find((s) => s.key === b.card("Iris"))!;
+    expect((await b.chatEdit([{ op: "move", section: b.card("Harbor"), to: iris.position }])).result).toMatchObject({ applied: true });
+    const shown = await b.keys();
+    expect(shown.indexOf(b.card("Harbor"))).toBe(shown.indexOf(b.card("Iris")) - 1);
+    expect(shown.indexOf(b.card("Harbor"))).toBe(iris.position);
   });
 });

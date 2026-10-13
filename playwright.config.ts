@@ -102,6 +102,14 @@ export default defineConfig({
       testMatch: /overview\.spec\.ts/,
       use: { ...devices["iPhone 15"] },
     },
+    {
+      // Something he placed on the Overview stays there (v1.02): a list sent
+      // to the top through the real tool, next up directly under it, after a
+      // reload too. Last, because while it runs the shared board has a pin.
+      name: "pins",
+      testMatch: /pins\.spec\.ts/,
+      use: { ...devices["iPhone 15"] },
+    },
   ],
 
   webServer: {
