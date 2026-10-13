@@ -23,7 +23,12 @@ changed before another line was written); round 5, the rule that stands:
 `03e590c` (the code), `739aaf4`, `7c62bce`, `a28447c` (the walker's own
 corrections), `293e8ff`, `b234174`, `b7d0bb9`, `d9ffec1` (the older tests
 brought to the new rule, and new ones), `0abae38`, `f559056` (the browser
-specs), this commit. `132b183`, `1d7d798`
+specs), `393de92` (offered as r5). Then, after a pass on a copy of his own
+board and the Reviewer's probe of rows main wrote, the day it lands:
+`2781997`, `c347032`, `a9fe5bb`, `c18801f`, `ad28acb` (the walker, each
+before the code it holds, red first), `49aa0f9`, `ef8e067`, `88f2d12`,
+`045b5ce` (the spec), `3d50c77`, `8519048`, `a9e3a11`, `68d2ab8`,
+`bcd9f54`, `e1045fe` (the code and its tests), this commit. `132b183`, `1d7d798`
 and `ccd57ef` are an earlier round-3 rule that composition replaced;
 `f23e56c` merges main with v1.03 and `b3aa8fe` with v1.04, so the package
 version is 1.0.4.
@@ -148,6 +153,29 @@ understand all the whats". sec rev's round 2 (SEC-A007).
   where it said "Due today". A size asked for in calm mode is refused in
   those words, where the tool said it was set. The pin button on the page
   shows the board the request was answered with, and a refusal's reason.
+- **The day it lands** (found after the first offer of round 5, on a copy
+  of his own board, and by the Reviewer opening rows main had written).
+  The cards went where the system plan's first card stood. Main's planner
+  puts urgent cards above next up, so a row it wrote, held on the landing
+  day, showed every card above next up, the tiles and the strip; and under
+  this version alone a planner answer with its cards first, or last, did
+  the same at either end. Now the cards go where the fewest of the
+  system's sections end up on the wrong side of them (next up and the
+  tiles belong above the cards, Needs a date and People below, the strip
+  neither), and among such places the nearest to where the plan had them.
+  With the usual order that is: never above next up or the tiles, never
+  below Needs a date or People. A planner may still raise Needs a date or
+  sink the tiles, with a reason; nothing is refused. The count is made on
+  what will be drawn: a section he hid is not in it, or the stored board
+  would not come out the same at the next open.
+  A section retired since (main still stored it) is taken out wherever a
+  stored row is read as a board: it sat on the board the model was told,
+  and put his pinned strip one place too high. Put it back does not step
+  behind the first board stored under this version, and says so: reading
+  main's row as a board that way lost a pin he had. A hide whose project
+  has been archived or deleted could not be lifted in Settings and stayed
+  there for good; it is simply removed, as on main. "Hide kanban, show
+  kanban" in one voice request was refused for a section he had added.
 - **The gate is a walker, not examples** (tests/board-walk.test.ts). Three
   rounds were offered on examples and failed on a state no example had. The
   walker makes boards of 0 to 9 projects and takes seeded random steps
@@ -163,12 +191,17 @@ understand all the whats". sec rev's round 2 (SEC-A007).
   drawn and nothing else, an unchanged open stores nothing, composing the
   stored board gives the same board).
   On round 4's code the first forty walks (24 steps each) made 19 kinds of
-  complaint, 1,348 in all, and every one of the forty failed. On this
-  version the same walks from the same seed make none, and neither do 120
-  walks of 30 steps.
+  complaint, 1,568 in all, and every one of the forty failed. One seed is
+  not the gate, though: the first offer of round 5 was clean on the seed
+  it had been built against and failed 5 of 120 walks on the Reviewer's;
+  and a third seed, given by the Reviewer once the tree was thought final,
+  found one more defect and one more gap in the walker (3 of 120 walks).
+  This version makes no complaint on those three seeds, 120 walks of 30
+  steps each.
   The walker itself was wrong in places, each fixed in its own commit with
-  a line saying what it had wrong (`739aaf4`, `7c62bce`, `a28447c`); the
-  first two were read by the Reviewer before this was offered.
+  a line saying what it had wrong (`739aaf4`, `7c62bce`, `a28447c`,
+  `2781997`, `c347032`, `a9fe5bb`, `c18801f`, `ad28acb`), and read by the
+  Reviewer.
 - Found on the way, and fixed because the rule could not be tested without
   it: a planner answer was paid for and thrown away whenever his data
   changed and the board did not (the stored plan still carried the older
@@ -187,7 +220,27 @@ understand all the whats". sec rev's round 2 (SEC-A007).
   place remembered past the end of a board that has grown short is read
   again as where the section stands the next time he asks for anything.
   There is no "let it go back" by voice yet, and the pin button only shows
-  under a mouse.
+  under a mouse. After a request of his everything else keeps the order he
+  saw, except that the cards stand where the rule puts them on the board
+  as it now is: on a board where the system has moved the tiles under the
+  cards, or Needs a date above them, a request that takes away or brings
+  back one of next up, the tiles, Needs a date or People (hide, show, ban,
+  lift, pin, unpin, remove, add back) can move the cards to the other side
+  of the tiles. The reply shows him the board he gets; on the usual order
+  nothing moves. The system can keep the tiles under the cards only while
+  Needs a date or People stands between them (until the split, 1.07). A
+  place is a position, not a neighbour: when the cards
+  move (the rule above, a rule sending the strip up), a section he placed
+  in the middle keeps its count and may get new neighbours. On the day it
+  lands: one undo step is lost (Put it back cannot return to a board from
+  before the update); a card he moved above next up in the CHAT on main
+  was never pinned there, so it follows the data now (main lost that move
+  at the next change in his data anyway; what he placed by voice or with
+  the pin button stays); and while main's last planner row is held, the
+  cards are right under the tiles with the strip below them, main's own
+  look, until the next rules plan. And if the update is taken back: after
+  going back to the version before, the board is main's own until he next
+  arranges it; nothing is deleted.
 - Seen in the browser and not fixed here: a card with nothing to draw, and
   a section with nothing in it, still counts as a place on the board. On
   the local copy "Needs a date, up one" moved it above a card that draws
@@ -200,17 +253,19 @@ understand all the whats". sec rev's round 2 (SEC-A007).
   date, days are his calendar days, a project's own deadline is read, a
   Timeline lane is ordered by its due day, and a list never takes a cell
   among the project cards.
-- Checks: 2,518 tests, the production build, 73 browser specs on local
+- Checks: 2,558 tests, the production build, 73 browser specs on local
   Chromium (three with something he placed: sent to the top by the tool,
   pinned and let go with the pin button, listed and removed in Settings),
-  all the way CI runs them. Each of 62 behaviours of the new rule taken out
-  in turn failed a test: 42 as the tests stood, 19 only after an example
-  was written for them (the long walk reached them, the eight walks the
-  suite runs did not), and one after two checks that did the same job were
-  made one. One more changed nothing when taken out, was dead code, and is
-  gone. Not seen by me on a real clock: the chip the morning after; that is
-  a test with the clock moved, through the real render and store. Not run
-  against a copy of his real board this round, as round 4 was.
+  all the way CI runs them. Each of 85 behaviours of the rule taken
+  out in turn failed a test (some only after an example was written for
+  them: the long walk reached them, the eight walks the suite runs did
+  not). Where the cards go is asked about every case there is: every order
+  of every subset of the five sections, every place a plan could name. In a
+  real browser on a local copy of his own board: 18 page reads over five
+  ways of placing something, on a board with a planner's banner and on one
+  a rule had rearranged, tablet and phone; the pin button, Settings and
+  Put it back pressed on the page. Not seen by me on a real clock: the
+  chip the morning after; that is a test with the clock moved.
   App spend: $0.
 
 ---
