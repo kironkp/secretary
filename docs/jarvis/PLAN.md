@@ -8,8 +8,8 @@ beside me in a workshop."*
 ## Now
 
 - **Cycle counter: 100** (shown as 1.00). See §9 for how cycles are numbered.
-- **1.00** — this plan. Round 2 in review; round 1 (`1577ccd`) failed on three
-  wrong claims, corrected here.
+- **1.00** — this plan. Three review rounds: the first two failed on wrong
+  claims, corrected here.
 - **1.01** — measured baseline (§7). With the Executor.
 - **Next after that:** 1.02 land the parked Overview round (A007), then
   Phase 2a.
@@ -28,7 +28,7 @@ Reviewer on a built copy, in a real browser where it says so
 
 | Capability | Evidence |
 |---|---|
-| Chat and voice share one tool system. 64 tool schemas; 62 reach chat; voice carries a 33-name subset and has no create-task, complete-task or document tools: the extractor turns a call into tasks afterwards | **R** `lib/secretary/tool-schemas.ts:804-871` |
+| Chat and voice share one tool system. 64 tool schemas; 62 reach chat; voice carries a 33-name subset under its own names: `create_commitment`, `log_status` and `amend_task` write tasks directly, and it has no document-editing tools. The extractor runs after every chat turn and every call as a safety net for what was said and not logged | **R** `lib/secretary/tool-schemas.ts:804-871`, `lib/secretary/tools.ts:1924-1977`, `app/api/chat/route.ts:350`, `app/api/realtime/end/route.ts:81` |
 | A Workspace board with inline widgets (no iframe), stable widget ids, grid geometry, z-order, collapse, focus, undo and redo, saved per user | `lib/workspace/types.ts`, `lib/workspace/ops.ts`, table `workspaces` at `lib/db/schema.ts:846` |
 | Drag and resize **at 768 px and wider**. Under 768 px the board is one stacked column with no drag and no resize, by design | **R** `components/workspace/workspace-board.tsx:118`, `:249`, `:466`; browser: 5 drag and 5 resize handles at 1280, none on the phone |
 | Widgets show live data: tasks, events, projects, documents, check-ins. Read only | `lib/workspace/bindings.ts`, `lib/workspace/apply-bindings.ts` |
@@ -44,7 +44,7 @@ Reviewer on a built copy, in a real browser where it says so
 
 | Capability | State | Evidence |
 |---|---|---|
-| **Ticking a task on the board** | The board stamps `data-check` on the row and nothing handles the tap. `data-action` is only a sanitizer allow-list entry. This is `docs/workspace/SPEC.md` phase 3, never done, on no branch | **R** `lib/workspace/apply-bindings.ts:48-56`; browser: tapped a tickable row, the task stayed `todo`, no request left the page |
+| **Ticking a task on the board** | The board stamps `data-check` on the row and nothing handles the tap. `data-action` is only a sanitizer allow-list entry. This is `docs/workspace/SPEC.md` phase 3, never done, on no branch | **R** `lib/workspace/apply-bindings.ts:48-56`; browser: tapped a tickable row, the task stayed `todo`, no request went to `/api/tasks` |
 | Keyboard on the board | No key handling at all | **R** no `onKeyDown` in `workspace-board.tsx` |
 | Touch-drag and any resize gesture | Untested anywhere; CI uses a mouse | **R** |
 
@@ -69,8 +69,10 @@ figures re-added by the Reviewer):
 - **$159.08 in 30 days; $139.37 of it (87.6 %) was background "understanding"
   reading.** Worst days $29.45 (09-24) and $27.83 (10-01). That is the "about 30
   credits a day": US dollars, mostly the Anthropic API on Opus, some OpenAI.
-  Caps went live 10-06 (v52). The Reviewer read $1.59 of understanding that
-  evening with the caps holding. **From 10-07 on it is unmeasured.**
+  Caps went live 10-06 (v52). The Reviewer took one reading that day, 17
+  minutes after reading was switched back on: $1.59 of understanding, the next
+  run refused by the cap, then $0 from v61 to 02:01Z. **From 10-07 on it is
+  unmeasured.**
 - **A chat turn costs between $0.10 and $0.50 depending on the model.** One
   usage row is one turn: one message from Kiron, with tokens summed over up to
   eight model rounds (`lib/secretary/chat-claude.ts:10`, `:83-99`).
@@ -129,7 +131,7 @@ by the shell, one validated op list, undo.
    `applyOps` a drag calls. `remove` exists; add create, update, hide, restore
    and group. Every tool write must carry `version`, closing the overwrite hole.
    An idempotency key stops a retried tool call adding a second widget. Ops stay
-   flat objects: the Realtime API rejects `oneOf` (`lib/workspace/types.ts:128-135`).
+   flat objects: the Realtime API rejects `oneOf` (`lib/workspace/types.ts:131-139`).
 4. **Two layouts, one board.** At 768 px and wider it is a grid, and "move it
    right, make it bigger" are geometry ops. On a phone it is one column, and the
    same words become reorder and expand. Decided: the workshop milestone is
@@ -207,11 +209,20 @@ loop: the Executor writes a short diagnosis and the Planner changes the approach
 
 **Background: on, at $3 a day or less in total.** Kiron, 2026-10-12:
 "Background should definetly stay at 3 per day or less." In code "background"
-is understanding, extraction, layout, slow_loop and email
-(`lib/spend-guard.ts:97`). The all-background default was $4; Heroku has been
-$3 since v62, and Phase 2a makes $3 the code default. Extraction stays on: it
-is how a voice call becomes tasks. $3 every day would be $90 a month; the one
-day measured after the caps came to $1.59.
+is understanding, extraction, layout, slow_loop, email and suggestions
+(`lib/spend-guard.ts:97`, `:134`, `:160`). The all-background default was $4;
+Heroku has been $3 since v62, and Phase 2a makes $3 the code default.
+Extraction stays on: it is the safety net that files what was said in a turn
+or a call and not logged at the time. $3 every day would be $90 a month; the
+one reading taken after the caps showed $1.59, with the next run refused.
+
+A consequence of v62, found by the Reviewer: reading's own cap ($3) now equals
+the cap on all background work ($3). On a day reading spends its full $3,
+extraction, the dashboard planner and inbound email wait until that spend rolls
+off, and a "Background work paused" push goes out
+(`lib/spend-guard.ts:160-163`). Nothing is lost: extraction keeps its place
+(`lib/secretary/extraction.ts:517-519`). Before v62 there was $1 of room.
+Lowering reading's own cap to $2 would restore it (§10, decision 6).
 
 Proposed for chat and voice, not yet agreed with Kiron:
 
@@ -381,3 +392,7 @@ Still open:
    the organisation that owns the app's key will show it.
 5. **The chat and voice caps in §5** ($1 a session, $2 a day, $40 a month) are
    my proposal. Phase 2a builds them as settings; the numbers are Kiron's.
+6. **Split the $3.** I recommend reading at $2 a day, leaving $1 for the rest
+   of the background work, so a heavy reading day cannot stall extraction. One
+   Heroku setting, Kiron's to run:
+   `heroku config:set UNDERSTANDING_DAILY_CAP_USD=2 -a secretary-kiron`.

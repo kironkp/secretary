@@ -34,6 +34,9 @@ as you go."
   figure was per turn on the dearest model, not per call. Corrected, with the
   Reviewer's file and line references. The version is `1.0.N` with no leading
   zero, and there are no tags.
+- Round 3. One more wrong line, this one the Reviewer's own and withdrawn by
+  them: voice does write tasks itself (`create_commitment`, `log_status`,
+  `amend_task`); the extractor is the safety net, not the only path.
 - Kiron the same day: background work stays at $3 a day or less (the
   all-background cap on Heroku went from the $4 default to $3, release v62);
   the Findit team may build an API; he is on the highest Claude plan.
