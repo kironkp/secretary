@@ -46,7 +46,10 @@ export async function POST(req: Request) {
       // A request like the others (SPEC §2): the preference goes, the board is
       // worked out again with it gone, stored, and that is the next open.
       const [own] = await db.select({ id: layoutPreferences.id }).from(layoutPreferences).where(and(eq(layoutPreferences.userId, user.id), eq(layoutPreferences.id, parsed.id)));
-      if (own) await requestBoard(user.id, { liftPreference: own.id });
+      if (own) {
+        const reply = await requestBoard(user.id, { liftPreference: own.id });
+        if (!reply.ok) return NextResponse.json({ error: reply.error }, { status: 400 });
+      }
       return NextResponse.json({ ok: true });
     }
     await db

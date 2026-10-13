@@ -83,11 +83,20 @@ export async function requestBoard(userId: string, request: BoardRequest): Promi
   if (lifted) {
     const at = preferences.findIndex((p) => samePreference(p, lifted));
     preferences = preferences.filter((_, i) => i !== at);
-    // A hide lifted is a show like any other.
-    if (lifted.kind === "hide_section") ops.unshift({ op: "show", key: liftedValue.section });
   }
   const banned = new Set(preferences.filter((p) => p.kind === "ban_component").map((p) => p.value.component));
   const hides = new Set(state.preferences.filter((p) => p.kind === "hide_section").map((p) => p.value.section));
+  /** A ban that now also remembers a section he had put on the board (its hide is lifted while the ban stands). */
+  let remembers: string | null = null;
+  if (lifted?.kind === "hide_section") {
+    const component = isCardKey(liftedValue.section) ? CARD : liftedValue.section;
+    // A hide lifted is a show like any other; under a ban the section stays off, and the hide simply goes.
+    if (!banned.has(component)) ops.unshift({ op: "show", key: liftedValue.section });
+    else {
+      hides.delete(liftedValue.section);
+      if (!isCardKey(liftedValue.section)) remembers = component;
+    }
+  }
   const hiddenBefore = new Set(hides);
   const claims = { present: new Set<string>(), absent: new Set<string>() };
   /** What this request sends back to where the system has it: shown again, added back, let go. */
@@ -284,6 +293,13 @@ export async function requestBoard(userId: string, request: BoardRequest): Promi
   const plan: LayoutPlan = { ...board, plan_id, sections: written(board.sections, new Set(placedOn(board))) };
   const stillPlaced = placedOn(plan);
   if (lifted) await db.delete(layoutPreferences).where(and(eq(layoutPreferences.userId, userId), eq(layoutPreferences.id, lifted.id)));
+  if (remembers) {
+    const bans = await db.select().from(layoutPreferences).where(and(eq(layoutPreferences.userId, userId), eq(layoutPreferences.kind, "ban_component")));
+    for (const row of bans) {
+      const value = row.value as Record<string, string>;
+      if (value.component === remembers && isExtra(remembers)) await db.update(layoutPreferences).set({ value: { ...value, added: "1" } }).where(eq(layoutPreferences.id, row.id));
+    }
+  }
   if (ban) await db.insert(layoutPreferences).values({ userId, kind: "ban_component", value: ban.value });
   const hideRows = await db.select().from(layoutPreferences).where(and(eq(layoutPreferences.userId, userId), eq(layoutPreferences.kind, "hide_section")));
   for (const row of hideRows) {
