@@ -9,6 +9,9 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 ## v1.02 — A clear Overview (2026-10-12)
 
+`7a53974` to `de5dc87` (written 2026-10-06 as v0.34 and parked: node would not
+start that day, so nothing was run), `a4b8966`, this commit
+
 Kiron on the Overview: "make it make sense", "a random graph", "I don't
 understand all the whats". sec rev's round 2 (SEC-A007).
 
@@ -41,6 +44,27 @@ understand all the whats". sec rev's round 2 (SEC-A007).
   "Being re-read" for good; the task stamp's field list is pinned to the
   task's fields; a start on the due day is allowed and drawn as a one-day
   bar; an event's Undo runs in a transaction.
+- One order for projects on every screen (review fix): the cards, the strip
+  and the Timeline sort with the same code. Late first by how late, then the
+  nearest date or the project's own deadline, then no date, lists last. A
+  late project's card is kept above the fold like an urgent one.
+- A planner's plan is named by the server, never by the model, and a planner
+  call is billed even when its plan is refused (review fixes). A call that
+  reports no tokens is not billed with the figures of the call before it.
+- Run for the first time on 10-12, the way CI runs it. One test failed, an
+  older one that still expected the model's own plan name. The Timeline's
+  lane order had no test at all (putting the old sort back passed
+  everything); it has two now. Then each fix was taken out in turn, and a
+  test failed every time: 11 of 11.
+- Found by looking at real data in a browser, not by a test: a project with
+  nothing to draw (nothing open, nothing finished this week, no event coming)
+  still took a cell in the card grid and left a hole the width of a card
+  between two projects. It gets no cell now. On a local copy of the real
+  board the cards, the strip and the Timeline were then compared with an
+  order worked out by hand in SQL, at 393, 820 and 1440 wide: one order on
+  all three, the most overdue project first.
+- Checks: 1,176 tests, the production build, 70 browser specs on local
+  Chromium. App spend: $0.
 
 ---
 
