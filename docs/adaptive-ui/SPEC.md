@@ -162,8 +162,9 @@ change with them: the head is stamped with those signals before the call.
 
 Who pins: `arrange_dashboard`'s moves, `edit_layout_plan`'s `move` and `add`,
 and the pin button on a section. `show` does not pin (a card he un-hid was not
-placed by him). Hiding, the section leaving the board, and the pin button
-remove a pin. `remove` in `edit_layout_plan` is a hide, for a card or any
+placed by him). Hiding, the section leaving the board, the pin button, and
+Undo of the move that made it remove a pin (Undo puts back the previous
+version of the board, its pins included). `remove` in `edit_layout_plan` is a hide, for a card or any
 other section. No tool answers that a change was applied when the next render
 will not show it; the one limit is a size or accent set with `set_props`,
 which lasts until his data next changes (emphasis is the system's; a variant
