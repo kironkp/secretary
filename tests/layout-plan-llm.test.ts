@@ -57,9 +57,11 @@ describe("planWithFallback", () => {
     ).toBe(true);
   });
 
-  it("walks past rules to the previous good plan when preferences reject both", async () => {
-    // people_index banned: LLM plan and rules/default plans all contain it —
-    // only the previous plan (already cleaned) survives validation.
+  it("a planner's plan that carries what he banned is refused; the rules plan is judged without it", async () => {
+    // people_index banned. The planner's plan contains it and is refused
+    // (F7). Until v1.02 r5 the rules plan was refused for it too, and the
+    // board fell back to the previous plan: a ban of his held the system's
+    // own plan. It is taken out of the rules plan before that is judged.
     const signals = baseSignals();
     const previous = defaultPlan(signals);
     previous.sections = previous.sections.filter((s) => s.component !== "people_index");
@@ -71,7 +73,8 @@ describe("planWithFallback", () => {
       call,
     });
     expect(res.plan.sections.map((s) => s.component)).not.toContain("people_index");
-    expect(["previous", "default"]).toContain(res.source);
+    expect(call).toHaveBeenCalledTimes(1);
+    expect(res.source).toBe("rules");
   });
 
   it("never emits an invalid plan even with llm disabled", async () => {

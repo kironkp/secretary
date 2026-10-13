@@ -207,7 +207,7 @@ describe("arrange_dashboard: 'can you put the shopping list at the top of the da
     ).toEqual([]);
   });
 
-  it("show puts a section back where it was hidden from, and the board says the user arranged it", async () => {
+  it("show puts a section back where the system has it, everything else as he saw it, and the board is his", async () => {
     const userId = await newUser(["Caltrans"]);
     // Pin the board first, so its order is the user's and stable.
     await executeTool(call(userId), "arrange_dashboard", { operations: [{ op: "move_down", section: "stats" }] });
@@ -226,7 +226,12 @@ describe("arrange_dashboard: 'can you put the shopping list at the top of the da
     expect(after.indexOf("timeline")).toBe(at);
     expect(after).toEqual(before);
     expect((head.spec as LayoutPlan).plan_id).toMatch(/^user-/);
-    expect((head.spec as LayoutPlan).reason_summary).toBeNull();
+    // The page says "Arranged by you" because something on the board is his
+    // (it reads the pins, SPEC §2). The system's reason line is no longer
+    // wiped by his request: it is about the emphasis and the banner, which
+    // the request did not touch.
+    expect(head.pinned).toContain("stat_row");
+    expect((head.spec as LayoutPlan).reason_summary).toBe("Arranged for a busy week");
   });
 
   it("words that fit two sections are a question, not a guess (sec rev C14)", async () => {
