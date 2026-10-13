@@ -71,10 +71,26 @@ beside me in a workshop."*
   five fresh seeds at 120 walks of 30 steps that the Executor has never
   seen, all at zero; the Reviewer's own probes and mutants again. A
   complaint on a fresh seed traced to the product is a FAIL of r5, not
-  another fix on top. Not repeated on the tip yet: the pass on the copy of
-  his real board (asked of the Executor on the final tip, as the landing
-  day goes; the Executor's own check, not an independent one). Found on
-  main while building it and live until this
+  another fix on top. Then a second fresh seed found a second product
+  defect, one that matters on the landing day: with the strip under the
+  cards (main's look), bringing Needs a date or People back puts it above
+  the strip, and from then on the rules plan is refused and the system's
+  plan stays held by his own request. Three fresh seeds of the Reviewer's
+  on `472c2a7`: three complaints, two of them product; each in a state the
+  walk had only just become able to reach. **So no third offer before a
+  burn-in by the Executor**: a walk biased toward where the last five
+  defects were, at least 20 fresh seeds at 120 walks of 30 steps on the
+  final product code, all at zero, any product change resetting the count;
+  each product defect it finds reported to me as found. At the third I
+  decide whether r5 goes on or the stored row is split first (1.07's
+  storage brought forward): the last two defects are one family, a
+  section of the system's that the stored list lacks needing a place, and
+  the Executor has been asked whether one function can answer that for
+  both the composition and a request. The Executor's pass on a copy of his
+  real board was repeated on `472c2a7` as the landing day goes and found
+  nothing (their own check, not an independent one; it did not stand on
+  either of those two states). Found on main while building it and live
+  until this
   lands: the layout clock reads only the newest ten stored rows, so on a
   busy day a system move can happen twice. Not done by anyone
   independent: a browser pass on real data; the Reviewer's session
