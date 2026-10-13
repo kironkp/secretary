@@ -4,9 +4,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { layoutPreferences, projects, tasks, user } from "@/lib/db/schema";
-import { defaultPlan, sectionKey, type LayoutPlan } from "@/lib/layout/plan";
-import { computeCurrentPlan, getPlanHead, savePlanAsHead } from "@/lib/layout/plan-store";
-import { computeSignals } from "@/lib/layout/signals";
+import { sectionKey, type LayoutPlan } from "@/lib/layout/plan";
+import { computeCurrentPlan, getPlanHead, persistPlan } from "@/lib/layout/plan-store";
 import { executeTool } from "@/lib/secretary/tools";
 
 const U = { id: `test-layout-${crypto.randomUUID()}`, email: `layout-${Date.now()}@tools.test` };
@@ -29,8 +28,7 @@ beforeAll(async () => {
     { userId: U.id, projectId: `${U.id}-other`, title: "Someday thing", status: "todo" },
   ]);
   // A stored head to edit against.
-  const signals = await computeSignals(U.id);
-  await savePlanAsHead(U.id, defaultPlan(signals));
+  await persistPlan(U.id, await computeCurrentPlan(U.id));
 });
 
 afterAll(async () => {

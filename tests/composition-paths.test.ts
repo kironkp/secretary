@@ -8,8 +8,8 @@
 process.env.TZ = "UTC";
 
 import { beforeEach, describe, expect, it } from "vitest";
-import { bannerFirst, composePlan, ownSections, placeOn, placedKeys, runPlace } from "@/lib/layout/compose";
-import { deadlineWhy, defaultPlan, isDeadlineWhy, sectionKey, type LayoutPlan, type PlanSection } from "@/lib/layout/plan";
+import { bannerFirst, composePlan, ownSections, placedKeys, readPlaces, runPlace } from "@/lib/layout/compose";
+import { asPlace, deadlineWhy, defaultPlan, isDeadlineWhy, sectionKey, type LayoutPlan, type PlanSection } from "@/lib/layout/plan";
 import { planFromRules } from "@/lib/layout/plan-from-rules";
 import { clearPlanCache, planWithFallback } from "@/lib/layout/plan-from-llm";
 import type { LayoutPreference } from "@/lib/layout/validator";
@@ -74,10 +74,39 @@ function pinned(plan: LayoutPlan, pin: Pin): LayoutPlan {
   const where = pin.at(body.map(sectionKey));
   const index = where === "last" ? rest.length : where;
   const sections = [...rest.slice(0, index), moved, ...rest.slice(index)];
-  const place = placeOn(sections, pin.key)!;
-  return { ...plan, sections: [...banner, ...sections.map((s) => (s === moved ? { ...s, place } : s))] };
+  // Every place is read again from the board he is told (SPEC §2).
+  const placed = new Set([...sections.filter((s) => s.place !== undefined).map(sectionKey), pin.key]);
+  const places = readPlaces(sections, placed, { projects: [] } as unknown as Signals);
+  return {
+    ...plan,
+    sections: [
+      ...banner,
+      ...sections.map(({ place: _was, ...s }) => {
+        void _was;
+        const place = places.get(sectionKey(s));
+        return place ? { ...s, place } : s;
+      }),
+    ],
+  };
 }
 const firstCardAt = (b: string[]) => b.findIndex(isCard);
+/** The rule for what he placed, written out again here so the test does not borrow the product's: see SPEC §2. */
+function placeInto(flow: string[], told: { key: string; from: "top" | "bottom"; n: number }[]): string[] {
+  const seq = [...flow];
+  const total = flow.length + told.length;
+  let last = -1;
+  for (const t of told.filter((x) => x.from === "top").toSorted((a, b) => a.n - b.n)) {
+    const at = Math.max(Math.min(t.n, seq.length), last + 1);
+    seq.splice(at, 0, t.key);
+    last = at;
+  }
+  for (const t of told.filter((x) => x.from === "bottom").toSorted((a, b) => b.n - a.n)) {
+    const at = Math.max(Math.min(total - 1 - t.n, seq.length), last + 1);
+    seq.splice(at, 0, t.key);
+    last = at;
+  }
+  return seq;
+}
 const SHAPES: [string, Pin[]][] = [
   ["nothing pinned", []],
   ["the list on top", [{ key: "project_card:shopping", at: () => 0 }]],
@@ -187,11 +216,14 @@ const PATHS: Path[] = [
     order: ["timeline", "hero_next_up", "stat_row", "cards", "date_chase", "people_index"],
   },
   {
-    name: "the default, composed (the stored plan has a component he has banned)",
+    // Round 4 reached the default here: a rules plan carrying a component he
+    // had banned was refused. A ban is his, and no longer gets the system's
+    // plan refused (SPEC §2): the rules plan is judged without it.
+    name: "the rules plan with a component he has just banned still in the stored plan",
     stored: (b) => defaultPlan(b),
     preferences: [{ kind: "ban_component", value: { component: "people_index" } }],
     render: viaChain(false),
-    source: "default",
+    source: "rules",
     order: ["hero_next_up", "stat_row", "timeline", "cards", "date_chase"],
   },
   {
@@ -221,7 +253,7 @@ describe.each(PATHS)("on the path: $name", (path) => {
   describe.each(SHAPES)("%s", (_shape, pins) => {
     const withPlaces = pins.reduce((plan, pin) => pinned(plan, pin), base);
     const pinnedKeys = pins.map((p) => p.key);
-    const places = new Map(withPlaces.sections.filter((s) => s.place !== undefined).map((s) => [sectionKey(s), s.place!]));
+    const places = new Map(withPlaces.sections.filter((s) => s.place !== undefined).map((s) => [sectionKey(s), asPlace(s.place)!]));
     // The same board as it was stored before v1.02, and as the pin button
     // leaves it until the next render: the pinned sections are where he put
     // them, and no place is written on them yet.
@@ -237,7 +269,7 @@ describe.each(PATHS)("on the path: $name", (path) => {
       // Read from where each pinned section stands, it is the same board, and the place is written from now on.
       expect(keys(res.plan)).toEqual(keys(withPlace.plan));
       expect(res.source).toBe(withPlace.source);
-      for (const s of res.plan.sections) if (pinnedKeys.includes(sectionKey(s))) expect(s.place, sectionKey(s)).toBe(places.get(sectionKey(s)));
+      for (const s of res.plan.sections) if (pinnedKeys.includes(sectionKey(s))) expect(s.place, sectionKey(s)).toEqual(places.get(sectionKey(s)));
     });
 
     it.each(CHANGES)("%s", async (_change, change) => {
@@ -254,16 +286,16 @@ describe.each(PATHS)("on the path: $name", (path) => {
       expect(res.source).toBe(held ? "rules" : path.source);
 
       // 1. What he placed is at its place; an archived project has no card, pinned or not.
-      const body = shown.filter((k) => k !== "focus_banner");
-      for (const key of pinnedKeys) {
-        if (!here.includes(key)) expect(shown, key).not.toContain(key);
-        else if (places.get(key) === "last") expect(body.at(-1), key).toBe(key);
-        else expect(body[places.get(key) as number], key).toBe(key);
-      }
       // 2. Nothing else is where it is because of his pins: take them out of
       // both boards, and the rest is the board with nothing pinned.
+      // Both at once, exactly: the board with nothing pinned, with what he
+      // placed put in by the rule (top-counted in place order, then
+      // bottom-counted from the end, none in front of one already put in).
+      const body = shown.filter((k) => k !== "focus_banner");
+      for (const key of pinnedKeys) if (!here.includes(key)) expect(shown, key).not.toContain(key);
       const without = (list: string[]) => list.filter((k) => !pinnedKeys.includes(k));
       expect(without(shown)).toEqual(without(keys(bare.plan)));
+      expect(body).toEqual(placeInto(without(keys(bare.plan)).filter((k) => k !== "focus_banner"), here.map((key) => ({ key, ...places.get(key)! }))));
       // 3. The cards he did not place are in data order.
       expect(without(cardKeys(res.plan))).toEqual(without(cardKeys(defaultPlan(after))));
       // 4. One card for every active project and list, none twice, none for a project that is gone.
@@ -283,7 +315,7 @@ describe.each(PATHS)("on the path: $name", (path) => {
         expect(s.why).toBe(deadlineWhy(p));
       }
       // 8. The place is stored with the section again, so the next render reads the same one.
-      for (const key of here) expect(res.plan.sections.find((s) => sectionKey(s) === key)?.place, key).toBe(places.get(key));
+      for (const key of here) expect(res.plan.sections.find((s) => sectionKey(s) === key)?.place, key).toEqual(places.get(key));
     });
 
     // The stored plan still has everything where he put it; he lets go of all of it.
@@ -294,18 +326,20 @@ describe.each(PATHS)("on the path: $name", (path) => {
         const res = await path.render(after, stored, [], preferences);
         const bare = await path.render(after, base, [], preferences);
         const shown = keys(res.plan);
-        const body = shown.filter((k) => k !== "focus_banner");
         // A card he let go follows the data again: every card is in data order.
         expect(cardKeys(res.plan)).toEqual(cardKeys(defaultPlan(after)));
-        // Another section stays at the place stored with it (a stated limit, until 1.06).
-        const kept = pinnedKeys.filter((k) => !isCard(k));
-        for (const key of kept) {
-          if (places.get(key) === "last") expect(body.at(-1), key).toBe(key);
-          else expect(body[places.get(key) as number], key).toBe(key);
-        }
-        // And nothing else is out of place: without those, it is the board with nothing pinned.
-        const without = (list: string[]) => list.filter((k) => !kept.includes(k));
-        expect(without(shown)).toEqual(without(keys(bare.plan)));
+        // Another section goes back where the system has it: the board is the
+        // one with nothing pinned. (Round 4 kept such a section at the place
+        // stored with it, "a stated limit, until 1.06"; that rule is gone on
+        // purpose: a place written on a section that is no longer his is not
+        // read.)
+        // One case apart: the strip, which rule 3 had sent up and which is
+        // held there once the talk stops. While it was his, the stored board
+        // did not have it as the system's, so "where the system has it" is
+        // its default place (where a held or a planner's order had it comes
+        // back with the storage split).
+        const wasHeld = path.source === "previous" && path.name.includes("rule 3") && pinnedKeys.includes("timeline");
+        expect(shown).toEqual(wasHeld ? keys(compose(planFromRules(after), after, null, [], preferences)) : keys(bare.plan));
         expect(new Set(shown).size).toBe(shown.length);
       });
     }
@@ -328,7 +362,7 @@ describe("where the card run goes is one rule", () => {
   it("the run goes where the plan's first own card is; his pinned card in front of everything does not say", () => {
     const listOnTop = pinned(plan, { key: "project_card:shopping", at: () => 0 });
     expect(sectionKey(listOnTop.sections[0])).toBe("project_card:shopping");
-    const placed = placedKeys(listOnTop, ["project_card:shopping"], []);
+    const placed = placedKeys(listOnTop, ["project_card:shopping"], [], signals);
     expect([...placed]).toEqual(["project_card:shopping"]);
     expect(runPlace(ownSections(listOnTop.sections, placed))).toBe(3); // after next up, the tiles and the strip
     // Let go of, it is still on top of the stored plan, carrying its place: it still does not say.
@@ -355,8 +389,8 @@ describe("where the card run goes is one rule", () => {
   });
 
   it("a pin that is not on the stored plan places nothing", () => {
-    expect([...placedKeys(plan, ["kanban"], [{ kind: "pin_section", value: { section: "documents" } }])]).toEqual([]);
-    expect([...placedKeys(null, ["stat_row"], [])]).toEqual([]);
+    expect([...placedKeys(plan, ["kanban"], [{ kind: "pin_section", value: { section: "documents" } }], signals)]).toEqual([]);
+    expect([...placedKeys(null, ["stat_row"], [], signals)]).toEqual([]);
   });
 });
 

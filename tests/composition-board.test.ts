@@ -14,12 +14,15 @@ import { db } from "@/lib/db";
 import { conversations, layoutPreferences, layoutSpecs, messages, projects, tasks, usage, user } from "@/lib/db/schema";
 import { defaultPlan, sectionKey, type LayoutPlan } from "@/lib/layout/plan";
 import { clearPlanCache, lastPlannerUsage } from "@/lib/layout/plan-from-llm";
-import { composeUsersPlan, computeCurrentPlan, getPlanHead, persistPlan, revertPlan, setPinned, unmetClaims } from "@/lib/layout/plan-store";
+import { computeCurrentPlan, getPlanHead, persistPlan } from "@/lib/layout/plan-store";
+import { requestBoard } from "@/lib/layout/request";
 import { REGISTRY_VERSION } from "@/lib/layout/registry";
 import { computeSignals, signalsHash } from "@/lib/layout/signals";
 import { buildBriefing } from "@/lib/secretary/briefing";
 import { executeTool, liveTurnContext } from "@/lib/secretary/tools";
 
+/** The pin button: on, the section is his where it stands; off, it goes where the system has it. */
+const pin = async (userId: string, key: string, on: boolean) => (await requestBoard(userId, { ops: [{ op: on ? "pin" : "unpin", key }] })).ok;
 const TZ = "America/Los_Angeles";
 const NAMES = ["Atlas", "Birch", "Cedar", "Dune", "Ember", "Fjord", "Grove", "Harbor", "Iris"];
 const users: string[] = [];
@@ -355,10 +358,10 @@ describe("on a board with one section he placed, everything else still follows t
   it("Undo of a move takes the pin with it: the list is back among the cards, last, and stays last when a project is made", async () => {
     const b = await board(5);
     const before = await b.keys();
-    await setPinned(b.id, "stat_row", true); // a pin he made before the move survives the Undo
+    await pin(b.id, "stat_row", true); // a pin he made before the move survives the Undo
     await b.arrange([{ op: "move_to_top", section: "shopping list" }]);
     expect((await b.keys())[0]).toBe(b.card("Shopping"));
-    expect(await revertPlan(b.id)).toBe(true);
+    expect((await requestBoard(b.id, { revert: true })).ok).toBe(true);
     expect((await b.head()).pinned).toEqual(["stat_row"]);
     expect(await b.keys()).toEqual(before);
     await b.add("Juniper", null);
@@ -372,13 +375,13 @@ describe("on a board with one section he placed, everything else still follows t
     const before = await b.keys();
     const key = b.card("Grove");
     const at = before.indexOf(key);
-    expect(await setPinned(b.id, key, true)).toBe(true);
+    expect(await pin(b.id, key, true)).toBe(true);
     await b.render();
     await b.newTask("Iris", -40); // goes to the top of the cards, pushing the others down
     const shown = await b.keys();
     expect(shown[at]).toBe(key);
     await expectCardsFollowData(b, shown, [key]);
-    await setPinned(b.id, key, false);
+    await pin(b.id, key, false);
     await expectCardsFollowData(b, await b.keys(), []);
   });
 });
@@ -436,13 +439,19 @@ describe("every operation of both tools is on the board at the next render", () 
     await b.arrange([{ op: "show", section: "stats" }]);
     expect(await b.keys()).toContain("stat_row");
 
-    // All of it holds the next day, with new data.
+    // All of it holds the next day, with new data: everything he placed is
+    // where the board he was last told had it. (Round 3 kept a NUMBER from
+    // the top, so "Needs a date" stayed at the index it had before the
+    // later requests. A place is read again from the board after every
+    // request now: it is where he last saw it.)
+    const told = await b.keys();
     await b.nextDay();
     await b.newTask("Iris", -40);
     const later = await b.keys();
     expect(later[0]).toBe(b.card("Shopping"));
     expect(later.at(-1)).toBe(b.card("Grove"));
-    expect(later[chase - 1]).toBe("date_chase");
+    for (const key of [b.card("Shopping"), b.card("Grove"), "date_chase", "timeline"]) expect(later.indexOf(key), key).toBe(told.indexOf(key));
+    expect(later).toHaveLength(told.length);
     await expectCardsFollowData(b, later, [b.card("Shopping"), b.card("Grove")]);
   });
 
@@ -485,12 +494,16 @@ describe("every operation of both tools is on the board at the next render", () 
     expect(String(sized.size_note)).toMatch(/until the user's data next changes/);
     expect((await b.render()).plan.sections.find((s) => s.props?.project_id === b.ids.Grove)?.props?.variant).toBe("compact");
 
-    // The next day, with new data: the move, the hides and the add all stand.
+    // The next day, with new data: the move, the hides and the add all stand,
+    // each where the board he was last told had it (the section added at the
+    // second place moved the card he had placed down by one, and that is
+    // where it stays).
+    const told = await b.keys();
+    expect(told.indexOf(top)).toBe(first);
     await b.nextDay();
     await b.newTask("Atlas");
     const later = await b.keys();
-    // A place is counted from the top: the card is still third, the added section second.
-    expect(later[first - 1]).toBe(top);
+    expect(later.indexOf(top)).toBe(told.indexOf(top));
     expect(later[1]).toBe("kanban");
     expect(later).not.toContain(b.card("Iris"));
     expect(later).not.toContain("people_index");
@@ -708,7 +721,8 @@ describe("what a tool says it did is on the composed board, or nothing is change
     for (const project_id of [b.ids.Grove, "00000000-0000-4000-8000-000000000000"]) {
       const res = (await b.chatEdit([{ op: "add", component: "project_card", props: { project_id }, at: 0 }])).result as { applied?: boolean; error?: string };
       expect(res.applied).toBeUndefined();
-      expect(res.error).toMatch(/would not be on the dashboard.*Nothing was changed/);
+      expect(res.error).toMatch(/has no card on the dashboard.*Nothing was changed/);
+      expect(res.error).not.toMatch(/project_card:|[0-9a-f]{8}-[0-9a-f]{4}/); // by name, never by key
     }
     expect((await b.head()).version).toBe(before);
   });
@@ -720,7 +734,7 @@ describe("what a tool says it did is on the composed board, or nothing is change
     await db.insert(projects).values({ userId: b.id, name: "Paperwork", status: "active", parentId: b.ids.Atlas });
     const res = (await b.arrange([{ op: "show", section: "Paperwork" }])).result as { applied?: boolean; error?: string };
     expect(res.applied).not.toBe(true);
-    expect(res.error).toMatch(/would not show on the dashboard.*Nothing was changed/);
+    expect(res.error).toMatch(/Paperwork has no card on the dashboard.*Nothing was changed/);
     expect((await b.head()).version).toBe(before);
   });
 
@@ -737,22 +751,25 @@ describe("what a tool says it did is on the composed board, or nothing is change
     expect(await b.keys()).not.toContain("stat_row");
   });
 
-  it("the check itself: a claim the composed board does not bear out is named", async () => {
+  it("the check itself: a request the board would not bear out changes nothing and says why, by name", async () => {
+    // The claims are presence only (round 4 also demanded the exact place,
+    // and refused an honest move down): what is said to be on the board is
+    // on it, what is said to be off it is off. Reached through the request
+    // function, since the check is no longer a function of its own.
     const b = await board(3);
-    const bundle = await b.render();
-    const plan = bundle.plan;
-    const change = { signals: bundle.signals, placed: [] as string[], preferences: [] };
-    const composed = composeUsersPlan(plan, change, []);
-    expect(unmetClaims(composed, { placed: [], shown: ["stat_row"], hidden: ["kanban"] })).toEqual([]);
-    expect(unmetClaims(composed, { shown: ["kanban"] })).toEqual(['"kanban" would not be on the dashboard']);
-    expect(unmetClaims(composed, { hidden: ["stat_row"] })).toEqual(['"stat_row" would still be on the dashboard']);
-    expect(unmetClaims(composed, { placed: ["kanban"], placedOn: plan })).toEqual(['"kanban" would not be on the dashboard']);
-    // Placed, and the composed board has it somewhere else than where the request put it.
-    const moved: LayoutPlan = { ...plan, sections: [plan.sections.at(-1)!, ...plan.sections.slice(0, -1)] };
-    expect(unmetClaims(composed, { placed: [sectionKey(plan.sections.at(-1)!)], placedOn: moved })).toEqual([`"${sectionKey(plan.sections.at(-1)!)}" would not be where it was put`]);
-    // And when it is where it was put.
-    const key = sectionKey(plan.sections.at(-1)!);
-    expect(unmetClaims(composeUsersPlan(moved, { ...change, placed: [key] }, []), { placed: [key], placedOn: moved })).toEqual([]);
+    await b.render();
+    const before = await b.head();
+    // A card for a project that has none (a subproject, an archived one, an unknown id).
+    const noCard = await requestBoard(b.id, { ops: [{ op: "show", key: "project_card:no-such-project" }] });
+    expect(noCard).toMatchObject({ ok: false });
+    expect(JSON.stringify(noCard)).not.toMatch(/project_card:/);
+    // A component he banned cannot be brought back by a show.
+    await requestBoard(b.id, { ban: "kanban" });
+    const banned = await requestBoard(b.id, { ops: [{ op: "add", section: { component: "kanban" } }] });
+    expect(banned).toMatchObject({ ok: false, error: expect.stringContaining("never to be shown kanban") });
+    // Nothing was written by either.
+    expect((await b.head()).version).toBe(before.version);
+    expect(await hides(b.id)).toHaveLength(0);
   });
 });
 

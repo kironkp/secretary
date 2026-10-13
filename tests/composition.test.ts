@@ -11,8 +11,8 @@
 process.env.TZ = "UTC";
 
 import { beforeEach, describe, expect, it } from "vitest";
-import { composePlan, placeOn } from "@/lib/layout/compose";
-import { defaultPlan, isUrgent, sectionKey, type LayoutPlan, type PlanSection } from "@/lib/layout/plan";
+import { composePlan, readPlaces } from "@/lib/layout/compose";
+import { asPlace, defaultPlan, isUrgent, sectionKey, type LayoutPlan, type PlanSection } from "@/lib/layout/plan";
 import { planFromRules } from "@/lib/layout/plan-from-rules";
 import { clearPlanCache, planWithFallback } from "@/lib/layout/plan-from-llm";
 import { movementReasons, validatePlan, type LayoutPreference, type ValidationContext } from "@/lib/layout/validator";
@@ -72,13 +72,22 @@ const cardOf = (plan: LayoutPlan, id: string) => plan.sections.find((s) => s.pro
 const reasonsOf = (res: ReturnType<typeof validatePlan>) => (res.ok ? "ok" : res.reasons.join(" | "));
 const compose = (system: LayoutPlan, signals: Signals, stored: LayoutPlan | null = null, pinned: string[] = [], preferences: LayoutPreference[] = []) =>
   composePlan(system, { signals, stored, pinned, preferences });
-/** A stored plan with one section lifted out and pinned at a place on the board, as a tool would save it. */
+/** A board with every place read off it again, as a request stores it (SPEC §2: every place is read from the board he was told). */
+function placesRead(sections: PlanSection[], placed: string[]): PlanSection[] {
+  const places = readPlaces(sections, new Set(placed), { projects: [] } as unknown as Signals);
+  return sections.map(({ place: _was, ...s }) => {
+    void _was;
+    const place = places.get(sectionKey(s));
+    return place ? { ...s, place } : s;
+  });
+}
+/** A stored plan with one section lifted out and put at a place on the board, as a request stores it. */
 function pinnedAt(plan: LayoutPlan, key: string, index: number | "last"): LayoutPlan {
   const moved = plan.sections.find((s) => sectionKey(s) === key)!;
   const rest = plan.sections.filter((s) => s !== moved);
   const at = index === "last" ? rest.length : index;
   const sections = [...rest.slice(0, at), moved, ...rest.slice(at)];
-  return { ...plan, sections: sections.map((s) => (s === moved ? { ...s, place: placeOn(sections, key)! } : s)) };
+  return { ...plan, sections: placesRead(sections, [...sections.filter((s) => s.place !== undefined).map(sectionKey), key]) };
 }
 const render = (signals: Signals, stored: LayoutPlan | null, pinned: string[] = [], preferences: LayoutPreference[] = []) =>
   planWithFallback(signals, { previousPlan: stored, preferences, pinnedSections: pinned, llmEnabled: false });
@@ -193,14 +202,17 @@ describe("presence (invariant 4)", () => {
     expect(keys(pinned).filter((k) => !k.startsWith("project_card:"))).toEqual(["hero_next_up", "timeline", "date_chase"]);
   });
 
-  it("with a component he has just banned still in the stored plan, the default is composed: the ban, his hide and his pin all hold", async () => {
+  it("with a component he has just banned still in the stored plan, the rules plan is judged without it: the ban, his hide and his pin all hold", async () => {
     const stored = pinnedAt(compose(defaultPlan(signals), signals), "project_card:shopping", 0);
     const prefs: LayoutPreference[] = [
       { kind: "ban_component", value: { component: "people_index" } },
       { kind: "hide_section", value: { section: "project_card:quiet-one" } },
     ];
     const res = await render(signals, stored, ["project_card:shopping"], prefs);
-    expect(res.source).toBe("default");
+    // Round 4: "default". A rules plan carrying what he had banned was
+    // refused, and the board fell back. A ban is his, and no longer gets the
+    // system's own plan refused (SPEC §2).
+    expect(res.source).toBe("rules");
     expect(keys(res.plan)).not.toContain("people_index");
     expect(keys(res.plan)).not.toContain("project_card:quiet-one");
     expect(keys(res.plan)[0]).toBe("project_card:shopping");
@@ -378,7 +390,7 @@ describe("movement is measured without the cards and without his pins (invariant
     const res = await render(talk, stored, ["project_card:quiet-two"]);
     expect(res.source).toBe("rules");
     expect(keys(res.plan)[0]).toBe("timeline");
-    expect(cardOf(res.plan, "quiet-two")).toMatchObject({ props: { variant: "compact" }, place: 3 });
+    expect(cardOf(res.plan, "quiet-two")).toMatchObject({ props: { variant: "compact" }, place: { from: "top", n: 3 } });
     expect(keys(res.plan)[3]).toBe("project_card:quiet-two");
   });
 
@@ -388,7 +400,7 @@ describe("movement is measured without the cards and without his pins (invariant
     talk.conversation.schedule_word_share = 0.5;
     const res = await render(talk, stored, ["timeline"]);
     expect(res.source).toBe("rules");
-    expect(res.plan.sections[4]).toMatchObject({ component: "timeline", props: { span_days: 14, expanded: true }, place: 4 });
+    expect(res.plan.sections[4]).toMatchObject({ component: "timeline", props: { span_days: 14, expanded: true }, place: { from: "top", n: 4 } });
     expect(res.plan.sections[4].why).toMatch(/talking dates/);
   });
 
@@ -425,10 +437,13 @@ describe("a section he placed stays where he put it", () => {
 
   describe.each(shapes)("%s", (_what, key, index) => {
     const stored = pinnedAt(base, key, index);
-    const place = stored.sections.find((s) => sectionKey(s) === key)!.place!;
+    const place = asPlace(stored.sections.find((s) => sectionKey(s) === key)!.place)!;
 
-    it("its place is the n-th from the top, or last", () => {
-      expect(place).toBe(index);
+    it("its place is counted from the top; from the bottom when no card of the run and none of the upper sections stands below it", () => {
+      // Round 3 wrote a number from the top, or "last". A place is now a
+      // position on the board he was told, counted from whichever end it
+      // belongs to: the bottom stays the bottom when a project is made.
+      expect(place).toEqual(index === "last" ? { from: "bottom", n: 0 } : { from: "top", n: index });
     });
 
     it.each(changes)("%s: it is at its place, and the cards he did not place are in data order around it", async (_change, now) => {
@@ -437,15 +452,15 @@ describe("a section he placed stays where he put it", () => {
       const shown = keys(res.plan);
       if (gone) {
         expect(shown).not.toContain(key); // an archived project has no card, pinned or not
-      } else if (place === "last") {
-        expect(shown.at(-1)).toBe(key);
+      } else if (place.from === "bottom") {
+        expect(shown.at(-1 - place.n)).toBe(key);
       } else {
-        expect(shown[place]).toBe(key);
+        expect(shown[place.n]).toBe(key);
       }
       const others = cards(res.plan).filter((id) => `project_card:${id}` !== key);
       expect(others).toEqual(cards(defaultPlan(now)).filter((id) => `project_card:${id}` !== key));
       // The place is stored with the section, so the next render reads the same one.
-      if (!gone) expect(res.plan.sections.find((s) => sectionKey(s) === key)?.place).toBe(place);
+      if (!gone) expect(res.plan.sections.find((s) => sectionKey(s) === key)?.place).toEqual(place);
     });
   });
 
@@ -459,18 +474,21 @@ describe("a section he placed stays where he put it", () => {
     expect(keys(again)[7]).toBe("date_chase");
   });
 
-  it("a pin made with the pin button has no place yet: it is read once from where the section stands, and kept", () => {
+  it("a pin with no place written (a row from before r5, a preference pin): it is read once from where the section stands, and kept", () => {
     const stored = compose(defaultPlan(signals), signals); // nothing carries a place
     const key = "project_card:quiet-one";
     const at = keys(stored).indexOf(key);
     const first = compose(defaultPlan(signals), signals, stored, [key]);
-    expect(first.sections[at]).toMatchObject({ props: { project_id: "quiet-one" }, place: at });
+    expect(first.sections[at]).toMatchObject({ props: { project_id: "quiet-one" }, place: { from: "top", n: at } });
     // The data changes; the place does not.
     const later = changed(signals, (p) => [...p, project("Brand new", -40)]);
     expect(keys(compose(defaultPlan(later), later, first, [key]))[at]).toBe(key);
-    // A pin kept as a preference is a pin too.
+    // A pin kept as a preference (before r5) is a pin too, until it has been
+    // given its place: then the row is marked, and no longer read as one.
     const viaPreference = compose(defaultPlan(later), later, first, [], [{ kind: "pin_section", value: { section: key } }]);
     expect(keys(viaPreference)[at]).toBe(key);
+    const marked = compose(defaultPlan(later), later, first, [], [{ kind: "pin_section", value: { section: key, migrated: "1" } }]);
+    expect(cards(marked)).toEqual(cards(defaultPlan(later)));
     // Unpinned, it goes back to following the data.
     expect(cards(compose(defaultPlan(later), later, first))).toEqual(cards(defaultPlan(later)));
     // Read from a stored plan that has a banner: the banner is not a place.
@@ -478,17 +496,43 @@ describe("a section he placed stays where he put it", () => {
     expect(keys(compose(defaultPlan(signals), signals, bannered, [key]))[at]).toBe(key);
   });
 
-  it("two he placed at the same place keep their stored order: the later one has the place, the earlier sits next to it", () => {
-    // The list went to the top first, then Needs a date; a card went to the bottom, then another.
+  it("two he placed never meet at one place: each has its own position on the board he was told, from the top or from the bottom", () => {
+    // Round 3 let two sections hold the same number ("0, 0, last, last") and
+    // broke the tie by the stored order; composing again turned them over.
+    // That rule is gone on purpose: a place is a position on one real board,
+    // read again for every placed section after each request, so the places
+    // are distinct and there is no tie to break.
     const top = pinnedAt(pinnedAt(base, "project_card:shopping", 0), "date_chase", 0);
     const both = pinnedAt(pinnedAt(top, "project_card:late-a", "last"), "project_card:quiet-one", "last");
     const pins = ["project_card:shopping", "date_chase", "project_card:late-a", "project_card:quiet-one"];
-    expect(both.sections.filter((s) => s.place !== undefined).map((s) => s.place)).toEqual([0, 0, "last", "last"]);
+    expect(both.sections.filter((s) => s.place !== undefined).map((s) => s.place)).toEqual([
+      { from: "top", n: 0 },
+      { from: "top", n: 1 },
+      { from: "bottom", n: 1 },
+      { from: "bottom", n: 0 },
+    ]);
     for (const [, now] of changes) {
       const shown = keys(compose(planFromRules(now), now, both, pins));
       expect(shown.slice(0, 2)).toEqual(["date_chase", "project_card:shopping"]);
       expect(shown.slice(-2)).toEqual(now.projects.some((p) => p.id === "late-a") ? ["project_card:late-a", "project_card:quiet-one"] : [shown.at(-2), "project_card:quiet-one"]);
     }
+  });
+
+  it("on a board too short for their places, two he placed keep the order he was told, and composing the result again changes nothing", () => {
+    // The state rounds 3 and 4 failed on: two sections placed far down a long
+    // board, which then grows short. Round 4 put both at the end and turned
+    // them over at every compose (A,B then B,A then A,B).
+    const long = pinnedAt(pinnedAt(base, "date_chase", 6), "people_index", 7);
+    const pins = ["date_chase", "people_index"];
+    const few = changed(signals, (p) => p.filter((x) => x.id === "shopping"));
+    const once = compose(defaultPlan(few), few, long, pins);
+    expect(keys(once).slice(-2)).toEqual(["date_chase", "people_index"]);
+    const twice = compose(once, few, once, pins);
+    expect(keys(twice)).toEqual(keys(once));
+    expect(keys(compose(twice, few, twice, pins))).toEqual(keys(once));
+    // The projects come back: each is at the place it was told, since nothing was said meanwhile.
+    const back = keys(compose(defaultPlan(signals), signals, twice, pins));
+    expect([back[6], back[7]]).toEqual(["date_chase", "people_index"]);
   });
 
   it("the banner is not counted: a section pinned at the top is first under it, and first when it is gone", () => {
@@ -499,15 +543,20 @@ describe("a section he placed stays where he put it", () => {
   });
 
   it("a section he added is placed too: the system's plan does not have it, the stored one keeps it", () => {
-    const added: PlanSection = { component: "kanban", place: 1 };
+    const added: PlanSection = { component: "kanban", place: { from: "top", n: 1 } };
     const stored: LayoutPlan = { ...base, sections: [base.sections[0], added, ...base.sections.slice(1)] };
     const later = changed(signals, redate("quiet-three", -15));
     const res = compose(planFromRules(later), later, stored, ["kanban"]);
     expect(keys(res)[1]).toBe("kanban");
     expect(cards(res)).toEqual(cards(defaultPlan(later)));
-    // Unpinned, it stays at the place stored with it (r4, a stated limit until 1.06: a section that is not a card has nowhere to go back to).
-    expect(keys(compose(planFromRules(later), later, stored))[1]).toBe("kanban");
-    // With no place stored and no pin, it is not his: the system's plan decides, and it has none.
+    // Not on the row's pins, the place written on it is not read (round 4
+    // kept such a section "at the place stored with it"; gone on purpose). A
+    // section he added is never let go in the first place: the request
+    // refuses to unpin it (lib/layout/request.ts), so this state is not one a
+    // request leaves; if a row has it, the system's plan decides, and it has
+    // none.
+    expect(keys(compose(planFromRules(later), later, stored))).not.toContain("kanban");
+    // With no place stored and no pin, it is not his either.
     const unplaced: LayoutPlan = { ...stored, sections: stored.sections.map((s) => (s.component === "kanban" ? { component: "kanban" } : s)) };
     expect(keys(compose(planFromRules(later), later, unplaced))).not.toContain("kanban");
   });

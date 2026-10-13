@@ -16,7 +16,7 @@ import { defaultPlan, sectionKey, type LayoutPlan } from "@/lib/layout/plan";
 import { clearPlanCache, lastPlannerUsage } from "@/lib/layout/plan-from-llm";
 import { computeCurrentPlan, getPlanHead, hashOnceStored, persistPlan } from "@/lib/layout/plan-store";
 import { REGISTRY_VERSION } from "@/lib/layout/registry";
-import { signalsHash, type Signals } from "@/lib/layout/signals";
+import { computeSignals, signalsHash, type Signals } from "@/lib/layout/signals";
 import { executeTool, liveTurnContext } from "@/lib/secretary/tools";
 
 const TZ = "America/Los_Angeles";
@@ -108,7 +108,7 @@ describe("what one change costs in planner calls", { timeout: 30_000 }, () => {
   it.each([
     ["a card", { op: "move_to_top", section: "Cedar" }],
     ["a section that is not a card", { op: "move_to_top", section: "needs a date" }],
-  ])("his own move of %s: none at the opens that follow; one the next day (a reorder is allowed again); none after", async (_what, op) => {
+  ])("his own move of %s: none, at the opens that follow or on the days after", async (_what, op) => {
     const b = await settled();
     expect((await b.arrange([op])).result).toMatchObject({ applied: true });
     const sameDay = [];
@@ -127,7 +127,11 @@ describe("what one change costs in planner calls", { timeout: 30_000 }, () => {
       await b.open(agrees);
       perDay.push(b.calls() - before);
     }
-    expect(perDay).toEqual([1, 0, 0, 0]);
+    // v1.04 had [1, 0, 0, 0]: his move reset the layout clock, and the clock
+    // turning over a day later was a new situation. Since v1.02 r5 the clock
+    // is the system's own (what he placed is not counted), so his move
+    // leaves it alone and no later day is new.
+    expect(perDay).toEqual([0, 0, 0, 0]);
   });
 
   it.each([
@@ -159,21 +163,28 @@ describe("what one change costs in planner calls", { timeout: 30_000 }, () => {
     expect(b.calls()).toBe(1);
   });
 
-  it("days going by after a planner's banner, nothing else changing: one call a day at most, never two", async () => {
+  it("a planner that writes a banner every time it is asked, nothing else changing: after the first day, no call on any day", async () => {
+    // What a real planner does while things are late. Before v1.02 r5 this
+    // was one paid call a day for ever: the banner's row reset the layout
+    // clock, the clock turning over a day later was a new hash, the rules
+    // took the banner off at that open and the planner put it back. The
+    // banner is not a change of order: it does not count for the clock.
     const b = await settled();
     await b.newTask("Birch");
     await b.open(banner);
+    expect(b.calls()).toBe(1);
     const perDay: number[] = [];
-    for (let day = 1; day <= 3; day++) {
+    for (let day = 1; day <= 4; day++) {
       await b.nextDay();
       const before = b.calls();
-      for (let open = 0; open < 3; open++) await b.open(banner);
+      for (let open = 0; open < 3; open++) {
+        const bundle = await b.open(banner);
+        expect(bundle.plan.sections[0].component, `day ${day}, open ${open + 1}`).toBe("focus_banner");
+      }
       perDay.push(b.calls() - before);
     }
-    for (const n of perDay) expect(n).toBeLessThanOrEqual(1);
-    // With a planner that has nothing to add: the rules take the banner away
-    // the next day, which is itself a change of layout, so the day after
-    // that is the last one that costs a call.
+    expect(perDay).toEqual([0, 0, 0, 0]);
+    // The same with a planner that would have nothing to add: nobody asks it.
     const c = await settled();
     await c.newTask("Birch");
     await c.open(banner);
@@ -184,7 +195,47 @@ describe("what one change costs in planner calls", { timeout: 30_000 }, () => {
       for (let open = 0; open < 2; open++) await c.open(agrees);
       quiet.push(c.calls() - before);
     }
-    expect(quiet).toEqual([1, 1, 0, 0]);
+    expect(quiet).toEqual([0, 0, 0, 0]);
+  });
+
+  it("the banner the planner wrote today stays today when his data changes (invariant 8), with the one call a new situation costs", async () => {
+    const b = await settled();
+    await b.newTask("Birch");
+    await b.open(banner);
+    const before = b.calls();
+    await b.newTask("Cedar");
+    const bundle = await b.open(banner);
+    expect(bundle.plan.sections[0].component).toBe("focus_banner"); // not taken off by the rules plan, which has none
+    expect(b.calls() - before).toBe(1);
+  });
+});
+
+describe("the layout clock reads the day, not the newest ten rows", () => {
+  const spec = (order: string[], why: string): LayoutPlan => ({ plan_id: "x", reason_summary: null, sections: order.map((component) => ({ component, ...(component === "stat_row" ? { why } : {}) })) });
+  it("a change of layout today is still today's after ten more rows are stored the same day", async () => {
+    // On main the clock read the newest ten stored rows. Ten rows later the
+    // same day (a why that changes, his own requests) the row that changed
+    // the layout was out of sight, the clock read "never", the hash turned
+    // over and the system was free to reorder again the same day.
+    const id = `test-clock-${crypto.randomUUID()}`;
+    users.push(id);
+    await db.insert(user).values({ id, name: "Clock", email: `${id}@v102.test`, timezone: TZ });
+    const row = (version: number, plan: LayoutPlan, ageHours: number) =>
+      db.insert(layoutSpecs).values({ userId: id, version, spec: plan, pinned: [], kind: "plan", signalsHash: "h", outcome: "accepted", createdAt: new Date(Date.now() - ageHours * 3_600_000) });
+    const usual = ["hero_next_up", "stat_row", "timeline", "date_chase", "people_index"];
+    const stripUp = ["timeline", "hero_next_up", "stat_row", "date_chase", "people_index"];
+    await row(1, spec(usual, "a"), 80); // three days ago
+    await row(2, spec(stripUp, "a"), 3); // the system moved the strip, three hours ago
+    const clock = async () => (await computeSignals(id)).context.days_since_layout_change;
+    expect(await clock()).toBe(0);
+    for (let n = 0; n < 14; n++) {
+      await row(3 + n, spec(stripUp, `mentioned ${n} times`), 2 - n / 10);
+      expect(await clock(), `after ${n + 1} more rows`).toBe(0);
+    }
+    // And it does turn over when a day has gone by (how many days is not read
+    // by anything: the rules and the hash ask only whether it is one or more).
+    await db.update(layoutSpecs).set({ createdAt: sql`${layoutSpecs.createdAt} - interval '49 hours'` }).where(eq(layoutSpecs.userId, id));
+    expect(await clock()).toBeGreaterThanOrEqual(1);
   });
 });
 
@@ -213,14 +264,14 @@ describe("the hash", () => {
     const reordered: LayoutPlan = { ...a, sections: [{ component: "stat_row" }, { component: "hero_next_up" }] };
     const now = signalsHash(signals(5), REGISTRY_VERSION);
     const reset = signalsHash(signals(0), REGISTRY_VERSION);
-    expect(hashOnceStored(signals(5), emphasised, a, [])).toBe(now);
-    expect(hashOnceStored(signals(5), reordered, a, [])).toBe(reset);
+    expect(hashOnceStored(signals(5), emphasised, { spec: a, pinned: [] }, [])).toBe(now);
+    expect(hashOnceStored(signals(5), reordered, { spec: a, pinned: [] }, [])).toBe(reset);
     expect(hashOnceStored(signals(5), a, null, [])).toBe(now); // the first plan ever stored has nothing before it
-    expect(hashOnceStored(signals(0), reordered, a, [])).toBe(reset);
+    expect(hashOnceStored(signals(0), reordered, { spec: a, pinned: [] }, [])).toBe(reset);
     // The pins are in the hash, and a row is stored with its own.
     const pinned = signals(5);
     pinned.context.pinned_sections = ["stat_row"];
-    expect(hashOnceStored(signals(5), emphasised, a, ["stat_row"])).toBe(signalsHash(pinned, REGISTRY_VERSION));
-    expect(hashOnceStored(signals(5), emphasised, a, ["stat_row"])).not.toBe(now);
+    expect(hashOnceStored(signals(5), emphasised, { spec: a, pinned: [] }, ["stat_row"])).toBe(signalsHash(pinned, REGISTRY_VERSION));
+    expect(hashOnceStored(signals(5), emphasised, { spec: a, pinned: [] }, ["stat_row"])).not.toBe(now);
   });
 });
