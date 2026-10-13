@@ -119,6 +119,19 @@
 // before or after, so the one move ruling A allows is not in play. No model
 // of where the section goes.
 //
+// WHAT HE PLACED KEEPS A NEIGHBOUR IT HAD, on every board, crossed ones
+// included, after a request that names one section of the system's. Read
+// off the two boards: everything of his keeps at least one of the two
+// things it stood between (his own things and the named section not
+// counted), and what stood first or last of all stays first or last;
+// with the named section taken out, the system's sections stand in the
+// order they had and the cards in theirs; and the run of cards moves as a
+// whole only where ruling A allows it (something of the system's on the
+// wrong side of the cards before or after). His places are numbers read
+// off a list; where the list and the board drawn came apart, something of
+// his was left under another neighbour, and no check that went through the
+// model could see it.
+//
 // WHERE THE WALK STANDS. The last five defects were all found on a board in
 // one of a few states, so the tally counts them, step by step: a crossing
 // (the system's own sections on the wrong side of each other); the strip
@@ -673,6 +686,37 @@ async function walk(index: number, scripted = false) {
       const [had, has] = [without(before, subject[0]), without(board, subject[0])];
       if (had.join() !== has.join()) complain("everything else is where it was", `${what}: without ${subject[0]}, he had ${row(had)} | he has ${row(has)}`);
     }
+    // What he placed keeps the neighbour it had, and the system's sections and the cards their order: on every board.
+    if (subject.length === 1 && isDefault(subject[0])) {
+      const named = subject[0];
+      const hisNow = placedSet();
+      // The two things it stood between, his own things and the named section not counted.
+      const between = (list: string[], his: string[], key: string) => {
+        const others = (k: string) => !his.includes(k) && k !== named && k !== BANNER;
+        return [list.slice(0, list.indexOf(key)).findLast(others) ?? "the top", list.slice(list.indexOf(key) + 1).find(others) ?? "the bottom"];
+      };
+      // First or last of all: the banner and the named section aside (sent to the top, the named section is first, and rightly).
+      const [bodyBefore, bodyAfter] = [before, board].map((list) => list.filter((k) => k !== BANNER && k !== named));
+      for (const key of hadPlaced.filter((k) => k !== named && hisNow.includes(k) && before.includes(k) && board.includes(k))) {
+        const [had, has] = [between(before, hadPlaced, key), between(board, hisNow, key)];
+        if (had[0] !== has[0] && had[1] !== has[1]) complain("what he placed keeps a neighbour it had", `${what}: ${short(key)} stood between ${short(had[0])} and ${short(had[1])} and stands between ${short(has[0])} and ${short(has[1])}: he had ${row(before)} | he has ${row(board)}`);
+        if (bodyBefore[0] === key && bodyAfter[0] !== key) complain("what he placed at the top stays first", `${what}: ${short(key)}: he had ${row(before)} | he has ${row(board)}`);
+        if (bodyBefore.at(-1) === key && bodyAfter.at(-1) !== key) complain("what he placed at the bottom stays last", `${what}: ${short(key)}: he had ${row(before)} | he has ${row(board)}`);
+      }
+      const systems = (list: string[], cards: boolean) => list.filter((k) => k !== BANNER && k !== named && isCard(k) === cards && !hadPlaced.includes(k) && !hisNow.includes(k));
+      for (const cards of [false, true]) {
+        const [had, has] = [systems(before, cards).filter((k) => board.includes(k)), systems(board, cards).filter((k) => before.includes(k))];
+        if (had.join() !== has.join()) complain(cards ? "the cards keep their order" : "the system's sections keep their order", `${what}: ${row(had)} | ${row(has)}`);
+      }
+      // The run as a whole: how many of the system's sections stand above it, the named one aside.
+      const over = (list: string[]) => {
+        const first = list.findIndex((k) => isCard(k) && !hadPlaced.includes(k) && !hisNow.includes(k));
+        return first === -1 ? -1 : systems(list.slice(0, first), false).length;
+      };
+      if (rightWayUp(before, hadPlaced) && rightWayUp(board, hisNow) && over(before) !== -1 && over(board) !== -1 && over(before) !== over(board)) {
+        complain("the cards move only where ruling A allows it", `${what}: he had ${row(before)} | he has ${row(board)}`);
+      }
+    }
     // No order the rules can produce that was accepted against the board he had is refused against the board he has.
     for (const rules of RULES_ORDERS) {
       const has = systemsOn(board, placedSet());
@@ -762,6 +806,10 @@ async function walk(index: number, scripted = false) {
     await afterRequest(what, before, model, subject, null, placedNow, heldBefore, (first) => {
       // What it read back is the first open, name for name.
       const names = keysOf(first).map((k) => nameOf(k));
+      // And, read off the board with no model: what he sent to the top or the bottom is first or last.
+      const body = without(keysOf(first), BANNER);
+      if (ops.length === 1 && ops[0].op === "move_to_top" && body[0] !== ops[0].key) return `sent to the top, ${short(ops[0].key)} is not first: ${row(body)}`;
+      if (ops.length === 1 && ops[0].op === "move_to_bottom" && body.at(-1) !== ops[0].key) return `sent to the bottom, ${short(ops[0].key)} is not last: ${row(body)}`;
       return (res.order ?? []).join("|") === names.join("|") ? null : `it read back ${(res.order ?? []).join(" · ")} and the open shows ${names.join(" · ")}`;
     });
   };
