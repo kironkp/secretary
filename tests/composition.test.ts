@@ -505,8 +505,11 @@ describe("a section he placed stays where he put it", () => {
     const res = compose(planFromRules(later), later, stored, ["kanban"]);
     expect(keys(res)[1]).toBe("kanban");
     expect(cards(res)).toEqual(cards(defaultPlan(later)));
-    // Not pinned (he un-pinned it), the system's plan decides, and it has none.
-    expect(keys(compose(planFromRules(later), later, stored))).not.toContain("kanban");
+    // Unpinned, it stays at the place stored with it (r4, a stated limit until 1.06: a section that is not a card has nowhere to go back to).
+    expect(keys(compose(planFromRules(later), later, stored))[1]).toBe("kanban");
+    // With no place stored and no pin, it is not his: the system's plan decides, and it has none.
+    const unplaced: LayoutPlan = { ...stored, sections: stored.sections.map((s) => (s.component === "kanban" ? { component: "kanban" } : s)) };
+    expect(keys(compose(planFromRules(later), later, unplaced))).not.toContain("kanban");
   });
 
   it("a pin holds the place only: the card's emphasis and why are today's, not the day he pinned it", () => {

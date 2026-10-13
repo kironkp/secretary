@@ -42,7 +42,13 @@ function placesIn(stored: LayoutPlan | null, pins: Set<string>): Map<string, { p
   const found = new Map<string, { place: Place; section: PlanSection }>();
   for (const s of stored?.sections ?? []) {
     const key = sectionKey(s);
-    if (!pins.has(key) || found.has(key) || s.component === BANNER) continue;
+    if (found.has(key) || s.component === BANNER) continue;
+    // Pinned; or a section that is not a card and still carries the place he
+    // gave it. Unpinning a card lets it follow the data again; another
+    // section has nowhere to follow to yet, so its place goes on holding it
+    // until he moves it, hides it or undoes the move (SPEC §2, a stated
+    // limit: it goes back by itself in 1.06).
+    if (!pins.has(key) && (isCard(s) || s.place === undefined)) continue;
     const place = s.place ?? placeOn(stored!.sections, key);
     if (place !== null) found.set(key, { place, section: s });
   }
@@ -67,13 +73,27 @@ export function ownSections(sections: PlanSection[], placed: Set<string>): PlanS
 
 /**
  * Where the card run goes among a plan's own sections that are not cards:
- * after how many of them. Its first own card says. A plan with no card of
- * its own has the run where the default has it, under the strip.
+ * after how many of them. Its first own card says, unless that card carries
+ * a place: a card he pinned and then let go is still sitting where he put
+ * it in the stored plan, and says nothing about the run. A plan with no such
+ * card has the run where the default has it, under the strip.
  */
 export function runPlace(own: PlanSection[]): number {
-  const first = own.findIndex(isCard);
-  if (first !== -1) return first; // everything before the first card is not a card
-  return Math.max(...["hero_next_up", "stat_row", "timeline"].map((c) => own.findIndex((s) => s.component === c))) + 1;
+  const others = own.filter((s) => !isCard(s));
+  const first = own.findIndex((s) => isCard(s) && s.place === undefined);
+  if (first !== -1) return own.slice(0, first).filter((s) => !isCard(s)).length;
+  return Math.max(...["hero_next_up", "stat_row", "timeline"].map((c) => others.findIndex((s) => s.component === c))) + 1;
+}
+
+/**
+ * The banner is first, whatever a request did above it: "the top" is under
+ * the banner for both tools. Left second, the validator drops it ("not at
+ * top") and a move to the first place would lose the banner.
+ */
+export function bannerFirst(sections: PlanSection[]): PlanSection[] {
+  const banner = sections.find((s) => s.component === BANNER);
+  if (!banner || sections[0] === banner) return sections;
+  return [banner, ...sections.filter((s) => s !== banner)];
 }
 
 export type CompositionContext = {

@@ -8,7 +8,7 @@
 process.env.TZ = "UTC";
 
 import { beforeEach, describe, expect, it } from "vitest";
-import { composePlan, ownSections, placeOn, placedKeys, runPlace } from "@/lib/layout/compose";
+import { bannerFirst, composePlan, ownSections, placeOn, placedKeys, runPlace } from "@/lib/layout/compose";
 import { deadlineWhy, defaultPlan, isDeadlineWhy, sectionKey, type LayoutPlan, type PlanSection } from "@/lib/layout/plan";
 import { planFromRules } from "@/lib/layout/plan-from-rules";
 import { clearPlanCache, planWithFallback } from "@/lib/layout/plan-from-llm";
@@ -268,6 +268,30 @@ describe.each(PATHS)("on the path: $name", (path) => {
       // 8. The place is stored with the section again, so the next render reads the same one.
       for (const key of here) expect(res.plan.sections.find((s) => sectionKey(s) === key)?.place, key).toBe(places.get(key));
     });
+
+    // The stored plan still has everything where he put it; he lets go of all of it.
+    if (pins.length) {
+      it.each(CHANGES)("then he unpins: %s", async (_change, change) => {
+        const after = (path.today ?? ((s) => s))(changed(before, change));
+        const preferences = path.preferences ?? [];
+        const res = await path.render(after, stored, [], preferences);
+        const bare = await path.render(after, base, [], preferences);
+        const shown = keys(res.plan);
+        const body = shown.filter((k) => k !== "focus_banner");
+        // A card he let go follows the data again: every card is in data order.
+        expect(cardKeys(res.plan)).toEqual(cardKeys(defaultPlan(after)));
+        // Another section stays at the place stored with it (a stated limit, until 1.06).
+        const kept = pinnedKeys.filter((k) => !isCard(k));
+        for (const key of kept) {
+          if (places.get(key) === "last") expect(body.at(-1), key).toBe(key);
+          else expect(body[places.get(key) as number], key).toBe(key);
+        }
+        // And nothing else is out of place: without those, it is the board with nothing pinned.
+        const without = (list: string[]) => list.filter((k) => !kept.includes(k));
+        expect(without(shown)).toEqual(without(keys(bare.plan)));
+        expect(new Set(shown).size).toBe(shown.length);
+      });
+    }
   });
 });
 
@@ -290,8 +314,19 @@ describe("where the card run goes is one rule", () => {
     const placed = placedKeys(listOnTop, ["project_card:shopping"], []);
     expect([...placed]).toEqual(["project_card:shopping"]);
     expect(runPlace(ownSections(listOnTop.sections, placed))).toBe(3); // after next up, the tiles and the strip
-    // Read without that rule, the run would go to the very top.
-    expect(runPlace(listOnTop.sections)).toBe(0);
+    // Let go of, it is still on top of the stored plan, carrying its place: it still does not say.
+    expect(runPlace(ownSections(listOnTop.sections, new Set()))).toBe(3);
+    // A card on top that nobody placed is the system's first card, and does say.
+    const bare = { ...listOnTop, sections: listOnTop.sections.map((s) => ({ component: s.component, props: s.props })) };
+    expect(runPlace(ownSections(bare.sections, new Set()))).toBe(0);
+  });
+
+  it("the banner is first whatever a request did above it", () => {
+    const withBanner = [BANNER, ...plan.sections];
+    expect(bannerFirst(withBanner)).toBe(withBanner);
+    const pushed = [plan.sections[0], BANNER, ...plan.sections.slice(1)];
+    expect(bannerFirst(pushed).map(sectionKey)).toEqual(withBanner.map(sectionKey));
+    expect(bannerFirst(plan.sections)).toBe(plan.sections);
   });
 
   it("a plan with no card of its own has the run under the strip, wherever the strip is", () => {

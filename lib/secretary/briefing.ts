@@ -9,9 +9,8 @@ import { documents, events, expectations, memories, pipelineTemplates, projects,
 import { dayRangeInTz } from "@/lib/time";
 import { carriesMail } from "./proposals";
 import { getRecentConversationTails } from "@/lib/db/queries";
-import { getPlanHead } from "@/lib/layout/plan-store";
+import { computeCurrentPlan, getPlanHead } from "@/lib/layout/plan-store";
 import { boardSectionNames } from "@/lib/layout/arrange";
-import type { LayoutPlan } from "@/lib/layout/plan";
 import { listsSummary } from "./lists";
 import { listQuestions } from "@/lib/understanding/questions";
 import { markSurfaced } from "@/lib/understanding/today";
@@ -722,9 +721,12 @@ export async function buildBriefing(
   // the secretary knows why and can say so — or change it on request.
   // The board's sections by the names people use, so "put the shopping list
   // at the top" is one arrange_dashboard call, by voice too (SEC-A003).
+  // The board as it renders now (composed: SPEC §2), not the stored row: a
+  // project that went late since the Dashboard was last opened has already
+  // moved, and the model must see that order to move things against it.
   const planHead = await getPlanHead(userId);
   const planReason = planHead?.reasonSummary;
-  const board = planHead ? await boardSectionNames(userId, planHead.spec as LayoutPlan) : [];
+  const board = planHead ? await boardSectionNames(userId, (await computeCurrentPlan(userId)).plan) : [];
   lines.push(
     "",
     `DASHBOARD${board.length ? ` (top to bottom): ${board.join(" · ")}` : ""}. To move, hide or show a section when the user asks, call arrange_dashboard with its name; it applies at once.${planReason ? ` Arranged for the situation: "${planReason}".` : ""}`

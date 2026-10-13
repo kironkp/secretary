@@ -46,11 +46,12 @@ import { deleteGoogleEvent, insertGoogleEvent, patchGoogleEvent } from "@/lib/go
 import { connectionStatus, GoogleUnavailable, NOT_CONNECTED_LINE } from "@/lib/google/connection";
 import { describeRecurrence, firstOccurrence, normalizeRecurrence } from "./rrule";
 import { findList, findOrCreateList, itemTitle, listFor, parseListPhrase, spokenList } from "./lists";
-import { arrangeDashboard } from "@/lib/layout/arrange";
+import { arrangeDashboard, defaultPlaceFor } from "@/lib/layout/arrange";
 import { draftReply, inboxSummary, readMail, searchMail } from "@/lib/google/gmail";
 import { carriesMail, claimProposal, confirmable, markUntrusted, placeOf, propose, sealProposal, UNTRUSTED_OK } from "./proposals";
 import { recordUsage } from "@/lib/usage";
 import { paidCallAllowed } from "@/lib/spend-guard";
+import { bannerFirst } from "@/lib/layout/compose";
 import { defaultPlan, sectionKey, type LayoutPlan, type PlanSection } from "@/lib/layout/plan";
 import { composeUsersPlan, computeCurrentPlan, getPlanHead, getPreferences, savePlanAsHead, saveUsersPlan, unmetClaims } from "@/lib/layout/plan-store";
 import { REGISTRY_COMPONENTS, REGISTRY_VERSION } from "@/lib/layout/registry";
@@ -2403,13 +2404,17 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
   // planner output; user-initiated changes apply immediately (invariant 3). ---
 
   async get_current_plan(ctx) {
-    const [head, prefs, signals, dynamic] = await Promise.all([
+    // The board as it renders NOW (composed: SPEC §2), not the stored row:
+    // the positions it reports are the ones edit_layout_plan starts from.
+    // Read from the stored row, they were stale between a change in his data
+    // and the next Dashboard open, and an index landed on the wrong section.
+    const [bundle, head, prefs, dynamic] = await Promise.all([
+      computeCurrentPlan(ctx.userId),
       getPlanHead(ctx.userId),
       getPreferences(ctx.userId),
-      computeSignals(ctx.userId),
       listDynamicComponents(ctx.userId),
     ]);
-    const plan = head ? (head.spec as LayoutPlan) : defaultPlan(signals);
+    const plan = bundle.plan;
     return {
       result: {
         registry_version: dynamic.length
@@ -2463,7 +2468,11 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
           if (boardHasIt) {
             if (!isCard) {
               const was = hiddenAt.get(key);
-              sections.splice(was !== undefined && Number.isFinite(was) ? Math.min(was, sections.length) : sections.length, 0, section);
+              const at =
+                was !== undefined && Number.isFinite(was)
+                  ? Math.min(was, sections.length)
+                  : defaultPlaceFor(sections, section, defaultPlan(signals).sections);
+              sections.splice(at, 0, section);
             }
             shown.add(key);
             continue;
@@ -2494,7 +2503,8 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     const candidate: LayoutPlan = {
       plan_id: `chat-${Date.now().toString(36)}`,
       reason_summary: current.reason_summary ?? null,
-      sections,
+      // "The top" is under the banner (SPEC §2): an index of 0 must not push it down.
+      sections: bannerFirst(sections),
     };
     // User-initiated: movement rationing doesn't constrain the user's own
     // request (invariant 3), but structural rules and preferences still do

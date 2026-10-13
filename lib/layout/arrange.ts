@@ -13,6 +13,7 @@ import { db } from "@/lib/db";
 import { layoutPreferences, projects } from "@/lib/db/schema";
 import { titleSimilarity } from "@/lib/secretary/dedupe";
 import { composeUsersPlan, computeCurrentPlan, getPreferences, saveUsersPlan, unmetClaims } from "./plan-store";
+import { bannerFirst } from "./compose";
 import { defaultPlan, sectionKey, type LayoutPlan, type PlanSection } from "./plan";
 import { listDynamicComponents } from "./slow-loop";
 import { validatePlan } from "./validator";
@@ -69,6 +70,25 @@ function pick(words: string, candidates: Named[]): { hit: Named } | { error: str
     return { error: `There's no "${words}" on the dashboard. It has: ${candidates.map((c) => c.names[0]).join(", ")}.` };
   }
   return { error: `"${words}" could be ${top.map((t) => t.c.names[0]).join(" or ")}. Which one?` };
+}
+
+/**
+ * Where a section that is being shown again goes when nothing recorded where
+ * it was: its place on the default board, just under the nearest section the
+ * default has above it that is on this board. Showing is not placing, so it
+ * must land where the system has it; left at the end, it would be held there
+ * (SPEC §2, the stated limit: what is not pinned and not a card does not go
+ * back by itself).
+ */
+export function defaultPlaceFor(sections: PlanSection[], section: PlanSection, defaults: PlanSection[]): number {
+  const order = defaults.map((s) => sectionKey(s));
+  const here = order.indexOf(sectionKey(section));
+  if (here === -1) return sections.length;
+  for (let i = here - 1; i >= 0; i--) {
+    const at = sections.findIndex((s) => sectionKey(s) === order[i]);
+    if (at !== -1) return at + 1;
+  }
+  return sections[0]?.component === "focus_banner" ? 1 : 0;
 }
 
 export type ArrangeResult =
@@ -136,7 +156,11 @@ export async function arrangeDashboard(userId: string, ops: ArrangeOp[]): Promis
       if (!("hit" in away)) return { ok: false, error: onBoard.error };
       hit = away.hit;
       const was = hiddenAt.get(hit.key);
-      sections.splice(was !== undefined && Number.isFinite(was) ? Math.min(was, sections.length) : sections.length, 0, hit.section);
+      const at =
+        was !== undefined && Number.isFinite(was)
+          ? Math.min(was, sections.length)
+          : defaultPlaceFor(sections, hit.section, defaultPlan(bundle.signals).sections);
+      sections.splice(at, 0, hit.section);
     }
     if (hiddenNow.has(hit.key) && op.op !== "hide") unhide.push(hit.key);
     last.set(hit.key, op.op === "hide" ? "hidden" : op.op === "show" ? "shown" : "placed");
@@ -177,7 +201,7 @@ export async function arrangeDashboard(userId: string, ops: ArrangeOp[]): Promis
     plan_id: `user-${Date.now().toString(36)}`,
     // The user's own arrangement: no planner's reason over it (SEC-A003b).
     reason_summary: null,
-    sections,
+    sections: bannerFirst(sections),
   };
   // User-initiated: no movement rationing, no pins against the user's own
   // move; the structural invariants still hold.

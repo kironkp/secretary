@@ -8,13 +8,13 @@
 // no tool says "applied" to something the next render does not show.
 process.env.TZ = "UTC";
 
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { layoutPreferences, layoutSpecs, projects, tasks, usage, user } from "@/lib/db/schema";
+import { conversations, layoutPreferences, layoutSpecs, messages, projects, tasks, usage, user } from "@/lib/db/schema";
 import { defaultPlan, sectionKey, type LayoutPlan } from "@/lib/layout/plan";
 import { clearPlanCache, lastPlannerUsage } from "@/lib/layout/plan-from-llm";
-import { computeCurrentPlan, getPlanHead, persistPlan, revertPlan, setPinned } from "@/lib/layout/plan-store";
+import { composeUsersPlan, computeCurrentPlan, getPlanHead, persistPlan, revertPlan, setPinned, unmetClaims } from "@/lib/layout/plan-store";
 import { REGISTRY_VERSION } from "@/lib/layout/registry";
 import { computeSignals, signalsHash } from "@/lib/layout/signals";
 import { executeTool, liveTurnContext } from "@/lib/secretary/tools";
@@ -67,6 +67,13 @@ async function board(late: number) {
     /** The stored plans are a day or more old: the rationing clock has moved on. */
     nextDay: () => db.update(layoutSpecs).set({ createdAt: day(-2) }).where(eq(layoutSpecs.userId, id)),
     archive: (project: string) => db.update(projects).set({ status: "archived" }).where(eq(projects.id, ids[project])),
+    /** He says the same thing several times today (a question about dates makes rule 3 fire). */
+    say: async (text: string, times: number) => {
+      const [conv] = await db.insert(conversations).values({ userId: id, mode: "text" }).returning();
+      await db.insert(messages).values(Array.from({ length: times }, (_, i) => ({ userId: id, conversationId: conv.id, role: "user" as const, content: `${text} (${i})`, mode: "text" as const })));
+    },
+    /** What he said is days old now. */
+    talkStops: () => db.update(messages).set({ createdAt: day(-3) }).where(eq(messages.userId, id)),
   };
 }
 type Board = Awaited<ReturnType<typeof board>>;
@@ -472,5 +479,245 @@ describe("every operation of both tools is on the board at the next render", () 
     expect(later).not.toContain("people_index");
     await b.arrange([{ op: "show", section: "Iris" }]);
     expect(await b.keys()).toContain(b.card("Iris"));
+  });
+});
+
+// r4. The held path: the rules plan is refused (a removal or a move of the
+// system's own is rationed) and the stored sections are kept. In r3 his list
+// pinned on top was taken there for "the first card", and the whole board
+// went under the cards. These are the Reviewer's two boards.
+describe("a held plan keeps his list on top and the board the right way up", () => {
+  it("a planner's answer with a banner lands; at the next open: the banner, his list, the system's sections, the cards", async () => {
+    const b = await board(5);
+    await b.render();
+    await b.arrange([{ op: "move_to_top", section: "shopping list" }]);
+    await b.nextDay();
+    await b.newTask("Atlas");
+    const bundle = await computeCurrentPlan(b.id);
+    await persistPlan(b.id, bundle, {
+      call: async () => {
+        lastPlannerUsage.model = "claude-sonnet-5";
+        lastPlannerUsage.input = 4_000;
+        lastPlannerUsage.output = 800;
+        const plan = defaultPlan(bundle.signals);
+        return JSON.stringify({ ...plan, plan_id: "p", reason_summary: "A busy week", sections: [{ component: "focus_banner", props: { text: "Five things are late", tone: "serious" } }, ...plan.sections] });
+      },
+    });
+    expect(((await b.head()).spec as LayoutPlan).sections[0].component).toBe("focus_banner");
+
+    // The next open, with no change in his data. The banner has just changed
+    // the layout, so taking it away is rationed and the stored plan is held.
+    for (let open = 0; open < 2; open++) {
+      const shown = await b.keys();
+      expect(shown.slice(0, 5)).toEqual(["focus_banner", b.card("Shopping"), "hero_next_up", "stat_row", "timeline"]);
+      expect(shown.slice(-2)).toEqual(["date_chase", "people_index"]);
+      expect(b.cardsOf(shown.slice(5, -2))).toHaveLength(9);
+      await expectCardsFollowData(b, shown, [b.card("Shopping")]);
+    }
+    // And with a project going late meanwhile.
+    await b.newTask("Iris", -40);
+    const later = await b.keys();
+    expect(later.slice(0, 6)).toEqual(["focus_banner", b.card("Shopping"), "hero_next_up", "stat_row", "timeline", b.card("Iris")]);
+  });
+
+  it("rule 3 sent the strip up, under his list; the talk stops: the strip stays (a stated limit), and nothing is turned over", async () => {
+    const b = await board(5);
+    await b.render();
+    await b.arrange([{ op: "move_to_top", section: "shopping list" }]);
+    await b.nextDay();
+    await b.say("when is the deadline?", 4);
+    const talking = await b.keys();
+    expect(talking.slice(0, 4)).toEqual([b.card("Shopping"), "timeline", "hero_next_up", "stat_row"]);
+
+    await b.talkStops();
+    await b.nextDay();
+    for (let open = 0; open < 2; open++) {
+      const shown = await b.keys();
+      expect(shown.slice(0, 4)).toEqual([b.card("Shopping"), "timeline", "hero_next_up", "stat_row"]);
+      expect(shown.slice(-2)).toEqual(["date_chase", "people_index"]);
+      await expectCardsFollowData(b, shown, [b.card("Shopping")]);
+    }
+  });
+
+  it("the same two held boards with the first card moved up and Needs a date moved into the cards", async () => {
+    const b = await board(5);
+    const start = await b.keys();
+    const firstCard = start.find((k) => k.startsWith("project_card:"))!;
+    await b.chatEdit([{ op: "move", section: firstCard, to: start.indexOf(firstCard) - 1 }]);
+    await b.arrange([{ op: "move_up", section: "needs a date" }]);
+    const arranged = await b.keys();
+    await b.nextDay();
+    await b.say("when is the deadline?", 4);
+    await b.keys();
+    await b.talkStops();
+    await b.nextDay();
+    const held = await b.keys();
+    // The strip went up and stays; his two sections are at their places; the rest is as he arranged it.
+    expect(held.indexOf(firstCard)).toBe(arranged.indexOf(firstCard));
+    expect(held.indexOf("date_chase")).toBe(arranged.indexOf("date_chase"));
+    expect(held[0]).toBe("timeline");
+    await expectCardsFollowData(b, held, [firstCard]);
+    expect(held.filter((k) => !k.startsWith("project_card:") && k !== "date_chase")).toEqual(["timeline", "hero_next_up", "stat_row", "people_index"]);
+  });
+});
+
+// r4. The cache is keyed by days_left, which ticks at the hour a task is due;
+// the chip counts calendar days, which tick at midnight. A plan stored in the
+// evening was served the next morning still saying "Due tomorrow".
+describe("the chip under a deadline is today's from the cache too, and costs no planner call", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("21:54, due 17:00 tomorrow; 09:00 the next morning, nothing else changed; 17:01, it is late", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-21T04:54:00Z")); // Oct 20, 21:54 in Los Angeles
+    const id = `test-compose-${crypto.randomUUID()}`;
+    users.push(id);
+    await db.insert(user).values({ id, name: "Board", email: `${id}@v102.test`, timezone: TZ });
+    const [report] = await db.insert(projects).values({ userId: id, name: "Report", status: "active" }).returning();
+    const [quiet] = await db.insert(projects).values({ userId: id, name: "Garden", status: "active" }).returning();
+    await db.insert(tasks).values({ userId: id, projectId: report.id, title: "Send the report", status: "todo", source: "spoken", dueAt: new Date("2026-10-22T00:00:00Z") }); // Oct 21, 17:00
+    await db.insert(tasks).values({ userId: id, projectId: quiet.id, title: "Order seeds", status: "todo", source: "spoken" });
+
+    let calls = 0;
+    const open = async () => {
+      const bundle = await computeCurrentPlan(id);
+      await persistPlan(id, bundle, {
+        call: async () => {
+          calls++;
+          lastPlannerUsage.model = "claude-sonnet-5";
+          lastPlannerUsage.input = 4_000;
+          lastPlannerUsage.output = 800;
+          // The planner agrees with the rules, so what is stored is the rules' plan, chip and all.
+          return JSON.stringify(bundle.plan);
+        },
+      });
+      const card = bundle.plan.sections.find((s) => s.props?.project_id === report.id);
+      const signal = bundle.signals.projects.find((p) => p.id === report.id)!;
+      return { why: card?.why, fromCache: !bundle.wantsLlmRefinement, days_left: signal.days_left, soonest_days: signal.soonest_days, hash: signalsHash(bundle.signals, REGISTRY_VERSION) };
+    };
+
+    const evening = await open();
+    expect(evening).toMatchObject({ why: "Due tomorrow", fromCache: false, days_left: 0, soonest_days: 1 });
+    expect(calls).toBe(1);
+    expect(await open()).toMatchObject({ why: "Due tomorrow", fromCache: true });
+
+    vi.setSystemTime(new Date("2026-10-21T16:00:00Z")); // Oct 21, 09:00
+    const morning = await open();
+    // Nothing the cache is keyed by has moved: this is the stored plan, and it says today.
+    expect(morning).toMatchObject({ why: "Due today", fromCache: true, days_left: 0, soonest_days: 0, hash: evening.hash });
+    expect(await open()).toMatchObject({ why: "Due today", fromCache: true });
+    expect(calls).toBe(1);
+
+    vi.setSystemTime(new Date("2026-10-22T00:01:00Z")); // Oct 21, 17:01: late now, a new situation
+    const late = await open();
+    expect(late).toMatchObject({ fromCache: false, days_left: null, soonest_days: 0 });
+    expect(late.why ?? "").not.toMatch(/^Due /);
+    // One dated task, a day and a half, nothing else changing: the evening's call and this one.
+    expect(calls).toBe(2);
+    expect(await db.select().from(usage).where(and(eq(usage.userId, id), eq(usage.kind, "layout")))).toHaveLength(2);
+  });
+});
+
+// r4. No tool says "applied" to what the next render will not show: the two
+// cases that slipped past r3, and the check both tools now make before
+// writing anything.
+describe("what a tool says it did is on the composed board, or nothing is changed", () => {
+  const hides = (userId: string) => db.select().from(layoutPreferences).where(and(eq(layoutPreferences.userId, userId), eq(layoutPreferences.kind, "hide_section")));
+
+  it("adding back a card he had hidden is a show: on the board at the next render and the next day, by the data, not pinned", async () => {
+    const b = await board(3);
+    await b.render();
+    await b.chatEdit([{ op: "remove", section: b.card("Iris") }]);
+    expect(await b.keys()).not.toContain(b.card("Iris"));
+    const res = (await b.chatEdit([{ op: "add", component: "project_card", props: { project_id: b.ids.Iris }, at: 0 }])).result as Record<string, unknown>;
+    expect(res).toMatchObject({ applied: true, shown: [b.card("Iris")] });
+    expect(String(res.shown_note)).toMatch(/not placed/);
+    expect(await hides(b.id)).toHaveLength(0);
+    expect((await b.head()).pinned).not.toContain(b.card("Iris"));
+    const shown = await b.keys();
+    expect(shown).toContain(b.card("Iris"));
+    await expectCardsFollowData(b, shown, []);
+    await b.nextDay();
+    await b.newTask("Atlas");
+    await expectCardsFollowData(b, await b.keys(), []);
+    expect(await b.keys()).toContain(b.card("Iris"));
+  });
+
+  it("adding back a section of the default board he had hidden: back where it was, not pinned; with arrange_dashboard's hide too", async () => {
+    const b = await board(3);
+    const start = await b.keys();
+    await b.chatEdit([{ op: "remove", section: "stat_row" }]);
+    await b.arrange([{ op: "hide", section: "needs a date" }]);
+    expect(await hides(b.id)).toHaveLength(2);
+    expect((await b.chatEdit([{ op: "add", component: "stat_row" }, { op: "add", component: "date_chase" }])).result).toMatchObject({ applied: true, shown: ["stat_row", "date_chase"] });
+    expect(await hides(b.id)).toHaveLength(0);
+    expect((await b.head()).pinned).toEqual([]);
+    expect(await b.keys()).toEqual(start);
+    await b.nextDay();
+    await b.newTask("Iris", -40);
+    const later = await b.keys();
+    expect(later.filter((k) => !k.startsWith("project_card:"))).toEqual(start.filter((k) => !k.startsWith("project_card:")));
+  });
+
+  it("adding back a section the board does not have by itself: its hide is lifted and it is placed, like any add", async () => {
+    const b = await board(3);
+    await b.render();
+    await b.chatEdit([{ op: "add", component: "kanban", at: 1 }]);
+    await b.chatEdit([{ op: "remove", section: "kanban" }]);
+    expect(await b.keys()).not.toContain("kanban");
+    expect((await b.head()).pinned).not.toContain("kanban");
+    const res = (await b.chatEdit([{ op: "add", component: "kanban", at: 2 }])).result as Record<string, unknown>;
+    expect(res.applied).toBe(true);
+    expect(res.shown).toBeUndefined();
+    expect(await hides(b.id)).toHaveLength(0);
+    expect((await b.head()).pinned).toContain("kanban");
+    expect((await b.keys())[2]).toBe("kanban");
+    await b.nextDay();
+    await b.newTask("Iris", -40);
+    expect((await b.keys())[2]).toBe("kanban");
+  });
+
+  it("a card for a project that is not on the board is not 'applied': the tool says so and stores nothing", async () => {
+    const b = await board(3);
+    await b.render();
+    const before = (await b.head()).version;
+    await b.archive("Grove");
+    for (const project_id of [b.ids.Grove, "00000000-0000-4000-8000-000000000000"]) {
+      const res = (await b.chatEdit([{ op: "add", component: "project_card", props: { project_id }, at: 0 }])).result as { applied?: boolean; error?: string };
+      expect(res.applied).toBeUndefined();
+      expect(res.error).toMatch(/would not be on the dashboard.*Nothing was changed/);
+    }
+    expect((await b.head()).version).toBe(before);
+  });
+
+  it("in one request the last word about a section wins: hidden and shown again is shown, at its own place, and no hide is kept", async () => {
+    const b = await board(3);
+    const start = await b.keys();
+    expect((await b.arrange([{ op: "hide", section: "stats" }, { op: "show", section: "stats" }])).result).toMatchObject({ applied: true });
+    expect(await hides(b.id)).toHaveLength(0);
+    expect(await b.keys()).toEqual(start);
+    // Shown and then hidden is hidden.
+    await b.arrange([{ op: "hide", section: "stats" }]);
+    expect((await b.arrange([{ op: "show", section: "stats" }, { op: "hide", section: "stats" }])).result).toMatchObject({ applied: true });
+    expect(await hides(b.id)).toHaveLength(1);
+    expect(await b.keys()).not.toContain("stat_row");
+  });
+
+  it("the check itself: a claim the composed board does not bear out is named", async () => {
+    const b = await board(3);
+    const bundle = await b.render();
+    const plan = bundle.plan;
+    const change = { signals: bundle.signals, placed: [] as string[], preferences: [] };
+    const composed = composeUsersPlan(plan, change, []);
+    expect(unmetClaims(composed, { placed: [], shown: ["stat_row"], hidden: ["kanban"] })).toEqual([]);
+    expect(unmetClaims(composed, { shown: ["kanban"] })).toEqual(['"kanban" would not be on the dashboard']);
+    expect(unmetClaims(composed, { hidden: ["stat_row"] })).toEqual(['"stat_row" would still be on the dashboard']);
+    expect(unmetClaims(composed, { placed: ["kanban"], placedOn: plan })).toEqual(['"kanban" would not be on the dashboard']);
+    // Placed, and the composed board has it somewhere else than where the request put it.
+    const moved: LayoutPlan = { ...plan, sections: [plan.sections.at(-1)!, ...plan.sections.slice(0, -1)] };
+    expect(unmetClaims(composed, { placed: [sectionKey(plan.sections.at(-1)!)], placedOn: moved })).toEqual([`"${sectionKey(plan.sections.at(-1)!)}" would not be where it was put`]);
+    // And when it is where it was put.
+    const key = sectionKey(plan.sections.at(-1)!);
+    expect(unmetClaims(composeUsersPlan(moved, { ...change, placed: [key] }, []), { placed: [key], placedOn: moved })).toEqual([]);
   });
 });

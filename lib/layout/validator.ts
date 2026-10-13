@@ -16,6 +16,7 @@
 //   that the user has not pinned: a card moving with the data is not a system
 //   move, and a pin is applied by the composition, not checked.
 import { PROP_SCHEMAS, RETIRED_COMPONENTS, isRegistryComponent, type RegistryComponent } from "./registry";
+import { placedKeys } from "./compose";
 import { isUrgent, layoutPlanSchema, sectionKey, urgencyLabel, type LayoutPlan, type PlanSection } from "./plan";
 import type { Signals } from "./signals";
 
@@ -237,9 +238,13 @@ export function movementReasons(plan: LayoutPlan, ctx: ValidationContext): strin
   const reasons: string[] = [];
   const baseline = ctx.previousPlan?.plan_id === "default" ? ctx.defaultPlan : ctx.previousPlan;
   if (!baseline) return reasons;
+  // His: what he pinned, and what the composition holds at a place he gave
+  // it (a section he unpinned that is not a card stays at its stored place,
+  // SPEC §2). None of that is the system's to be rationed about.
   const pins = new Set([
     ...ctx.pinnedSections,
     ...ctx.preferences.filter((p) => p.kind === "pin_section").map((p) => p.value.section),
+    ...placedKeys(ctx.previousPlan, ctx.pinnedSections, ctx.preferences),
   ]);
   const systems = (s: PlanSection) => s.component !== "project_card" && !pins.has(sectionKey(s));
   const prevKeys = baseline.sections.filter((s) => !RETIRED_COMPONENTS.has(s.component) && systems(s)).map(sectionKey);
