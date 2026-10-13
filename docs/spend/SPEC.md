@@ -114,12 +114,18 @@ count):
 | Kind | What makes the second run free |
 |---|---|
 | Understanding | the stored record's inputs hash; a failed run on the same inputs backs off until they change |
-| Extraction | the conversation's high-water mark (`extracted_at`) |
+| Extraction | the conversation's high-water mark (`extracted_at`), written and compared inside the database at its full precision |
 | Suggestions | once in 24 hours, from the last attempt in this process or the last recorded call |
 | Dashboard planner | the stored plan's signals hash |
 | Inbound email | a message already taken in is not read again |
 
 A test runs each of these twice and counts the calls.
+
+The mark is the reason for "inside the database": until v1.04 it was read
+into the app, where a timestamp keeps milliseconds, and written back. The
+message it stood for is stored to the microsecond, so that message was
+"after the mark" for ever: every run read it again, and a run with nothing
+new still paid for a read whenever that message was the user's.
 
 ## 5. Not in this spec yet
 
