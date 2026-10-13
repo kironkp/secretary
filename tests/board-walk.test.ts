@@ -22,6 +22,12 @@
 // through the tool executor, an open as compute-then-store, the pin button,
 // Put it back, calm mode and the Settings route that lifts a preference
 // through their route handler. Their limits, accepted and named here:
+// - the planner's answers include the ones that would turn the board over:
+//   cards above next up (every card first; main's shape, cards in two runs),
+//   cards last of all, and the two moves of a system section a planner may
+//   really make (Needs a date raised above next up, the tiles sunk under
+//   it, each with props and a reason, or it never lands). The composition
+//   has to keep the board the right way up whatever a planner writes;
 // - the planner's ANSWER is put in through persistPlan's `call` seam (the
 //   budget is $0); everything after the answer is the real code. A planner's
 //   plan served again from the in-memory cache is not reached by the walk; it
@@ -327,13 +333,17 @@ async function walk(index: number) {
     const free = (list: string[]) => list.filter((k) => isCard(k) && !placedKeys.includes(k));
     const byData = free(keysOf(defaultPlan(signals))).filter((k) => board.includes(k));
     if (free(board).join() !== byData.join()) complain("3 cards by the data", `${why}: ${row(free(board))} | by the data: ${row(byData)}`);
-    // 4. The right way up: without the banner and what he placed, the cards are one run, next up and the tiles above it, needs a date and people below.
+    // 4. The right way up, in the spec's words: without the banner and what he placed, the cards are one run; the
+    // run is after the last of the system's next up and tiles, and before the first Needs a date or People that
+    // stands below that point. Top wins: a planner may raise Needs a date above next up, or sink the tiles under
+    // it, and the run is then under the tiles all the same.
     const rest = body.filter((k) => !placedKeys.includes(k));
     const cardAt = rest.map((k, i) => (isCard(k) ? i : -1)).filter((i) => i >= 0);
     if (cardAt.length && cardAt.at(-1)! - cardAt[0] + 1 !== cardAt.length) complain("4 the right way up", `${why}: the cards are not one run: ${row(rest)}`);
     if (cardAt.length) {
+      const top = Math.max(rest.indexOf("hero_next_up"), rest.indexOf("stat_row"));
       for (const above of ["hero_next_up", "stat_row"]) if (rest.includes(above) && rest.indexOf(above) > cardAt[0]) complain("4 the right way up", `${why}: ${above} is under the cards: ${row(rest)}`);
-      for (const below of ["date_chase", "people_index"]) if (rest.includes(below) && rest.indexOf(below) < cardAt.at(-1)!) complain("4 the right way up", `${why}: ${below} is above the cards: ${row(rest)}`);
+      for (const below of ["date_chase", "people_index"]) if (rest.indexOf(below) > top && rest.indexOf(below) < cardAt.at(-1)!) complain("4 the right way up", `${why}: ${below} is above the cards: ${row(rest)}`);
     }
     // 5. What he placed stands where the rule puts it among today's other sections: exactly.
     const expected = placeInto(rest, here);
@@ -708,7 +718,7 @@ async function walk(index: number) {
       await openTwice("the next day", { firstMayStore: true });
     } else if (draw < 0.8) {
       // A planner answer lands. Most are a banner; some move the strip; some are answers a planner should not give.
-      const kind = r.pick(["a banner", "a banner", "a banner and the strip to the top", "a banner and the strip to the top", "without a default section", "the cards backwards", "a place written on a section", "not a plan at all"] as const);
+      const kind = r.pick(["a banner", "a banner", "a banner and the strip to the top", "a banner and the strip to the top", "without a default section", "the cards backwards", "a place written on a section", "not a plan at all", "every card first", "the cards in two runs", "the cards last of all", "needs a date raised above next up", "the tiles sunk under needs a date"] as const);
       moves.push(`a planner answer: ${kind}`);
       count(`a planner answer: ${kind}`);
       const names = [...ids.keys()];
@@ -721,6 +731,23 @@ async function walk(index: number) {
         const strip: PlanSection = { component: "timeline", props: { span_days: 14, expanded: true }, why: "Dates first this week" };
         const answer = (sections: PlanSection[]) => JSON.stringify({ ...plan, plan_id: "p", reason_summary: "A busy week", sections });
         if (kind === "not a plan at all") return "I would put the dates first this week.";
+        // What the planner on main writes, and what nothing stops one from writing: cards above next up. Every card
+        // before it; or main's shape, two cards on top and the rest under the strip.
+        const cards = plan.sections.filter((s) => s.component === "project_card");
+        const others = plan.sections.filter((s) => s.component !== "project_card");
+        if (kind === "every card first") return answer([banner, ...cards, ...others]);
+        if (kind === "the cards in two runs") return answer([banner, ...cards.slice(0, 2), ...others.slice(0, 3), ...cards.slice(2), ...others.slice(3)]);
+        if (kind === "the cards last of all") return answer([banner, ...others, ...cards]);
+        // A planner may move one of the system's sections, with a reason, a day after the layout last changed. Props
+        // go with it: a reason on a section left exactly as the default has it is stripped, and the move then refused.
+        const without = (component: string) => plan.sections.filter((s) => s.component !== component);
+        if (kind === "needs a date raised above next up") return answer([banner, { component: "date_chase", props: { item_ids: [] }, why: "Several things have no date" }, ...without("date_chase")]);
+        if (kind === "the tiles sunk under needs a date") {
+          const tiles: PlanSection = { component: "stat_row", props: { tiles: [{ value: "3", label: "late" }] }, why: "The numbers matter less today" };
+          const list = without("stat_row");
+          const at = list.findIndex((s) => s.component === "date_chase") + 1;
+          return answer([banner, ...list.slice(0, at), tiles, ...list.slice(at)]);
+        }
         if (kind === "a banner and the strip to the top") return answer([banner, strip, ...rest]);
         if (kind === "without a default section") return answer([banner, ...plan.sections.filter((s) => s.component !== "people_index")]);
         if (kind === "the cards backwards") return answer([banner, ...plan.sections.filter((s) => s.component !== "project_card").slice(0, 3), ...plan.sections.filter((s) => s.component === "project_card").toReversed(), ...plan.sections.filter((s) => s.component !== "project_card").slice(3)]);
