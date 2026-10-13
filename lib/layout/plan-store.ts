@@ -282,29 +282,60 @@ export async function savePlanAsHead(
   return version;
 }
 
+/** A plan the user just changed, and what it changes. */
+export type UsersChange = {
+  signals: Signals;
+  /** What he moved or added: pinned at the place it has on the plan. */
+  placed: string[];
+  /** His preferences as they stand after this change (a hide just made, a hide just lifted). */
+  preferences: LayoutPreference[];
+};
+
 /**
- * Save a plan the user just changed, as it will render (SPEC §2, composition).
+ * A plan the user just changed, as it will render (SPEC §2, composition).
  * What he moved or added is PINNED at the place it has on that plan (the n-th
- * section from the top, or last), and the plan is composed before it is
- * stored: the answer a tool gives is then what the next render shows.
- * `preferences` are his preferences as they stand after this change (a hide
- * just made, a hide just lifted).
+ * section from the top, or last), and the plan is composed, so what is
+ * stored, and what a tool answers, is what the next render shows. Pure:
+ * `headPinned` are the pins on the stored plan's row.
  */
-export async function saveUsersPlan(
-  userId: string,
-  plan: LayoutPlan,
-  opts: { signals: Signals; placed: string[]; preferences: LayoutPreference[] }
-): Promise<{ version: number; plan: LayoutPlan }> {
-  const head = await getPlanHead(userId);
+export function composeUsersPlan(plan: LayoutPlan, change: UsersChange, headPinned: string[]): LayoutPlan {
   const sections = plan.sections.map((s) => {
     const key = sectionKey(s);
-    return opts.placed.includes(key) ? { ...s, place: placeOn(plan.sections, key) ?? ("last" as const) } : s;
+    return change.placed.includes(key) ? { ...s, place: placeOn(plan.sections, key) ?? ("last" as const) } : s;
   });
   const placedPlan = { ...plan, sections };
   const present = new Set(sections.map((s) => sectionKey(s)));
-  const pinned = [...pinKeys([...(head?.pinned ?? []), ...opts.placed], [])].filter((k) => present.has(k));
-  const composed = composePlan(placedPlan, { signals: opts.signals, stored: placedPlan, pinned, preferences: opts.preferences });
-  const version = await savePlanAsHead(userId, composed, opts.placed);
+  const pinned = [...pinKeys([...headPinned, ...change.placed], [])].filter((k) => present.has(k));
+  return composePlan(placedPlan, { signals: change.signals, stored: placedPlan, pinned, preferences: change.preferences });
+}
+
+/**
+ * What a tool is about to say it did that the composed board does not bear
+ * out, in words; empty when every claim holds. The check behind "no tool
+ * answers that a change was applied when the next render will not show it":
+ * a tool that gets anything back from here changes nothing and says why.
+ */
+export function unmetClaims(
+  composed: LayoutPlan,
+  claims: { placedOn?: LayoutPlan; placed?: string[]; shown?: string[]; hidden?: string[] }
+): string[] {
+  const unmet: string[] = [];
+  const has = (key: string) => composed.sections.some((s) => sectionKey(s) === key);
+  for (const key of claims.placed ?? []) {
+    const want = claims.placedOn ? placeOn(claims.placedOn.sections, key) : null;
+    if (!has(key)) unmet.push(`"${key}" would not be on the dashboard`);
+    else if (want !== null && placeOn(composed.sections, key) !== want) unmet.push(`"${key}" would not be where it was put`);
+  }
+  for (const key of claims.shown ?? []) if (!has(key)) unmet.push(`"${key}" would not be on the dashboard`);
+  for (const key of claims.hidden ?? []) if (has(key)) unmet.push(`"${key}" would still be on the dashboard`);
+  return unmet;
+}
+
+/** Store a plan the user just changed, composed (composeUsersPlan), as the new head. */
+export async function saveUsersPlan(userId: string, plan: LayoutPlan, change: UsersChange): Promise<{ version: number; plan: LayoutPlan }> {
+  const head = await getPlanHead(userId);
+  const composed = composeUsersPlan(plan, change, head?.pinned ?? []);
+  const version = await savePlanAsHead(userId, composed, change.placed);
   return { version, plan: composed };
 }
 

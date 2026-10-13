@@ -1,7 +1,7 @@
 // Tool executor — the secretary's hands. Every function is user-scoped; the
 // voice path reaches it via POST /api/secretary/tools, the text path calls
 // executeTool directly inside /api/chat.
-import { and, count, desc, eq, gte, ilike, inArray, isNotNull, lt, ne, notInArray } from "drizzle-orm";
+import { and, count, desc, eq, gte, ilike, inArray, isNotNull, lt, ne, notInArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { matchProjectName } from "@/lib/project-names";
 import {
@@ -52,7 +52,7 @@ import { carriesMail, claimProposal, confirmable, markUntrusted, placeOf, propos
 import { recordUsage } from "@/lib/usage";
 import { paidCallAllowed } from "@/lib/spend-guard";
 import { defaultPlan, sectionKey, type LayoutPlan, type PlanSection } from "@/lib/layout/plan";
-import { computeCurrentPlan, getPlanHead, getPreferences, savePlanAsHead, saveUsersPlan } from "@/lib/layout/plan-store";
+import { composeUsersPlan, computeCurrentPlan, getPlanHead, getPreferences, savePlanAsHead, saveUsersPlan, unmetClaims } from "@/lib/layout/plan-store";
 import { REGISTRY_COMPONENTS, REGISTRY_VERSION } from "@/lib/layout/registry";
 import { computeSignals } from "@/lib/layout/signals";
 import { applyBans, validatePlan } from "@/lib/layout/validator";
@@ -2436,16 +2436,41 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     // "applied" and be gone at the next render.
     const placed = new Set<string>();
     const hide = new Map<string, number>();
+    /** Hides lifted by adding back what he had hidden, and which of those the board shows by itself. */
+    const lifted = new Set<string>();
+    const shown = new Set<string>();
     let sized = false;
+    const hiddenAt = new Map(prefs.filter((p) => p.kind === "hide_section").map((p) => [p.value.section, Number(p.value.at ?? NaN)]));
 
     for (const op of a.operations) {
       if (op.op === "add") {
         const section = { component: op.component, props: op.props } as PlanSection;
-        if (sections.some((s) => sectionKey(s) === sectionKey(section))) {
-          return { result: { error: `"${sectionKey(section)}" is already on the dashboard. Move it instead.` } };
+        const key = sectionKey(section);
+        if (sections.some((s) => sectionKey(s) === key)) {
+          return { result: { error: `"${key}" is already on the dashboard. Move it instead.` } };
+        }
+        if (hiddenAt.has(key) && !hide.has(key)) {
+          // Adding what he had hidden is a show (SPEC §2): the hide is
+          // lifted. What the board has by itself is not placed by this: a
+          // project's card goes where the data puts it, a section of the
+          // default board where it was when he hid it. Anything else is
+          // added and pinned below, like any other add.
+          lifted.add(key);
+          const isCard = section.component === "project_card";
+          const boardHasIt = isCard
+            ? signals.projects.some((p) => p.id === String(section.props?.project_id ?? ""))
+            : defaultPlan(signals).sections.some((s) => sectionKey(s) === key);
+          if (boardHasIt) {
+            if (!isCard) {
+              const was = hiddenAt.get(key);
+              sections.splice(was !== undefined && Number.isFinite(was) ? Math.min(was, sections.length) : sections.length, 0, section);
+            }
+            shown.add(key);
+            continue;
+          }
         }
         sections.splice(Math.min(op.at ?? sections.length, sections.length), 0, section);
-        placed.add(sectionKey(section));
+        placed.add(key);
         continue;
       }
       const idx = sections.findIndex((s) => sectionKey(s) === op.section);
@@ -2454,6 +2479,8 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         sections.splice(idx, 1);
         hide.set(op.section, idx);
         placed.delete(op.section);
+        shown.delete(op.section);
+        lifted.delete(op.section);
       } else if (op.op === "move") {
         const [s] = sections.splice(idx, 1);
         sections.splice(Math.min(op.to, sections.length), 0, s);
@@ -2495,21 +2522,41 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     if (dropped.length) {
       return { result: { error: `There is no "${dropped.join('", "')}" to put on the dashboard. Nothing was changed.` } };
     }
-    const already = new Set(prefs.filter((p) => p.kind === "hide_section").map((p) => p.value.section));
-    const newlyHidden = [...hide].filter(([key]) => !already.has(key));
+    const newlyHidden = [...hide].filter(([key]) => !hiddenAt.has(key));
+    const change = {
+      signals,
+      placed: [...placed],
+      preferences: [
+        ...prefs.filter((p) => !(p.kind === "hide_section" && lifted.has(p.value.section))),
+        ...newlyHidden.map(([key]) => ({ kind: "hide_section" as const, value: { section: key } })),
+      ],
+    };
+    // Before anything is written: the board as it will render after this
+    // change must bear out everything about to be said (SPEC §2).
+    const unmet = unmetClaims(composeUsersPlan(v.plan, change, bundle.pinned), {
+      placedOn: v.plan,
+      placed: change.placed,
+      shown: [...shown],
+      hidden: [...hide.keys()],
+    });
+    if (unmet.length) {
+      return { result: { error: `That would not show on the dashboard: ${unmet.join("; ")}. Nothing was changed.` } };
+    }
+    for (const key of lifted) {
+      await db
+        .delete(layoutPreferences)
+        .where(and(eq(layoutPreferences.userId, ctx.userId), eq(layoutPreferences.kind, "hide_section"), sql`${layoutPreferences.value}->>'section' = ${key}`));
+    }
     for (const [key, at] of newlyHidden) {
       await db.insert(layoutPreferences).values({ userId: ctx.userId, kind: "hide_section", value: { section: key, at: String(at) } });
     }
-    const saved = await saveUsersPlan(ctx.userId, v.plan, {
-      signals,
-      placed: [...placed],
-      preferences: [...prefs, ...newlyHidden.map(([key]) => ({ kind: "hide_section" as const, value: { section: key } }))],
-    });
+    const saved = await saveUsersPlan(ctx.userId, v.plan, change);
     return {
       result: {
         applied: true,
         version: saved.version,
         sections: saved.plan.sections.map((s) => sectionKey(s)),
+        ...(shown.size ? { shown: [...shown], shown_note: "It was hidden and is back where the dashboard puts it; it was not placed. To put it somewhere, move it." } : {}),
         ...(hide.size ? { hidden: [...hide.keys()], hidden_note: "Hidden, not deleted: it stays off the dashboard until the user asks to show it." } : {}),
         // Emphasis is the system's and follows the data (SPEC §2): do not
         // tell the user a size or accent is saved for good.

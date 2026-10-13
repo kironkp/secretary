@@ -563,7 +563,7 @@ export function PlanView({
             )}
             <button
               onClick={() => togglePin(key)}
-              title={pinned.has(key) ? "Unpin: it goes back to its usual place" : "Pin this section here"}
+              title={pinned.has(key) ? "Unpin" : "Pin this section here"}
               className={`absolute -left-6 top-1 hidden group-hover:block ${
                 pinned.has(key) ? "text-accent" : "text-muted hover:text-ink"
               }`}

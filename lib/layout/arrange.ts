@@ -12,7 +12,7 @@ import { and, eq, ne, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { layoutPreferences, projects } from "@/lib/db/schema";
 import { titleSimilarity } from "@/lib/secretary/dedupe";
-import { computeCurrentPlan, getPreferences, saveUsersPlan } from "./plan-store";
+import { composeUsersPlan, computeCurrentPlan, getPreferences, saveUsersPlan, unmetClaims } from "./plan-store";
 import { defaultPlan, sectionKey, type LayoutPlan, type PlanSection } from "./plan";
 import { listDynamicComponents } from "./slow-loop";
 import { validatePlan } from "./validator";
@@ -111,6 +111,8 @@ export async function arrangeDashboard(userId: string, ops: ArrangeOp[]): Promis
   };
 
   const pins = new Set<string>();
+  /** What the request leaves each section it names as, the last word winning. */
+  const last = new Map<string, "hidden" | "shown" | "placed">();
   const hide: string[] = [];
   const unhide: string[] = [];
   const changed: string[] = [];
@@ -137,6 +139,7 @@ export async function arrangeDashboard(userId: string, ops: ArrangeOp[]): Promis
       sections.splice(was !== undefined && Number.isFinite(was) ? Math.min(was, sections.length) : sections.length, 0, hit.section);
     }
     if (hiddenNow.has(hit.key) && op.op !== "hide") unhide.push(hit.key);
+    last.set(hit.key, op.op === "hide" ? "hidden" : op.op === "show" ? "shown" : "placed");
 
     const idx = sections.findIndex((s) => sectionKey(s) === hit.key);
     if (op.op === "hide") {
@@ -189,12 +192,34 @@ export async function arrangeDashboard(userId: string, ops: ArrangeOp[]): Promis
   });
   if (!v.ok) return { ok: false, error: `That would break a dashboard rule: ${v.reasons.join("; ")}. Nothing was changed.` };
 
-  for (const key of unhide) {
+  // What is true at the end of the request: hidden and then shown in one
+  // breath is shown.
+  const hidden = hide.filter((key, i) => last.get(key) === "hidden" && hide.indexOf(key) === i);
+  const lifted = unhide.filter((key) => last.get(key) !== "hidden");
+  // Before anything is written: the board as it will render after this
+  // change must bear out everything about to be said (SPEC §2).
+  const change = {
+    signals: bundle.signals,
+    placed: [...pins],
+    preferences: [
+      ...prefs.filter((p) => !(p.kind === "hide_section" && lifted.includes(p.value.section))),
+      ...hidden.filter((key) => !hiddenNow.has(key)).map((key) => ({ kind: "hide_section" as const, value: { section: key } })),
+    ],
+  };
+  const unmet = unmetClaims(composeUsersPlan(v.plan, change, bundle.pinned), {
+    placedOn: v.plan,
+    placed: change.placed,
+    shown: [...last].filter(([key, state]) => state === "shown" && !pins.has(key)).map(([key]) => key),
+    hidden,
+  });
+  if (unmet.length) return { ok: false, error: `That would not show on the dashboard: ${unmet.join("; ")}. Nothing was changed.` };
+
+  for (const key of lifted) {
     await db
       .delete(layoutPreferences)
       .where(and(eq(layoutPreferences.userId, userId), eq(layoutPreferences.kind, "hide_section"), sql`${layoutPreferences.value}->>'section' = ${key}`));
   }
-  for (const key of hide) {
+  for (const key of hidden) {
     if (!hiddenNow.has(key)) {
       await db
         .insert(layoutPreferences)
@@ -203,14 +228,7 @@ export async function arrangeDashboard(userId: string, ops: ArrangeOp[]): Promis
   }
   // Stored as it will render: what he moved is pinned at its place, and the
   // cards he did not place are where the data puts them (SPEC §2).
-  const saved = await saveUsersPlan(userId, v.plan, {
-    signals: bundle.signals,
-    placed: [...pins],
-    preferences: [
-      ...prefs.filter((p) => !(p.kind === "hide_section" && unhide.includes(p.value.section))),
-      ...hide.filter((key) => !hiddenNow.has(key)).map((key) => ({ kind: "hide_section" as const, value: { section: key } })),
-    ],
-  });
+  const saved = await saveUsersPlan(userId, v.plan, change);
   return { ok: true, version: saved.version, sections: saved.plan.sections.map((s) => named(s).names[0]), changed };
 }
 

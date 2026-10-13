@@ -98,6 +98,43 @@ export function urgencyLabel(p: ProjectSignal): string {
 export const cardOrder = (a: ProjectSignal, b: ProjectSignal): number =>
   Number(isUrgent(b)) - Number(isUrgent(a)) || byUrgency(urgencyOf(a), urgencyOf(b));
 
+/**
+ * Calendar days, in the user's zone, to the date that makes a project
+ * pressing: the count the date beside the chip uses (lib/due.ts). days_left
+ * counts whole 24-hour periods, so at 7 PM a task due tomorrow at 5 PM is
+ * "0 days" by it, and the chip said "Due in 0 days" beside "tomorrow".
+ * A committed deadline is the project's own date; otherwise the nearest date
+ * that is not already past; and for a fixture or an event with neither,
+ * days_left as before. Null when the project has no such date at all.
+ */
+function calendarDays(p: ProjectSignal): number | null {
+  if (p.deadline_type === "committed" && typeof p.deadline_days === "number") return p.deadline_days;
+  const ahead = [p.soonest_days, p.deadline_days].filter((d): d is number => typeof d === "number" && d >= 0);
+  return ahead.length ? Math.min(...ahead) : (p.days_left ?? null);
+}
+const COMMITTED_WHY = " — you committed to this date";
+
+/**
+ * Rule 1's why (SPEC §5): "Due today", "Due tomorrow", "Due in N days", in
+ * calendar days. Null for a project with no date to count to.
+ */
+export function deadlineWhy(p: ProjectSignal): string | null {
+  const days = calendarDays(p);
+  if (days === null) return null;
+  const due = days <= 0 ? "Due today" : days === 1 ? "Due tomorrow" : `Due in ${days} days`;
+  return `${due}${p.deadline_type === "committed" ? COMMITTED_WHY : ""}`;
+}
+
+/**
+ * Whether a why is one rule 1 wrote, on any day, the wording before v1.02
+ * ("Due in 0 days", "Due in 1 day") included. Such a why counts days, so
+ * the composition writes it again with today's count at every render: a
+ * plan served from the cache was written when the count was different.
+ */
+export function isDeadlineWhy(why: string | undefined | null): boolean {
+  return !!why && /^Due (today|tomorrow|in \d+ days?)( — you committed to this date)?$/.test(why);
+}
+
 /** The why on a card the user hid that is back because its project is urgent (invariant 4, presence). */
 export function backOnBoardWhy(p: ProjectSignal): string {
   const late = typeof p.soonest_days === "number" && p.soonest_days < 0;

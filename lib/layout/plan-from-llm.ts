@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { openai, PLANNER_MODEL } from "@/lib/openai";
 import type Anthropic from "@anthropic-ai/sdk";
 import { REGISTRY_VERSION } from "./registry";
-import { composePlan } from "./compose";
+import { composePlan, ownSections, placedKeys, runPlace } from "./compose";
 import { defaultPlan, type LayoutPlan, type PlanSection } from "./plan";
 import { planFromRules } from "./plan-from-rules";
 import { signalsHash, type Signals } from "./signals";
@@ -209,12 +209,21 @@ export async function planWithFallback(
   if (opts.previousPlan) {
     const isCard = (s: PlanSection) => s.component === "project_card";
     const stored = opts.previousPlan.sections;
-    const others = stored.filter((s) => !isCard(s));
-    const firstCard = stored.findIndex(isCard);
-    const at = firstCard === -1 ? others.length : firstCard;
+    // The stored plan's OWN sections, as the composition reads any system
+    // plan: without the banner and without what he placed. Where the card
+    // run goes is theirs to say (r4: read from the whole stored plan, his
+    // list pinned on top was "the first card", and the board went under it).
+    const own = ownSections(stored, placedKeys(opts.previousPlan, opts.pinnedSections, opts.preferences));
+    const others = own.filter((s) => !isCard(s));
+    const at = runPlace(own);
     const standing: LayoutPlan = {
       ...opts.previousPlan,
-      sections: [...others.slice(0, at), ...rulesPlan.sections.filter(isCard), ...others.slice(at)],
+      sections: [
+        ...stored.filter((s) => s.component === "focus_banner"),
+        ...others.slice(0, at),
+        ...rulesPlan.sections.filter(isCard),
+        ...others.slice(at),
+      ],
     };
     const v = validatePlan(standing, { ...ctx, skipMovement: true });
     if (v.ok) return { plan: compose(v.plan), source: "previous", called };

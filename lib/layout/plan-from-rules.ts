@@ -2,7 +2,7 @@
 // applies rules in order; later rules may not violate earlier ones. Every
 // deviation carries a user-addressed `why` naming the signal.
 import { REGISTRY_VERSION } from "./registry";
-import { defaultPlan, type LayoutPlan, type PlanSection } from "./plan";
+import { deadlineWhy, defaultPlan, type LayoutPlan, type PlanSection } from "./plan";
 import {
   isStrongEngagement,
   isStrongScheduleTalk,
@@ -19,22 +19,6 @@ export function resolvePlan(
   if (signals.context.calm_mode) return defaultPlan(signals);
   return planner(signals);
 }
-
-/**
- * Calendar days, in the user's zone, to the date that makes a project
- * pressing: the count the date beside the chip uses (lib/due.ts). days_left
- * counts whole 24-hour periods, so at 7 PM a task due tomorrow at 5 PM is
- * "0 days" by it, and the chip said "Due in 0 days" beside "tomorrow".
- * A committed deadline is the project's own date; otherwise the nearest date
- * that is not already past; and for a fixture or an event with neither,
- * days_left as before.
- */
-function calendarDays(p: Signals["projects"][number]): number {
-  if (p.deadline_type === "committed" && typeof p.deadline_days === "number") return p.deadline_days;
-  const ahead = [p.soonest_days, p.deadline_days].filter((d): d is number => typeof d === "number" && d >= 0);
-  return ahead.length ? Math.min(...ahead) : (p.days_left ?? 0);
-}
-const dueWords = (days: number): string => (days <= 0 ? "Due today" : days === 1 ? "Due tomorrow" : `Due in ${days} days`);
 
 export function planFromRules(signals: Signals): LayoutPlan {
   const base = defaultPlan(signals);
@@ -61,9 +45,8 @@ export function planFromRules(signals: Signals): LayoutPlan {
     const card = cardOf(deadlineAccented.id);
     if (card) {
       card.props = { ...card.props, variant: "full", accent: true, inline_loops: true };
-      card.why = `${dueWords(calendarDays(deadlineAccented))}${
-        deadlineAccented.deadline_type === "committed" ? " — you committed to this date" : ""
-      }`;
+      // In calendar days, like the date beside it (lib/layout/plan.ts deadlineWhy).
+      card.why = deadlineWhy(deadlineAccented) ?? undefined;
     }
     firedRules.push(`${deadlineAccented.name} due in ${deadlineAccented.days_left}d`);
   }

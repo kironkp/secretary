@@ -8,7 +8,7 @@
 //   4. his hides and bans, then presence (a hidden card is back while its
 //      project is urgent).
 // The stored plan supplies only where his pins sit. Pure: no I/O.
-import { backOnBoardWhy, cardOrder, isUrgent, sectionKey, type LayoutPlan, type PlanSection } from "./plan";
+import { backOnBoardWhy, cardOrder, deadlineWhy, isDeadlineWhy, isUrgent, sectionKey, type LayoutPlan, type PlanSection } from "./plan";
 import type { Signals } from "./signals";
 import type { LayoutPreference } from "./validator";
 
@@ -49,6 +49,33 @@ function placesIn(stored: LayoutPlan | null, pins: Set<string>): Map<string, { p
   return found;
 }
 
+/** The sections he placed that the stored plan still has: the ones the composition puts back. */
+export function placedKeys(stored: LayoutPlan | null, pinned: string[], preferences: LayoutPreference[]): Set<string> {
+  return new Set(placesIn(stored, pinKeys(pinned, preferences)).keys());
+}
+
+/**
+ * A plan's OWN sections: without the banner (it is always first) and without
+ * what he placed (those are put back afterwards, each at its place). Every
+ * system plan is read through this, the held one included
+ * (lib/layout/plan-from-llm.ts), so one rule decides where the card run
+ * goes: a card he pinned never says.
+ */
+export function ownSections(sections: PlanSection[], placed: Set<string>): PlanSection[] {
+  return sections.filter((s) => s.component !== BANNER && !placed.has(sectionKey(s)));
+}
+
+/**
+ * Where the card run goes among a plan's own sections that are not cards:
+ * after how many of them. Its first own card says. A plan with no card of
+ * its own has the run where the default has it, under the strip.
+ */
+export function runPlace(own: PlanSection[]): number {
+  const first = own.findIndex(isCard);
+  if (first !== -1) return first; // everything before the first card is not a card
+  return Math.max(...["hero_next_up", "stat_row", "timeline"].map((c) => own.findIndex((s) => s.component === c))) + 1;
+}
+
 export type CompositionContext = {
   signals: Signals;
   /** The stored plan: where his pins sit, and the spec of a section he added. */
@@ -76,7 +103,11 @@ export function composePlan(system: LayoutPlan, ctx: CompositionContext): Layout
     const back = hidden.has(key) && isUrgent(p);
     if (banned.has("project_card") || (hidden.has(key) && !back)) continue;
     const from = emphasis.get(p.id);
-    const why = back ? backOnBoardWhy(p) : from?.why;
+    // A why that counts days is today's count, whatever plan it came from: a
+    // stored plan is served from the cache as long as days_left has not
+    // moved, and that ticks at the hour the task is due, not at midnight.
+    const counted = isDeadlineWhy(from?.why) ? deadlineWhy(p) : null;
+    const why = back ? backOnBoardWhy(p) : (counted ?? from?.why);
     cards.set(key, {
       component: "project_card",
       props: { variant: "full", ...(from?.props ?? {}), project_id: p.id },
@@ -85,28 +116,17 @@ export function composePlan(system: LayoutPlan, ctx: CompositionContext): Layout
   }
   const run = [...cards].filter(([key]) => !places.has(key)).map(([, card]) => card);
 
-  // The unpinned sequence: the system's non-card sections in the system's
-  // order, with the card run where the system's first card sits.
-  const sequence: PlanSection[] = [];
-  let ran = false;
-  for (const s of system.sections) {
-    if (s.component === BANNER) continue;
-    // What he placed is put in afterwards, at its place. A card he pinned
-    // does not say where the run goes: the system's first card of its own does.
-    if (places.has(sectionKey(s))) continue;
-    if (isCard(s)) {
-      if (!ran) sequence.push(...run);
-      ran = true;
-      continue;
-    }
-    if (gone(s)) continue;
-    sequence.push({ component: s.component, ...(s.props ? { props: s.props } : {}), ...(s.why ? { why: s.why } : {}) });
-  }
-  if (!ran) {
-    // A system plan with no card in it: the run goes where the default has it, under the strip.
-    const after = Math.max(...["hero_next_up", "stat_row", "timeline"].map((c) => sequence.findIndex((s) => s.component === c)));
-    sequence.splice(after + 1, 0, ...run);
-  }
+  // The unpinned sequence: the system's own sections that are not cards, in
+  // the system's order, with the card run where its first own card sits.
+  // What he placed is put in afterwards, each at its place.
+  const own = ownSections(system.sections, new Set(places.keys()));
+  const at = runPlace(own);
+  const others = own.filter((s) => !isCard(s));
+  const shown = (list: PlanSection[]): PlanSection[] =>
+    list
+      .filter((s) => !gone(s))
+      .map((s) => ({ component: s.component, ...(s.props ? { props: s.props } : {}), ...(s.why ? { why: s.why } : {}) }));
+  const sequence: PlanSection[] = [...shown(others.slice(0, at)), ...run, ...shown(others.slice(at))];
 
   // The sections he placed, lowest place first; with fewer sections than its
   // place, a section is last. What he placed stays; the system's own moves
