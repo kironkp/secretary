@@ -6,7 +6,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { layoutPreferences, layoutSpecs } from "@/lib/db/schema";
 import { REGISTRY_VERSION } from "./registry";
-import { composePlan, pinKeys, placeOn } from "./compose";
+import { composePlan } from "./compose";
 import { defaultPlan, sectionKey, type LayoutPlan } from "./plan";
 import { planWithFallback, type PlannerCall } from "./plan-from-llm";
 import { computeSignals, signalsHash, type Signals } from "./signals";
@@ -43,41 +43,57 @@ export async function getPreferences(userId: string): Promise<LayoutPreference[]
   return rows;
 }
 
-/** Compute the plan to render right now. LLM → rules → previous → default. */
-export async function computeCurrentPlan(userId: string): Promise<PlanBundle> {
-  const [signals, head, preferences] = await Promise.all([
+/** Everything an open reads: his signals, the stored row, his preferences. */
+export type BoardState = {
+  signals: Signals;
+  head: { spec: LayoutPlan; pinned: string[]; signalsHash: string | null; version: number; createdAt: Date | null } | null;
+  preferences: LayoutPreference[];
+  dynamic: { name: string; description: string }[];
+  /** Views being built that a section stands in for meanwhile (SPEC §7.5). */
+  wishes: { closestComponent: string | null; need: string }[];
+};
+
+/** Read what an open reads. */
+export async function loadState(userId: string): Promise<BoardState> {
+  const [signals, head, preferences, dynamic, wishes] = await Promise.all([
     computeSignals(userId),
     getPlanHead(userId),
     getPreferences(userId),
+    listDynamicComponents(userId),
+    openPriorityWishes(userId),
   ]);
-  const previousPlan = head ? (head.spec as LayoutPlan) : null;
+  return {
+    signals,
+    head: head ? { spec: head.spec as LayoutPlan, pinned: head.pinned, signalsHash: head.signalsHash, version: head.version, createdAt: head.createdAt } : null,
+    preferences,
+    dynamic,
+    wishes: wishes.map((w) => ({ closestComponent: w.closestComponent, need: w.need })),
+  };
+}
 
+/**
+ * What an open runs, on a state: the board that renders. No I/O beyond the
+ * state it is given, so a request can run it on the state it is ABOUT to
+ * write and answer with exactly what the next open will show (SPEC §2).
+ * LLM → rules → held → default, every branch ending in the composition.
+ */
+export async function openOn(state: BoardState): Promise<{ plan: LayoutPlan; wantsLlmRefinement: boolean }> {
+  const { signals, head, preferences } = state;
+  const previousPlan = head?.spec ?? null;
   // The render path is synchronous-fast: rules or cache, never a model call.
   // The LLM refinement happens in persistPlan (background, after render) and
-  // is served by the durable cache on the NEXT open — measured nano-model
-  // latency (~5s) is far over the fast-loop budget to block a render on.
+  // is served by the durable cache on the NEXT open.
   let plan: LayoutPlan;
   let wantsLlmRefinement = false;
-  // What renders is composed (SPEC §2, v1.02; lib/layout/compose.ts): from a
-  // system plan come the emphasis and the places of the sections that are not
-  // cards; the sections he placed go back where he put them; the cards he did
-  // not place are in data order; then his hides, bans and presence. Every
-  // branch below ends in the same composition, so the order follows the data
-  // whichever plan it starts from.
   const compose = (system: LayoutPlan): LayoutPlan =>
     composePlan(system, { signals, stored: previousPlan, pinned: head?.pinned ?? [], preferences });
   if (signals.context.calm_mode) {
     // Invariant 7: DEFAULT_PLAN unconditionally — no planner of any kind.
     plan = compose(defaultPlan(signals));
-  } else if (
-    head?.signalsHash &&
-    head.signalsHash === signalsHash(signals, REGISTRY_VERSION) &&
-    previousPlan
-  ) {
-    // Durable cache (SPEC §6): the stored plan was written for exactly these
+  } else if (head?.signalsHash && head.signalsHash === signalsHash(signals, REGISTRY_VERSION) && previousPlan) {
+    // Durable cache (SPEC §6): the stored board was written for exactly these
     // signals, so it is today's system plan → zero calls. The hash does not
-    // carry everything the card order reads (a task's date edited into the
-    // past leaves it unchanged), which is why the cards are ordered here too.
+    // carry everything the card order reads, which is why it is composed too.
     plan = compose(previousPlan);
   } else {
     ({ plan } = await planWithFallback(signals, {
@@ -85,7 +101,7 @@ export async function computeCurrentPlan(userId: string): Promise<PlanBundle> {
       preferences,
       pinnedSections: head?.pinned ?? [],
       llmEnabled: false, // rules only on the render path
-      dynamicComponents: await listDynamicComponents(userId),
+      dynamicComponents: state.dynamic,
     }));
     wantsLlmRefinement = true;
   }
@@ -93,7 +109,7 @@ export async function computeCurrentPlan(userId: string): Promise<PlanBundle> {
   // F8 interim substitution (SPEC §7.5 tier 2): while a wished view is being
   // built, its closest component stands in — emphasized, with an honest why.
   if (!signals.context.calm_mode) {
-    for (const wish of await openPriorityWishes(userId)) {
+    for (const wish of state.wishes) {
       const stand = plan.sections.find((s) => s.component === wish.closestComponent);
       if (!stand) continue;
       if (stand.component === "timeline") {
@@ -102,17 +118,23 @@ export async function computeCurrentPlan(userId: string): Promise<PlanBundle> {
       stand.why = `closest I have until the ${wish.need.split("—")[0].trim()} view is built`.slice(0, 140);
     }
   }
+  return { plan, wantsLlmRefinement };
+}
 
+/** Compute the plan to render right now. */
+export async function computeCurrentPlan(userId: string): Promise<PlanBundle> {
+  const state = await loadState(userId);
+  const { plan, wantsLlmRefinement } = await openOn(state);
   // A plan is "new" when its content differs — sections or reason. plan_id
   // embeds the signals hash, which drifts with time; comparing it would write
   // a new history row on every render.
-  const changed = !previousPlan || planContent(previousPlan) !== planContent(plan);
+  const changed = !state.head || planContent(state.head.spec) !== planContent(plan);
   return {
     plan,
-    signals,
-    version: head?.version ?? 0,
-    pinned: head?.pinned ?? [],
-    updatedAt: head?.createdAt ?? null,
+    signals: state.signals,
+    version: state.head?.version ?? 0,
+    pinned: state.head?.pinned ?? [],
+    updatedAt: state.head?.createdAt ?? null,
     changed,
     wantsLlmRefinement,
   };
@@ -180,12 +202,14 @@ export async function persistPlan(
           userId,
           version: (head?.version ?? 0) + 1,
           spec: bundle.plan,
-          pinned: head?.pinned ?? [],
+          // What he placed is what carries a place on this board (one home for a pin, SPEC §2).
+          pinned: placedOn(bundle.plan),
           kind: "plan",
           signalsHash: hash,
           reasonSummary: bundle.plan.reason_summary ?? null,
           outcome: "accepted",
         });
+        await markPinPreferences(userId, placedOn(bundle.plan));
       }
     }
 
@@ -243,7 +267,7 @@ export async function persistPlan(
       userId,
       version: (head?.version ?? 0) + 1,
       spec: refined.plan,
-      pinned: head?.pinned ?? [],
+      pinned: placedOn(refined.plan),
       kind: "plan",
       signalsHash: hash,
       reasonSummary: refined.plan.reason_summary ?? null,
@@ -255,135 +279,21 @@ export async function persistPlan(
 }
 
 /**
- * Store a user-initiated plan (chat edit, ban re-render) as the new head.
- * Stamped with the CURRENT signals hash so the durable cache serves it until
- * the situation actually changes — the planner can't immediately undo the user.
+ * The keys of what he placed on a board: the sections that carry a place.
+ * A pin has one home (SPEC §2): the place written on the section; the row's
+ * `pinned` is this list, written with the board.
  */
-export async function savePlanAsHead(
-  userId: string,
-  plan: LayoutPlan,
-  /** Section keys to pin with it: what the user just placed stays where they put it. */
-  pin: string[] = []
-): Promise<number> {
-  const [head, signals] = await Promise.all([getPlanHead(userId), computeSignals(userId)]);
-  const version = (head?.version ?? 0) + 1;
-  const present = new Set(plan.sections.map((s) => sectionKey(s)));
-  await db.insert(layoutSpecs).values({
-    userId,
-    version,
-    spec: plan,
-    // A pin on a section that left the plan has nothing to hold.
-    pinned: [...new Set([...(head?.pinned ?? []), ...pin])].filter((k) => present.has(k)),
-    kind: "plan",
-    signalsHash: signalsHash(signals, REGISTRY_VERSION),
-    reasonSummary: plan.reason_summary ?? null,
-    outcome: "accepted",
-  });
-  return version;
+export function placedOn(plan: LayoutPlan): string[] {
+  return plan.sections.filter((s) => s.place !== undefined).map((s) => sectionKey(s));
 }
 
-/** A plan the user just changed, and what it changes. */
-export type UsersChange = {
-  signals: Signals;
-  /** What he moved or added: pinned at the place it has on the plan. */
-  placed: string[];
-  /** His preferences as they stand after this change (a hide just made, a hide just lifted). */
-  preferences: LayoutPreference[];
-};
-
-/**
- * A plan the user just changed, as it will render (SPEC §2, composition).
- * What he moved or added is PINNED at the place it has on that plan (the n-th
- * section from the top, or last), and the plan is composed, so what is
- * stored, and what a tool answers, is what the next render shows. Pure:
- * `headPinned` are the pins on the stored plan's row.
- */
-export function composeUsersPlan(plan: LayoutPlan, change: UsersChange, headPinned: string[]): LayoutPlan {
-  const sections = plan.sections.map((s) => {
-    const key = sectionKey(s);
-    return change.placed.includes(key) ? { ...s, place: placeOn(plan.sections, key) ?? ("last" as const) } : s;
-  });
-  const placedPlan = { ...plan, sections };
-  const present = new Set(sections.map((s) => sectionKey(s)));
-  const pinned = [...pinKeys([...headPinned, ...change.placed], [])].filter((k) => present.has(k));
-  return composePlan(placedPlan, { signals: change.signals, stored: placedPlan, pinned, preferences: change.preferences });
-}
-
-/**
- * What a tool is about to say it did that the composed board does not bear
- * out, in words; empty when every claim holds. The check behind "no tool
- * answers that a change was applied when the next render will not show it":
- * a tool that gets anything back from here changes nothing and says why.
- */
-export function unmetClaims(
-  composed: LayoutPlan,
-  claims: { placedOn?: LayoutPlan; placed?: string[]; shown?: string[]; hidden?: string[] }
-): string[] {
-  const unmet: string[] = [];
-  const has = (key: string) => composed.sections.some((s) => sectionKey(s) === key);
-  for (const key of claims.placed ?? []) {
-    const want = claims.placedOn ? placeOn(claims.placedOn.sections, key) : null;
-    if (!has(key)) unmet.push(`"${key}" would not be on the dashboard`);
-    else if (want !== null && placeOn(composed.sections, key) !== want) unmet.push(`"${key}" would not be where it was put`);
+/** A `pin_section` preference whose section now carries a place is marked, and no longer read as a pin (left, not deleted). */
+export async function markPinPreferences(userId: string, placed: string[]): Promise<void> {
+  if (!placed.length) return;
+  const rows = await db.select().from(layoutPreferences).where(and(eq(layoutPreferences.userId, userId), eq(layoutPreferences.kind, "pin_section")));
+  for (const row of rows) {
+    const value = row.value as Record<string, string>;
+    if (value.migrated === "1" || !placed.includes(value.section)) continue;
+    await db.update(layoutPreferences).set({ value: { ...value, migrated: "1" } }).where(eq(layoutPreferences.id, row.id));
   }
-  for (const key of claims.shown ?? []) if (!has(key)) unmet.push(`"${key}" would not be on the dashboard`);
-  for (const key of claims.hidden ?? []) if (has(key)) unmet.push(`"${key}" would still be on the dashboard`);
-  return unmet;
-}
-
-/** Store a plan the user just changed, composed (composeUsersPlan), as the new head. */
-export async function saveUsersPlan(userId: string, plan: LayoutPlan, change: UsersChange): Promise<{ version: number; plan: LayoutPlan }> {
-  const head = await getPlanHead(userId);
-  const composed = composeUsersPlan(plan, change, head?.pinned ?? []);
-  const version = await savePlanAsHead(userId, composed, change.placed);
-  return { version, plan: composed };
-}
-
-/**
- * One-tap revert (SPEC §1 invariant 7): the previous plan becomes a new head
- * and the reverted head is labeled — every revert is a labeled wrong
- * prediction, our accuracy metric. The previous plan's PINS come back with
- * it (v1.02): a pin holds a place now, so the pin a move made must go when
- * the move is undone, or the section would hold its old place for good.
- */
-export async function revertPlan(userId: string): Promise<boolean> {
-  const rows = await db
-    .select()
-    .from(layoutSpecs)
-    .where(and(eq(layoutSpecs.userId, userId), eq(layoutSpecs.kind, "plan")))
-    .orderBy(desc(layoutSpecs.version))
-    .limit(2);
-  if (rows.length < 2) return false;
-  const [head, previous] = rows;
-  await db
-    .update(layoutSpecs)
-    .set({ outcome: "reverted" })
-    .where(eq(layoutSpecs.id, head.id));
-  await db.insert(layoutSpecs).values({
-    userId,
-    version: head.version + 1,
-    spec: previous.spec as LayoutPlan,
-    pinned: previous.pinned,
-    kind: "plan",
-    signalsHash: previous.signalsHash,
-    reasonSummary: previous.reasonSummary,
-    outcome: "accepted",
-  });
-  return true;
-}
-
-/** Pin/unpin a section key on the head plan row. */
-export async function setPinned(userId: string, key: string, pinned: boolean): Promise<boolean> {
-  const head = await getPlanHead(userId);
-  if (!head) return false;
-  const plan = head.spec as LayoutPlan;
-  if (pinned && !plan.sections.some((s) => sectionKey(s) === key)) return false;
-  const next = new Set(head.pinned);
-  if (pinned) next.add(key);
-  else next.delete(key);
-  await db
-    .update(layoutSpecs)
-    .set({ pinned: [...next] })
-    .where(eq(layoutSpecs.id, head.id));
-  return true;
 }

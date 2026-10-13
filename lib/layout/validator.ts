@@ -75,6 +75,17 @@ const bannedComponents = (prefs: LayoutPreference[]) =>
   new Set(prefs.filter((p) => p.kind === "ban_component").map((p) => p.value.component));
 
 /**
+ * A plan without the components he banned. The rules plan and the held one
+ * are read through this before they are judged (SPEC §2): a ban is his, and
+ * must not get the system's own plan refused. A planner's plan is still
+ * refused for carrying one (F7).
+ */
+export function withoutBanned(plan: LayoutPlan, prefs: LayoutPreference[]): LayoutPlan {
+  const banned = bannedComponents(prefs);
+  return banned.size ? { ...plan, sections: plan.sections.filter((s) => !banned.has(s.component)) } : plan;
+}
+
+/**
  * Strip banned components, and sections the user hid, out of a plan, so no
  * planner or fallback can bring them back.
  */
@@ -225,28 +236,29 @@ export function validatePlan(input: unknown, ctx: ValidationContext): Validation
  * reordering needs days_since_layout_change >= 1 AND a why on every moved
  * section, and same-day plans may not remove what the user saw today.
  *
- * Measured on the sections that are the system's to place (SPEC §3, v1.02):
- * not the project cards, which follow the data and are never "moved by the
- * system", and not the sections the user pinned, whose place is his and is
- * applied by the composition. A previous plan that is itself the default
- * (nobody arranged it) is measured as the NEW default (SEC-A007): a product
- * change to the default is not the planner moving things. A retired
- * component's section is not on anyone's screen, so its absence is not a
- * removal.
+ * The system is measured against the system (SPEC §2, v1.02 r5): only the
+ * sections that were the system's on the stored board AND are the system's
+ * now. Not the project cards, which follow the data; and not a section that
+ * changes hands in either direction (he places it, lets it go, hides it,
+ * shows it, bans it), so none of his own requests gets a plan refused or
+ * held. `plan` is the COMPOSED board: what he placed carries its place. A
+ * previous plan that is itself the default (nobody arranged it) is measured
+ * as the NEW default (SEC-A007): a product change to the default is not the
+ * planner moving things. A retired component's section is not on anyone's
+ * screen, so its absence is not a removal.
  */
 export function movementReasons(plan: LayoutPlan, ctx: ValidationContext): string[] {
   const reasons: string[] = [];
   const baseline = ctx.previousPlan?.plan_id === "default" ? ctx.defaultPlan : ctx.previousPlan;
   if (!baseline) return reasons;
-  // His: what he pinned, and what the composition holds at a place he gave
-  // it (a section he unpinned that is not a card stays at its stored place,
-  // SPEC §2). None of that is the system's to be rationed about.
-  const pins = new Set([
-    ...ctx.pinnedSections,
-    ...ctx.preferences.filter((p) => p.kind === "pin_section").map((p) => p.value.section),
-    ...placedKeys(ctx.previousPlan, ctx.pinnedSections, ctx.preferences),
-  ]);
-  const systems = (s: PlanSection) => s.component !== "project_card" && !pins.has(sectionKey(s));
+  const hisThen = placedKeys(ctx.previousPlan, ctx.pinnedSections, ctx.preferences, ctx.signals);
+  const hisNow = new Set(plan.sections.filter((s) => s.place !== undefined).map(sectionKey));
+  const banned = bannedComponents(ctx.preferences);
+  const hidden = new Set(ctx.preferences.filter((p) => p.kind === "hide_section").map((p) => p.value.section));
+  const systems = (s: PlanSection) => {
+    const key = sectionKey(s);
+    return s.component !== "project_card" && s.place === undefined && !hisThen.has(key) && !hisNow.has(key) && !hidden.has(key) && !banned.has(s.component);
+  };
   const prevKeys = baseline.sections.filter((s) => !RETIRED_COMPONENTS.has(s.component) && systems(s)).map(sectionKey);
   const newKeys = plan.sections.filter(systems).map(sectionKey);
   // Invariant 8: same-day system plans may add or re-emphasize, but

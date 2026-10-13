@@ -14,7 +14,9 @@ export const planSectionSchema = z
     // Where the user pinned it (SPEC §2, composition): the n-th section from
     // the top of the board, or its last place. Written by the app, never read
     // from a planner.
-    place: z.union([z.number().int().min(0), z.literal("last")]).optional(),
+    place: z
+      .union([z.object({ from: z.enum(["top", "bottom"]), n: z.number().int().min(0) }), z.number().int().min(0), z.literal("last")])
+      .optional(),
   })
   .strict();
 
@@ -45,8 +47,12 @@ export type PlanSection = {
   component: RegistryComponent | (string & {});
   props?: Record<string, unknown>;
   why?: string;
-  /** A pinned section's place on the board (SPEC §2): n-th from the top, the banner not counted, or last. */
-  place?: number | "last";
+  /**
+   * The place of a section he placed (SPEC §2): its position on the board he
+   * was last told, counted from the top or from the bottom, the banner not
+   * counted. A bare number or "last" is how rounds 3 and 4 wrote it (asPlace).
+   */
+  place?: Place | number | "last";
 };
 export type WishlistEntry = { need: string; closest_component: string; signals: string };
 export type LayoutPlan = {
@@ -121,7 +127,8 @@ const COMMITTED_WHY = " — you committed to this date";
 export function deadlineWhy(p: ProjectSignal): string | null {
   const days = calendarDays(p);
   if (days === null) return null;
-  const due = days <= 0 ? "Due today" : days === 1 ? "Due tomorrow" : `Due in ${days} days`;
+  // A committed date already past says how late it is, in the words the date beside it uses (lib/due.ts).
+  const due = days < 0 ? `${-days} ${days === -1 ? "day" : "days"} late` : days === 0 ? "Due today" : days === 1 ? "Due tomorrow" : `Due in ${days} days`;
   return `${due}${p.deadline_type === "committed" ? COMMITTED_WHY : ""}`;
 }
 
@@ -132,13 +139,27 @@ export function deadlineWhy(p: ProjectSignal): string | null {
  * plan served from the cache was written when the count was different.
  */
 export function isDeadlineWhy(why: string | undefined | null): boolean {
-  return !!why && /^Due (today|tomorrow|in \d+ days?)( — you committed to this date)?$/.test(why);
+  return !!why && /^(Due (today|tomorrow|in \d+ days?)|\d+ days? late)( — you committed to this date)?$/.test(why);
 }
 
+const BACK_ON_BOARD = "Back on your board: ";
 /** The why on a card the user hid that is back because its project is urgent (invariant 4, presence). */
 export function backOnBoardWhy(p: ProjectSignal): string {
   const late = typeof p.soonest_days === "number" && p.soonest_days < 0;
-  return late ? "Back on your board: it has late work" : "Back on your board: it is due within a week";
+  return `${BACK_ON_BOARD}${late ? "it has late work" : "it is due within a week"}`;
+}
+/** Whether a why is the composition's own "Back on your board": written again or dropped at each render, never read back. */
+export function isBackOnBoardWhy(why: string | undefined | null): boolean {
+  return !!why && why.startsWith(BACK_ON_BOARD);
+}
+
+/** A place on the board: the n-th section from the top, or from the bottom, the banner not counted. */
+export type Place = { from: "top" | "bottom"; n: number };
+/** A stored place as a Place: rounds 3 and 4 wrote a bare number (from the top) or "last". */
+export function asPlace(place: PlanSection["place"]): Place | null {
+  if (place === undefined || place === null) return null;
+  if (place === "last") return { from: "bottom", n: 0 };
+  return typeof place === "number" ? { from: "top", n: place } : place;
 }
 
 /**

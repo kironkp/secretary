@@ -1,63 +1,99 @@
-// Composition (SPEC §2, v1.02): a render is composed, not chosen.
+// Composition (SPEC §2, v1.02 r5): a render is composed, not chosen.
 //
-// What is on screen is put together at every render from four things:
-//   1. today's system plan: emphasis, whys, the banner, and the places of
-//      the sections that are not cards (whatever card order it has is ignored);
-//   2. the sections the user placed, put back where he put them;
-//   3. the cards he did not place, in data order, flowing around those;
-//   4. his hides and bans, then presence (a hidden card is back while its
+// What is on screen is put together at every render from:
+//   1. today's system plan: emphasis, whys, the banner, and the order of the
+//      sections that are not cards (whatever card order it has is ignored);
+//   2. everything that belongs: a card for every active project and list,
+//      every section of the default board, every section he added;
+//   3. the cards he did not place, in data order, in one run;
+//   4. what he placed, each at its place: a position on the board he was
+//      last told, counted from the top or from the bottom;
+//   5. his hides and bans, then presence (a hidden card is back while its
 //      project is urgent).
-// The stored plan supplies only where his pins sit. Pure: no I/O.
-import { backOnBoardWhy, cardOrder, deadlineWhy, isDeadlineWhy, isUrgent, sectionKey, type LayoutPlan, type PlanSection } from "./plan";
+// The stored board supplies, through this one door: the places written on
+// what he placed, and (when it is the system plan: a cache hit, or held) its
+// own order of the sections that are not cards. Composing the board that was
+// just stored gives that same board. Pure: no I/O.
+import {
+  asPlace,
+  backOnBoardWhy,
+  cardOrder,
+  deadlineWhy,
+  defaultPlan,
+  isBackOnBoardWhy,
+  isDeadlineWhy,
+  isUrgent,
+  sectionKey,
+  type LayoutPlan,
+  type Place,
+  type PlanSection,
+} from "./plan";
 import type { Signals } from "./signals";
 import type { LayoutPreference } from "./validator";
-
-export type Place = number | "last";
 
 const BANNER = "focus_banner";
 const isCard = (s: PlanSection) => s.component === "project_card";
 const cardKey = (projectId: string) => `project_card:${projectId}`;
+const bare = (s: PlanSection): PlanSection => ({ component: s.component, ...(s.props ? { props: s.props } : {}), ...(s.why ? { why: s.why } : {}) });
 
-/** The user's pins, wherever one is kept: on the plan's row, or as a pin_section preference. */
+/**
+ * His pins, wherever one is kept: on the stored row, or as a `pin_section`
+ * preference from before r5 that has not yet been given a place (once it
+ * has, the row is marked and no longer read: a pin has one home).
+ */
 export function pinKeys(pinned: string[], preferences: LayoutPreference[]): Set<string> {
-  return new Set([...pinned, ...preferences.filter((p) => p.kind === "pin_section").map((p) => p.value.section)]);
+  return new Set([...pinned, ...preferences.filter((p) => p.kind === "pin_section" && p.value.migrated !== "1").map((p) => p.value.section)]);
 }
 
-/** A section's place on a board: the n-th from the top, the banner not counted; the last one holds last. */
-export function placeOn(sections: PlanSection[], key: string): Place | null {
-  const board = sections.filter((s) => s.component !== BANNER);
-  const i = board.findIndex((s) => sectionKey(s) === key);
-  if (i === -1) return null;
-  return i === board.length - 1 ? "last" : i;
+/** The system's sections that belong above the card run: the default board's, before its first card. */
+function upperSections(signals: Signals): Set<string> {
+  const defaults = defaultPlan(signals).sections;
+  const firstCard = defaults.findIndex(isCard);
+  return new Set(defaults.slice(0, firstCard === -1 ? 3 : firstCard).map(sectionKey));
 }
 
 /**
- * Where each pinned section sits, from the stored plan: the place stored with
- * it when it was pinned, or, the first time it is seen pinned (the pin
- * button records only the key), where it stands in the stored order. Once
- * read it is written back with the section, so it does not drift when cards
- * come and go.
+ * The places of what he placed, read off a board he was told. A place counts
+ * from the bottom when nothing upper stands below it on that board (upper: a
+ * card he has not placed, or a system section that belongs above the cards),
+ * otherwise from the top. So "to the bottom" stays the bottom when a project
+ * is added, and places on one board are always distinct.
  */
-function placesIn(stored: LayoutPlan | null, pins: Set<string>): Map<string, { place: Place; section: PlanSection }> {
-  const found = new Map<string, { place: Place; section: PlanSection }>();
-  for (const s of stored?.sections ?? []) {
+export function readPlaces(sections: PlanSection[], placed: Set<string>, signals: Signals): Map<string, Place> {
+  const board = sections.filter((s) => s.component !== BANNER);
+  const above = upperSections(signals);
+  const upper = (s: PlanSection) => !placed.has(sectionKey(s)) && (isCard(s) || above.has(sectionKey(s)));
+  const places = new Map<string, Place>();
+  board.forEach((s, i) => {
     const key = sectionKey(s);
-    if (found.has(key) || s.component === BANNER) continue;
-    // Pinned; or a section that is not a card and still carries the place he
-    // gave it. Unpinning a card lets it follow the data again; another
-    // section has nowhere to follow to yet, so its place goes on holding it
-    // until he moves it, hides it or undoes the move (SPEC §2, a stated
-    // limit: it goes back by itself in 1.06).
-    if (!pins.has(key) && (isCard(s) || s.place === undefined)) continue;
-    const place = s.place ?? placeOn(stored!.sections, key);
-    if (place !== null) found.set(key, { place, section: s });
+    if (!placed.has(key) || places.has(key)) return;
+    places.set(key, board.slice(i + 1).some(upper) ? { from: "top", n: i } : { from: "bottom", n: board.length - 1 - i });
+  });
+  return places;
+}
+
+/**
+ * Where each section he placed sits, from the stored board: the place written
+ * on it. A pin with no place written (a row from before r5, or a preference
+ * pin) is read ONCE from where the section stands in the stored order; the
+ * composition writes it back, so it is never read from the order again.
+ */
+function placesIn(stored: LayoutPlan | null, pins: Set<string>, signals: Signals): Map<string, { place: Place; section: PlanSection }> {
+  const found = new Map<string, { place: Place; section: PlanSection }>();
+  if (!stored) return found;
+  let fromOrder: Map<string, Place> | null = null;
+  for (const s of stored.sections) {
+    const key = sectionKey(s);
+    if (!pins.has(key) || found.has(key) || s.component === BANNER) continue;
+    const place = asPlace(s.place) ?? (fromOrder ??= readPlaces(stored.sections, pins, signals)).get(key);
+    if (place) found.set(key, { place, section: s });
   }
   return found;
 }
 
-/** The sections he placed that the stored plan still has: the ones the composition puts back. */
-export function placedKeys(stored: LayoutPlan | null, pinned: string[], preferences: LayoutPreference[]): Set<string> {
-  return new Set(placesIn(stored, pinKeys(pinned, preferences)).keys());
+/** The sections he placed that the stored board still has: the ones the composition puts back. */
+export function placedKeys(stored: LayoutPlan | null, pinned: string[], preferences: LayoutPreference[], signals: Signals): Set<string> {
+  return new Set(placesIn(stored, pinKeys(pinned, preferences), signals).keys());
 }
 
 /**
@@ -65,7 +101,7 @@ export function placedKeys(stored: LayoutPlan | null, pinned: string[], preferen
  * what he placed (those are put back afterwards, each at its place). Every
  * system plan is read through this, the held one included
  * (lib/layout/plan-from-llm.ts), so one rule decides where the card run
- * goes: a card he pinned never says.
+ * goes: a card he placed never says.
  */
 export function ownSections(sections: PlanSection[], placed: Set<string>): PlanSection[] {
   return sections.filter((s) => s.component !== BANNER && !placed.has(sectionKey(s)));
@@ -73,10 +109,9 @@ export function ownSections(sections: PlanSection[], placed: Set<string>): PlanS
 
 /**
  * Where the card run goes among a plan's own sections that are not cards:
- * after how many of them. Its first own card says, unless that card carries
- * a place: a card he pinned and then let go is still sitting where he put
- * it in the stored plan, and says nothing about the run. A plan with no such
- * card has the run where the default has it, under the strip.
+ * after how many of them. Its first own card says, unless that card still
+ * carries a place (one he let go, not yet composed again). A plan with no
+ * such card has the run where the default has it, under the strip.
  */
 export function runPlace(own: PlanSection[]): number {
   const others = own.filter((s) => !isCard(s));
@@ -87,8 +122,7 @@ export function runPlace(own: PlanSection[]): number {
 
 /**
  * The banner is first, whatever a request did above it: "the top" is under
- * the banner for both tools. Left second, the validator drops it ("not at
- * top") and a move to the first place would lose the banner.
+ * the banner for both tools.
  */
 export function bannerFirst(sections: PlanSection[]): PlanSection[] {
   const banner = sections.find((s) => s.component === BANNER);
@@ -96,84 +130,107 @@ export function bannerFirst(sections: PlanSection[]): PlanSection[] {
   return [banner, ...sections.filter((s) => s !== banner)];
 }
 
+/**
+ * A section's default place on a board that lacks it: just under the nearest
+ * section the default board has above it that is on this board. "Where the
+ * system has it" for a section shown again, unpinned, or left out.
+ */
+export function defaultPlaceFor(sections: PlanSection[], section: PlanSection, defaults: PlanSection[]): number {
+  const order = defaults.map((s) => sectionKey(s));
+  const here = order.indexOf(sectionKey(section));
+  if (here === -1) return sections.length;
+  for (let i = here - 1; i >= 0; i--) {
+    const at = sections.findIndex((s) => sectionKey(s) === order[i]);
+    if (at !== -1) return at + 1;
+  }
+  return sections[0]?.component === BANNER ? 1 : 0;
+}
+
 export type CompositionContext = {
   signals: Signals;
-  /** The stored plan: where his pins sit, and the spec of a section he added. */
+  /** The stored board: the places written on what he placed, and the spec of a section he added. */
   stored: LayoutPlan | null;
-  /** The pins kept on the stored plan's row. */
+  /** The keys of what he placed, kept on the stored row. */
   pinned: string[];
   preferences: LayoutPreference[];
 };
 
 /** Compose what renders from today's system plan and what the user placed, hid and banned. */
 export function composePlan(system: LayoutPlan, ctx: CompositionContext): LayoutPlan {
-  const pins = pinKeys(ctx.pinned, ctx.preferences);
-  const places = placesIn(ctx.stored, pins);
+  const places = placesIn(ctx.stored, pinKeys(ctx.pinned, ctx.preferences), ctx.signals);
+  const placed = new Set(places.keys());
   const hidden = new Set(ctx.preferences.filter((p) => p.kind === "hide_section").map((p) => p.value.section));
   const banned = new Set(ctx.preferences.filter((p) => p.kind === "ban_component").map((p) => p.value.component));
   const gone = (s: PlanSection) => banned.has(s.component) || hidden.has(sectionKey(s));
 
   // Cards: one for every active project and list unless he hid it (and a
-  // hidden one too while its project is urgent), with today's emphasis.
+  // hidden one too while its project is urgent), with today's emphasis. A
+  // why the composition itself wrote on an earlier render is never read back
+  // as the system's: the count under a deadline is today's, and "Back on
+  // your board" is said only while it is true.
   const emphasis = new Map(system.sections.filter(isCard).map((s) => [String(s.props?.project_id ?? ""), s]));
-  const projects = ctx.signals.projects.filter((p) => !p.parent_id).toSorted(cardOrder);
   const cards = new Map<string, PlanSection>();
-  for (const p of projects) {
+  for (const p of ctx.signals.projects.filter((x) => !x.parent_id).toSorted(cardOrder)) {
     const key = cardKey(p.id);
     const back = hidden.has(key) && isUrgent(p);
     if (banned.has("project_card") || (hidden.has(key) && !back)) continue;
     const from = emphasis.get(p.id);
-    // A why that counts days is today's count, whatever plan it came from: a
-    // stored plan is served from the cache as long as days_left has not
-    // moved, and that ticks at the hour the task is due, not at midnight.
-    const counted = isDeadlineWhy(from?.why) ? deadlineWhy(p) : null;
-    const why = back ? backOnBoardWhy(p) : (counted ?? from?.why);
-    cards.set(key, {
-      component: "project_card",
-      props: { variant: "full", ...(from?.props ?? {}), project_id: p.id },
-      ...(why ? { why } : {}),
-    });
+    const systems = isBackOnBoardWhy(from?.why) ? undefined : isDeadlineWhy(from?.why) ? (deadlineWhy(p) ?? from?.why) : from?.why;
+    const why = back ? backOnBoardWhy(p) : systems;
+    cards.set(key, { component: "project_card", props: { variant: "full", ...(from?.props ?? {}), project_id: p.id }, ...(why ? { why } : {}) });
   }
-  const run = [...cards].filter(([key]) => !places.has(key)).map(([, card]) => card);
 
-  // The unpinned sequence: the system's own sections that are not cards, in
-  // the system's order, with the card run where its first own card sits.
-  // What he placed is put in afterwards, each at its place.
-  const own = ownSections(system.sections, new Set(places.keys()));
+  // The system's own sections that are not cards, in the system's order, with
+  // the card run where its first own card sits. A section that still carries
+  // a place and is no longer his is not where the system has it: it is left
+  // out here and, if it belongs, drawn at its default place below.
+  const own = ownSections(system.sections, placed);
   const at = runPlace(own);
   const others = own.filter((s) => !isCard(s));
-  const shown = (list: PlanSection[]): PlanSection[] =>
-    list
-      .filter((s) => !gone(s))
-      .map((s) => ({ component: s.component, ...(s.props ? { props: s.props } : {}), ...(s.why ? { why: s.why } : {}) }));
-  const sequence: PlanSection[] = [...shown(others.slice(0, at)), ...run, ...shown(others.slice(at))];
+  const shown = (list: PlanSection[]) => list.filter((s) => !gone(s) && s.place === undefined).map(bare);
+  const flow: PlanSection[] = [...shown(others.slice(0, at)), ...[...cards].filter(([key]) => !placed.has(key)).map(([, card]) => card), ...shown(others.slice(at))];
 
-  // The sections he placed, lowest place first; with fewer sections than its
-  // place, a section is last. What he placed stays; the system's own moves
-  // land around it. Two he placed at the same place keep the order the stored
-  // plan has them in: the one placed later took the place, the earlier one
-  // sits next to it (so the later of the two goes in last).
+  // Everything that belongs is drawn: a section of the default board that the
+  // system's plan (or the stored board) lacks goes in at its default place.
+  const defaults = defaultPlan(ctx.signals).sections;
+  for (const d of defaults) {
+    const key = sectionKey(d);
+    if (isCard(d) || d.component === BANNER || gone(d) || placed.has(key) || flow.some((s) => sectionKey(s) === key)) continue;
+    flow.splice(defaultPlaceFor(flow, d, defaults), 0, bare(d));
+  }
+
+  // What he placed, each at its place. A place is a position only: a card's
+  // emphasis is today's, a section the system also has takes today's props,
+  // and one he added keeps its own.
   const today = new Map(system.sections.filter((s) => !isCard(s)).map((s) => [sectionKey(s), s]));
-  const inStoredOrder = [...places].map((entry, at) => ({ entry, at }));
-  const numbered = inStoredOrder
-    .filter(({ entry }) => entry[1].place !== "last")
-    .sort((a, b) => (a.entry[1].place as number) - (b.entry[1].place as number) || b.at - a.at)
-    .map(({ entry }) => entry);
-  const last = [...places].filter(([, v]) => v.place === "last");
-  for (const [key, { place, section }] of [...numbered, ...last]) {
-    // A pin holds the place only: a card's emphasis is today's, a section the
-    // system also has takes today's props, and one he added keeps its own.
+  const his: { place: Place; section: PlanSection }[] = [];
+  for (const [key, { place, section }] of places) {
     const content = isCard(section) ? cards.get(key) : (today.get(key) ?? section);
     if (!content || (!isCard(section) && gone(content))) continue;
-    const placed: PlanSection = { component: content.component, ...(content.props ? { props: content.props } : {}), ...(content.why ? { why: content.why } : {}), place };
-    sequence.splice(place === "last" ? sequence.length : Math.min(place, sequence.length), 0, placed);
+    his.push({ place, section: { ...bare(content), place } });
+  }
+  // Top-counted in place order, each at its place; then bottom-counted, each
+  // at its place from the end. On a board too short for a place they keep
+  // the order he was told: none goes in front of one already put in.
+  const total = flow.length + his.length;
+  const sequence = [...flow];
+  let last = -1;
+  for (const { place, section } of his.filter((h) => h.place.from === "top").toSorted((a, b) => a.place.n - b.place.n)) {
+    const index = Math.max(Math.min(place.n, sequence.length), last + 1);
+    sequence.splice(index, 0, section);
+    last = index;
+  }
+  for (const { place, section } of his.filter((h) => h.place.from === "bottom").toSorted((a, b) => b.place.n - a.place.n)) {
+    const index = Math.max(Math.min(total - 1 - place.n, sequence.length), last + 1);
+    sequence.splice(index, 0, section);
+    last = index;
   }
 
   const banner = system.sections.find((s) => s.component === BANNER && !gone(s));
   return {
     plan_id: system.plan_id,
     reason_summary: system.reason_summary ?? null,
-    sections: [...(banner ? [{ component: banner.component, ...(banner.props ? { props: banner.props } : {}), ...(banner.why ? { why: banner.why } : {}) }] : []), ...sequence],
+    sections: [...(banner ? [bare(banner)] : []), ...sequence],
     ...(system.wishlist ? { wishlist: system.wishlist } : {}),
   };
 }

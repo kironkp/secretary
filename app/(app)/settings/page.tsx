@@ -17,7 +17,9 @@ import { LayoutPreferences } from "@/components/settings/layout-preferences";
 import { ProposalReview } from "@/components/settings/proposal-review";
 import { SassSlider } from "@/components/settings/sass-slider";
 import { VoicePicker } from "@/components/settings/voice-picker";
-import { layoutPreferences } from "@/lib/db/schema";
+import { layoutPreferences, projects } from "@/lib/db/schema";
+import { nameOfKey } from "@/lib/layout/names";
+import { getPlanHead } from "@/lib/layout/plan-store";
 import { PasskeySection } from "@/components/settings/passkey-section";
 import { ShopRequests } from "@/components/settings/shop-requests";
 import { shopVisible } from "@/lib/shop/visible";
@@ -31,7 +33,7 @@ export default async function SettingsPage() {
   if (!session) redirect("/sign-in");
 
   const timezone = (session.user as { timezone?: string }).timezone ?? "UTC";
-  const [[userRow], prefRows, spend, allTime] = await Promise.all([
+  const [[userRow], storedPrefs, spend, allTime, head, projectRows] = await Promise.all([
     db
       .select({ calmMode: user.calmMode, persona: user.persona })
       .from(user)
@@ -42,7 +44,18 @@ export default async function SettingsPage() {
       .where(eq(layoutPreferences.userId, session.user.id)),
     spendReport(session.user.id, spendWindow("month", 0, timezone), timezone),
     spendAllTime(session.user.id),
+    getPlanHead(session.user.id),
+    db.select({ id: projects.id, name: projects.name, kind: projects.kind }).from(projects).where(eq(projects.userId, session.user.id)),
   ]);
+  // A pin has one home: the place on the board (SPEC §2). What he placed is
+  // listed from the stored board, by name; an old `pin_section` row is not.
+  const names = new Map(projectRows.map((p) => [p.id, p]));
+  const prefRows = [
+    ...storedPrefs
+      .filter((p) => p.kind !== "pin_section")
+      .map((p) => (p.kind === "hide_section" ? { ...p, value: { ...p.value, name: nameOfKey(p.value.section, names) } } : p)),
+    ...(head?.pinned ?? []).map((key) => ({ id: `placed:${key}`, kind: "placed", value: { section: key, name: nameOfKey(key, names) } })),
+  ];
 
   return (
     <div className="mx-auto max-w-xl space-y-6 py-6">

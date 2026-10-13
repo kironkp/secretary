@@ -1,42 +1,18 @@
-// "Put the shopping list at the top of the dashboard" (SEC-A003, 2026-10-06):
-// the user's words → section keys → the board as they asked, at once, with no
-// model call for the geometry. The voice session had no layout tool at all,
-// so it answered "Sure, let me move that" and then "I can't move the
-// dashboard sections with the tools I have right now."
-//
-// User-initiated (validator invariant 3): no movement rationing. What the
-// user placed is pinned, so the background planner cannot move it back, and
-// "hide" is a hide_section preference, so no planner brings it back either.
-// Structural rules still hold: an urgent project's card cannot be hidden.
-import { and, eq, ne, sql } from "drizzle-orm";
+// arrange_dashboard: the user moves, hides and shows sections of the Overview
+// by NAME ("put the shopping list at the top"), by voice or in the chat. It
+// turns what was said into plain operations and hands them to the one
+// function every request goes through (lib/layout/request.ts, SPEC §2).
+import { and, eq, ne } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { layoutPreferences, projects } from "@/lib/db/schema";
+import { projects } from "@/lib/db/schema";
 import { titleSimilarity } from "@/lib/secretary/dedupe";
-import { composeUsersPlan, computeCurrentPlan, getPreferences, saveUsersPlan, unmetClaims } from "./plan-store";
-import { bannerFirst } from "./compose";
+import { COMPONENT_NAMES, namesOf, type NamedProject } from "./names";
 import { defaultPlan, sectionKey, type LayoutPlan, type PlanSection } from "./plan";
-import { listDynamicComponents } from "./slow-loop";
-import { validatePlan } from "./validator";
+import { computeCurrentPlan, getPreferences } from "./plan-store";
+import { requestBoard, type BoardOp } from "./request";
 
 export const ARRANGE_OPS = ["move_to_top", "move_up", "move_down", "move_to_bottom", "hide", "show"] as const;
 export type ArrangeOp = { op: (typeof ARRANGE_OPS)[number]; section: string };
-
-/** What people call each section, first name first. */
-const COMPONENT_NAMES: Record<string, string[]> = {
-  focus_banner: ["banner", "focus banner"],
-  hero_next_up: ["next up", "up next", "what's next", "hero"],
-  stat_row: ["stats", "numbers", "stat row", "counts"],
-  // The projects progress strip since registry v3 (SEC-A007); the first name
-  // is what a read-back says ("Done: hid project progress.").
-  timeline: ["project progress", "progress", "progress strip", "projects strip", "timeline"],
-  date_chase: ["needs a date", "no date", "date chase", "undated"],
-  people_index: ["people", "people index", "contacts"],
-  documents: ["documents", "docs"],
-  coming_up: ["coming up", "upcoming"],
-  kanban: ["kanban", "board"],
-  procrastination_zone: ["procrastination", "putting off", "procrastinating"],
-  suggested_zone: ["suggestions", "suggested"],
-};
 
 type Named = { key: string; names: string[]; section: PlanSection };
 
@@ -72,188 +48,67 @@ function pick(words: string, candidates: Named[]): { hit: Named } | { error: str
   return { error: `"${words}" could be ${top.map((t) => t.c.names[0]).join(" or ")}. Which one?` };
 }
 
-/**
- * Where a section that is being shown again goes when nothing recorded where
- * it was: its place on the default board, just under the nearest section the
- * default has above it that is on this board. Showing is not placing, so it
- * must land where the system has it; left at the end, it would be held there
- * (SPEC §2, the stated limit: what is not pinned and not a card does not go
- * back by itself).
- */
-export function defaultPlaceFor(sections: PlanSection[], section: PlanSection, defaults: PlanSection[]): number {
-  const order = defaults.map((s) => sectionKey(s));
-  const here = order.indexOf(sectionKey(section));
-  if (here === -1) return sections.length;
-  for (let i = here - 1; i >= 0; i--) {
-    const at = sections.findIndex((s) => sectionKey(s) === order[i]);
-    if (at !== -1) return at + 1;
-  }
-  return sections[0]?.component === "focus_banner" ? 1 : 0;
-}
-
 export type ArrangeResult =
   | { ok: true; version: number; sections: string[]; changed: string[] }
   | { ok: false; error: string };
 
 /** Apply the user's moves to the board they see now, and keep them there. */
 export async function arrangeDashboard(userId: string, ops: ArrangeOp[]): Promise<ArrangeResult> {
-  const [bundle, prefs, projectRows, dynamic] = await Promise.all([
+  const [bundle, prefs, projectRows] = await Promise.all([
     computeCurrentPlan(userId),
     getPreferences(userId),
     db
       .select({ id: projects.id, name: projects.name, kind: projects.kind })
       .from(projects)
       .where(and(eq(projects.userId, userId), ne(projects.status, "archived"))),
-    listDynamicComponents(userId),
   ]);
-  const current = bundle.plan;
-  const sections: PlanSection[] = structuredClone(current.sections);
-  const byId = new Map(projectRows.map((p) => [p.id, p]));
-
-  const named = (s: PlanSection): Named => {
-    const key = sectionKey(s);
-    if (s.component === "project_card") {
-      const p = byId.get(String(s.props?.project_id));
-      const name = p?.name ?? "project";
-      const names = p?.kind === "list" ? [`${name} list`, name] : [name, `${name} project`];
-      return { key, names, section: s };
-    }
-    return { key, names: COMPONENT_NAMES[s.component] ?? [s.component.replaceAll("_", " ")], section: s };
-  };
-  // What "show" can bring back: every project, and every section of the default board.
-  const offBoard = (): Named[] => {
-    const here = new Set(sections.map((s) => sectionKey(s)));
+  const byId = new Map<string, NamedProject>(projectRows.map((p) => [p.id, p]));
+  const named = (s: PlanSection): Named => ({ key: sectionKey(s), names: namesOf(s, byId), section: s });
+  // What is on the board, and what could be brought onto it: what he hid,
+  // every project's card, every section of the default board.
+  const here = new Map(bundle.plan.sections.map((s) => [sectionKey(s), s]));
+  const hidden = prefs.filter((p) => p.kind === "hide_section").map((p) => p.value.section);
+  const away = (): Named[] => {
     const all: PlanSection[] = [
       ...projectRows.map((p): PlanSection => ({ component: "project_card", props: { project_id: p.id, variant: "full" } })),
       ...defaultPlan(bundle.signals).sections.filter((s) => s.component !== "project_card"),
+      ...hidden.filter((key) => !key.startsWith("project_card:")).map((key): PlanSection => ({ component: key })),
     ];
-    return all.filter((s) => !here.has(sectionKey(s))).map(named);
+    const seen = new Set<string>();
+    return all.filter((s) => !here.has(sectionKey(s)) && !seen.has(sectionKey(s)) && seen.add(sectionKey(s))).map(named);
   };
 
-  const pins = new Set<string>();
-  /** What the request leaves each section it names as, the last word winning. */
-  const last = new Map<string, "hidden" | "shown" | "placed">();
-  const hide: string[] = [];
-  const unhide: string[] = [];
+  const request: BoardOp[] = [];
   const changed: string[] = [];
-  // Hidden sections and where each was when it was hidden, so "show" puts it back there.
-  const hiddenAt = new Map(
-    prefs.filter((p) => p.kind === "hide_section").map((p) => [p.value.section, Number(p.value.at ?? NaN)])
-  );
-  const hiddenNow = new Set(hiddenAt.keys());
-  const hideAt = new Map<string, number>();
-
   for (const op of ops) {
     let hit: Named;
-    const onBoard = pick(op.section, sections.map(named));
+    const onBoard = pick(op.section, [...here.values()].map(named));
     if ("hit" in onBoard) hit = onBoard.hit;
     else if (op.op === "hide") return { ok: false, error: onBoard.error };
     else {
-      // "Show the timeline", or "put the shopping list at the top" when it
-      // isn't on the board yet: bring it onto the board first, where it was
-      // when it was hidden if it was.
-      const away = pick(op.section, offBoard());
-      if (!("hit" in away)) return { ok: false, error: onBoard.error };
-      hit = away.hit;
-      const was = hiddenAt.get(hit.key);
-      const at =
-        was !== undefined && Number.isFinite(was)
-          ? Math.min(was, sections.length)
-          : defaultPlaceFor(sections, hit.section, defaultPlan(bundle.signals).sections);
-      sections.splice(at, 0, hit.section);
+      // "Show the timeline", or "put the shopping list at the top" when it is not on the board yet.
+      const off = pick(op.section, away());
+      if (!("hit" in off)) return { ok: false, error: onBoard.error };
+      hit = off.hit;
     }
-    if (hiddenNow.has(hit.key) && op.op !== "hide") unhide.push(hit.key);
-    last.set(hit.key, op.op === "hide" ? "hidden" : op.op === "show" ? "shown" : "placed");
-
-    const idx = sections.findIndex((s) => sectionKey(s) === hit.key);
     if (op.op === "hide") {
-      sections.splice(idx, 1);
-      hide.push(hit.key);
-      hideAt.set(hit.key, idx);
-      pins.delete(hit.key);
+      request.push({ op: "hide", key: hit.key });
+      here.delete(hit.key);
       changed.push(`hid ${hit.names[0]}`);
-      continue;
-    }
-    if (op.op === "show") {
-      // Showing is not placing (SPEC §2): a card he un-hid goes where the
-      // data puts it, a section where the system has it. Only a move pins.
+    } else if (op.op === "show") {
+      request.push({ op: "show", key: hit.key });
+      here.set(hit.key, hit.section);
       changed.push(`showed ${hit.names[0]}`);
-      continue;
-    }
-    const [moved] = sections.splice(idx, 1);
-    // "The top" is just under a banner. That is said in one place for both
-    // tools (bannerFirst, where the candidate is built), not worked out here.
-    const to =
-      op.op === "move_to_top"
-        ? 0
-        : op.op === "move_to_bottom"
-          ? sections.length
-          : op.op === "move_up"
-            ? Math.max(0, idx - 1)
-            : Math.min(sections.length, idx + 1);
-    sections.splice(to, 0, moved);
-    pins.add(hit.key);
-    const where = { move_to_top: "to the top", move_to_bottom: "to the bottom", move_up: "up", move_down: "down" }[op.op];
-    changed.push(`moved ${hit.names[0]} ${where}`);
-  }
-
-  const candidate: LayoutPlan = {
-    plan_id: `user-${Date.now().toString(36)}`,
-    // The user's own arrangement: no planner's reason over it (SEC-A003b).
-    reason_summary: null,
-    sections: bannerFirst(sections),
-  };
-  // User-initiated: no movement rationing, no pins against the user's own
-  // move; the structural invariants still hold.
-  const v = validatePlan(candidate, {
-    signals: bundle.signals,
-    previousPlan: current,
-    preferences: prefs.filter((p) => p.kind !== "hide_section"),
-    pinnedSections: [],
-    defaultPlan: defaultPlan(bundle.signals),
-    userInitiated: true,
-    dynamicComponents: dynamic.map((d) => d.name),
-  });
-  if (!v.ok) return { ok: false, error: `That would break a dashboard rule: ${v.reasons.join("; ")}. Nothing was changed.` };
-
-  // What is true at the end of the request: hidden and then shown in one
-  // breath is shown.
-  const hidden = hide.filter((key, i) => last.get(key) === "hidden" && hide.indexOf(key) === i);
-  const lifted = unhide.filter((key) => last.get(key) !== "hidden");
-  // Before anything is written: the board as it will render after this
-  // change must bear out everything about to be said (SPEC §2).
-  const change = {
-    signals: bundle.signals,
-    placed: [...pins],
-    preferences: [
-      ...prefs.filter((p) => !(p.kind === "hide_section" && lifted.includes(p.value.section))),
-      ...hidden.filter((key) => !hiddenNow.has(key)).map((key) => ({ kind: "hide_section" as const, value: { section: key } })),
-    ],
-  };
-  const unmet = unmetClaims(composeUsersPlan(v.plan, change, bundle.pinned), {
-    placedOn: v.plan,
-    placed: change.placed,
-    shown: [...last].filter(([key, state]) => state === "shown" && !pins.has(key)).map(([key]) => key),
-    hidden,
-  });
-  if (unmet.length) return { ok: false, error: `That would not show on the dashboard: ${unmet.join("; ")}. Nothing was changed.` };
-
-  for (const key of lifted) {
-    await db
-      .delete(layoutPreferences)
-      .where(and(eq(layoutPreferences.userId, userId), eq(layoutPreferences.kind, "hide_section"), sql`${layoutPreferences.value}->>'section' = ${key}`));
-  }
-  for (const key of hidden) {
-    if (!hiddenNow.has(key)) {
-      await db
-        .insert(layoutPreferences)
-        .values({ userId, kind: "hide_section", value: { section: key, at: String(hideAt.get(key) ?? "") } });
+    } else {
+      const to = ({ move_to_top: "top", move_to_bottom: "bottom", move_up: "up", move_down: "down" } as const)[op.op];
+      request.push({ op: "move", key: hit.key, to });
+      here.set(hit.key, hit.section);
+      changed.push(`moved ${hit.names[0]} ${{ top: "to the top", bottom: "to the bottom", up: "up", down: "down" }[to]}`);
     }
   }
-  // Stored as it will render: what he moved is pinned at its place, and the
-  // cards he did not place are where the data puts them (SPEC §2).
-  const saved = await saveUsersPlan(userId, v.plan, change);
-  return { ok: true, version: saved.version, sections: saved.plan.sections.map((s) => named(s).names[0]), changed };
+  const reply = await requestBoard(userId, { ops: request });
+  if (!reply.ok) return { ok: false, error: reply.error };
+  return { ok: true, version: reply.version, sections: reply.plan.sections.map((s) => named(s).names[0]), changed };
 }
 
 /** The board's sections as people call them, top to bottom (for the briefing). */

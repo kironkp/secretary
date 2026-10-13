@@ -8,7 +8,8 @@ import { db } from "@/lib/db";
 import { layoutPreferences, layoutSpecs, user as userTable } from "@/lib/db/schema";
 import { isErrorResponse, parseBody, requireSession } from "@/lib/api";
 import { getLayoutHead } from "@/lib/layout/generator";
-import { getPlanHead, revertPlan, setPinned } from "@/lib/layout/plan-store";
+import { getPlanHead } from "@/lib/layout/plan-store";
+import { requestBoard } from "@/lib/layout/request";
 
 const PLAN_MODE = process.env.ADAPTIVE_V2 === "true";
 
@@ -41,6 +42,13 @@ export async function POST(req: Request) {
   }
 
   if (parsed.action === "remove_preference") {
+    if (PLAN_MODE) {
+      // A request like the others (SPEC §2): the preference goes, the board is
+      // worked out again with it gone, stored, and that is the next open.
+      const [own] = await db.select({ id: layoutPreferences.id }).from(layoutPreferences).where(and(eq(layoutPreferences.userId, user.id), eq(layoutPreferences.id, parsed.id)));
+      if (own) await requestBoard(user.id, { liftPreference: own.id });
+      return NextResponse.json({ ok: true });
+    }
     await db
       .delete(layoutPreferences)
       .where(and(eq(layoutPreferences.userId, user.id), eq(layoutPreferences.id, parsed.id)));
@@ -48,15 +56,17 @@ export async function POST(req: Request) {
   }
 
   if (PLAN_MODE) {
+    // Put it back and the pin button are requests like any other (SPEC §2):
+    // one function works the board out, checks it, writes it and answers.
     if (parsed.action === "revert") {
-      const ok = await revertPlan(user.id);
-      if (!ok) return NextResponse.json({ error: "Nothing to revert to" }, { status: 404 });
+      const reply = await requestBoard(user.id, { revert: true });
+      if (!reply.ok) return NextResponse.json({ error: reply.error }, { status: 404 });
       return NextResponse.json({ ok: true });
     }
     const head = await getPlanHead(user.id);
     if (!head) return NextResponse.json({ error: "No layout yet" }, { status: 404 });
-    const ok = await setPinned(user.id, parsed.component, parsed.pinned);
-    if (!ok) return NextResponse.json({ error: "Unknown section" }, { status: 400 });
+    const reply = await requestBoard(user.id, { ops: [{ op: parsed.pinned ? "pin" : "unpin", key: parsed.component }] });
+    if (!reply.ok) return NextResponse.json({ error: reply.error }, { status: 400 });
     const fresh = await getPlanHead(user.id);
     return NextResponse.json({ ok: true, pinned: fresh?.pinned ?? [] });
   }

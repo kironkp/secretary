@@ -16,8 +16,10 @@ function describe(p: PreferenceRow): string {
   switch (p.kind) {
     case "ban_component":
       return `Never show ${p.value.component?.replaceAll("_", " ")}`;
-    case "pin_section":
-      return `Keep ${p.value.section?.replaceAll("_", " ")} where it is`;
+    case "placed":
+      return `Keep ${p.value.name} where you put it`;
+    case "hide_section":
+      return `Hide ${p.value.name}`;
     case "default_variant_for":
       return `Always show ${p.value.project} as ${p.value.variant}`;
     case "accent_policy":
@@ -30,15 +32,23 @@ function describe(p: PreferenceRow): string {
 export function LayoutPreferences({ initial }: { initial: PreferenceRow[] }) {
   const router = useRouter();
   const [rows, setRows] = useState(initial);
+  const [refused, setRefused] = useState<string | null>(null);
 
-  const remove = async (id: string) => {
-    setRows((r) => r.filter((row) => row.id !== id));
+  const remove = async (row: PreferenceRow) => {
+    setRefused(null);
+    setRows((r) => r.filter((other) => other.id !== row.id));
+    // Letting go of something he placed is a request about the board, the
+    // same one the pin button makes; the rest are stored preferences.
     const res = await fetch("/api/layout", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "remove_preference", id }),
+      body: JSON.stringify(row.kind === "placed" ? { action: "pin", component: row.value.section, pinned: false } : { action: "remove_preference", id: row.id }),
     });
-    if (res.ok) router.refresh();
+    if (res.ok) return router.refresh();
+    // Refused (a section he added stays placed): the row is back, with why.
+    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    setRows(initial);
+    setRefused(body?.error ?? "That could not be removed.");
   };
 
   if (!rows.length) {
@@ -51,6 +61,7 @@ export function LayoutPreferences({ initial }: { initial: PreferenceRow[] }) {
   }
   return (
     <ul className="space-y-2">
+      {refused && <li className="text-xs text-muted">{refused}</li>}
       {rows.map((p) => (
         <li
           key={p.id}
@@ -58,7 +69,7 @@ export function LayoutPreferences({ initial }: { initial: PreferenceRow[] }) {
         >
           <span className="text-sm">{describe(p)}</span>
           <button
-            onClick={() => remove(p.id)}
+            onClick={() => remove(p)}
             title="Remove this preference"
             className="text-muted transition-colors hover:text-ink"
           >

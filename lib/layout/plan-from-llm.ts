@@ -11,7 +11,7 @@ import { composePlan, ownSections, placedKeys, runPlace } from "./compose";
 import { defaultPlan, type LayoutPlan, type PlanSection } from "./plan";
 import { planFromRules } from "./plan-from-rules";
 import { signalsHash, type Signals } from "./signals";
-import { movementReasons, validatePlan, type LayoutPreference } from "./validator";
+import { movementReasons, validatePlan, withoutBanned, type LayoutPreference } from "./validator";
 
 export type PlannerCall = (systemPrompt: string, signalsJson: string) => Promise<string>;
 
@@ -147,8 +147,10 @@ export async function planWithFallback(
   const accept = (raw: unknown): { system: LayoutPlan; composed: LayoutPlan } | null => {
     const v = validatePlan(raw, { ...ctx, skipMovement: true });
     if (!v.ok) return null;
-    const composed = compose(v.plan);
-    return movementReasons(composed, ctx).length ? null : { system: v.plan, composed };
+    // The system never places: a place is the user's, written by the app.
+    const system: LayoutPlan = { ...v.plan, sections: v.plan.sections.map((s) => ({ component: s.component, ...(s.props ? { props: s.props } : {}), ...(s.why ? { why: s.why } : {}) })) };
+    const composed = compose(system);
+    return movementReasons(composed, ctx).length ? null : { system, composed };
   };
   let called = false;
 
@@ -196,7 +198,8 @@ export async function planWithFallback(
     }
   }
 
-  const rulesPlan = planFromRules(signals);
+  // Without what he banned: a ban of his does not get the rules plan refused.
+  const rulesPlan = withoutBanned(planFromRules(signals), opts.preferences);
   const rules = accept(rulesPlan);
   if (rules) return { plan: rules.composed, source: "rules", called };
 
@@ -213,7 +216,7 @@ export async function planWithFallback(
     // plan: without the banner and without what he placed. Where the card
     // run goes is theirs to say (r4: read from the whole stored plan, his
     // list pinned on top was "the first card", and the board went under it).
-    const own = ownSections(stored, placedKeys(opts.previousPlan, opts.pinnedSections, opts.preferences));
+    const own = ownSections(stored, placedKeys(opts.previousPlan, opts.pinnedSections, opts.preferences, signals));
     const others = own.filter((s) => !isCard(s));
     const at = runPlace(own);
     const standing: LayoutPlan = {
@@ -225,7 +228,7 @@ export async function planWithFallback(
         ...others.slice(at),
       ],
     };
-    const v = validatePlan(standing, { ...ctx, skipMovement: true });
+    const v = validatePlan(withoutBanned(standing, opts.preferences), { ...ctx, skipMovement: true });
     if (v.ok) return { plan: compose(v.plan), source: "previous", called };
   }
 

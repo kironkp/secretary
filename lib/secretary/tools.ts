@@ -1,7 +1,7 @@
 // Tool executor — the secretary's hands. Every function is user-scoped; the
 // voice path reaches it via POST /api/secretary/tools, the text path calls
 // executeTool directly inside /api/chat.
-import { and, count, desc, eq, gte, ilike, inArray, isNotNull, lt, ne, notInArray, sql } from "drizzle-orm";
+import { and, count, desc, eq, gte, ilike, inArray, isNotNull, lt, ne, notInArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { matchProjectName } from "@/lib/project-names";
 import {
@@ -46,17 +46,16 @@ import { deleteGoogleEvent, insertGoogleEvent, patchGoogleEvent } from "@/lib/go
 import { connectionStatus, GoogleUnavailable, NOT_CONNECTED_LINE } from "@/lib/google/connection";
 import { describeRecurrence, firstOccurrence, normalizeRecurrence } from "./rrule";
 import { findList, findOrCreateList, itemTitle, listFor, parseListPhrase, spokenList } from "./lists";
-import { arrangeDashboard, defaultPlaceFor } from "@/lib/layout/arrange";
+import { arrangeDashboard } from "@/lib/layout/arrange";
+import { requestBoard, type BoardOp } from "@/lib/layout/request";
 import { draftReply, inboxSummary, readMail, searchMail } from "@/lib/google/gmail";
 import { carriesMail, claimProposal, confirmable, markUntrusted, placeOf, propose, sealProposal, UNTRUSTED_OK } from "./proposals";
 import { recordUsage } from "@/lib/usage";
 import { paidCallAllowed } from "@/lib/spend-guard";
-import { bannerFirst } from "@/lib/layout/compose";
-import { defaultPlan, sectionKey, type LayoutPlan, type PlanSection } from "@/lib/layout/plan";
-import { composeUsersPlan, computeCurrentPlan, getPlanHead, getPreferences, savePlanAsHead, saveUsersPlan, unmetClaims } from "@/lib/layout/plan-store";
+import { sectionKey, type PlanSection } from "@/lib/layout/plan";
+import { computeCurrentPlan, getPlanHead, getPreferences } from "@/lib/layout/plan-store";
 import { REGISTRY_COMPONENTS, REGISTRY_VERSION } from "@/lib/layout/registry";
 import { computeSignals } from "@/lib/layout/signals";
-import { applyBans, validatePlan } from "@/lib/layout/validator";
 import { setAsideInWords } from "@/components/today/copy";
 import { QUESTION_KINDS } from "@/lib/understanding/types";
 import type { UndoTicket } from "@/lib/timeline-undo";
@@ -2431,146 +2430,28 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
 
   async edit_layout_plan(ctx, args) {
     const a = toolSchemas.edit_layout_plan.parse(args);
-    // The board as it renders now (composed: SPEC §2), not the stored row.
-    const [bundle, prefs] = await Promise.all([computeCurrentPlan(ctx.userId), getPreferences(ctx.userId)]);
-    const { signals } = bundle;
-    const current = bundle.plan;
-    const sections: PlanSection[] = structuredClone(current.sections);
-    // What he placed (a move, an add) is pinned at its place; what he removed
-    // is hidden, the way arrange_dashboard hides. Anything else would answer
-    // "applied" and be gone at the next render.
-    const placed = new Set<string>();
-    const hide = new Map<string, number>();
-    /** Hides lifted by adding back what he had hidden, and which of those the board shows by itself. */
-    const lifted = new Set<string>();
-    const shown = new Set<string>();
-    let sized = false;
-    const hiddenAt = new Map(prefs.filter((p) => p.kind === "hide_section").map((p) => [p.value.section, Number(p.value.at ?? NaN)]));
-
-    for (const op of a.operations) {
-      if (op.op === "add") {
-        const section = { component: op.component, props: op.props } as PlanSection;
-        const key = sectionKey(section);
-        if (sections.some((s) => sectionKey(s) === key)) {
-          return { result: { error: `"${key}" is already on the dashboard. Move it instead.` } };
-        }
-        if (hiddenAt.has(key) && !hide.has(key)) {
-          // Adding what he had hidden is a show (SPEC §2): the hide is
-          // lifted. What the board has by itself is not placed by this: a
-          // project's card goes where the data puts it, a section of the
-          // default board where it was when he hid it. Anything else is
-          // added and pinned below, like any other add.
-          lifted.add(key);
-          const isCard = section.component === "project_card";
-          const boardHasIt = isCard
-            ? signals.projects.some((p) => p.id === String(section.props?.project_id ?? ""))
-            : defaultPlan(signals).sections.some((s) => sectionKey(s) === key);
-          if (boardHasIt) {
-            if (!isCard) {
-              const was = hiddenAt.get(key);
-              const at =
-                was !== undefined && Number.isFinite(was)
-                  ? Math.min(was, sections.length)
-                  : defaultPlaceFor(sections, section, defaultPlan(signals).sections);
-              sections.splice(at, 0, section);
-            }
-            shown.add(key);
-            continue;
-          }
-        }
-        sections.splice(Math.min(op.at ?? sections.length, sections.length), 0, section);
-        placed.add(key);
-        continue;
-      }
-      const idx = sections.findIndex((s) => sectionKey(s) === op.section);
-      if (idx === -1) return { result: { error: `No section "${op.section}" in the current plan` } };
-      if (op.op === "remove") {
-        sections.splice(idx, 1);
-        hide.set(op.section, idx);
-        placed.delete(op.section);
-        shown.delete(op.section);
-        lifted.delete(op.section);
-      } else if (op.op === "move") {
-        const [s] = sections.splice(idx, 1);
-        sections.splice(Math.min(op.to, sections.length), 0, s);
-        placed.add(op.section);
-      } else if (op.op === "set_props") {
-        sections[idx] = { ...sections[idx], props: { ...sections[idx].props, ...op.props } };
-        sized = true;
-      }
-    }
-
-    const candidate: LayoutPlan = {
-      plan_id: `chat-${Date.now().toString(36)}`,
-      reason_summary: current.reason_summary ?? null,
-      // "The top" is under the banner (SPEC §2): an index of 0 must not push it down.
-      sections: bannerFirst(sections),
-    };
-    // User-initiated: movement rationing doesn't constrain the user's own
-    // request (invariant 3), but structural rules and preferences still do
-    // (hiding an urgent project's card is refused like any hide of it).
-    const dynamic = await listDynamicComponents(ctx.userId);
-    const v = validatePlan(candidate, {
-      signals,
-      previousPlan: current,
-      preferences: prefs.filter((p) => p.kind !== "hide_section"),
-      pinnedSections: [],
-      defaultPlan: defaultPlan(signals),
-      userInitiated: true,
-      dynamicComponents: dynamic.map((d) => d.name),
+    // Plain operations on the board as it renders now, handed to the one
+    // function every request goes through (lib/layout/request.ts, SPEC §2).
+    // remove is a hide; add of something he had hidden is a show; an index
+    // is a position on the plan as get_current_plan numbers it.
+    const ops: BoardOp[] = a.operations.map((op): BoardOp => {
+      if (op.op === "add") return { op: "add", section: { component: op.component, props: op.props } as PlanSection, at: op.at };
+      if (op.op === "remove") return { op: "hide", key: op.section };
+      if (op.op === "move") return { op: "move", key: op.section, to: { index: op.to } };
+      return { op: "set_props", key: op.section, props: op.props };
     });
-    if (!v.ok) {
-      return {
-        result: {
-          error: `That change breaks a layout rule: ${v.reasons.join("; ")}. Nothing was changed.`,
-        },
-      };
-    }
-    // A section the validator dropped (an unknown component) was not placed.
-    const kept = new Set(v.plan.sections.map((s) => sectionKey(s)));
-    const dropped = [...placed].filter((k) => !kept.has(k));
-    if (dropped.length) {
-      return { result: { error: `There is no "${dropped.join('", "')}" to put on the dashboard. Nothing was changed.` } };
-    }
-    const newlyHidden = [...hide].filter(([key]) => !hiddenAt.has(key));
-    const change = {
-      signals,
-      placed: [...placed],
-      preferences: [
-        ...prefs.filter((p) => !(p.kind === "hide_section" && lifted.has(p.value.section))),
-        ...newlyHidden.map(([key]) => ({ kind: "hide_section" as const, value: { section: key } })),
-      ],
-    };
-    // Before anything is written: the board as it will render after this
-    // change must bear out everything about to be said (SPEC §2).
-    const unmet = unmetClaims(composeUsersPlan(v.plan, change, bundle.pinned), {
-      placedOn: v.plan,
-      placed: change.placed,
-      shown: [...shown],
-      hidden: [...hide.keys()],
-    });
-    if (unmet.length) {
-      return { result: { error: `That would not show on the dashboard: ${unmet.join("; ")}. Nothing was changed.` } };
-    }
-    for (const key of lifted) {
-      await db
-        .delete(layoutPreferences)
-        .where(and(eq(layoutPreferences.userId, ctx.userId), eq(layoutPreferences.kind, "hide_section"), sql`${layoutPreferences.value}->>'section' = ${key}`));
-    }
-    for (const [key, at] of newlyHidden) {
-      await db.insert(layoutPreferences).values({ userId: ctx.userId, kind: "hide_section", value: { section: key, at: String(at) } });
-    }
-    const saved = await saveUsersPlan(ctx.userId, v.plan, change);
+    const reply = await requestBoard(ctx.userId, { ops });
+    if (!reply.ok) return { result: { error: reply.error } };
     return {
       result: {
         applied: true,
-        version: saved.version,
-        sections: saved.plan.sections.map((s) => sectionKey(s)),
-        ...(shown.size ? { shown: [...shown], shown_note: "It was hidden and is back where the dashboard puts it; it was not placed. To put it somewhere, move it." } : {}),
-        ...(hide.size ? { hidden: [...hide.keys()], hidden_note: "Hidden, not deleted: it stays off the dashboard until the user asks to show it." } : {}),
+        version: reply.version,
+        sections: reply.plan.sections.map((s) => sectionKey(s)),
+        ...(reply.shown.length ? { shown: reply.shown, shown_note: "It was hidden and is back where the dashboard puts it; it was not placed. To put it somewhere, move it." } : {}),
+        ...(reply.hidden.length ? { hidden: reply.hidden, hidden_note: "Hidden, not deleted: it stays off the dashboard until the user asks to show it." } : {}),
         // Emphasis is the system's and follows the data (SPEC §2): do not
         // tell the user a size or accent is saved for good.
-        ...(sized ? { size_note: "A size or accent set this way lasts until the user's data next changes; it is not a lasting setting yet. Say 'for now'." } : {}),
+        ...(reply.sized ? { size_note: "A size or accent set this way lasts until the user's data next changes; it is not a lasting setting yet. Say 'for now'." } : {}),
       },
       toast: { icon: "layout", text: "Dashboard rearranged" },
     };
@@ -2789,12 +2670,21 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
 
   async set_layout_preference(ctx, args) {
     const a = toolSchemas.set_layout_preference.parse(args);
+    // A pin is not a preference any more (SPEC §2: a pin has one home, the
+    // place on the board). Asked for here, it is a request like the pin button's.
+    if (a.kind === "pin_section") {
+      if (!a.section) return { result: { error: "Missing fields for pin_section" } };
+      const reply = await requestBoard(ctx.userId, { ops: [{ op: a.remove ? "unpin" : "pin", key: a.section }] });
+      if (!reply.ok) return { result: { error: reply.error } };
+      return {
+        result: a.remove ? { removed: true, kind: a.kind, value: { section: a.section } } : { stored: true, kind: a.kind, value: { section: a.section }, note: "It stays where it is on the dashboard until the user moves or unpins it." },
+        toast: { icon: "layout", text: a.remove ? "Unpinned" : "Pinned" },
+      };
+    }
     const value: Record<string, string> =
       a.kind === "ban_component"
         ? { component: a.component ?? "" }
-        : a.kind === "pin_section"
-          ? { section: a.section ?? "" }
-          : a.kind === "default_variant_for"
+        : a.kind === "default_variant_for"
             ? { project: a.project ?? "", variant: a.variant ?? "full" }
             : { policy: a.policy ?? "auto" };
     if (Object.values(value).some((v) => !v)) {
@@ -2808,32 +2698,30 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
       .select()
       .from(layoutPreferences)
       .where(and(eq(layoutPreferences.userId, ctx.userId), eq(layoutPreferences.kind, a.kind)));
-    const match = existing.find(
-      (row) => JSON.stringify(row.value) === JSON.stringify(value)
+    // A ban is matched by its component: its row may also remember that the
+    // section was one he had put on the board (lib/layout/request.ts).
+    const match = existing.find((row) =>
+      a.kind === "ban_component" ? (row.value as Record<string, string>).component === value.component : JSON.stringify(row.value) === JSON.stringify(value)
     );
 
     if (a.remove) {
       if (!match) return { result: { error: "No such preference stored" } };
-      await db.delete(layoutPreferences).where(eq(layoutPreferences.id, match.id));
+      // Through the one function: the preference goes, and the board is worked out again and stored.
+      await requestBoard(ctx.userId, { liftPreference: match.id });
       return {
         result: { removed: true, kind: a.kind, value },
         toast: { icon: "layout", text: "Preference removed" },
       };
     }
 
-    if (!match) {
-      await db.insert(layoutPreferences).values({ userId: ctx.userId, kind: a.kind, value });
-    }
-
     // F7: the live plan re-renders without a banned component immediately.
-    const head = await getPlanHead(ctx.userId);
-    if (head) {
-      const current = head.spec as LayoutPlan;
-      const prefs = await getPreferences(ctx.userId);
-      const cleaned = applyBans(current, prefs);
-      if (JSON.stringify(cleaned.sections) !== JSON.stringify(current.sections)) {
-        await savePlanAsHead(ctx.userId, cleaned);
-      }
+    // A ban is a request about the board (SPEC §2): the one function stores
+    // the preference with the board worked out under it.
+    if (a.kind === "ban_component") {
+      if (!match) await requestBoard(ctx.userId, { ban: value.component });
+    } else {
+      if (!match) await db.insert(layoutPreferences).values({ userId: ctx.userId, kind: a.kind, value });
+      await requestBoard(ctx.userId, {});
     }
     return {
       result: { stored: true, kind: a.kind, value, note: "Enforced on every future plan; removable in Settings." },
