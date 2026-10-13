@@ -64,12 +64,16 @@ export async function arrangeDashboard(userId: string, ops: ArrangeOp[]): Promis
   ]);
   const byId = new Map<string, NamedProject>(projectRows.map((p) => [p.id, p]));
   const named = (s: PlanSection): Named => ({ key: sectionKey(s), names: namesOf(s, byId), section: s });
-  // What is on the board, and what could be brought onto it: what he hid,
-  // every project's card, every section of the default board.
+  // What is on the board, and what could be brought onto it: what he hid
+  // (earlier, or a moment ago in this same request), every project's card,
+  // every section of the default board.
   const here = new Map(bundle.plan.sections.map((s) => [sectionKey(s), s]));
   const hidden = prefs.filter((p) => p.kind === "hide_section").map((p) => p.value.section);
+  /** Taken off the board by this request. A section he added is in no other list: without this, "hide it, show it" found nothing to show. */
+  const taken = new Map<string, PlanSection>();
   const away = (): Named[] => {
     const all: PlanSection[] = [
+      ...taken.values(),
       ...projectRows.map((p): PlanSection => ({ component: "project_card", props: { project_id: p.id, variant: "full" } })),
       ...defaultPlan(bundle.signals).sections.filter((s) => s.component !== "project_card"),
       ...hidden.filter((key) => !key.startsWith("project_card:")).map((key): PlanSection => ({ component: key })),
@@ -94,6 +98,7 @@ export async function arrangeDashboard(userId: string, ops: ArrangeOp[]): Promis
     if (op.op === "hide") {
       request.push({ op: "hide", key: hit.key });
       here.delete(hit.key);
+      taken.set(hit.key, hit.section);
       changed.push(`hid ${hit.names[0]}`);
     } else if (op.op === "show") {
       request.push({ op: "show", key: hit.key });

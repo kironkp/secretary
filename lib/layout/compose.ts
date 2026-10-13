@@ -28,6 +28,7 @@ import {
   type Place,
   type PlanSection,
 } from "./plan";
+import { RETIRED_COMPONENTS } from "./registry";
 import type { Signals } from "./signals";
 import type { LayoutPreference } from "./validator";
 
@@ -85,7 +86,9 @@ function placesIn(stored: LayoutPlan | null, pins: Set<string>, signals: Signals
   for (const s of stored.sections) {
     const key = sectionKey(s);
     if (!pins.has(key) || found.has(key) || s.component === BANNER) continue;
-    const place = asPlace(s.place) ?? (fromOrder ??= readPlaces(stored.sections, pins, signals)).get(key);
+    // (Without the components retired since: main still stored them, the page does not draw them, and counted they
+    // put a section he had placed near the bottom one place higher.)
+    const place = asPlace(s.place) ?? (fromOrder ??= readPlaces(stored.sections.filter((x) => !RETIRED_COMPONENTS.has(x.component)), pins, signals)).get(key);
     if (place) found.set(key, { place, section: s });
   }
   return found;
@@ -109,15 +112,34 @@ export function ownSections(sections: PlanSection[], placed: Set<string>): PlanS
 
 /**
  * Where the card run goes among a plan's own sections that are not cards:
- * after how many of them. Its first own card says, unless that card still
- * carries a place (one he let go, not yet composed again). A plan with no
- * such card has the run where the default has it, under the strip.
+ * after how many of them. Its first own card says (one that still carries a
+ * place, let go and not yet composed again, never does). A plan with no own
+ * card has the run where the default has it, after next up, the tiles and
+ * the strip.
+ *
+ * The right way up, whatever the plan says. The run goes after the last of
+ * the system's next up and tiles, and before the first Needs a date or
+ * People that stands below that point. Top wins: a planner may raise Needs
+ * a date above next up, or sink the tiles under it, and the two cannot then
+ * both hold. A planner on main put urgent cards above next up; read as "the
+ * run starts here", such a plan put every card above it. Bounded, the run
+ * lands right under the tiles, above the strip: the strip is free (a rule
+ * may send it up, and main's own order had it under the cards).
+ *
+ * "The system's" is each section on its own: one he has placed is not in
+ * `own` and bounds nothing. The bound is worked out on the list the
+ * composition cuts on, hidden sections included (they are filtered after).
+ * One home: the composition and the held path both ask here.
  */
 export function runPlace(own: PlanSection[]): number {
   const others = own.filter((s) => !isCard(s));
+  // (A section that still carries a place is not where the system has it, and bounds nothing: see composePlan.)
+  const at = (component: string) => others.findIndex((s) => s.component === component && s.place === undefined);
   const first = own.findIndex((s) => isCard(s) && s.place === undefined);
-  if (first !== -1) return own.slice(0, first).filter((s) => !isCard(s)).length;
-  return Math.max(...["hero_next_up", "stat_row", "timeline"].map((c) => others.findIndex((s) => s.component === c))) + 1;
+  const said = first !== -1 ? own.slice(0, first).filter((s) => !isCard(s)).length : Math.max(at("hero_next_up"), at("stat_row"), at("timeline")) + 1;
+  const under = Math.max(at("hero_next_up"), at("stat_row")) + 1;
+  const lower = [at("date_chase"), at("people_index")].filter((i) => i >= under);
+  return Math.max(under, Math.min(said, lower.length ? Math.min(...lower) : others.length));
 }
 
 /**

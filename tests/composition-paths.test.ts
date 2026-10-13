@@ -367,9 +367,108 @@ describe("where the card run goes is one rule", () => {
     expect(runPlace(ownSections(listOnTop.sections, placed))).toBe(3); // after next up, the tiles and the strip
     // Let go of, it is still on top of the stored plan, carrying its place: it still does not say.
     expect(runPlace(ownSections(listOnTop.sections, new Set()))).toBe(3);
-    // A card on top that nobody placed is the system's first card, and does say.
+    // A card on top that nobody placed is the system's first card. Round 4
+    // let it say "the run starts here", above everything. The run is never
+    // above next up or the tiles: bounded, it lands right under the tiles.
     const bare = { ...listOnTop, sections: listOnTop.sections.map((s) => ({ component: s.component, props: s.props })) };
-    expect(runPlace(ownSections(bare.sections, new Set()))).toBe(0);
+    expect(runPlace(ownSections(bare.sections, new Set()))).toBe(2);
+    // Cards listed last of all: the run stops above Needs a date and People.
+    const others = plan.sections.filter((s) => s.component !== "project_card");
+    const cards = plan.sections.filter((s) => s.component === "project_card");
+    expect(runPlace([...others, ...cards])).toBe(3);
+  });
+
+  describe("the right way up, whatever the system's plan says", () => {
+    // The shape main's planner wrote: a banner, two urgent cards above next
+    // up, the rest under the strip. Read as "the run starts at the first
+    // card", it put every card above next up.
+    const cards = plan.sections.filter((s) => s.component === "project_card");
+    const rest = plan.sections.filter((s) => s.component !== "project_card");
+    const fromMain: LayoutPlan = { plan_id: "plan-old", reason_summary: "A busy week", sections: [BANNER, ...cards.slice(0, 2), ...rest.slice(0, 3), ...cards.slice(2), ...rest.slice(3)] };
+    const run = cardKeys(defaultPlan(signals));
+    // Bounded, the run lands right under the tiles, above the strip.
+    const bounded = ["hero_next_up", "stat_row", ...run, "timeline", "date_chase", "people_index"];
+    const answer = (sections: PlanSection[]) =>
+      planWithFallback(signals, { previousPlan: compose(plan, signals, null, []), preferences: [], pinnedSections: [], llmEnabled: true, call: async () => JSON.stringify({ plan_id: "p", reason_summary: null, sections }) });
+
+    it("a row main wrote, served again for the same signals: next up, the tiles, every card by the data, the strip", () => {
+      expect(keys(compose(fromMain, signals, fromMain, []))).toEqual(["focus_banner", ...bounded]);
+    });
+
+    it("the same row held on the day this version lands (its banner is hours old, so the rules plan is refused today)", async () => {
+      const today = structuredClone(signals);
+      today.context.sections_new_today = ["focus_banner"];
+      const held = await planWithFallback(today, { previousPlan: fromMain, preferences: [], pinnedSections: [], llmEnabled: false });
+      expect(held.source).toBe("previous");
+      expect(keys(held.plan)).toEqual(["focus_banner", ...bounded]);
+    });
+
+    it.each([
+      ["main's shape, the cards in two runs", [...cards.slice(0, 2), ...rest.slice(0, 3), ...cards.slice(2), ...rest.slice(3)], bounded],
+      ["every card first", [...cards, ...rest], bounded],
+      ["one card first and the others last of all", [cards[0], ...rest, ...cards.slice(1)], bounded],
+      ["every card last of all: above Needs a date and People", [...rest, ...cards], ["hero_next_up", "stat_row", "timeline", ...run, "date_chase", "people_index"]],
+    ])("a planner's answer under this version: %s", async (_what, sections, expected) => {
+      clearPlanCache();
+      const res = await answer(sections);
+      expect(res.source).toBe("llm");
+      expect(keys(res.plan)).toEqual(expected);
+    });
+
+    it("top wins: a planner may raise Needs a date above next up, or sink the tiles under it, and the run is under the tiles all the same", async () => {
+      clearPlanCache();
+      const chase: PlanSection = { component: "date_chase", props: { item_ids: [] }, why: "Several things have no date" };
+      const raised = await answer([chase, ...plan.sections.filter((s) => s.component !== "date_chase")]);
+      expect(raised.source).toBe("llm");
+      expect(keys(raised.plan)).toEqual(["date_chase", "hero_next_up", "stat_row", "timeline", ...run, "people_index"]);
+      clearPlanCache();
+      const tiles: PlanSection = { component: "stat_row", props: { tiles: [{ value: "3", label: "late" }] }, why: "The numbers matter less today" };
+      const others = rest.filter((s) => s.component !== "stat_row");
+      const sunk = await answer([others[0], others[1], ...cards, others[2], tiles, others[3]]);
+      expect(sunk.source).toBe("llm");
+      expect(keys(sunk.plan)).toEqual(["hero_next_up", "timeline", "date_chase", "stat_row", ...run, "people_index"]);
+    });
+
+    it("the system's own order may have the run right under the tiles, the strip below it (main's default)", () => {
+      const mains: LayoutPlan = { plan_id: "plan-old", reason_summary: null, sections: [...rest.slice(0, 2), ...cards, ...rest.slice(2)] };
+      expect(keys(compose(mains, signals, mains, []))).toEqual(bounded);
+    });
+
+    it("'the system's' is each section on its own: next up placed by him at the bottom, hidden or banned, bounds nothing; the tiles still do", () => {
+      const his = pinned(plan, { key: "hero_next_up", at: () => "last" });
+      expect(keys(compose(fromMain, signals, his, ["hero_next_up"]))).toEqual(["focus_banner", "stat_row", ...run, "timeline", "date_chase", "people_index", "hero_next_up"]);
+      for (const preference of [{ kind: "hide_section", value: { section: "hero_next_up" } }, { kind: "ban_component", value: { component: "hero_next_up" } }] as LayoutPreference[]) {
+        expect(keys(compose(fromMain, signals, fromMain, [], [preference]))).toEqual(["focus_banner", ...bounded.filter((k) => k !== "hero_next_up")]);
+      }
+      // Both his: nothing of the system's stands above, and a plan with its cards first has them first.
+      expect(runPlace([...cards, ...rest.slice(2)])).toBe(0);
+    });
+
+    it("what he placed on a row main wrote is his, and untouched: a card he put above next up stays there, at the place read off that row", () => {
+      // main kept his pins as keys on the row, with no place written.
+      const hisCard = sectionKey(cards[0]);
+      const before = compose(fromMain, signals, fromMain, [hisCard]);
+      expect(keys(before).slice(0, 3)).toEqual(["focus_banner", hisCard, "hero_next_up"]);
+      expect(before.sections[1].place).toEqual({ from: "top", n: 0 });
+      // The system's cards, the one that stood beside it included, are the run under the tiles.
+      expect(keys(before).slice(3)).toEqual(["stat_row", ...run.filter((k) => k !== hisCard), "timeline", "date_chase", "people_index"]);
+    });
+
+    it("a place read off a row main wrote does not count the section retired since: his strip, and a Needs a date he moved up one, land where he had them", () => {
+      // main's own order: next up, the tiles, the cards, the strip, the retired section, Needs a date, People.
+      const retired: PlanSection = { component: "open_loops" };
+      const mains = (sections: PlanSection[]): LayoutPlan => ({ plan_id: "user-old", reason_summary: null, sections });
+      // He pinned the strip where it stood: under the last card.
+      const strip = mains([...rest.slice(0, 2), ...cards, rest[2], retired, ...rest.slice(3)]);
+      const withStrip = keys(compose(defaultPlan(signals), signals, strip, ["timeline"]));
+      expect(withStrip.slice(-3)).toEqual(["timeline", "date_chase", "people_index"]);
+      expect(withStrip.indexOf("timeline")).toBe(withStrip.findLastIndex(isCard) + 1);
+      // He moved Needs a date up one, above the retired section.
+      const chase = mains([...rest.slice(0, 2), ...cards, rest[2], rest[3], retired, rest[4]]);
+      const withChase = keys(compose(defaultPlan(signals), signals, chase, ["date_chase"]));
+      expect(withChase.slice(-2)).toEqual(["date_chase", "people_index"]);
+      expect(withChase.indexOf("date_chase")).toBe(withChase.findLastIndex(isCard) + 1);
+    });
   });
 
   it("the banner is first whatever a request did above it", () => {

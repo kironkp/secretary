@@ -15,6 +15,7 @@ import { conversations, layoutPreferences, layoutSpecs, messages, projects, task
 import { defaultPlan, sectionKey, type LayoutPlan } from "@/lib/layout/plan";
 import { clearPlanCache, lastPlannerUsage, planWithFallback } from "@/lib/layout/plan-from-llm";
 import { computeCurrentPlan, getPlanHead, persistPlan } from "@/lib/layout/plan-store";
+import { nameOfKey } from "@/lib/layout/names";
 import { requestBoard } from "@/lib/layout/request";
 import { REGISTRY_VERSION } from "@/lib/layout/registry";
 import { computeSignals, signalsHash } from "@/lib/layout/signals";
@@ -923,6 +924,49 @@ describe("the request function, case by case", { timeout: 30_000 }, () => {
     await b.nextDay();
     await b.newTask("Iris", -40);
     expect((await b.keys()).at(-1)).toBe("kanban");
+  });
+
+  it("the last word wins for a section he added as well: hidden and shown, or hidden and moved, in one request by voice", async () => {
+    // The voice tool's own picture of the board lost the section at the hide,
+    // and its list of what can be brought back did not have a section he
+    // had added and hidden a moment ago: "there is no kanban on the
+    // dashboard", while it was on the board.
+    const b = await board(3);
+    await b.render();
+    await b.chatEdit([{ op: "add", component: "kanban", at: 2 }]);
+    const start = await b.keys();
+    expect((await b.arrange([{ op: "hide", section: "kanban" }, { op: "show", section: "kanban" }])).result).toMatchObject({ applied: true });
+    const shown = await b.keys();
+    expect(shown.at(-1)).toBe("kanban"); // hidden and shown again, a section he added is back at the end, placed
+    expect(shown.slice(0, -1)).toEqual(start.filter((k) => k !== "kanban"));
+    expect((await b.head()).pinned).toContain("kanban");
+    expect(await hideRows(b.id)).toHaveLength(0);
+    expect((await b.arrange([{ op: "hide", section: "kanban" }, { op: "move_to_top", section: "kanban" }])).result).toMatchObject({ applied: true });
+    expect((await b.keys())[0]).toBe("kanban");
+    expect(await hideRows(b.id)).toHaveLength(0);
+  });
+
+  it("a hide of a card whose project has since been archived, or deleted, can be lifted: the row goes, and the name is an honest one", async () => {
+    // On 393de92 the lift asked for a show, the show was refused (the project
+    // has no card) and the row stayed in Settings for good. main deletes it.
+    const b = await board(3);
+    await b.render();
+    await b.arrange([{ op: "hide", section: "Iris" }, { op: "hide", section: "Harbor" }]);
+    const before = await b.keys();
+    await b.archive("Iris");
+    const gone = b.card("Harbor");
+    await db.delete(projects).where(eq(projects.id, b.ids.Harbor));
+    const rows = await hideRows(b.id);
+    expect(rows).toHaveLength(2);
+    for (const row of rows) expect(await requestBoard(b.id, { liftPreference: row.id })).toMatchObject({ ok: true });
+    expect(await hideRows(b.id)).toHaveLength(0);
+    expect(await b.keys()).toEqual(before);
+    // A project that is deleted has no name left to show.
+    expect(nameOfKey(gone, new Map())).toBe("a project that is no longer there");
+    // And a hide of a component retired since is lifted the same way.
+    const [retired] = await db.insert(layoutPreferences).values({ userId: b.id, kind: "hide_section", value: { section: "open_loops" } }).returning();
+    expect(await requestBoard(b.id, { liftPreference: retired.id })).toMatchObject({ ok: true });
+    expect(await hideRows(b.id)).toHaveLength(0);
   });
 
   it("a ban works like a hide, nothing brings the section back while it stands, and lifting it brings back a section he had added, at the end", async () => {

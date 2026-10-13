@@ -89,12 +89,17 @@ export async function requestBoard(userId: string, request: BoardRequest): Promi
   /** A ban that now also remembers a section he had put on the board (its hide is lifted while the ban stands). */
   let remembers: string | null = null;
   if (lifted?.kind === "hide_section") {
-    const component = isCardKey(liftedValue.section) ? CARD : liftedValue.section;
-    // A hide lifted is a show like any other; under a ban the section stays off, and the hide simply goes.
-    if (!banned.has(component)) ops.unshift({ op: "show", key: liftedValue.section });
+    const section = liftedValue.section;
+    const component = isCardKey(section) ? CARD : section;
+    // A hide lifted is a show like any other. When there is nothing to show
+    // (the project has been archived or deleted since, the component retired)
+    // or a ban stands, the hide simply goes: it must not stay in Settings for
+    // good because the board cannot draw what it was hiding.
+    const drawable = isCardKey(section) ? active.has(section) : known(component);
+    if (drawable && !banned.has(component)) ops.unshift({ op: "show", key: section });
     else {
-      hides.delete(liftedValue.section);
-      if (!isCardKey(liftedValue.section)) remembers = component;
+      hides.delete(section);
+      if (banned.has(component) && !isCardKey(section)) remembers = component;
     }
   }
   const hiddenBefore = new Set(hides);

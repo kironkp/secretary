@@ -34,6 +34,8 @@ export function namesOf(section: PlanSection, projects: Map<string, NamedProject
 
 /** The one name a section is called in a reply, from its key. */
 export function nameOfKey(key: string, projects: Map<string, NamedProject>): string {
+  // A card whose project has been deleted has no name left: say so, not the bare word "project".
+  if (key.startsWith("project_card:") && !projects.has(key.slice("project_card:".length))) return "a project that is no longer there";
   if (key.startsWith("project_card:")) return namesOf({ component: "project_card", props: { project_id: key.slice("project_card:".length) } }, projects)[0];
   return namesOf({ component: key }, projects)[0];
 }
