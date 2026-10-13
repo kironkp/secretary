@@ -83,10 +83,24 @@ beside me in a workshop."*
   final product code, all at zero, any product change resetting the count;
   each product defect it finds reported to me as found. At the third I
   decide whether r5 goes on or the stored row is split first (1.07's
-  storage brought forward): the last two defects are one family, a
-  section of the system's that the stored list lacks needing a place, and
-  the Executor has been asked whether one function can answer that for
-  both the composition and a request. The Executor's pass on a copy of his
+  storage brought forward). The last two defects are one family: a
+  section of the system's that the stored list lacks needs a place, and
+  two pieces of code each invented one. Contracted after both peers
+  answered (the Reviewer drafted and brute-forced it, the Executor
+  confirmed the fit): ONE function in the composition decides; the
+  request has no rule of its own; the section goes into the system's list
+  before the cards' place is counted. It goes where today's plan would
+  keep it: directly under the last section in step that precedes it,
+  else directly above the first in step that follows it, "in step" by
+  the validator's own reading; on a board that is held anyway, a tie
+  between two readings is settled by reading as moved a section the
+  rules can move or one that carries a reason on the board. Before it
+  writes, a request also checks it has not turned an accepted board into
+  a held one (a guard; his request is applied either way). Named limits:
+  on a board a planner crossed, some sections come back on the other side
+  of the moved one; a planner answer that leaves a default section out on
+  such a board can be refused and its one call is thrown away (measured:
+  no further calls for the same signals). The Executor's pass on a copy of his
   real board was repeated on `472c2a7` as the landing day goes and found
   nothing (their own check, not an independent one; it did not stand on
   either of those two states). Found on main while building it and live
