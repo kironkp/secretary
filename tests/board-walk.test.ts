@@ -9,10 +9,13 @@
 // with the neighbour; the top is the first place under the banner; the bottom
 // is the end; remove; insert at n) and requires the reply to be that board,
 // section for section. What he placed, and where, is read off that EXPECTED
-// board, never off what the product stored. For show, add-back and unpin the
-// model can only say "where the system has it": there it asks that the
-// section is drawn, that everything else kept its order, and the standing
-// questions. It keeps its own history, one entry per stored version, and
+// board, never off what the product stored. For a section of the default
+// board that comes back (shown, added back, let go, a hide or a ban lifted)
+// the model says where: under the nearest of the system's sections above it
+// in today's system order. Only for a CARD that comes back can it say no
+// more than "by the data": there it asks that the card is drawn, that
+// everything else kept its order, and the standing questions (the cards he
+// did not place are one run in data order). It keeps its own history, one entry per stored version, and
 // after "Put it back" expects the entry before.
 //
 // Everything goes through the real paths: both tools and the preference tool
@@ -67,6 +70,7 @@ import { daysFromToday } from "@/lib/due";
 import { composePlan } from "@/lib/layout/compose";
 import { defaultPlan, isUrgent, sectionKey, type LayoutPlan, type PlanSection } from "@/lib/layout/plan";
 import { clearPlanCache, lastPlannerUsage, planWithFallback } from "@/lib/layout/plan-from-llm";
+import { planFromRules } from "@/lib/layout/plan-from-rules";
 import { computeCurrentPlan, getPlanHead, getPreferences, persistPlan } from "@/lib/layout/plan-store";
 import type { Signals } from "@/lib/layout/signals";
 import { executeTool, liveTurnContext } from "@/lib/secretary/tools";
@@ -84,6 +88,19 @@ const SAID: Record<string, string> = { focus_banner: "banner", hero_next_up: "ne
 const DEFAULT_SECTIONS = ["hero_next_up", "stat_row", "timeline", "date_chase", "people_index"];
 const ADDABLE = ["kanban", "coming_up", "documents", "suggested_zone"];
 const BANNER = "focus_banner";
+/** What each refusal the model predicts has to say: a keyword of its reason, so one refusal cannot pass for another. */
+const REFUSAL_SAYS: Record<string, RegExp> = {
+  "an urgent card cannot be hidden": /urgent project/,
+  "hiding what is already hidden": /There's no /,
+  "a section that is not on the board": /There's no /,
+  "adding what is already on the board": /already on the dashboard/,
+  "a card for something that is not on the board": /has no card on the dashboard/,
+  "a subproject has no card": /has no card on the dashboard|There's no /,
+  "a section he added cannot be unpinned": /stays where you put it/,
+  "he asked never to be shown it": /never to be shown/,
+  "a size is not set in calm mode": /calm mode/,
+  "nothing to put back": /Nothing to revert to/,
+};
 const MARK = "[walk]";
 const day = (n: number) => new Date(Date.now() + n * 86_400_000);
 const isCard = (key: string) => key.startsWith("project_card:");
@@ -130,6 +147,24 @@ function editModel(board: string[], operation: { op: string; section?: string; c
   if (operation.op === "remove") return without(board, key);
   if (operation.op === "add") return bannerFirst(insertAt(board, key, operation.at ?? board.length));
   return board; // set_props
+}
+/**
+ * Where a section of the default board goes when it comes back (shown, added
+ * back, let go, a hide or a ban lifted): where the system has it today.
+ * `order` is today's system order (the rules plan's; the default's in calm
+ * mode), which the walker takes from the product: the rules are not what
+ * this walk tests. Among the sections on the board that are the system's
+ * (not placed, not the banner) it stands under the nearest one above it in
+ * that order; with none above, on top of them; with none at all, first
+ * under the banner.
+ */
+function returnModel(board: string[], key: string, placed: string[], order: string[]): string[] {
+  const rest = without(board, key);
+  const own = (k: string) => k !== BANNER && !placed.includes(k);
+  const above = order.slice(0, Math.max(0, order.indexOf(key))).findLast((k) => rest.includes(k) && own(k));
+  const firstOwn = rest.findIndex(own);
+  const at = above ? rest.indexOf(above) + 1 : firstOwn !== -1 ? firstOwn : rest[0] === BANNER ? 1 : 0;
+  return insertAt(rest, key, at);
 }
 /** The places of what he placed, read off a board he was told: from the bottom when nothing upper stands below. */
 function readPlaces(board: string[], placed: string[]): Told[] {
@@ -219,10 +254,12 @@ async function walk(index: number) {
   const history: Told[][] = [];
   const complain = (check: string, detail: string) => complaints.push({ check, detail: `step ${moves.length} (${moves.at(-1) ?? "start"}): ${detail}` });
   const blank = (reason: string) => reason.replace(/"[^"]*"/g, '"…"').replace(/\b[0-9a-f]{8}-[0-9a-f-]{27}\b/g, "<id>").slice(0, 110);
-  /** A refusal: one the walker expected, by its reason, or a complaint. */
+  /** A refusal: one the walker predicted, saying what it predicted (a keyword of the reason), or a complaint. */
   const refused = (reason: string, expected: string | null) => {
-    if (expected) refusals.set(expected, (refusals.get(expected) ?? 0) + 1);
-    else complain("refused, and the walker had no reason to expect it", blank(reason));
+    if (expected) {
+      refusals.set(expected, (refusals.get(expected) ?? 0) + 1);
+      if (!REFUSAL_SAYS[expected]?.test(reason)) complain("a predicted refusal gives another reason", `${expected}: ${blank(reason)}`);
+    } else complain("refused, and the walker had no reason to expect it", blank(reason));
     if (/project_card:|[0-9a-f]{8}-[0-9a-f]{4}/.test(reason)) complain("a reply shows a raw key", blank(reason));
   };
 
@@ -304,6 +341,12 @@ async function walk(index: number) {
     for (const key of [...DEFAULT_SECTIONS, ...added]) {
       if (!hidden.has(key) && !banned.has(key) && !board.includes(key)) complain("A what belongs is drawn", `${why}: ${key} is missing`);
     }
+    // And the converse: nothing else is drawn. Every section that is not the banner or a card is one of the default
+    // board's or one he added (no rule and no planner in this walk adds a component), so one that Put it back took
+    // off, or that he never asked for, cannot stay or turn up.
+    for (const key of body) {
+      if (!isCard(key) && !DEFAULT_SECTIONS.includes(key) && !added.has(key)) complain("A nothing else is drawn", `${why}: ${key} is on the board`);
+    }
     // Calm mode: the default's emphasis, nothing accented, no reason given but a card being back.
     if (signals.context.calm_mode) {
       for (const s of bundle.plan.sections) {
@@ -376,11 +419,16 @@ async function walk(index: number) {
   };
   const boardNow = async () => keysOf((await computeCurrentPlan(id)).plan);
   const placedSet = () => told.map((t) => t.key);
+  /** Today's system order, for where a returning default section goes (returnModel). */
+  const systemOrder = async () => {
+    const signals = (await computeCurrentPlan(id)).signals;
+    return keysOf(signals.context.calm_mode ? defaultPlan(signals) : planFromRules(signals));
+  };
+  const isDefault = (key: string) => DEFAULT_SECTIONS.includes(key);
 
   /** One or more operations by voice in one request; the last word about a section wins. */
   const arrange = async (ops: { op: string; key: string }[]) => {
     const before = await boardNow();
-    const hidden = await hiddenNow();
     const urgent = new Set((await computeCurrentPlan(id)).signals.projects.filter(isUrgent).map((p) => `project_card:${p.id}`));
     const heldBefore = await sourceNow();
     let model: string[] | null = before;
@@ -388,20 +436,25 @@ async function walk(index: number) {
     const subject: string[] = [];
     let expectRefusal: string | null = null;
     const banned = await bannedNow();
+    const order = await systemOrder();
     for (const { op, key } of ops) {
       const onBoard = (model ?? before).includes(key);
       if (op !== "hide" && banned.has(key.split(":")[0])) expectRefusal ??= "he asked never to be shown it";
       if (op === "hide" && isCard(key) && urgent.has(key)) expectRefusal ??= "an urgent card cannot be hidden";
       if (op === "hide" && !onBoard) expectRefusal ??= "hiding what is already hidden";
       subject.push(key);
+      const was: string[] | null = model;
       model = model ? arrangeModel(model, op, key) : null;
       if (op === "hide") placedNow = without(placedNow, key);
       else if (op !== "show") placedNow = [...new Set([...placedNow, key])];
       else if (added.has(key)) placedNow = [...new Set([...placedNow, key])]; // a section he added comes back placed
-      if (op === "show" && added.has(key) && hidden.has(key) && model === null) model = [...without(before, key), key]; // at the end
+      // A show of something not on the board: one he added, at the end; one of the default board's, where the system has it.
+      if (op === "show" && was && !was.includes(key) && added.has(key)) model = [...was, key];
+      if (op === "show" && was && !was.includes(key) && isDefault(key)) model = returnModel(was, key, placedNow, order);
     }
     const res = (await executeTool(ctx, "arrange_dashboard", { operations: ops.map((o) => ({ op: o.op, section: nameOf(o.key) })) })).result as { applied?: boolean; error?: string; order?: string[] };
     if (!res.applied) return refused(res.error ?? "no reason given", expectRefusal);
+    if (expectRefusal) complain("a request the model refuses was applied", `${expectRefusal}: arrange ${ops.map((o) => `${o.op} ${short(o.key)}`).join(" + ")}`);
     const what = `arrange ${ops.map((o) => `${o.op} ${short(o.key)}`).join(" + ")}`;
     await afterRequest(what, before, model, subject, null, placedNow, heldBefore, (first) => {
       // What it read back is the first open, name for name.
@@ -416,6 +469,7 @@ async function walk(index: number) {
     const urgent = new Set((await computeCurrentPlan(id)).signals.projects.filter(isUrgent).map((p) => `project_card:${p.id}`));
     const heldBefore = await sourceNow();
     const banned = await bannedNow();
+    const order = await systemOrder();
     const calm = (await computeCurrentPlan(id)).signals.context.calm_mode;
     let model: string[] | null = before;
     let placedNow = placedSet();
@@ -430,7 +484,8 @@ async function walk(index: number) {
         if (banned.has(key.split(":")[0])) expectRefusal ??= "he asked never to be shown it";
         else if (onBoard) expectRefusal ??= "adding what is already on the board";
         else if (isCard(key) && !ids.has(nameOf(key).replace(/ list$/, ""))) expectRefusal ??= "a card for something that is not on the board";
-        else if (hidden.has(key) && !added.has(key)) model = null; // a show: where the system has it
+        else if (hidden.has(key) && isDefault(key)) model = model ? returnModel(model, key, placedNow, order) : null; // a show: where the system has it
+        else if (hidden.has(key) && !added.has(key)) model = null; // a card shown again: by the data
         else {
           model = model ? editModel(model, o, key) : null; // a new component, or one he added and hid: placed
           placedNow = [...new Set([...placedNow, key])];
@@ -454,7 +509,7 @@ async function walk(index: number) {
     }
     const res = (await executeTool(ctx, "edit_layout_plan", { operations })).result as { applied?: boolean; error?: string; sections?: string[]; size_note?: string };
     if (!res.applied) return refused(res.error ?? "no reason given", expectRefusal);
-    if (expectRefusal === "an urgent card cannot be hidden") complain("hiding an urgent card was applied", operations.map((o) => o.op).join("+"));
+    if (expectRefusal) complain("a request the model refuses was applied", `${expectRefusal}: ${operations.map((o) => o.op).join("+")}`);
     const what = `edit ${operations.map((o) => `${o.op} ${short(o.section ?? o.component ?? "")}${o.to !== undefined ? ` to ${o.to}` : ""}${o.at !== undefined ? ` at ${o.at}` : ""}`).join(" + ")}`;
     await afterRequest(what, before, model, subject, res.sections ?? null, placedNow, heldBefore, (first) => {
       if (!sized) return null;
@@ -479,10 +534,13 @@ async function walk(index: number) {
       ok = !res.error;
       reason = res.error ?? "";
     }
-    if (!ok) return refused(reason || "no reason given", stays ? "a section he added cannot be unpinned" : !pinned && how === "preference" ? "no such preference to remove" : null);
-    if (stays) complain("a section he added cannot be unpinned", `unpin ${short(key)} was applied`);
+    if (!ok) return refused(reason || "no reason given", stays ? "a section he added cannot be unpinned" : null);
+    if (stays) complain("a request the model refuses was applied", `a section he added cannot be unpinned: unpin ${short(key)}`);
     const what = `${pinned ? "pin" : "unpin"} ${short(key)} (${how})`;
-    await afterRequest(what, before, pinned ? before : null, [key], null, pinned ? [...new Set([...placedSet(), key])] : without(placedSet(), key), heldBefore);
+    const placedNow = pinned ? [...new Set([...placedSet(), key])] : without(placedSet(), key);
+    // Pinned, the board is the same. Let go, a default section goes where the system has it; a card, by the data.
+    const expected = pinned ? before : isDefault(key) ? returnModel(before, key, placedNow, await systemOrder()) : null;
+    await afterRequest(what, before, expected, [key], null, placedNow, heldBefore);
   };
 
   // --- the walk ------------------------------------------------------------------------
@@ -611,7 +669,7 @@ async function walk(index: number) {
         if (!res.ok) refused(res.json.error ?? "no reason given", null);
         else {
           const his = added.has(key) && !stillOff;
-          const expected = stillOff ? before : his ? [...before, key] : null;
+          const expected = stillOff || before.includes(key) ? before : his ? [...before, key] : isDefault(key) ? returnModel(before, key, placedSet(), await systemOrder()) : null;
           await afterRequest(`settings lifts ${pref.kind} ${short(key)}`, before, expected, [key], null, his ? [...new Set([...placedSet(), key])] : placedSet(), heldBefore);
         }
       }
@@ -630,7 +688,7 @@ async function walk(index: number) {
         // A ban is a hide of the component's section: the board he saw without it, everything else in order, its place
         // gone. Lifted, a section he had put there himself comes back placed, at the end; another goes where the system has it.
         const his = remove && added.has(component) && !stillHidden;
-        const expected = remove ? (stillHidden ? before : his ? [...before, component] : null) : without(before, component);
+        const expected = remove ? (stillHidden ? before : his ? [...before, component] : isDefault(component) ? returnModel(before, component, placedSet(), await systemOrder()) : null) : without(before, component);
         const placedNow = remove ? (his ? [...new Set([...placedSet(), component])] : placedSet()) : without(placedSet(), component);
         await afterRequest(`${remove ? "unban" : "ban"} ${component}`, before, expected, [component], null, placedNow, heldBefore);
         if (heldBefore !== "previous" && (await sourceNow()) === "previous") complain("a ban alone does not hold the plan", `${remove ? "unban" : "ban"} ${component}`);
