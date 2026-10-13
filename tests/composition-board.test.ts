@@ -370,6 +370,50 @@ describe("on a board with one section he placed, everything else still follows t
     expect(b.cardsOf(shown).at(-1)).toBe(b.card("Shopping"));
   });
 
+  it("a pin kept as a preference before r5: given its place at the first open, the row marked and left; taken off with the button, the card follows the data", async () => {
+    // The Reviewer's first cause of "cards not by the data" on round 4: the
+    // pin lived in two places. Taken off the row by the button, the
+    // preference still pinned, the route said ok, and the card stayed put.
+    const b = await board(5);
+    const key = b.card("Grove");
+    await b.render();
+    const at = (await b.keys()).indexOf(key);
+    await db.insert(layoutPreferences).values({ userId: b.id, kind: "pin_section", value: { section: key } });
+    await b.newTask("Iris", -40); // the others re-sort around it
+    const held = await b.keys();
+    expect(held[at]).toBe(key);
+    // One home now: the place on the board. The preference row is marked, not deleted, and not read again.
+    expect((await b.head()).pinned).toEqual([key]);
+    const rows = await db.select().from(layoutPreferences).where(and(eq(layoutPreferences.userId, b.id), eq(layoutPreferences.kind, "pin_section")));
+    expect(rows.map((r) => r.value)).toEqual([{ section: key, migrated: "1" }]);
+    // Off with the button: it is off, whatever the old row says.
+    expect(await pin(b.id, key, false)).toBe(true);
+    expect((await b.head()).pinned).toEqual([]);
+    await b.newTask("Harbor", -60);
+    await expectCardsFollowData(b, await b.keys(), []);
+  });
+
+  it("a place goes with its section: a card he placed whose project is archived and brought back follows the data", async () => {
+    // The Reviewer's second cause: the pin's key stayed on the row while the
+    // project was away, and when it came back the card was held, from the
+    // second open on, at an index he never chose.
+    const b = await board(5);
+    await b.render();
+    await b.arrange([{ op: "move_to_top", section: "Grove" }]);
+    expect((await b.keys())[0]).toBe(b.card("Grove"));
+    await b.archive("Grove");
+    expect(await b.keys()).not.toContain(b.card("Grove"));
+    expect((await b.head()).pinned).toEqual([]); // gone for good with the first board worked out without it
+    await db.update(projects).set({ status: "active" }).where(eq(projects.id, b.ids.Grove));
+    for (let open = 0; open < 3; open++) {
+      const shown = await b.keys();
+      expect(shown).toContain(b.card("Grove"));
+      expect(shown[0]).not.toBe(b.card("Grove"));
+      await expectCardsFollowData(b, shown, []);
+    }
+    expect((await b.head()).pinned).toEqual([]);
+  });
+
   it("the pin button: a card pinned where it stands holds that place while the others re-sort; unpinned, it follows the data again", async () => {
     const b = await board(5);
     const before = await b.keys();
