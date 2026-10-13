@@ -131,6 +131,28 @@ count):
 
 A test runs each of these twice and counts the calls.
 
+**A row written because of a change that is already known is not a new
+situation (v1.04).** The dashboard planner is asked when the signals hash
+changes. The hash carried the layout clock (`days_since_layout_change`) as a
+raw number of days, and every stored plan that changes the order of the board
+resets that clock. So the row that answered a situation changed the hash it
+had just been stored under, and the next open asked the planner again: two
+paid calls for one planner answer that added a banner or moved a section, a
+paid call after every move the user made himself, and, on every day after
+any change of layout, one more call because the count had gone up by one.
+Now:
+
+- the hash carries what the rules read from the clock, whether a reorder is
+  allowed yet (a day has passed), not the number of days;
+- a row that itself resets the clock is stored under the hash the next open
+  will compute, with the clock already reset.
+
+What it costs in planner calls, for one change, with a planner that answers:
+a move of a card or of another section by the user, none; a planner answer
+that adds a banner or moves a section, the one call that produced it; a day
+passing after a change of layout, one (the rules may reorder again, which is
+a real change in what the board can do), and none on the days after.
+
 The mark is the reason for "inside the database": until v1.04 it was read
 into the app, where a timestamp keeps milliseconds, and written back. The
 message it stood for is stored to the microsecond, so that message was
