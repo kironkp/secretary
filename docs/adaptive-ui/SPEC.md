@@ -38,32 +38,22 @@ CHI'09, Lavie & Meyer IJHCS'10, Google A2UI's declarative-over-codegen design):
    section. **User-initiated changes (a chat request, a pin, a tap) apply
    immediately, always.** The rationing exists to protect spatial memory from
    surprises; nothing the user asked for is a surprise.
+   **A project card is never "moved by the system"** (v1.02): the system does
+   not place cards at all (§2, composition), so a card changing place because
+   the data changed needs no why, is not rationed, and does not count as a
+   layout change for `days_since_layout_change`. Movement means the sections
+   that are not cards and that the user has not placed.
 4. **Nothing urgent disappears.** A project is *urgent* when it has late open
    work or `days_left <= 7`. A list is never urgent.
-   - **Presence.** An urgent project is never absent from a plan. A plan the
-     SYSTEM writes (rules, planner) without its card is rejected; compact is
-     allowed. A STORED plan that has come to lack one (a project went late
-     after the user arranged the board, or after he hid its card) is
-     repaired, not rejected: the card is added after the last urgent card (at
-     the end of the cards when there is none) with a user-visible `why`, and
-     nothing else moves. A hidden card coming back because it went late is
-     right; the rest of his board moving is not.
-   - **Order.** A plan the SYSTEM writes may not move a project card that is
-     not urgent ahead of one that is. It is judged on what it CHANGED: the
-     plan is refused only for a pair (a card that is not urgent before an
-     urgent one) that the plan it replaces did not already have in that
-     order. With no plan to replace, any such pair is refused; DEFAULT_PLAN
-     puts the urgent cards first, so it has none. A list's card is a card
-     that is not urgent.
-   - **Whose order it is.** A stored plan the user arranged (`plan_id`
-     `user-…` or `chat-…`) or that carries a pin of his is kept as it stands
-     and is never refused for its order; a change the user asks for is never
-     refused under the order rule (invariant 7; §2). A stored plan the SYSTEM
-     wrote (planner, rules, default) is kept only while it has no card that
-     is not urgent ahead of an urgent one. Once it has, it is not kept:
-     DEFAULT_PLAN is shown instead, exactly as for any other stored plan that
-     fails. The system's own stale order is nobody's to protect: a planner
-     plan from weeks ago otherwise keeps late work below quiet projects.
+   - **Presence.** An urgent project always has a card. A plan the SYSTEM
+     writes (rules, planner) without one is rejected. A user's request that
+     would leave an urgent project without a card (hiding it) is refused. A
+     card the user hid earlier is back on the board while its project is
+     urgent, with a user-visible `why`, in its place by the data.
+   - **Order.** The system never places a card (§2, composition): the cards
+     the user did not place are in the default order at every render, urgent
+     first. So no plan the system produces can have a card that is not urgent
+     ahead of an urgent one, unless the user put it there.
    - There is no fixed position. Until v1.02 the rule was "above the fold"
      (the first 8 sections): with six urgent projects no plan could meet it,
      so the default and the rules plan were themselves refused, and it
@@ -72,10 +62,11 @@ CHI'09, Lavie & Meyer IJHCS'10, Google A2UI's declarative-over-codegen design):
    Color meaning (deadline pressure) is fixed by the design system, never by the planner.
 6. **Model output is data, never markup.** No planner string may reach
    `innerHTML`/JSX children unescaped. Unknown components/props are rejected.
-7. **User overrides beat the planner:** pinned sections keep position+variant
-   against every PLANNER; the user's own edit may move them (putting one section
-   at the top shifts a pinned one down a place, and refusing that broke
-   invariant 3's "apply immediately, always");
+7. **User overrides beat the planner:** a section the user placed is PINNED
+   and stays where he put it (§2, composition: a pin is applied to every plan,
+   not checked against it). A pin holds the PLACE only; emphasis (variant,
+   accent, what is unfolded) stays the system's on a pinned card too. The
+   user's own edit may move anything, pinned or not;
    `calm_mode` renders DEFAULT_PLAN unconditionally; one-tap revert to previous plan.
    Every revert is logged (it's a labeled wrong prediction — our accuracy metric).
 8. **Mid-session mutation is diff-shaped.** While the dashboard is open, new plans
@@ -113,8 +104,56 @@ deadline, then no date, then name); lists after them.
 
 A plan whose head is the default (nobody arranged it) is measured against the
 NEW default for movement and removals (§3 invariants 3 and 8): a product
-change to the default is not a system-initiated move. A plan the user arranged
-or pinned keeps its order.
+change to the default is not a system-initiated move.
+
+### Composition (v1.02): a render is composed, not chosen
+
+What is on screen is put together at every render from four things, in this
+order. No stored plan is "kept as it stands".
+
+1. **Today's system plan**: the planner's plan for exactly these signals when
+   there is one, else the rules plan, else the stored plan's own sections
+   (when a system move was refused: nothing moves), else DEFAULT_PLAN. From it
+   come the emphasis (variant, accent, what is unfolded), the whys, the
+   banner, and the places of the sections that are not cards. Whatever card
+   order it carries is ignored.
+2. **The sections the user placed, put back where he put them.** A pin holds
+   the section's place on the board: the n-th section from the top, n counted
+   when it was pinned, the banner not counted; a section pinned in the
+   board's last place holds last; with fewer than n sections it is last. n is
+   stored with the section in the stored plan (`place`), so it does not drift
+   when cards come and go. The unpinned sequence is built first (the system's
+   non-card sections in the system's order, the card run where the system's
+   first card sits), then each pinned section goes in at its place, lowest n
+   first. What he placed stays; a system move lands around it: with his list
+   pinned on top, the timeline that rule 3 sends to the top is second. A
+   section he added with `edit_layout_plan` is a placed section too: its spec
+   is kept in the stored plan and it is put at its place.
+3. **The cards he did not place, in data order**: every active project and
+   list has a card unless he hid it, in the default order above (urgent
+   first, then the one urgency order, lists last), flowing around the pinned
+   sections. A project made today has a card today; an archived one has none.
+4. **His hides and bans**, then **presence** (invariant 4): a hidden card is
+   back while its project is urgent.
+
+The stored row supplies only: where his pins sit, the baseline for rationing
+the system's own non-card moves (invariant 3), the planner's plan for the
+signals it was written for, and history. A stored plan counts as today's
+system plan only while its `signals_hash` equals today's: the hash carries
+each project's deadline, `days_left`, open and done counts and subproject
+count, the engagement counts, the schedule-talk share and question count,
+`days_since_layout_change`, the pinned sections, calm mode, the count of
+items missing dates and the next hard commitment. When any of those changes
+the rules plan is today's and the planner is asked again in the background.
+
+Who pins: `arrange_dashboard`'s moves, `edit_layout_plan`'s `move` and `add`,
+and the pin button on a section. `show` does not pin (a card he un-hid was not
+placed by him). Hiding, the section leaving the board, and the pin button
+remove a pin. `remove` in `edit_layout_plan` is a hide, for a card or any
+other section. No tool answers that a change was applied when the next render
+will not show it; the one limit is a size or accent set with `set_props`,
+which lasts until his data next changes (emphasis is the system's; a variant
+he asked for gets a durable home in a later task), and the tool says so.
 
 Adding a component = bump registry version + add prop schema + add render fn +
 mention in planner prompt. Never mid-session.
@@ -314,13 +353,15 @@ Pure function `planFromRules(signals): LayoutPlan`. Start from DEFAULT_PLAN, app
 in order (later rules may not violate earlier invariants):
 
 1. **Deadline pressure:** any project `days_left <= 3` (or committed `<= 7`) →
-   its card gets `accent: true` + `inline_loops: true`. If several qualify, accent
+   its card gets `accent: true` + `inline_loops: true`, and a why in calendar
+   days in the user's zone, the count the date beside it uses: "Due today",
+   "Due tomorrow", "Due in N days" (v1.02; `days_left` itself counts whole
+   24-hour periods and said "Due in 0 days" for tomorrow at 5 PM). If several qualify, accent
    only the soonest (invariant 5); others full variant.
 2. **Engagement:** strongest strong-engagement project → accent + full +
-   `inline_loops`. If `days_since_layout_change >= 1`, also move its card to
-   position after `hero_next_up` with `why: "N mentions today vs M typical"`;
-   a card that is not urgent stops just below the last urgent card instead
-   (invariant 4: the system does not put it ahead of urgent work).
+   `inline_loops`, with `why: "N mentions today vs M typical"`. It does not
+   move the card (until v1.02 it went to the top after a day): the system
+   never places a card (§2, composition).
    Engagement accent loses to deadline accent when both fire (deadline wins;
    engaged project still gets full + inline_loops).
 3. **Schedule-talk:** strong schedule-talk → `timeline` gets `expanded: true`,
@@ -631,8 +672,7 @@ calm_mode false. Each fixture overrides only what it names.
 **F2 timeline-day** — `schedule_word_share: 0.42`, `questions_today` includes 3
 schedule questions.
 → first section is `timeline` with `expanded: true, span_days: 14` and a `why`;
-patent card still on the board, ahead of every card that is not urgent
-(invariant 4: days_left 3); patent keeps accent
+patent card still on the board (invariant 4: days_left 3); patent keeps accent
 (rule 1 beats rule 3's compacting); non-accented cards `compact`.
 
 **F3a engagement-promote** — `engagement.patent.mentions_24h: 14`.

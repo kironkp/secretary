@@ -52,8 +52,10 @@ Omitted props render computed defaults. DEFAULT_PLAN is:
 4. Nothing urgent disappears. A project is urgent when `days_left <= 7` or it
    has late open work (`soonest_days < 0`); a list (`kind: "list"`) never is.
    Every urgent project keeps its project_card: compact is fine, absent is
-   not. And never place a project_card that is not urgent ahead of an urgent
-   one. There is no fixed position to keep them in.
+   not. You do not place project cards: their order is fixed by the data
+   (urgent first) and by what the user pinned, and any order you send for them
+   is ignored. Send each card once, for its emphasis; place only the sections
+   that are not cards.
 5. At most ONE project_card with `accent: true`. Deadline pressure beats
    engagement for the accent.
 6. Strong engagement = `mentions_24h >= 3 × baseline` and `>= 5` absolute.
