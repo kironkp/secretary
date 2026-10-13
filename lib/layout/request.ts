@@ -236,11 +236,15 @@ export async function requestBoard(userId: string, request: BoardRequest): Promi
     ...(ban ? [ban] : []),
   ];
   const plan_id = `user-${Date.now().toString(36)}`;
-  /** What an open shows once `list` is the stored board, with what he placed on it at the places read off it. */
-  const openWith = async (list: PlanSection[]) => {
+  /**
+   * What an open shows once `list` is the stored board, with what he placed
+   * on it at the places read off it; or, for Put it back, at the places the
+   * earlier row wrote (its board is not one he is looking at now).
+   */
+  const openWith = async (list: PlanSection[], places: "read" | "kept" = "read") => {
     const on = new Set(list.map((s) => sectionKey(s)));
     const pinned = [...placed].filter((key) => on.has(key) && key !== BANNER);
-    const draft: LayoutPlan = { plan_id, reason_summary: reason, sections: written(list, new Set(pinned)) };
+    const draft: LayoutPlan = { plan_id, reason_summary: reason, sections: places === "read" ? written(list, new Set(pinned)) : list };
     // The state as it will be once written: this board is the stored one, for
     // exactly these signals, with these pins and preferences, and with the
     // layout clock as this row leaves it.
@@ -254,29 +258,35 @@ export async function requestBoard(userId: string, request: BoardRequest): Promi
     };
     return (await openOn(next)).plan;
   };
-  // Where the system has what this request sends back to it (a card by the
-  // data, another section at its default place) is the composition's to say:
-  // it is asked with those sections off the board, and they then go in under
-  // the system's section each one follows there. Everything else keeps the
-  // order he saw. An unpinned card stays in the draft for its emphasis only.
-  const standing = bannerFirst(sections).filter((s) => !floating.has(sectionKey(s)));
-  const run = standing.findIndex((s) => isCard(s) && !placed.has(sectionKey(s)));
-  const asked = [...standing];
-  // (Beside a card of the run, so it does not say where the run goes; with no run to stand in, it is left out.)
-  if (run !== -1) asked.splice(run + 1, 0, ...sections.filter((s) => floating.has(sectionKey(s)) && isCard(s)));
-  const systems = await openWith(asked);
-  const flow = systems.sections.filter((s) => s.place === undefined && s.component !== BANNER);
-  const drawnBy = new Set(systems.sections.map((s) => sectionKey(s)));
-  const told = standing.filter((s) => drawnBy.has(sectionKey(s)));
-  flow.forEach((s, i) => {
-    if (told.some((t) => sectionKey(t) === sectionKey(s))) return;
-    // Under the nearest of the system's sections above it that is on the board; else on top of them.
-    const above = flow.slice(0, i).findLast((f) => told.some((t) => sectionKey(t) === sectionKey(f)));
-    const firstOwn = told.findIndex((t) => t.component !== BANNER && !placed.has(sectionKey(t)));
-    const at = above ? told.findIndex((t) => sectionKey(t) === sectionKey(above)) + 1 : firstOwn !== -1 ? firstOwn : told[0]?.component === BANNER ? 1 : 0;
-    told.splice(at, 0, s);
-  });
-  const board = await openWith(told);
+  // Put it back: the earlier row's board with what was placed on it, each at
+  // the place that row wrote, on today's data and under today's hides.
+  let board: LayoutPlan;
+  if (request.revert) board = await openWith(bannerFirst(sections), "kept");
+  else {
+    // Where the system has what this request sends back to it (a card by the
+    // data, another section at its default place) is the composition's to say:
+    // it is asked with those sections off the board, and they then go in under
+    // the system's section each one follows there. Everything else keeps the
+    // order he saw. An unpinned card stays in the draft for its emphasis only.
+    const standing = bannerFirst(sections).filter((s) => !floating.has(sectionKey(s)));
+    const run = standing.findIndex((s) => isCard(s) && !placed.has(sectionKey(s)));
+    const asked = [...standing];
+    // (Beside a card of the run, so it does not say where the run goes; with no run to stand in, it is left out.)
+    if (run !== -1) asked.splice(run + 1, 0, ...sections.filter((s) => floating.has(sectionKey(s)) && isCard(s)));
+    const systems = await openWith(asked);
+    const flow = systems.sections.filter((s) => s.place === undefined && s.component !== BANNER);
+    const drawnBy = new Set(systems.sections.map((s) => sectionKey(s)));
+    const told = standing.filter((s) => drawnBy.has(sectionKey(s)));
+    flow.forEach((s, i) => {
+      if (told.some((t) => sectionKey(t) === sectionKey(s))) return;
+      // Under the nearest of the system's sections above it that is on the board; else on top of them.
+      const above = flow.slice(0, i).findLast((f) => told.some((t) => sectionKey(t) === sectionKey(f)));
+      const firstOwn = told.findIndex((t) => t.component !== BANNER && !placed.has(sectionKey(t)));
+      const at = above ? told.findIndex((t) => sectionKey(t) === sectionKey(above)) + 1 : firstOwn !== -1 ? firstOwn : told[0]?.component === BANNER ? 1 : 0;
+      told.splice(at, 0, s);
+    });
+    board = await openWith(told);
+  }
 
   // --- the claims, on that board ------------------------------------------------------
   const drawn = new Set(board.sections.map((s) => sectionKey(s)));
@@ -285,6 +295,17 @@ export async function requestBoard(userId: string, request: BoardRequest): Promi
   }
   for (const key of claims.absent) {
     if (drawn.has(key)) return refuse(`That would not show on the dashboard: ${say(key)} would still be on it. Nothing was changed.`);
+  }
+  // A size or accent he set has to be on that board too (calm mode shows every section the default way).
+  for (const op of ops) {
+    if (op.op !== "set_props") continue;
+    const section = board.sections.find((x) => sectionKey(x) === op.key);
+    if (Object.entries(op.props).every(([name, value]) => JSON.stringify(section?.props?.[name]) === JSON.stringify(value))) continue;
+    return refuse(
+      signals.context.calm_mode
+        ? "The dashboard is in calm mode, which shows every section the plain way. Turn calm mode off to change a size. Nothing was changed."
+        : `That would not show on the dashboard: ${say(op.key)} would look as it does now. Nothing was changed.`
+    );
   }
 
   // --- write, and answer with that board ------------------------------------------------
