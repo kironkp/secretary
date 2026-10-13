@@ -90,7 +90,14 @@ test("the pin button: pinned where it stands the board does not move; unpinned, 
   // from a phone is a later task), so it is pressed through its click
   // handler: the page's own code from there on (the request, the board
   // that comes back).
-  await section().locator('button[aria-label="Pin this section here"]').dispatchEvent("click");
+  const press = async (label: string) => {
+    // The page marks the pin at once and asks the server; the answer is waited for, so a reload does not cut the request off.
+    const answered = page.waitForResponse((res) => res.url().includes("/api/layout") && res.request().method() === "POST");
+    await section().locator(`button[aria-label="${label}"]`).dispatchEvent("click");
+    const res = await answered;
+    expect(res.ok(), `${label}: ${res.status()} ${await res.text()}`).toBeTruthy();
+  };
+  await press("Pin this section here");
   await expect(section().locator('button[aria-label="Unpin"]')).toBeAttached();
   await expect(page.getByText("Arranged by you")).toBeVisible();
   expect(await board(page)).toEqual(before);
@@ -101,7 +108,7 @@ test("the pin button: pinned where it stands the board does not move; unpinned, 
   expect(await board(page)).toEqual(before);
 
   // Let go, a list goes back where the data has it, which is where it stood.
-  await section().locator('button[aria-label="Unpin"]').dispatchEvent("click");
+  await press("Unpin");
   await expect(section().locator('button[aria-label="Pin this section here"]')).toBeAttached();
   expect(await board(page)).toEqual(before);
   await page.reload();
