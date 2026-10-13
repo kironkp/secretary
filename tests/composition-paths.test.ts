@@ -422,18 +422,23 @@ describe("where the card run goes is one rule", () => {
       expect(keys(res.plan)).toEqual(expected);
     });
 
-    it("top wins: a planner may raise Needs a date above next up, or sink the tiles under it, and the run is under the tiles all the same", async () => {
-      clearPlanCache();
+    it("a crossing: a planner may raise Needs a date above next up, or sink the tiles to the bottom; the run stays as near as it can to where the plan had it", async () => {
       const chase: PlanSection = { component: "date_chase", props: { item_ids: [] }, why: "Several things have no date" };
-      const raised = await answer([chase, ...plan.sections.filter((s) => s.component !== "date_chase")]);
-      expect(raised.source).toBe("llm");
-      expect(keys(raised.plan)).toEqual(["date_chase", "hero_next_up", "stat_row", "timeline", ...run, "people_index"]);
-      clearPlanCache();
       const tiles: PlanSection = { component: "stat_row", props: { tiles: [{ value: "3", label: "late" }] }, why: "The numbers matter less today" };
-      const others = rest.filter((s) => s.component !== "stat_row");
-      const sunk = await answer([others[0], others[1], ...cards, others[2], tiles, others[3]]);
-      expect(sunk.source).toBe("llm");
-      expect(keys(sunk.plan)).toEqual(["hero_next_up", "timeline", "date_chase", "stat_row", ...run, "people_index"]);
+      const [hero, , strip, , people] = rest;
+      const shown = async (sections: PlanSection[]) => {
+        clearPlanCache();
+        const res = await answer(sections);
+        expect(res.source).toBe("llm");
+        return keys(res.plan);
+      };
+      // Needs a date raised: the cards first, and last.
+      expect(await shown([chase, ...cards, hero, rest[1], strip, people])).toEqual(["date_chase", "hero_next_up", "stat_row", ...run, "timeline", "people_index"]);
+      expect(await shown([chase, hero, rest[1], strip, people, ...cards])).toEqual(["date_chase", "hero_next_up", "stat_row", "timeline", ...run, "people_index"]);
+      // The tiles sunk to the bottom: the cards where they were are left alone (the first form of the bound moved them under the tiles).
+      expect(await shown([hero, strip, ...cards, rest[3], people, tiles])).toEqual(["hero_next_up", "timeline", ...run, "date_chase", "people_index", "stat_row"]);
+      expect(await shown([...cards, hero, strip, rest[3], people, tiles])).toEqual(["hero_next_up", ...run, "timeline", "date_chase", "people_index", "stat_row"]);
+      expect(await shown([hero, strip, rest[3], people, tiles, ...cards])).toEqual(["hero_next_up", "timeline", ...run, "date_chase", "people_index", "stat_row"]);
     });
 
     it("the system's own order may have the run right under the tiles, the strip below it (main's default)", () => {

@@ -267,8 +267,10 @@ export async function planWithFallback(
     const own = ownSections(stored, placedKeys(opts.previousPlan, opts.pinnedSections, opts.preferences, signals));
     const others = own.filter((s) => !isCard(s));
     const at = runPlace(own);
+    // (Built from its parts: a stored row carries the store's own mark, which is not part of a plan.)
     const standing: LayoutPlan = {
-      ...opts.previousPlan,
+      plan_id: opts.previousPlan.plan_id,
+      reason_summary: opts.previousPlan.reason_summary ?? null,
       sections: [
         ...stored.filter((s) => s.component === "focus_banner"),
         ...others.slice(0, at),

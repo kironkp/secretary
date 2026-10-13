@@ -225,7 +225,7 @@ export async function persistPlan(
         await db.insert(layoutSpecs).values({
           userId,
           version: (head?.version ?? 0) + 1,
-          spec: bundle.plan,
+          spec: asStored(bundle.plan),
           // What he placed is what carries a place on this board (one home for a pin, SPEC §2).
           pinned: placedOn(bundle.plan),
           kind: "plan",
@@ -295,7 +295,7 @@ export async function persistPlan(
     await db.insert(layoutSpecs).values({
       userId,
       version: (head?.version ?? 0) + 1,
-      spec: refined.plan,
+      spec: asStored(refined.plan),
       pinned: placedOn(refined.plan),
       kind: "plan",
       signalsHash: hashOnceStored(bundle.signals, refined.plan, head ? { spec: head.spec as LayoutPlan, pinned: head.pinned } : null, placedOn(refined.plan)),
@@ -305,6 +305,11 @@ export async function persistPlan(
   } catch (err) {
     console.error("persistPlan failed", err);
   }
+}
+
+/** A board as it is stored: marked as composed, so a row from before this version can be told from one written since. */
+export function asStored(plan: LayoutPlan): LayoutPlan {
+  return { ...plan, composed: true };
 }
 
 /**

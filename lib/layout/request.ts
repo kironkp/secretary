@@ -19,7 +19,7 @@ import { bannerFirst, readPlaces } from "./compose";
 import { nameOfKey, type NamedProject } from "./names";
 import { planFromRules } from "./plan-from-rules";
 import { defaultPlan, isUrgent, sectionKey, urgencyLabel, type LayoutPlan, type PlanSection } from "./plan";
-import { hashOnceStored, loadState, markPinPreferences, openOn, placedOn, planContent, type BoardState } from "./plan-store";
+import { asStored, hashOnceStored, loadState, markPinPreferences, openOn, placedOn, planContent, type BoardState } from "./plan-store";
 import { REGISTRY_COMPONENTS, REGISTRY_VERSION } from "./registry";
 import { layoutChanged, signalsHash } from "./signals";
 import type { LayoutPreference } from "./validator";
@@ -117,6 +117,8 @@ export async function requestBoard(userId: string, request: BoardRequest): Promi
     if (rows.length < 2) return refuse("Nothing to revert to");
     reverted = { id: rows[0].id };
     const earlier = rows[1].spec as LayoutPlan;
+    // Not behind the first board stored under this version: a row from before it is not a board to return to.
+    if (!earlier.composed) return refuse("The board before this one is from before the last update, so it cannot be put back. Nothing was changed.");
     sections = structuredClone(earlier.sections);
     reason = earlier.reason_summary ?? null;
     placed = new Set([...placedOn(earlier), ...rows[1].pinned]);
@@ -361,7 +363,7 @@ export async function requestBoard(userId: string, request: BoardRequest): Promi
   await db.insert(layoutSpecs).values({
     userId,
     version,
-    spec: plan,
+    spec: asStored(plan),
     pinned: stillPlaced,
     kind: "plan",
     // Under the hash the next open will work out for it (its own pins, the

@@ -60,6 +60,12 @@ export type LayoutPlan = {
   reason_summary?: string | null;
   sections: PlanSection[];
   wishlist?: WishlistEntry[];
+  /**
+   * On every row stored since v1.02 r5 (written by the store, never by a
+   * planner): the row is a composed board. A row without it was written
+   * before, and is not a board "Put it back" returns to (SPEC §2).
+   */
+  composed?: true;
 };
 
 /**

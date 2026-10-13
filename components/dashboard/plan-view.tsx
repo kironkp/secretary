@@ -431,7 +431,10 @@ export function PlanView({
       body: JSON.stringify({ action: "revert" }),
     });
     setReverting(false);
-    if (res.ok) router.refresh();
+    if (res.ok) return router.refresh();
+    // Refused (nothing to put back, or the board before is from before the update): say why.
+    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    setPinRefused(body?.error ?? "That could not be put back.");
   };
 
   const render = (section: PlanSection) => {

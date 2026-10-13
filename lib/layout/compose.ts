@@ -74,21 +74,32 @@ export function readPlaces(sections: PlanSection[], placed: Set<string>, signals
 }
 
 /**
+ * A stored row as a board: without the components retired since it was
+ * written. Main still stored them; the page draws nothing for them. Left in,
+ * one sat on the composed board and the stored row (told to the model, and
+ * counted among the places), and a section he had placed near the bottom
+ * was read one place higher. Every read of a stored row as a board comes
+ * through here: as the system plan, and as where his places are.
+ */
+function drawable(plan: LayoutPlan): LayoutPlan {
+  return plan.sections.some((s) => RETIRED_COMPONENTS.has(s.component)) ? { ...plan, sections: plan.sections.filter((s) => !RETIRED_COMPONENTS.has(s.component)) } : plan;
+}
+
+/**
  * Where each section he placed sits, from the stored board: the place written
  * on it. A pin with no place written (a row from before r5, or a preference
  * pin) is read ONCE from where the section stands in the stored order; the
  * composition writes it back, so it is never read from the order again.
  */
-function placesIn(stored: LayoutPlan | null, pins: Set<string>, signals: Signals): Map<string, { place: Place; section: PlanSection }> {
+function placesIn(given: LayoutPlan | null, pins: Set<string>, signals: Signals): Map<string, { place: Place; section: PlanSection }> {
   const found = new Map<string, { place: Place; section: PlanSection }>();
-  if (!stored) return found;
+  if (!given) return found;
+  const stored = drawable(given);
   let fromOrder: Map<string, Place> | null = null;
   for (const s of stored.sections) {
     const key = sectionKey(s);
     if (!pins.has(key) || found.has(key) || s.component === BANNER) continue;
-    // (Without the components retired since: main still stored them, the page does not draw them, and counted they
-    // put a section he had placed near the bottom one place higher.)
-    const place = asPlace(s.place) ?? (fromOrder ??= readPlaces(stored.sections.filter((x) => !RETIRED_COMPONENTS.has(x.component)), pins, signals)).get(key);
+    const place = asPlace(s.place) ?? (fromOrder ??= readPlaces(stored.sections, pins, signals)).get(key);
     if (place) found.set(key, { place, section: s });
   }
   return found;
@@ -110,36 +121,49 @@ export function ownSections(sections: PlanSection[], placed: Set<string>): PlanS
   return sections.filter((s) => s.component !== BANNER && !placed.has(sectionKey(s)));
 }
 
+/** The system's sections that belong above the cards, and those that belong below. The strip is neither. */
+const ABOVE_THE_CARDS = ["hero_next_up", "stat_row"];
+const BELOW_THE_CARDS = ["date_chase", "people_index"];
+
 /**
  * Where the card run goes among a plan's own sections that are not cards:
- * after how many of them. Its first own card says (one that still carries a
- * place, let go and not yet composed again, never does). A plan with no own
- * card has the run where the default has it, after next up, the tiles and
- * the strip.
+ * after how many of them.
  *
- * The right way up, whatever the plan says. The run goes after the last of
- * the system's next up and tiles, and before the first Needs a date or
- * People that stands below that point. Top wins: a planner may raise Needs
- * a date above next up, or sink the tiles under it, and the two cannot then
- * both hold. A planner on main put urgent cards above next up; read as "the
- * run starts here", such a plan put every card above it. Bounded, the run
- * lands right under the tiles, above the strip: the strip is free (a rule
- * may send it up, and main's own order had it under the cards).
+ * The right way up, whatever the plan says: the cards go where the fewest of
+ * the system's sections end up on the wrong side of them. For each place the
+ * run could go, count the sections that belong above the cards and would be
+ * under them, plus those that belong below and would be over them. The run
+ * goes at a place with the lowest count; among those, the nearest to where
+ * the plan had it (its first own card; one that still carries a place, let
+ * go and not yet composed again, never says; a plan with no own card has it
+ * after next up, the tiles and the strip); at equal distance, the upper one.
+ *
+ * With the usual order that is: never above next up or the tiles, never
+ * below Needs a date or People. A planner on main put urgent cards above
+ * next up; read as "the run starts here", such a plan put every card above
+ * it. With a crossing (a planner may raise Needs a date above next up, or
+ * sink the tiles to the bottom) no place counts zero, and the run stays as
+ * near as it can to where the plan had it.
  *
  * "The system's" is each section on its own: one he has placed is not in
- * `own` and bounds nothing. The bound is worked out on the list the
+ * `own` and counts for nothing. The count is made on the list the
  * composition cuts on, hidden sections included (they are filtered after).
- * One home: the composition and the held path both ask here.
+ * Total, and one home: the composition and the held path both ask here.
  */
 export function runPlace(own: PlanSection[]): number {
   const others = own.filter((s) => !isCard(s));
-  // (A section that still carries a place is not where the system has it, and bounds nothing: see composePlan.)
+  // (A section that still carries a place is not where the system has it, and counts for nothing: see composePlan.)
   const at = (component: string) => others.findIndex((s) => s.component === component && s.place === undefined);
   const first = own.findIndex((s) => isCard(s) && s.place === undefined);
   const said = first !== -1 ? own.slice(0, first).filter((s) => !isCard(s)).length : Math.max(at("hero_next_up"), at("stat_row"), at("timeline")) + 1;
-  const under = Math.max(at("hero_next_up"), at("stat_row")) + 1;
-  const lower = [at("date_chase"), at("people_index")].filter((i) => i >= under);
-  return Math.max(under, Math.min(said, lower.length ? Math.min(...lower) : others.length));
+  const wrongSide = (place: number) =>
+    others.filter((s, i) => s.place === undefined && ((ABOVE_THE_CARDS.includes(s.component) && i >= place) || (BELOW_THE_CARDS.includes(s.component) && i < place))).length;
+  let best = 0;
+  for (let place = 1; place <= others.length; place++) {
+    const [now, was] = [wrongSide(place), wrongSide(best)];
+    if (now < was || (now === was && Math.abs(place - said) < Math.abs(best - said))) best = place;
+  }
+  return best;
 }
 
 /**
@@ -178,7 +202,8 @@ export type CompositionContext = {
 };
 
 /** Compose what renders from today's system plan and what the user placed, hid and banned. */
-export function composePlan(system: LayoutPlan, ctx: CompositionContext): LayoutPlan {
+export function composePlan(given: LayoutPlan, ctx: CompositionContext): LayoutPlan {
+  const system = drawable(given);
   const places = placesIn(ctx.stored, pinKeys(ctx.pinned, ctx.preferences), ctx.signals);
   const placed = new Set(places.keys());
   const hidden = new Set(ctx.preferences.filter((p) => p.kind === "hide_section").map((p) => p.value.section));
