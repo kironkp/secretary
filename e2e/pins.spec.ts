@@ -115,3 +115,28 @@ test("the pin button: pinned where it stands the board does not move; unpinned, 
   await expect(section().locator('button[aria-label="Pin this section here"]')).toBeAttached();
   expect(await board(page)).toEqual(before);
 });
+
+test("Settings lists what he placed by name, and removing it there lets the section go", async ({ page, request }) => {
+  const card = `project_card:${listId}`;
+  const moved = await tool(request, "arrange_dashboard", { operations: [{ op: "move_to_top", section: `${LIST} list` }] });
+  expect(moved.applied, String(moved.error)).toBe(true);
+
+  await page.goto("/settings");
+  // One home for a pin: the board. Settings reads it from there, and says it in words, never a key.
+  const row = page.locator("li", { hasText: new RegExp(`Keep ${LIST} list where you put it`, "i") });
+  await expect(row).toBeVisible();
+  await expect(page.getByText(/project_card:/)).toHaveCount(0);
+  const answered = page.waitForResponse((res) => res.url().includes("/api/layout") && res.request().method() === "POST");
+  await row.getByTitle("Remove this preference").click();
+  const res = await answered;
+  expect(res.ok(), `${res.status()} ${await res.text()}`).toBeTruthy();
+  await expect(row).toHaveCount(0);
+
+  // The same request as the pin button's: the list is back where the data has it.
+  await page.goto("/dashboard");
+  const now = await board(page);
+  expect(now).toContain(card);
+  expect(now[0]).not.toBe(card);
+  await page.goto("/settings");
+  await expect(page.locator("li", { hasText: new RegExp(`Keep ${LIST} list`, "i") })).toHaveCount(0);
+});

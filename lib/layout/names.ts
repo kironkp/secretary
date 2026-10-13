@@ -2,7 +2,7 @@
 // because the voice tool matches what was said against these, reads the
 // board back in them, and every refusal names a section by them: a reply
 // never shows a raw key (SPEC §2).
-import { sectionKey, type PlanSection } from "./plan";
+import type { PlanSection } from "./plan";
 
 export const COMPONENT_NAMES: Record<string, string[]> = {
   focus_banner: ["banner", "focus banner"],
@@ -37,5 +37,3 @@ export function nameOfKey(key: string, projects: Map<string, NamedProject>): str
   if (key.startsWith("project_card:")) return namesOf({ component: "project_card", props: { project_id: key.slice("project_card:".length) } }, projects)[0];
   return namesOf({ component: key }, projects)[0];
 }
-
-export const keyOf = sectionKey;
