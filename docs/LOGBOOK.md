@@ -7,6 +7,39 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 ---
 
+## v1.03 — A promised follow-up is asked (2026-10-12)
+
+`a03e399` (the spec), `bb4e929` (the code), this commit
+
+When Secretary says "I'll be asking", that is a row with a time on it. Found
+in the 1.01 baseline and proven by the Reviewer: opening any page cancelled it.
+
+- The defect. Every briefing build marked a due follow-up as missed, and the
+  chat dock builds a briefing on every page load to draw its card. By the
+  time a conversation began, the briefing had neither the opener nor the
+  promise.
+- Now building a briefing changes nothing. A due follow-up is raised only at
+  a session start (a chat turn, the start of an ordinary voice call), and
+  whoever hands the briefing to the model settles it afterwards: the chat
+  route once a model has answered, the voice route once the provider has
+  the call's instructions. A turn that fails, or a call that does not
+  start, leaves it open for the next one. It is asked once.
+- A page load, the briefing card, `consult_brain`, a voice reconnect and an
+  interview call neither show it nor change it. And a report in the meantime
+  clears it silently even after pages were opened, which the old behaviour
+  had made impossible (a follow-up already marked missed was never cleared).
+- Spec first: docs/adaptive-ui/SPEC.md §11.
+- `tests/followup-delivery.test.ts` goes through the real routes with fake
+  providers. All eight of its tests fail on the commit before. Each part of
+  the fix taken out in turn fails a test: 7 of 7.
+- Not changed, the same kind of defect one block further down the briefing:
+  a page load marks the next queued clarification as asked. Three queued,
+  three page loads, none left to ask. For a later task.
+- Checks: 1,148 tests, the production build, 62 browser specs on local
+  Chromium. App spend: $0.
+
+---
+
 ## v1.00 — The JARVIS plan (2026-10-12)
 
 this commit
