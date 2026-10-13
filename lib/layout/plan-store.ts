@@ -201,9 +201,10 @@ export async function persistPlan(
       dynamicComponents: await listDynamicComponents(userId),
     });
     // Bill the planner BEFORE any of the reasons this function returns early —
-    // the tokens were spent whether or not the refinement lands. A cache hit
-    // spent nothing, so it has nothing to record.
-    if (refined.source === "llm") {
+    // the tokens were spent whether or not the refinement lands, and whether
+    // or not the validator kept its plan. A cache hit spent nothing, so it
+    // has nothing to record.
+    if (refined.called) {
       const { lastPlannerUsage } = await import("./plan-from-llm");
       if (lastPlannerUsage.model) {
         const { recordUsage } = await import("@/lib/usage");
@@ -215,6 +216,11 @@ export async function persistPlan(
           outputTokens: lastPlannerUsage.output,
         });
       }
+    } else if (refined.unanswered) {
+      // Sent, and it never came back: counted at what was sent, so the cap
+      // sees it (docs/spend/SPEC.md §1.2).
+      const { recordUnanswered } = await import("@/lib/unanswered");
+      await recordUnanswered({ userId, kind: "layout", ...refined.unanswered });
     }
     if (refined.source !== "llm" && refined.source !== "llm-cache") return await stamp();
     if (planContent(refined.plan) === planContent(bundle.plan)) return await stamp();
