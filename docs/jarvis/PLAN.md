@@ -8,7 +8,7 @@ beside me in a workshop."*
 ## Now
 
 - **Cycle counter: 108.** 1.00, 1.03 and 1.04 are accepted; 1.01 and 1.02 are
-  open; then 1.08, 1.05, 1.06, 1.07 in that order. See §9.
+  open; then 1.09, 1.08, 1.05, 1.06, 1.07 in that order. See §9.
 - **1.00** — this plan. Accepted and live: `34fc1f1`, Heroku v63, 2026-10-12.
 - **1.01** — the measured baseline, `docs/jarvis/BASELINE.md`. Measured and
   checked by the Reviewer, except production: the Executor's session is refused
@@ -186,7 +186,21 @@ beside me in a workshop."*
   conversation; his own move of a section, or a planner answer that moves
   one, no longer costs a second planner call. Left: with a banner the
   planner is still asked once a day while nothing changes (ends in 1.02 r5).
-- **1.08** — FIRST after 1.02 r5 is offered, ahead of 1.05: an understanding
+- **1.09** — FIRST after 1.02 r5 is offered, ahead of 1.08: a chat answer
+  that takes longer than 30 seconds reaches him. Kiron hit it live on
+  2026-10-13 ("error try again"): one `POST /api/chat` cut by Heroku's
+  router at 30,007 ms (H12, 503) while the Claude API was up (status page
+  all operational, the app logged no provider failure). Cause, read on
+  main: the route waits for the whole answer, tools and all, before it
+  sends a byte (`app/api/chat/route.ts`, the await on `runClaudeChat`),
+  and Heroku allows 30 seconds to the first byte. Not known: whether the
+  cut turn was still finished, saved and paid for. Diagnosis first (what
+  happens to a turn whose request was cut; what a retry then costs), then
+  the contract: bytes within a few seconds and kept flowing (streamed
+  text is the goal, a heartbeat the least); if the connection still
+  drops, the page shows the saved answer and not an error; a retry never
+  runs or pays for the same turn twice.
+- **1.08** — after 1.09, ahead of 1.05: an understanding
   call that was sent and not answered is counted, and a provider failure
   backs off. Today: up to 3 attempts a sweep per project, every 10 minutes,
   on the dearest model, no usage row and no back-off, so neither cap sees it
