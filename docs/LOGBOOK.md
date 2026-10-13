@@ -11,8 +11,13 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 `b980803` (the round as one commit: written 2026-10-06 as v0.34 and parked,
 because node would not start that day and nothing was run; verified
-2026-10-12 and first offered on another branch), `a42f04e` (the spec),
-`fab811d` and `b4c455a` (the code and its tests), this commit
+2026-10-12 and first offered on another branch); round 2: `a42f04e` (the
+spec), `fab811d`, `b4c455a`, `aced086`; round 3, the rule that stands:
+`b4a8101`, `3242945`, `2d7dbbb`, `69e8d18` (the spec, each before its code),
+`6f8b750`, `8bb8ff6`, `341de68` (the code and its tests), this commit. `132b183`,
+`1d7d798` and `ccd57ef` are an earlier round-3 rule that composition
+replaced; `f23e56c` merges main, which had v1.03 by then. The package
+version stays 1.0.3, because 1.03 landed first.
 
 Kiron on the Overview: "make it make sense", "a random graph", "I don't
 understand all the whats". sec rev's round 2 (SEC-A007).
@@ -36,7 +41,7 @@ understand all the whats". sec rev's round 2 (SEC-A007).
   his default never validated and every render fell back to the stored
   plan. The cap is 40. And a default nobody arranged is now measured as the
   new default, so a change to it is not treated as the planner moving
-  things; a board the user arranged or pinned keeps its order.
+  things; what the user placed on his board stays where he put it (below).
 - Under the hood: registry v3 (open_loops retired; a stored plan naming it
   just drops it), signals carry a project's real kind, and the browser
   tests run the Overview production runs (the LayoutPlan board).
@@ -49,7 +54,7 @@ understand all the whats". sec rev's round 2 (SEC-A007).
 - One order for projects on every screen (review fix): the cards, the strip
   and the Timeline sort with the same code. Late first by how late, then the
   nearest date or the project's own deadline, then no date, lists last. A
-  late project's card is kept above the fold like an urgent one.
+  project with late work is urgent, like one with a date within the week.
 - A planner's plan is named by the server, never by the model, and a planner
   call is billed even when its plan is refused (review fixes). A call that
   reports no tokens is not billed with the figures of the call before it.
@@ -65,45 +70,97 @@ understand all the whats". sec rev's round 2 (SEC-A007).
   board the cards, the strip and the Timeline were then compared with an
   order worked out by hand in SQL, at 393, 820 and 1440 wide: one order on
   all three, the most overdue project first.
-- Round 2, after review. **Invariant 4 changed, for a reason, not to pass a
-  test.** "Nothing urgent disappears" used to mean "urgent cards above the
-  fold", the first 8 sections. Once late work counted as urgent that could
-  not be met: on a board with four late projects and one due soon, "put the
-  shopping list at the top" was refused; with six late projects the default
-  and the rules plan were refused themselves, every arrange request was
-  refused, and a planner answer was paid for and thrown away on each new
-  situation. The rule now (docs/adaptive-ui/SPEC.md §3):
-  - Presence. An urgent project always has a card. A plan the system writes
-    without one is rejected. A stored plan that has come to lack one (a
-    project went late after he arranged the board, or after he hid its card)
-    is repaired: the card goes in after the last urgent card with a "Back on
-    your board" why, and nothing else moves.
-  - Order. The system may not move a card that is not urgent ahead of an
-    urgent one, and it is judged only on what it changed. A board left as it
-    stands is never refused for its order, and neither is anything the user
-    asked for. A list is never urgent. There is no fixed position.
-  - The default puts urgent cards first, and the rules planner's "you keep
-    talking about this" move stops below the urgent cards for a project that
-    is not urgent.
-  - What this fixes that nobody had asked about yet: after he arranged his
-    board, the next change in his data re-checked his own plan as if the
-    planner had written it; with a late card below the fold it failed, and
-    the board went back to the default overnight.
+- Rounds 2 and 3, after review. **How the Overview is put together changed,
+  for a reason, not to pass a test.** Until now one plan was chosen (the
+  planner's, the rules', the stored one, the default) and shown as it stood,
+  and "nothing urgent disappears" meant "urgent cards in the first 8
+  sections". Once late work counted as urgent that could not be met: with
+  six late projects the default refused itself and every arrange request
+  was refused. Two attempts at a rule about card order on a chosen plan
+  each broke the same way on a board nobody had arranged: as soon as any
+  rule fired, a card the data had moved looked like the system moving it
+  without a reason, the plan was refused, and the order stopped following
+  his data. So a render is now composed, every time
+  (docs/adaptive-ui/SPEC.md §2 "Composition", lib/layout/compose.ts):
+  - Today's system plan gives the emphasis (size, accent, what is
+    unfolded), the reasons, the banner and where the sections that are not
+    cards sit. Whatever card order it has is ignored: the system never
+    places a card. A planner cannot drop a card either.
+  - What he placed stays where he put it. A move by voice, tap or chat, a
+    section added in the chat, and the pin button each pin the section at
+    its place on the board: the n-th from the top, or last. The place is
+    stored with the section, so it does not drift when cards come and go.
+    A system move lands around it: with his list on top, the strip that
+    "you have been talking dates" sends up is second.
+  - Every card he did not place follows his data at every render: urgent
+    first, then the one urgency order, lists last. A project made today has
+    a card today; an archived one has none.
+  - Then his hides and bans. A card he hid is back while its project is
+    urgent, in its place by the data, saying "Back on your board"; hiding
+    an urgent card is refused. Urgent is late open work or a date within
+    the week; a list never is. There is no fixed position any more.
+  - What follows from it. "You keep talking about this" no longer moves a
+    card; it unfolds it and says why. Rationing counts only the sections
+    that are the system's to place, so a re-sort is not a layout change and
+    one change in his data is at most one planner call, not two. Calm mode
+    is the default with no rule and no planner, and what he placed, hid
+    and banned still holds in it (before, his arrangement vanished while
+    calm mode was on). "Put it back" restores the previous board's pins
+    with it, so undoing a move also lets the section go.
+  - No tool says "applied" to something the next render does not show.
+    Checked for every operation of both tools: top, up, down, bottom, hide,
+    show; move, remove, add, set size. In the chat tool, remove is a hide
+    (it used to come back at the next render), an added section is kept as
+    a placed one, and adding what is already there or does not exist is
+    refused in plain words. Show does not pin.
+  - The reason chip under a deadline counts calendar days in his zone, like
+    the date beside it: "Due today", "Due tomorrow", "Due in 3 days". In
+    the evening it used to say "Due in 0 days" next to "tomorrow". The
+    thresholds still count 24-hour periods; one count everywhere is 1.06.
+- Found on the way, and fixed because the rule could not be tested without
+  it: a planner answer was paid for and thrown away whenever his data
+  changed and the board did not (the stored plan still carried the older
+  situation's stamp, so the answer was taken for a stale one). And one that
+  the old rule caused: a planner's banner from weeks ago could stay on the
+  board for good, because the plan that would replace it was refused for
+  its card order. A banner now lasts for the signals it was written for,
+  at most a day.
+- Limits, known and not hidden. A size or accent he sets on one card lasts
+  until his data next changes; the tool tells the model to say "for now"
+  (a lasting home for it is 1.06). A place is counted from the top, so
+  something he later places above an earlier pin does not push that pin
+  down. A board he arranged in the chat before this round has no pins, so
+  its cards follow the data now; one arranged by voice or tap keeps its
+  pins. A section he placed stays placed until he moves it again, hides
+  it, or uses "Put it back" straight away: there is no "let it go back"
+  by voice yet, and the pin button only shows under a mouse. With a
+  component banned, the rules plan is refused whole, as before this round;
+  the cards still get today's emphasis.
+- Seen in the browser and not fixed here: a card with nothing to draw, and
+  a section with nothing in it, still counts as a place on the board. On
+  the local copy "Needs a date, up one" moved it above a card that draws
+  nothing: the tool said moved, the stored board shows it, and the page
+  looked the same. Places should be counted among what is drawn, which
+  needs the server to know what draws; that is its own task.
 - Round 2 also: the test fixtures are made-up boards (no project of his by
   name), and five behaviours the Reviewer's mutants showed untested now have
   tests: finished and suggested tasks do not count as a project's soonest
   date, days are his calendar days, a project's own deadline is read, a
   Timeline lane is ordered by its due day, and a list never takes a cell
   among the project cards.
-- Checks: 1,236 tests, the production build, 70 browser specs on local
-  Chromium. Each of 36 behaviours taken out in turn failed a test. On a
-  local copy of the real board with no stored plan, the cards, the strip and
-  the Timeline match an order worked out by hand at three widths. App spend:
-  $0.
-- Known, and not changed here: a board whose stored plan was written by the
-  planner (not arranged by him, not the default) is kept as it stands too,
-  as it was before this round. With no working planner it stays, stale
-  banner and all, until a planner writes a new one.
+- Checks: 1,345 tests, the production build, 70 browser specs on local
+  Chromium, all the way CI runs them. Each of 86 behaviours taken out in
+  turn failed a test, three of them only after a test was written for them.
+  The Reviewer's own probe file, run unchanged: 14 of 16 pass as written;
+  the two that differ expect the whole board to stand still when a project
+  goes late, and under this rule the placed section stays and the other
+  cards re-sort. In a real browser on a local copy of the real board, whose
+  stored plan was a planner's from September, banner and all: no banner,
+  and the cards, the strip and the Timeline in the order worked out by hand
+  at 393, 820 and 1440 wide. A task dated into the past moved its card up
+  at the next load. At 11 PM a task due the next afternoon read "Due
+  tomorrow" beside "tomorrow". Three moves by the two tools and "Put it
+  back" each showed on the page, but for the one above. App spend: $0.
 
 ---
 
