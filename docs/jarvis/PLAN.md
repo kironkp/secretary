@@ -16,16 +16,23 @@ beside me in a workshop."*
   This branch (`jarvis-1.01-plan`) is merged into it when it is offered.
 - **1.02** — the Overview round (A007), rebuilt on `jarvis-1.02-overview-r2`
   from main with made-up fixture names. The first offer (`3eb1142`, branch
-  `jarvis-1.02-overview`) FAILED and stays untouched. `v1.02 r3` is offered
-  as `d32121f` and with the Reviewer: the render is composed instead of
-  chosen (below). Merged with main; package version stays 1.0.3.
+  `jarvis-1.02-overview`) FAILED and stays untouched. `v1.02 r3` (`d32121f`,
+  the render composed instead of chosen, below) FAILED on 2026-10-13: on the
+  held path a pinned card turned the board upside down, and a cached render
+  showed yesterday's "Due tomorrow". `v1.02 r4` is with the Executor. This
+  is the second FAIL; a third stops the loop (§4). Not yet done by anyone
+  independent: a browser pass on real data, because the Reviewer's session
+  refuses to copy the database. Kiron's say is needed.
 - **1.03** — a page load no longer cancels a promised follow-up. Accepted and
   live: `7073e9a`, Heroku v64, 2026-10-12.
 - **1.04** — the background bill counted right (first slice of Phase 2a): the
   code default cap is $3, cache writes priced as cache writes (needs an added
   column for the write count), a call that timed out still recorded, a sweep
   with nothing new proven to cost nothing. Branch `jarvis-1.04-spend-count`.
-  With the Executor.
+  Parked at `77c52a3` (WIP) while 1.02 r4 is built. Also in it: extraction
+  paid again for an unchanged conversation (a millisecond mark compared with
+  a microsecond message), and a landed planner answer that moves a section
+  causes one more paid planner call.
 - **1.05** — "asked means asked", the rest of what 1.03 began, built on main
   after 1.04: clarifications, understanding questions and nudges marked only
   after the hand-over; voice settles when the call really ran, not when the
@@ -42,7 +49,8 @@ beside me in a workshop."*
   drawn (today a card that draws nothing still counts, so "up one" can be
   stored and change nothing on the page); a placed section can be let go by
   voice and on a phone (the pin button is hover only); "Put it back" undoes
-  his last action, not the latest stored version.
+  his last action, not the latest stored version, and brings back what he
+  hid; the pin button is 13 px and does not show on a phone tap.
 - **Next:** reserve before sending so two requests cannot overshoot, and email
   attachments retried when there is room. Then the Workspace branch rebuilt
   on main after 1.02.
