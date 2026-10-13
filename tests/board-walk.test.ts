@@ -254,11 +254,17 @@ async function walk(index: number) {
   const history: Told[][] = [];
   const complain = (check: string, detail: string) => complaints.push({ check, detail: `step ${moves.length} (${moves.at(-1) ?? "start"}): ${detail}` });
   const blank = (reason: string) => reason.replace(/"[^"]*"/g, '"…"').replace(/\b[0-9a-f]{8}-[0-9a-f-]{27}\b/g, "<id>").slice(0, 110);
-  /** A refusal: one the walker predicted, saying what it predicted (a keyword of the reason), or a complaint. */
-  const refused = (reason: string, expected: string | null) => {
-    if (expected) {
-      refusals.set(expected, (refusals.get(expected) ?? 0) + 1);
-      if (!REFUSAL_SAYS[expected]?.test(reason)) complain("a predicted refusal gives another reason", `${expected}: ${blank(reason)}`);
+  /**
+   * A refusal: one the walker predicted, saying what it predicted (a keyword
+   * of the reason), or a complaint. A request of several operations may have
+   * more than one reason to be refused; the reply gives one of them.
+   */
+  const refused = (reason: string, expected: string | string[] | null) => {
+    const predicted = expected === null ? [] : [expected].flat();
+    if (predicted.length) {
+      const said = predicted.find((e) => REFUSAL_SAYS[e]?.test(reason)) ?? predicted[0];
+      refusals.set(said, (refusals.get(said) ?? 0) + 1);
+      if (!REFUSAL_SAYS[said]?.test(reason)) complain("a predicted refusal gives another reason", `${predicted.join(" / ")}: ${blank(reason)}`);
     } else complain("refused, and the walker had no reason to expect it", blank(reason));
     if (/project_card:|[0-9a-f]{8}-[0-9a-f]{4}/.test(reason)) complain("a reply shows a raw key", blank(reason));
   };
@@ -434,14 +440,15 @@ async function walk(index: number) {
     let model: string[] | null = before;
     let placedNow = placedSet();
     const subject: string[] = [];
-    let expectRefusal: string | null = null;
+    const predicted: string[] = [];
     const banned = await bannedNow();
     const order = await systemOrder();
     for (const { op, key } of ops) {
       const onBoard = (model ?? before).includes(key);
-      if (op !== "hide" && banned.has(key.split(":")[0])) expectRefusal ??= "he asked never to be shown it";
-      if (op === "hide" && isCard(key) && urgent.has(key)) expectRefusal ??= "an urgent card cannot be hidden";
-      if (op === "hide" && !onBoard) expectRefusal ??= "hiding what is already hidden";
+      if (op !== "hide" && banned.has(key.split(":")[0])) predicted.push("he asked never to be shown it");
+      // The last word about a section wins: an urgent card hidden and then shown in the same request is not hidden.
+      if (op === "hide" && isCard(key) && urgent.has(key) && ops.findLast((o) => o.key === key)?.op === "hide") predicted.push("an urgent card cannot be hidden");
+      if (op === "hide" && !onBoard) predicted.push("hiding what is already hidden");
       subject.push(key);
       const was: string[] | null = model;
       model = model ? arrangeModel(model, op, key) : null;
@@ -453,8 +460,8 @@ async function walk(index: number) {
       if (op === "show" && was && !was.includes(key) && isDefault(key)) model = returnModel(was, key, placedNow, order);
     }
     const res = (await executeTool(ctx, "arrange_dashboard", { operations: ops.map((o) => ({ op: o.op, section: nameOf(o.key) })) })).result as { applied?: boolean; error?: string; order?: string[] };
-    if (!res.applied) return refused(res.error ?? "no reason given", expectRefusal);
-    if (expectRefusal) complain("a request the model refuses was applied", `${expectRefusal}: arrange ${ops.map((o) => `${o.op} ${short(o.key)}`).join(" + ")}`);
+    if (!res.applied) return refused(res.error ?? "no reason given", predicted.length ? predicted : null);
+    if (predicted.length) complain("a request the model refuses was applied", `${predicted.join(" / ")}: arrange ${ops.map((o) => `${o.op} ${short(o.key)}`).join(" + ")}`);
     const what = `arrange ${ops.map((o) => `${o.op} ${short(o.key)}`).join(" + ")}`;
     await afterRequest(what, before, model, subject, null, placedNow, heldBefore, (first) => {
       // What it read back is the first open, name for name.
@@ -474,16 +481,16 @@ async function walk(index: number) {
     let model: string[] | null = before;
     let placedNow = placedSet();
     const subject: string[] = [];
-    let expectRefusal: string | null = null;
+    const predicted: string[] = [];
     let sized: { key: string; variant: string } | null = null;
     for (const o of operations) {
       const key = o.op === "add" ? (o.component === "project_card" ? `project_card:${String(o.props?.project_id)}` : o.component!) : o.section!;
       const onBoard = (model ?? before).includes(key);
       subject.push(key);
       if (o.op === "add") {
-        if (banned.has(key.split(":")[0])) expectRefusal ??= "he asked never to be shown it";
-        else if (onBoard) expectRefusal ??= "adding what is already on the board";
-        else if (isCard(key) && !ids.has(nameOf(key).replace(/ list$/, ""))) expectRefusal ??= "a card for something that is not on the board";
+        if (banned.has(key.split(":")[0])) predicted.push("he asked never to be shown it");
+        else if (onBoard) predicted.push("adding what is already on the board");
+        else if (isCard(key) && !ids.has(nameOf(key).replace(/ list$/, ""))) predicted.push("a card for something that is not on the board");
         else if (hidden.has(key) && isDefault(key)) model = model ? returnModel(model, key, placedNow, order) : null; // a show: where the system has it
         else if (hidden.has(key) && !added.has(key)) model = null; // a card shown again: by the data
         else {
@@ -494,22 +501,22 @@ async function walk(index: number) {
         continue;
       }
       if (!onBoard) {
-        expectRefusal ??= "a section that is not on the board";
+        predicted.push("a section that is not on the board");
         continue;
       }
       if (o.op === "remove") {
-        if (isCard(key) && urgent.has(key)) expectRefusal ??= "an urgent card cannot be hidden";
+        if (isCard(key) && urgent.has(key)) predicted.push("an urgent card cannot be hidden");
         placedNow = without(placedNow, key);
       }
       if (o.op === "move") placedNow = [...new Set([...placedNow, key])];
       // Calm mode shows every section the plain way: a size cannot show there, and the honest answer is no.
-      if (o.op === "set_props" && calm) expectRefusal ??= "a size is not set in calm mode";
+      if (o.op === "set_props" && calm) predicted.push("a size is not set in calm mode");
       if (o.op === "set_props") sized = { key, variant: String(o.props?.variant) };
       model = model ? editModel(model, o, key) : null;
     }
     const res = (await executeTool(ctx, "edit_layout_plan", { operations })).result as { applied?: boolean; error?: string; sections?: string[]; size_note?: string };
-    if (!res.applied) return refused(res.error ?? "no reason given", expectRefusal);
-    if (expectRefusal) complain("a request the model refuses was applied", `${expectRefusal}: ${operations.map((o) => o.op).join("+")}`);
+    if (!res.applied) return refused(res.error ?? "no reason given", predicted.length ? predicted : null);
+    if (predicted.length) complain("a request the model refuses was applied", `${predicted.join(" / ")}: ${operations.map((o) => o.op).join("+")}`);
     const what = `edit ${operations.map((o) => `${o.op} ${short(o.section ?? o.component ?? "")}${o.to !== undefined ? ` to ${o.to}` : ""}${o.at !== undefined ? ` at ${o.at}` : ""}`).join(" + ")}`;
     await afterRequest(what, before, model, subject, res.sections ?? null, placedNow, heldBefore, (first) => {
       if (!sized) return null;
