@@ -85,11 +85,8 @@ describe("where the card run goes: every order of every subset, every place the 
     expect(place([T, D, P], 3)).toBe(1);
   });
 
-  it("only the system's sections count: one that still carries a place does not, and neither does a card he let go", () => {
+  it("a card he let go on top says nothing about where the run goes; the plan's own first card does", () => {
     const [H, S, T, D, P] = FIVE.map(section);
-    // The tiles, let go at the bottom and not composed again yet, carry their place: they hold nothing down there.
-    expect(runPlace([H, T, CARD, D, P, { ...S, place: { from: "bottom", n: 0 } }])).toBe(2);
-    // A card he let go on top says nothing about where the run goes; the plan's own first card does.
     expect(runPlace([{ ...CARD, place: { from: "top", n: 0 } }, H, S, T, { ...CARD, props: { project_id: "b" } }, D, P])).toBe(3);
   });
 });

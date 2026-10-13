@@ -391,7 +391,8 @@ describe("where the card run goes is one rule", () => {
     // card", it put every card above next up.
     const cards = plan.sections.filter((s) => s.component === "project_card");
     const rest = plan.sections.filter((s) => s.component !== "project_card");
-    const fromMain: LayoutPlan = { plan_id: "plan-old", reason_summary: "A busy week", sections: [BANNER, ...cards.slice(0, 2), ...rest.slice(0, 3), ...cards.slice(2), ...rest.slice(3)] };
+    // (With the section retired since, which main still stored: it is on no board this version composes.)
+    const fromMain: LayoutPlan = { plan_id: "plan-old", reason_summary: "A busy week", sections: [BANNER, ...cards.slice(0, 2), ...rest.slice(0, 3), ...cards.slice(2), { component: "open_loops" }, ...rest.slice(3)] };
     const run = cardKeys(defaultPlan(signals));
     // Bounded, the run lands right under the tiles, above the strip.
     const bounded = ["hero_next_up", "stat_row", ...run, "timeline", "date_chase", "people_index"];
@@ -439,6 +440,22 @@ describe("where the card run goes is one rule", () => {
       expect(await shown([hero, strip, ...cards, rest[3], people, tiles])).toEqual(["hero_next_up", "timeline", ...run, "date_chase", "people_index", "stat_row"]);
       expect(await shown([...cards, hero, strip, rest[3], people, tiles])).toEqual(["hero_next_up", ...run, "timeline", "date_chase", "people_index", "stat_row"]);
       expect(await shown([hero, strip, rest[3], people, tiles, ...cards])).toEqual(["hero_next_up", "timeline", ...run, "date_chase", "people_index", "stat_row"]);
+    });
+
+    it("what he hid or banned is not counted, so the board that is stored composes to itself: the tiles sunk by a planner, Needs a date and People hidden", () => {
+      // The Reviewer's seed (31415926) found it: with the hidden sections
+      // counted, the cards stayed above the sunk tiles at this render (a
+      // place with a count of 1 was the best there was), and went under
+      // them at the next, when the stored board no longer had the two.
+      const tiles: PlanSection = { component: "stat_row", props: { tiles: [{ value: "3", label: "late" }] }, why: "The numbers matter less today" };
+      const sunk: LayoutPlan = { plan_id: "llm-x", reason_summary: null, sections: [rest[0], rest[2], ...cards, rest[3], rest[4], tiles] };
+      const hidden: LayoutPreference[] = [{ kind: "hide_section", value: { section: "date_chase" } }, { kind: "hide_section", value: { section: "people_index" } }];
+      const once = compose(sunk, signals, null, [], hidden);
+      expect(keys(once)).toEqual(["hero_next_up", "timeline", "stat_row", ...run]);
+      expect(keys(compose(once, signals, once, [], hidden))).toEqual(keys(once));
+      // A section that still carries a place and is no longer his is not where the system has it either: it is drawn at its default place.
+      const letGo: LayoutPlan = { ...sunk, sections: sunk.sections.map((s) => (s.component === "stat_row" ? { ...s, place: { from: "bottom", n: 0 } } : s)) };
+      expect(keys(compose(letGo, signals, letGo, []))).toEqual(["hero_next_up", "stat_row", "timeline", ...run, "date_chase", "people_index"]);
     });
 
     it("the system's own order may have the run right under the tiles, the strip below it (main's default)", () => {

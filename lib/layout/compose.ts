@@ -146,18 +146,18 @@ const BELOW_THE_CARDS = ["date_chase", "people_index"];
  * near as it can to where the plan had it.
  *
  * "The system's" is each section on its own: one he has placed is not in
- * `own` and counts for nothing. The count is made on the list the
- * composition cuts on, hidden sections included (they are filtered after).
- * Total, and one home: the composition and the held path both ask here.
+ * `own` and counts for nothing, and the composition hands over only the
+ * sections that will be drawn (not one he hid or banned, nor one that still
+ * carries a place and is no longer his). Total, and one home: the
+ * composition and the held path both ask here.
  */
 export function runPlace(own: PlanSection[]): number {
   const others = own.filter((s) => !isCard(s));
-  // (A section that still carries a place is not where the system has it, and counts for nothing: see composePlan.)
-  const at = (component: string) => others.findIndex((s) => s.component === component && s.place === undefined);
+  const at = (component: string) => others.findIndex((s) => s.component === component);
   const first = own.findIndex((s) => isCard(s) && s.place === undefined);
   const said = first !== -1 ? own.slice(0, first).filter((s) => !isCard(s)).length : Math.max(at("hero_next_up"), at("stat_row"), at("timeline")) + 1;
   const wrongSide = (place: number) =>
-    others.filter((s, i) => s.place === undefined && ((ABOVE_THE_CARDS.includes(s.component) && i >= place) || (BELOW_THE_CARDS.includes(s.component) && i < place))).length;
+    others.filter((s, i) => (ABOVE_THE_CARDS.includes(s.component) && i >= place) || (BELOW_THE_CARDS.includes(s.component) && i < place)).length;
   let best = 0;
   for (let place = 1; place <= others.length; place++) {
     const [now, was] = [wrongSide(place), wrongSide(best)];
@@ -231,11 +231,15 @@ export function composePlan(given: LayoutPlan, ctx: CompositionContext): LayoutP
   // the card run where its first own card sits. A section that still carries
   // a place and is no longer his is not where the system has it: it is left
   // out here and, if it belongs, drawn at its default place below.
-  const own = ownSections(system.sections, placed);
+  // Where the cards go is worked out on the sections that will be DRAWN:
+  // not one he hid or banned. The stored board does not have those, and it
+  // has to compose to itself; counted, a hidden Needs a date kept the cards
+  // on one side of a planner's sunk tiles at this render and let them
+  // cross at the next.
+  const own = ownSections(system.sections, placed).filter((s) => isCard(s) || (!gone(s) && s.place === undefined));
   const at = runPlace(own);
-  const others = own.filter((s) => !isCard(s));
-  const shown = (list: PlanSection[]) => list.filter((s) => !gone(s) && s.place === undefined).map(bare);
-  const flow: PlanSection[] = [...shown(others.slice(0, at)), ...[...cards].filter(([key]) => !placed.has(key)).map(([, card]) => card), ...shown(others.slice(at))];
+  const others = own.filter((s) => !isCard(s)).map(bare);
+  const flow: PlanSection[] = [...others.slice(0, at), ...[...cards].filter(([key]) => !placed.has(key)).map(([, card]) => card), ...others.slice(at)];
 
   // Everything that belongs is drawn: a section of the default board that the
   // system's plan (or the stored board) lacks goes in at its default place.
