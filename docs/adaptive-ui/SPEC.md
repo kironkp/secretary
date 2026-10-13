@@ -697,6 +697,19 @@ claude.ai session used as a fixture (docs/adaptive-ui/transcript-2026-08-18).
   A user report clears it silently; a miss fires per escalation policy.
   Rules: batch nags into one ping, respect quiet_hours, escalate per persona.
   Reuses the scheduled-trigger machinery; never a rhetorical promise.
+  **Raised once, and only by being asked (v1.03).** A follow-up that is due
+  is raised in the briefing that opens a session with the user and is handed
+  to the model: a chat turn, or the start of a voice call (not a reconnect,
+  and not an interview call, whose job is its own questions). It stays
+  `open` until that hand-over has succeeded: the model answered the chat
+  turn, or the provider accepted the call's instructions. Only then is it
+  settled (`missed`), and it is not raised again. Building a briefing for
+  anything else (the chat dock's bootstrap on every page load, the briefing
+  card, `consult_brain`) neither shows the follow-up nor changes it, and a
+  hand-over that fails leaves it open for the next one. So does a user
+  report in the meantime: it still clears it silently. Before v1.03 every
+  briefing build settled what it found, so opening a page cancelled the
+  promise before any conversation began.
 - **clarification queue**: extraction ambiguities accumulate in a queue asked
   ONE at a time at natural pauses — never mid-flow, never as a barrage.
   Sources: unresolved referents ("this one is finished" while reading an
