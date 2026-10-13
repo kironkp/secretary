@@ -166,7 +166,20 @@ beside me in a workshop."*
   right beside it (the side is written nowhere once the section is gone).
   **Stop rule from here: one more product defect of this family after
   this change and the row is split first.** Burn-in starts again from
-  nothing.
+  nothing. The Executor reports the change fits the code and is built
+  (its own runs: the Reviewer's two boards red before and green after;
+  hide and show gives the board he had in 160 of 175, was 141). One board
+  showed the build and the Reviewer's model reading the sentence two
+  ways (a section shown on a planner-rearranged board: under its
+  neighbour and every card moves, or in front of the cards and nothing
+  moves). Ruled: the side of the cards wins in both directions, and no
+  check in the walk is loosened. The Reviewer's model with that line: no
+  hole; a show or a let-go moving the cards on a planner-rearranged
+  board, 0 of 829,387 (was 476); accepted before and refused after, 0 of
+  6,436; list against board, 0 of 1.4 million. The limit "a thing of his
+  placed in the middle may get new neighbours when the cards move" is
+  gone at his requests and stays between them (a rule's move, a
+  planner's answer, the data sorting the cards) until 1.07.
   The Executor's pass on a copy of his
   real board was repeated on `472c2a7` as the landing day goes and found
   nothing (their own check, not an independent one; it did not stand on
