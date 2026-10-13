@@ -12,7 +12,7 @@ commits it covers so `git show <hash>` always reaches the real diff.
 `b980803` (the round as one commit: written 2026-10-06 as v0.34 and parked,
 because node would not start that day and nothing was run; verified
 2026-10-12 and first offered on another branch), `a42f04e` (the spec),
-the commit before this one (the code), this commit
+`fab811d` and `b4c455a` (the code and its tests), this commit
 
 Kiron on the Overview: "make it make sense", "a random graph", "I don't
 understand all the whats". sec rev's round 2 (SEC-A007).
@@ -95,7 +95,15 @@ understand all the whats". sec rev's round 2 (SEC-A007).
   date, days are his calendar days, a project's own deadline is read, a
   Timeline lane is ordered by its due day, and a list never takes a cell
   among the project cards.
-- Checks: CHECKS_LINE App spend: $0.
+- Checks: 1,236 tests, the production build, 70 browser specs on local
+  Chromium. Each of 36 behaviours taken out in turn failed a test. On a
+  local copy of the real board with no stored plan, the cards, the strip and
+  the Timeline match an order worked out by hand at three widths. App spend:
+  $0.
+- Known, and not changed here: a board whose stored plan was written by the
+  planner (not arranged by him, not the default) is kept as it stands too,
+  as it was before this round. With no working planner it stays, stale
+  banner and all, until a planner writes a new one.
 
 ---
 
