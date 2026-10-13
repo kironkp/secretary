@@ -28,7 +28,6 @@
 // with the walker's own reading of which sections are in step with that
 // plan: every run tried, not the validator's table). It is put onto the list
 // after everything else the request asked for. Only for a CARD that comes back can it say no
-
 // more than "by the data": there it asks that the card is drawn, that
 // everything else kept its order, and the standing questions (the cards he
 // did not place are one run in data order). It keeps its own history, one entry per stored version, and
@@ -47,6 +46,26 @@
 //   right way up whatever a planner writes: check 4 counts, on the board he
 //   sees, the system's sections on the wrong side of the cards, and asks
 //   that no other place for the run would have fewer;
+// - beside the walks there are as many SCRIPTED ones: a few drawn steps (none
+//   to six), then one scripted move, each a place a seed of the Reviewer's
+//   reached by chance:
+//   (27182818) a section of the usual board hidden, a planner's answer the
+//   next day, something pinned, the hidden section brought back by a move,
+//   then Put it back twice: the composition put a missing section in after
+//   the place for the cards had been worked out;
+//   (16180339) a planner's answer that leaves the strip under the cards,
+//   then Needs a date or People taken off and brought back: it came back
+//   above the strip, and the rules plan was refused from then on;
+//   (the Reviewer's probe) a rule's move left waiting (a banner new that
+//   day, he asks about dates, a day passes and the stored board is served),
+//   then a section taken off and brought back: it came back next to the
+//   strip the rule was about to move.
+//   A section is taken off and brought back each way he can: hidden and
+//   shown, in two requests or in one; hidden and added back; hidden and the
+//   hide lifted in Settings; pinned and let go; banned and the ban lifted.
+//   They are tests of their own ("scripted N"), so the walks themselves
+//   ("walk N") draw exactly what they drew before there were any: a seed
+//   and a walk named against an earlier tip still name the same walk;
 // - the planner's ANSWER is put in through persistPlan's `call` seam (the
 //   budget is $0); everything after the answer is the real code. A planner's
 //   plan served again from the in-memory cache is not reached by the walk; it
@@ -122,6 +141,8 @@ const CROSSINGS = [
   "the tiles sunk, the cards where they were",
   "the tiles sunk, the cards last",
 ] as const;
+/** The planner answers the walk puts in (some twice, to come up more often). */
+const PLANNER_KINDS: string[] = ["a banner", "a banner", "a banner and the strip to the top", "a banner and the strip to the top", "without a default section", "the cards backwards", "a place written on a section", "not a plan at all", "every card first", "the cards in two runs", "the cards last of all", ...CROSSINGS];
 /** What each refusal the model predicts has to say: a keyword of its reason, so one refusal cannot pass for another. */
 const REFUSAL_SAYS: Record<string, RegExp> = {
   "an urgent card cannot be hidden": /urgent project/,
@@ -295,8 +316,11 @@ const whole = (plan: LayoutPlan) => plan.sections.map((s) => JSON.stringify(cano
 
 type Complaint = { check: string; detail: string };
 
-async function walk(index: number) {
-  const r = rng(SEED + index * 7919);
+async function walk(index: number, scripted = false) {
+  const r = rng(SEED + index * 7919 + (scripted ? 4337 : 0));
+  /** What is scripted draws from a generator of its own. */
+  const rs = rng(SEED * 31 + index * 104_729 + 17);
+  const steps = scripted ? rs.int(7) : STEPS;
   const size = [9, 5, 3, 9, 1, 0][index % 6];
   const id = `test-walk-${crypto.randomUUID()}`;
   users.push(id);
@@ -557,7 +581,6 @@ async function walk(index: number) {
     const returning: string[] = [];
     for (const { op, key } of ops) {
       const onBoard = (model ?? before).includes(key);
-
       if (op !== "hide" && banned.has(key.split(":")[0])) predicted.push("he asked never to be shown it");
       // A card he hid whose project has since been archived: there is no card to show or to move.
       if (op !== "hide" && isCard(key) && ![...ids.values()].some((pid) => `project_card:${pid}` === key)) predicted.push("a card for something that is not on the board");
@@ -670,14 +693,134 @@ async function walk(index: number) {
     await afterRequest(what, before, expected, [key], null, placedNow, heldBefore);
   };
 
+  const count = (kind: string) => counts.set(kind, (counts.get(kind) ?? 0) + 1);
+  const nextDay = async () => {
+    moves.push("the next day");
+    count("the next day");
+    await db.update(layoutSpecs).set({ createdAt: sql`${layoutSpecs.createdAt} - interval '49 hours'` }).where(eq(layoutSpecs.userId, id));
+    clearPlanCache();
+    await openTwice("the next day", { firstMayStore: true });
+  };
+  /** Put it back, with what the walker's own history says he must then see. */
+  const putItBack = async () => {
+    moves.push("put it back");
+    count("put it back");
+    const n = await versions();
+    const res = await route({ action: "revert" });
+    if (!res.ok) refused(res.json.error ?? "no reason given", n < 2 ? "nothing to put back" : null);
+    else {
+      // The walker's own history: what he had placed, and where, one stored version back.
+      told = (history[history.length - 2] ?? []).filter((t) => !isCard(t.key) || [...ids.values()].some((pid) => `project_card:${pid}` === t.key)).map((t) => ({ ...t }));
+      // A section he added goes back with the board: one the earlier board did not have is no longer on it, unless it
+      // is off the board by a hide or a ban of today's (those live outside the versions, and bring it back when lifted).
+      const [hiddenToday, bannedToday] = [await hiddenNow(), await bannedNow()];
+      for (const key of [...added]) if (!told.some((t) => t.key === key) && !hiddenToday.has(key) && !bannedToday.has(key)) added.delete(key);
+      // And the other way: a section the earlier board had because he added it is his again (Put it back twice is a redo).
+      for (const t of told) if (!isCard(t.key) && !DEFAULT_SECTIONS.includes(t.key)) added.add(t.key);
+      await remember();
+      const first = await openTwice("put it back", { firstMayStore: false });
+      // Put it back is a request: after it, what he placed is read again from the board he was told.
+      told = readPlaces(first.board, placedSet().filter((k) => first.board.includes(k)));
+      history[history.length - 1] = told.map((t) => ({ ...t }));
+    }
+  };
+  const plannerAnswers = async (kind: string) => {
+    // A planner answer lands. Most are a banner; some move the strip; some are answers a planner should not give.
+    moves.push(`a planner answer: ${kind}`);
+    count(`a planner answer: ${kind}`);
+    const names = [...ids.keys()];
+    if (names.length) await db.insert(tasks).values({ userId: id, projectId: ids.get(r.pick(names))!, title: `for the planner ${crypto.randomUUID().slice(0, 4)}`, status: "todo", source: "spoken" });
+    const pinnedBefore = [...(await head()).pinned];
+    const stands = keysOf((await head()).spec as LayoutPlan);
+    await open("the planner is asked", { mayStore: true, planner: (signals) => {
+      const plan = defaultPlan(signals);
+      const banner: PlanSection = { component: BANNER, props: { text: "Several things are late", tone: "serious" } };
+      const rest = plan.sections.filter((s) => s.component !== "timeline");
+      const strip: PlanSection = { component: "timeline", props: { span_days: 14, expanded: true }, why: "Dates first this week" };
+      const answer = (sections: PlanSection[]) => JSON.stringify({ ...plan, plan_id: "p", reason_summary: "A busy week", sections });
+      if (kind === "not a plan at all") return "I would put the dates first this week.";
+      // What the planner on main writes, and what nothing stops one from writing: cards above next up. Every card
+      // before it; or main's shape, two cards on top and the rest under the strip.
+      const cards = plan.sections.filter((s) => s.component === "project_card");
+      const others = plan.sections.filter((s) => s.component !== "project_card");
+      if (kind === "every card first") return answer([banner, ...cards, ...others]);
+      // (Scripted only.) Every card first and the other sections in the order the board has them: nothing of the
+      // system's moves, so it lands on a board whatever its order, and the composition leaves the strip under the cards.
+      const where = (x: PlanSection) => (stands.includes(sectionKey(x)) ? stands.indexOf(sectionKey(x)) : plan.sections.indexOf(x) - 0.5);
+      if (kind === "every card first, the rest as it stands") return answer([banner, ...cards, ...others.toSorted((x, y) => where(x) - where(y))]);
+      if (kind === "the cards in two runs") return answer([banner, ...cards.slice(0, 2), ...others.slice(0, 3), ...cards.slice(2), ...others.slice(3)]);
+      if (kind === "the cards last of all") return answer([banner, ...others, ...cards]);
+      // A planner may move one of the system's sections, with a reason, a day after the layout last changed. Props
+      // go with it: a reason on a section left exactly as the default has it is stripped, and the move then refused.
+      // Both crossings (Needs a date raised above next up; the tiles sunk to the bottom), each with the cards
+      // first, where they were, and last.
+      if ((CROSSINGS as readonly string[]).includes(kind)) {
+        const raised = kind.startsWith("needs a date raised");
+        const moved: PlanSection = raised
+          ? { component: "date_chase", props: { item_ids: [] }, why: "Several things have no date" }
+          : { component: "stat_row", props: { tiles: [{ value: "3", label: "late" }] }, why: "The numbers matter less today" };
+        const kept = plan.sections.filter((s) => s.component !== moved.component);
+        const crossed = raised ? [moved, ...kept] : [...kept, moved];
+        const noCards = crossed.filter((s) => s.component !== "project_card");
+        if (kind.endsWith("the cards first")) return answer([banner, ...cards, ...noCards]);
+        if (kind.endsWith("the cards last")) return answer([banner, ...noCards, ...cards]);
+        return answer([banner, ...crossed]);
+      }
+      if (kind === "a banner and the strip to the top") return answer([banner, strip, ...rest]);
+      if (kind === "without a default section") return answer([banner, ...plan.sections.filter((s) => s.component !== "people_index")]);
+      if (kind === "the cards backwards") return answer([banner, ...plan.sections.filter((s) => s.component !== "project_card").slice(0, 3), ...plan.sections.filter((s) => s.component === "project_card").toReversed(), ...plan.sections.filter((s) => s.component !== "project_card").slice(3)]);
+      if (kind === "a place written on a section") return answer([banner, ...plan.sections.map((s) => (s.component === "date_chase" ? { ...s, place: 1 } : s))]);
+      return answer([banner, ...plan.sections]);
+    } });
+    const pinnedAfter = (await head()).pinned;
+    if (pinnedAfter.toSorted().join() !== pinnedBefore.toSorted().join()) complain("a planner's answer does not pin anything", `${kind}: ${pinnedBefore.map(short).join(" ")} -> ${pinnedAfter.map(short).join(" ")}`);
+    await openTwice("after the planner's answer", { firstMayStore: true });
+  };
+
+  /** Settings lifts a hide or a ban: a request like the others. A section he had put on the board himself comes
+   *  back placed, at the end; anything else goes where the system has it; under a ban or a hide still standing, nothing comes. */
+  const lift = async (pref: { id: string; kind: string; value: unknown }) => {
+    const value = pref.value as Record<string, string>;
+    const key = value.section ?? value.component;
+    const before = await boardNow();
+    const heldBefore = await sourceNow();
+    const stillOff = pref.kind === "hide_section" ? (await bannedNow()).has(key.split(":")[0]) : (await hiddenNow()).has(key);
+    moves.push(`settings lifts ${pref.kind} ${short(key)}`);
+    count("settings lifts a preference");
+    const res = await route({ action: "remove_preference", id: pref.id });
+    if (!res.ok) return refused(res.json.error ?? "no reason given", null);
+    const his = added.has(key) && !stillOff;
+    const expected = stillOff || before.includes(key) ? before : his ? [...before, key] : isDefault(key) ? returnModel(before, key, placedSet(), await systemOrder()) : null;
+    await afterRequest(`settings lifts ${pref.kind} ${short(key)}`, before, expected, [key], null, his ? [...new Set([...placedSet(), key])] : placedSet(), heldBefore);
+  };
+  /** The preference tool bans a component, or takes a ban back. */
+  const ban = async (component: string, remove: boolean) => {
+    moves.push(`${remove ? "unban" : "ban"} ${component}`);
+    count(remove ? "unban" : "ban");
+    const before = await boardNow();
+    const heldBefore = await sourceNow();
+    const stillHidden = (await hiddenNow()).has(component);
+    const res = (await executeTool(ctx, "set_layout_preference", { kind: "ban_component", component, ...(remove ? { remove: true } : {}) })).result as { error?: string };
+    if (res.error) return refused(res.error, null);
+    // A ban is a hide of the component's section: the board he saw without it, everything else in order, its place
+    // gone. Lifted, a section he had put there himself comes back placed, at the end; another goes where the system has it.
+    const his = remove && added.has(component) && !stillHidden;
+    const expected = remove ? (stillHidden ? before : his ? [...before, component] : isDefault(component) ? returnModel(before, component, placedSet(), await systemOrder()) : null) : without(before, component);
+    const placedNow = remove ? (his ? [...new Set([...placedSet(), component])] : placedSet()) : without(placedSet(), component);
+    await afterRequest(`${remove ? "unban" : "ban"} ${component}`, before, expected, [component], null, placedNow, heldBefore);
+  };
+  /** He says the same thing six times today (the rules read what he talks about). */
+  const says = async (text: string) => {
+    const [conv] = await db.insert(conversations).values({ userId: id, mode: "text" }).returning();
+    await db.insert(messages).values(Array.from({ length: 6 }, (_, i) => ({ userId: id, conversationId: conv.id, role: "user" as const, content: `${text} ${MARK} (${i})`, mode: "text" as const })));
+  };
   // --- the walk ------------------------------------------------------------------------
   await openTwice("the first open", { firstMayStore: true });
-  for (let step = 0; step < STEPS; step++) {
+  for (let step = 0; step < steps; step++) {
     const full = await boardNow();
     const board = without(full, BANNER);
     const hidden = [...(await hiddenNow())];
     const draw = r.next();
-    const count = (kind: string) => counts.set(kind, (counts.get(kind) ?? 0) + 1);
     const placedOnBoard = told.filter((t) => board.includes(t.key));
     if (!board.length) break;
     if (draw < 0.26) {
@@ -756,26 +899,7 @@ async function walk(index: number) {
       count(`${how}: ${isPinned ? "unpin" : "pin"}`);
       await pin(key, !isPinned, how);
     } else if (draw < 0.57) {
-      moves.push("put it back");
-      count("put it back");
-      const n = await versions();
-      const res = await route({ action: "revert" });
-      if (!res.ok) refused(res.json.error ?? "no reason given", n < 2 ? "nothing to put back" : null);
-      else {
-        // The walker's own history: what he had placed, and where, one stored version back.
-        told = (history[history.length - 2] ?? []).filter((t) => !isCard(t.key) || [...ids.values()].some((pid) => `project_card:${pid}` === t.key)).map((t) => ({ ...t }));
-        // A section he added goes back with the board: one the earlier board did not have is no longer on it, unless it
-        // is off the board by a hide or a ban of today's (those live outside the versions, and bring it back when lifted).
-        const [hiddenToday, bannedToday] = [await hiddenNow(), await bannedNow()];
-        for (const key of [...added]) if (!told.some((t) => t.key === key) && !hiddenToday.has(key) && !bannedToday.has(key)) added.delete(key);
-        // And the other way: a section the earlier board had because he added it is his again (Put it back twice is a redo).
-        for (const t of told) if (!isCard(t.key) && !DEFAULT_SECTIONS.includes(t.key)) added.add(t.key);
-        await remember();
-        const first = await openTwice("put it back", { firstMayStore: false });
-        // Put it back is a request: after it, what he placed is read again from the board he was told.
-        told = readPlaces(first.board, placedSet().filter((k) => first.board.includes(k)));
-        history[history.length - 1] = told.map((t) => ({ ...t }));
-      }
+      await putItBack();
     } else if (draw < 0.6) {
       const enabled = !(await computeCurrentPlan(id)).signals.context.calm_mode;
       moves.push(`calm mode ${enabled ? "on" : "off"}`);
@@ -783,98 +907,17 @@ async function walk(index: number) {
       await route({ action: "calm_mode", enabled });
       await openTwice("calm mode", { firstMayStore: true });
     } else if (draw < 0.64) {
-      // Settings lifts a hide or a ban: a request like the others. A section he had put on the board himself comes
-      // back placed, at the end; anything else goes where the system has it; under a ban or a hide still standing, nothing comes.
       const all = (await db.select().from(layoutPreferences).where(eq(layoutPreferences.userId, id))).filter((p) => p.kind === "hide_section" || p.kind === "ban_component");
-      if (all.length) {
-        const pref = r.pick(all);
-        const value = pref.value as Record<string, string>;
-        const key = value.section ?? value.component;
-        const before = await boardNow();
-        const heldBefore = await sourceNow();
-        const stillOff = pref.kind === "hide_section" ? (await bannedNow()).has(key.split(":")[0]) : (await hiddenNow()).has(key);
-        moves.push(`settings lifts ${pref.kind} ${short(key)}`);
-        count("settings lifts a preference");
-        const res = await route({ action: "remove_preference", id: pref.id });
-        if (!res.ok) refused(res.json.error ?? "no reason given", null);
-        else {
-          const his = added.has(key) && !stillOff;
-          const expected = stillOff || before.includes(key) ? before : his ? [...before, key] : isDefault(key) ? returnModel(before, key, placedSet(), await systemOrder()) : null;
-          await afterRequest(`settings lifts ${pref.kind} ${short(key)}`, before, expected, [key], null, his ? [...new Set([...placedSet(), key])] : placedSet(), heldBefore);
-        }
-      }
+      if (all.length) await lift(r.pick(all));
     } else if (draw < 0.69) {
       const banned = [...(await bannedNow())];
       const remove = banned.length > 0 && r.chance(0.6);
       const component = remove ? r.pick(banned) : r.pick(["people_index", "stat_row", "kanban", "date_chase", "coming_up"]);
-      moves.push(`${remove ? "unban" : "ban"} ${component}`);
-      count(remove ? "unban" : "ban");
-      const before = await boardNow();
-      const heldBefore = await sourceNow();
-      const stillHidden = (await hiddenNow()).has(component);
-      const res = (await executeTool(ctx, "set_layout_preference", { kind: "ban_component", component, ...(remove ? { remove: true } : {}) })).result as { error?: string };
-      if (res.error) refused(res.error, null);
-      else {
-        // A ban is a hide of the component's section: the board he saw without it, everything else in order, its place
-        // gone. Lifted, a section he had put there himself comes back placed, at the end; another goes where the system has it.
-        const his = remove && added.has(component) && !stillHidden;
-        const expected = remove ? (stillHidden ? before : his ? [...before, component] : isDefault(component) ? returnModel(before, component, placedSet(), await systemOrder()) : null) : without(before, component);
-        const placedNow = remove ? (his ? [...new Set([...placedSet(), component])] : placedSet()) : without(placedSet(), component);
-        await afterRequest(`${remove ? "unban" : "ban"} ${component}`, before, expected, [component], null, placedNow, heldBefore);
-      }
+      await ban(component, remove);
     } else if (draw < 0.73) {
-      moves.push("the next day");
-      count("the next day");
-      await db.update(layoutSpecs).set({ createdAt: sql`${layoutSpecs.createdAt} - interval '49 hours'` }).where(eq(layoutSpecs.userId, id));
-      clearPlanCache();
-      await openTwice("the next day", { firstMayStore: true });
+      await nextDay();
     } else if (draw < 0.8) {
-      // A planner answer lands. Most are a banner; some move the strip; some are answers a planner should not give.
-      const kind = r.pick(["a banner", "a banner", "a banner and the strip to the top", "a banner and the strip to the top", "without a default section", "the cards backwards", "a place written on a section", "not a plan at all", "every card first", "the cards in two runs", "the cards last of all", ...CROSSINGS] as const);
-      moves.push(`a planner answer: ${kind}`);
-      count(`a planner answer: ${kind}`);
-      const names = [...ids.keys()];
-      if (names.length) await db.insert(tasks).values({ userId: id, projectId: ids.get(r.pick(names))!, title: `for the planner ${crypto.randomUUID().slice(0, 4)}`, status: "todo", source: "spoken" });
-      const pinnedBefore = [...(await head()).pinned];
-      await open("the planner is asked", { mayStore: true, planner: (signals) => {
-        const plan = defaultPlan(signals);
-        const banner: PlanSection = { component: BANNER, props: { text: "Several things are late", tone: "serious" } };
-        const rest = plan.sections.filter((s) => s.component !== "timeline");
-        const strip: PlanSection = { component: "timeline", props: { span_days: 14, expanded: true }, why: "Dates first this week" };
-        const answer = (sections: PlanSection[]) => JSON.stringify({ ...plan, plan_id: "p", reason_summary: "A busy week", sections });
-        if (kind === "not a plan at all") return "I would put the dates first this week.";
-        // What the planner on main writes, and what nothing stops one from writing: cards above next up. Every card
-        // before it; or main's shape, two cards on top and the rest under the strip.
-        const cards = plan.sections.filter((s) => s.component === "project_card");
-        const others = plan.sections.filter((s) => s.component !== "project_card");
-        if (kind === "every card first") return answer([banner, ...cards, ...others]);
-        if (kind === "the cards in two runs") return answer([banner, ...cards.slice(0, 2), ...others.slice(0, 3), ...cards.slice(2), ...others.slice(3)]);
-        if (kind === "the cards last of all") return answer([banner, ...others, ...cards]);
-        // A planner may move one of the system's sections, with a reason, a day after the layout last changed. Props
-        // go with it: a reason on a section left exactly as the default has it is stripped, and the move then refused.
-        // Both crossings (Needs a date raised above next up; the tiles sunk to the bottom), each with the cards
-        // first, where they were, and last.
-        if ((CROSSINGS as readonly string[]).includes(kind)) {
-          const raised = kind.startsWith("needs a date raised");
-          const moved: PlanSection = raised
-            ? { component: "date_chase", props: { item_ids: [] }, why: "Several things have no date" }
-            : { component: "stat_row", props: { tiles: [{ value: "3", label: "late" }] }, why: "The numbers matter less today" };
-          const kept = plan.sections.filter((s) => s.component !== moved.component);
-          const crossed = raised ? [moved, ...kept] : [...kept, moved];
-          const noCards = crossed.filter((s) => s.component !== "project_card");
-          if (kind.endsWith("the cards first")) return answer([banner, ...cards, ...noCards]);
-          if (kind.endsWith("the cards last")) return answer([banner, ...noCards, ...cards]);
-          return answer([banner, ...crossed]);
-        }
-        if (kind === "a banner and the strip to the top") return answer([banner, strip, ...rest]);
-        if (kind === "without a default section") return answer([banner, ...plan.sections.filter((s) => s.component !== "people_index")]);
-        if (kind === "the cards backwards") return answer([banner, ...plan.sections.filter((s) => s.component !== "project_card").slice(0, 3), ...plan.sections.filter((s) => s.component === "project_card").toReversed(), ...plan.sections.filter((s) => s.component !== "project_card").slice(3)]);
-        if (kind === "a place written on a section") return answer([banner, ...plan.sections.map((s) => (s.component === "date_chase" ? { ...s, place: 1 } : s))]);
-        return answer([banner, ...plan.sections]);
-      } });
-      const pinnedAfter = (await head()).pinned;
-      if (pinnedAfter.toSorted().join() !== pinnedBefore.toSorted().join()) complain("a planner's answer does not pin anything", `${kind}: ${pinnedBefore.map(short).join(" ")} -> ${pinnedAfter.map(short).join(" ")}`);
-      await openTwice("after the planner's answer", { firstMayStore: true });
+      await plannerAnswers(r.pick(PLANNER_KINDS));
     } else if (draw < 0.86) {
       // The rules' own moves: he asks about dates all day (the strip goes up, a day after the layout last changed), then stops; or talks about one project.
       const kind = r.pick(["he asks about dates", "the talk stops", "he talks about one project"] as const);
@@ -882,11 +925,7 @@ async function walk(index: number) {
       count(`rules: ${kind}`);
       const names = [...ids.keys()];
       if (kind === "the talk stops") await db.update(messages).set({ createdAt: day(-3) }).where(and(eq(messages.userId, id), like(messages.content, `%${MARK}%`)));
-      else {
-        const [conv] = await db.insert(conversations).values({ userId: id, mode: "text" }).returning();
-        const text = kind === "he asks about dates" ? "when is the deadline?" : `what is next on ${r.pick(names.length ? names : ["nothing"])}`;
-        await db.insert(messages).values(Array.from({ length: 6 }, (_, i) => ({ userId: id, conversationId: conv.id, role: "user" as const, content: `${text} ${MARK} (${i})`, mode: "text" as const })));
-      }
+      else await says(kind === "he asks about dates" ? "when is the deadline?" : `what is next on ${r.pick(names.length ? names : ["nothing"])}`);
       await openTwice(`rules: ${kind}`, { firstMayStore: true });
     } else {
       // His data.
@@ -942,6 +981,108 @@ async function walk(index: number) {
       await openTwice("his data changed", { firstMayStore: true });
     }
   }
+  // --- a scripted walk: after its few steps, one scripted move ----------------------------
+  // (Three of them, below; one is drawn for each scripted walk.)
+  // Walked into on purpose, after the Reviewer's seed 27182818 found it by chance: a section of the usual board
+  // hidden, a planner's answer the next day, something pinned, the hidden section brought back by a move, then
+  // Put it back, twice. The earlier board lacks the section (it was hidden then); today it is not hidden, so
+  // the composition has to put it in itself, and the board it stores still has to compose to itself.
+  // Half the time one of the shapes the Reviewer's grid found wrong on 472c2a7 (all with Needs a date raised
+  // above next up: People hidden and next up or the tiles his; the tiles hidden, the plan's cards first, and
+  // nothing of next up or the tiles his); half the time any section, any answer, anything pinned.
+  const backOntoABoardWithoutIt = async () => {
+    const shapes: { gone: string; kind: string; his: string | null }[] = [
+      ...CROSSINGS.slice(0, 3).flatMap((kind) => ["hero_next_up", "stat_row"].map((his) => ({ gone: "people_index", kind, his }))),
+      ...[null, "timeline", "people_index"].map((his) => ({ gone: "stat_row", kind: CROSSINGS[0], his })),
+    ];
+    const usual = DEFAULT_SECTIONS.filter((k) => onBoard.includes(k));
+    const shape = rs.chance(0.5) ? rs.pick(shapes) : null;
+    if (!usual.length || (shape && !usual.includes(shape.gone))) return;
+    const gone = shape?.gone ?? rs.pick(usual);
+    const kind = shape?.kind ?? rs.pick(PLANNER_KINDS);
+    const his = shape ? shape.his : rs.pick([null, ...DEFAULT_SECTIONS.filter((k) => k !== gone)]);
+    const op = rs.pick(["move_up", "move_down", "move_to_top", "move_to_bottom"] as const);
+    moves.push(`scripted: hide ${gone}; the next day; ${kind}; pin ${his ?? "nothing"}; ${op} ${gone}; put it back twice`);
+    count("scripted: a hidden section brought back, then Put it back twice");
+    await arrange([{ op: "hide", key: gone }]);
+    await nextDay();
+    await plannerAnswers(kind);
+    if (his && (await boardNow()).includes(his) && !placedSet().includes(his)) await pin(his, true, "button");
+    if ((await hiddenNow()).has(gone)) await arrange([{ op, key: gone }]);
+    await putItBack();
+    await putItBack();
+  };
+  /** A section of the usual board taken off and brought back, one of the ways he can. */
+  const WAYS = ["hidden, shown", "hidden and shown in one request", "hidden, added back", "hidden, the hide lifted in Settings", "pinned, let go", "banned, the ban lifted"] as const;
+  const offAndBack = async (key: string, way: (typeof WAYS)[number]) => {
+    const hides = async () => (await db.select().from(layoutPreferences).where(eq(layoutPreferences.userId, id))).filter((p) => p.kind === "hide_section" && (p.value as Record<string, string>).section === key);
+    if (way === "hidden and shown in one request") return arrange([{ op: "hide", key }, { op: "show", key }]);
+    if (way === "pinned, let go") {
+      await pin(key, true, "button");
+      return pin(key, false, "button");
+    }
+    if (way === "banned, the ban lifted") {
+      await ban(key, false);
+      return ban(key, true);
+    }
+    await arrange([{ op: "hide", key }]);
+    if (way === "hidden, shown") return arrange([{ op: "show", key }]);
+    if (way === "hidden, added back") return edit([{ op: "add", component: key, at: rs.int(4) }]);
+    for (const pref of await hides()) await lift(pref);
+  };
+  /** What stands on the board he sees: the strip under the cards; a rule's move of the strip still to come. */
+  const stripUnderTheCards = async () => {
+    const body = without(await boardNow(), BANNER).filter((k) => !placedSet().includes(k));
+    return body.includes("timeline") && body.some(isCard) && body.indexOf("timeline") > body.findLastIndex(isCard);
+  };
+  const stripIsWaiting = async () => {
+    const [order, board] = [(await systemOrder()).filter((k) => !isCard(k) && k !== BANNER), without(await boardNow(), BANNER).filter((k) => !isCard(k) && !placedSet().includes(k))];
+    return order[0] === "timeline" && board.includes("timeline") && board[0] !== "timeline" && (await sourceNow()) === "rules";
+  };
+  // The Reviewer's seed 16180339 (walk 61): the strip under the cards on the board he sees (a planner's answer with
+  // every card first), and Needs a date or People taken off and brought back. On 472c2a7 it came back under the last
+  // card, above the strip, and the rules plan (the strip above both) was refused from then on.
+  const backUnderTheStrip = async () => {
+    const keys = rs.pick([["date_chase", "people_index"], ["people_index", "date_chase"], ["date_chase"], ["people_index"]]);
+    const ways = keys.map(() => rs.pick(WAYS));
+    moves.push(`scripted: every card first; ${keys.map((k, i) => `${k} ${ways[i]}`).join("; ")}`);
+    count("scripted: the strip under the cards, and a section of the bottom comes back");
+    await plannerAnswers("every card first, the rest as it stands");
+    for (const [i, key] of keys.entries()) {
+      if (!(await boardNow()).includes(key)) continue;
+      if (await stripUnderTheCards()) count("scripted: ... and the strip did stand under the cards");
+      await offAndBack(key, ways[i]);
+    }
+  };
+  // The Reviewer's probe: a rule's move left waiting. A banner lands; the same day he asks about dates, and the
+  // strip's move up is held (the banner is new today); a day later nothing in his data has changed, the stored
+  // board is served, and the move is still to come. A section taken off and brought back then has to go where the
+  // rules plan will keep it once the strip has moved: not next to the strip. On 472c2a7 next up came back under
+  // the strip, and the rules plan was refused from then on.
+  const besideAWaitingMove = async () => {
+    const key = rs.pick(["hero_next_up", "hero_next_up", "stat_row", "date_chase", "people_index"]);
+    const way = rs.pick(WAYS);
+    moves.push(`scripted: the next day; a banner; he asks about dates; the next day; ${key} ${way}`);
+    count("scripted: a rule's move is waiting, and a section comes back");
+    await nextDay();
+    await plannerAnswers("a banner");
+    await says("when is the deadline?");
+    await openTwice("rules: he asks about dates", { firstMayStore: true });
+    await nextDay();
+    if (!(await boardNow()).includes(key)) return;
+    if (await stripIsWaiting()) count("scripted: ... and the strip's move was waiting");
+    await offAndBack(key, way);
+  };
+  const onBoard = without(await boardNow(), BANNER);
+  if (scripted && onBoard.length) {
+    if ((await computeCurrentPlan(id)).signals.context.calm_mode) {
+      // (Out of calm mode first: there the board is the default's and no rule or planner is asked.)
+      moves.push("calm mode off");
+      await route({ action: "calm_mode", enabled: false });
+      await openTwice("calm mode", { firstMayStore: true });
+    }
+    await rs.pick([backOntoABoardWithoutIt, backUnderTheStrip, besideAWaitingMove])();
+  }
   return { complaints, moves, counts, refusals, size, storedBoard: await marked() };
 }
 
@@ -954,19 +1095,21 @@ describe(`a random walk over the Overview (${WALKS} walks of ${STEPS} steps, see
   const reached = new Map<string, number>();
   const refusedFor = new Map<string, number>();
 
-  it.each(Array.from({ length: WALKS }, (_, i) => i))("walk %i", async (index) => {
+  const run = async (index: number, scripted: boolean) => {
     clearPlanCache();
-    const result = await walk(index);
+    const result = await walk(index, scripted);
     for (const c of result.complaints) tally.set(c.check, (tally.get(c.check) ?? 0) + 1);
     for (const [k, n] of result.counts) reached.set(k, (reached.get(k) ?? 0) + n);
     for (const [k, n] of result.refusals) refusedFor.set(k, (refusedFor.get(k) ?? 0) + n);
     if (result.complaints.length) {
       console.log(
-        [`WALK ${index} (seed ${SEED}, a board of ${result.size}): ${result.complaints.length} complaint(s)`, ...result.complaints.slice(0, PRINT_ALL ? undefined : 6).map((c) => `  [${c.check}] ${c.detail}`), `  the last six moves: ${result.moves.slice(-6).join(" ; ")}`, `  the stored board (@place, *pinned): ${result.storedBoard}`].join("\n")
+        [`${scripted ? "SCRIPTED" : "WALK"} ${index} (seed ${SEED}, a board of ${result.size}): ${result.complaints.length} complaint(s)`, ...result.complaints.slice(0, PRINT_ALL ? undefined : 6).map((c) => `  [${c.check}] ${c.detail}`), `  the last six moves: ${result.moves.slice(-6).join(" ; ")}`, `  the stored board (@place, *pinned): ${result.storedBoard}`].join("\n")
       );
     }
     expect(result.complaints.map((c) => c.check)).toEqual([]);
-  });
+  };
+  it.each(Array.from({ length: WALKS }, (_, i) => i))("walk %i", (index) => run(index, false));
+  it.each(Array.from({ length: WALKS }, (_, i) => i))("scripted %i", (index) => run(index, true));
 
   afterAll(() => {
     console.log(
