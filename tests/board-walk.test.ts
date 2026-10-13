@@ -291,12 +291,13 @@ function acceptedAgainst(system: string[], rules: (typeof RULES_ORDERS)[number])
  * rules can produce that is accepted against the board as it stands (in calm
  * mode, the usual order). Of the system's sections on the board, those in
  * step with that order are the ones a plan in it would not move. The section
- * goes directly under the last of them that precedes it in the order; with
- * none, above the first that follows it, in front of the cards standing
- * there and of what he placed among them (under the nearest of the system's
- * sections above, if one stands there); with nothing of the system's on the
- * board but cards, in front of those; on a board with nothing of the
- * system's at all, first under the banner.
+ * goes under the last of them that precedes it in the order; with none,
+ * above the first that follows it; with nothing of the system's on the
+ * board but cards, among those; on a board with nothing of the system's at
+ * all, first under the banner. And on its side of the cards: between two of
+ * the system's sections there may stand cards, and things he placed among
+ * them; next up, the tiles and the strip go in front of those cards, Needs
+ * a date and People behind them.
  * If no order is accepted (a planner has moved something), the order is
  * today's (`todays`, taken from the product: the rules are not what this
  * walk tests), and of two sections that could each be read as the one out
@@ -325,9 +326,25 @@ function returnModel(board: string[], key: string, placed: string[], todays: str
   const here = order.indexOf(key);
   const above = order.slice(0, Math.max(0, here)).findLast((k) => kept.includes(k));
   const below = order.slice(here + 1).find((k) => kept.includes(k));
-  const firstOwn = rest.findIndex(own);
-  const over = below ? rest.slice(0, rest.indexOf(below)).findLastIndex((k) => own(k) && !isCard(k)) : -1;
-  const at = above ? rest.indexOf(above) + 1 : below ? (over !== -1 ? over + 1 : firstOwn) : firstOwn !== -1 ? firstOwn : rest[0] === BANNER ? 1 : 0;
+  const inFront = ["hero_next_up", "stat_row", "timeline"].includes(key);
+  const systemsSection = (k: string) => own(k) && !isCard(k);
+  /** The system's cards standing from `lo` up to `hi` on the board. */
+  const cardsFrom = (lo: number, hi: number) => rest.map((k, i) => (i >= lo && i < hi && own(k) && isCard(k) ? i : -1)).filter((i) => i !== -1);
+  let at: number;
+  if (above) {
+    const lo = rest.indexOf(above) + 1;
+    const next = rest.findIndex((k, i) => i >= lo && systemsSection(k));
+    const cards = inFront ? [] : cardsFrom(lo, next === -1 ? rest.length : next);
+    at = cards.length ? cards.at(-1)! + 1 : lo;
+  } else if (below) {
+    const hi = rest.indexOf(below);
+    const cards = inFront ? cardsFrom(rest.slice(0, hi).findLastIndex(systemsSection) + 1, hi) : [];
+    at = cards.length ? cards[0] : hi;
+  } else {
+    const cards = cardsFrom(0, rest.length);
+    const firstOwn = rest.findIndex(own);
+    at = cards.length ? (inFront ? cards[0] : cards.at(-1)! + 1) : firstOwn !== -1 ? firstOwn : rest[0] === BANNER ? 1 : 0;
+  }
   return insertAt(rest, key, at);
 }
 /** The places of what he placed, read off a board he was told: from the bottom when nothing upper stands below. */
