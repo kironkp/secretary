@@ -129,8 +129,11 @@
 // often: on a board in none of those states it has a planner cross it or
 // put the cards above the strip; it takes sections of the usual board off
 // and brings them back; it presses Put it back more, and straight after a
-// section came back. Without it the walk draws exactly what it drew before
-// the switch was there.
+// section came back; and it turns calm mode on where the board is not the
+// default's (crossed, the strip under the cards, the strip sent up) and
+// makes his requests there, where the board he sees is no longer the one
+// stored. Without it the walk draws exactly what it drew before the switch
+// was there.
 //
 // BOARD_WALKS, BOARD_STEPS and BOARD_SEED size the run; BOARD_PRINT=all
 // prints every complaint. The suite runs a small one; the long one
@@ -675,8 +678,10 @@ async function walk(index: number, scripted = false) {
       const has = systemsOn(board, placedSet());
       if (acceptedAgainst(hadBefore, rules) && !acceptedAgainst(has, rules)) complain("his request leaves no hold behind", `${what}: ${rules.name} was accepted against ${row(hadBefore)} and is refused against ${row(has)}`);
     }
+    if (await calmNow()) count("requests: in calm mode");
     if (systemsOf(board, placedSet()) !== systemsBefore) {
       count("requests: a section of the system's came or went");
+      if (await calmNow()) count("requests: ... in calm mode");
       if (stood.crossing || stood.stripUnder || stood.hisOnTop) count("requests: ... on a board in one of those states");
     }
     history[history.length - 1] = told.map((t) => ({ ...t }));
@@ -1021,6 +1026,20 @@ async function walk(index: number, scripted = false) {
     if (stands.stripUnder) count("stands: with the strip under the cards");
     if (stands.hisOnTop) count("stands: with something of his at or above next up and the tiles");
     if (["hero_next_up", "stat_row"].some((k) => full.includes(k) && placedSet().includes(k))) count("stands: with next up or the tiles his");
+    const stripUp = systemsOn(full, placedSet())[0] === "timeline" && systemsOn(full, placedSet()).some((k) => k === "hero_next_up" || k === "stat_row");
+    if (stripUp) count("stands: with the strip sent up");
+    const calm = await calmNow();
+    if (calm) count("stands: in calm mode");
+    /** Calm mode on or off, and what it was turned on over: there the board he sees becomes the default's, whatever is stored. */
+    const calmMode = async (enabled: boolean) => {
+      moves.push(`calm mode ${enabled ? "on" : "off"}`);
+      count("calm mode");
+      if (enabled && stands.crossing) count("calm mode turned on over a crossed board");
+      if (enabled && stands.stripUnder) count("calm mode turned on with the strip under the cards");
+      if (enabled && stripUp) count("calm mode turned on with the strip sent up");
+      await route({ action: "calm_mode", enabled });
+      await openTwice("calm mode", { firstMayStore: true });
+    };
     if (BIAS && board.length) {
       const b = r.next();
       if (!stands.crossing && !stands.stripUnder && b < 0.3) {
@@ -1058,6 +1077,12 @@ async function walk(index: number, scripted = false) {
       }
       if (b < 0.7) {
         await putItBack();
+        continue;
+      }
+      // Calm mode, turned on where the board is not the default's (crossed, the strip under the cards, the strip
+      // sent up), so that his requests are then made on a board the stored row does not show; and off again.
+      if (b < 0.8 && (calm || stands.crossing || stands.stripUnder || stripUp)) {
+        await calmMode(!calm);
         continue;
       }
     }
@@ -1142,11 +1167,7 @@ async function walk(index: number, scripted = false) {
     } else if (draw < 0.57) {
       await putItBack();
     } else if (draw < 0.6) {
-      const enabled = !(await computeCurrentPlan(id)).signals.context.calm_mode;
-      moves.push(`calm mode ${enabled ? "on" : "off"}`);
-      count("calm mode");
-      await route({ action: "calm_mode", enabled });
-      await openTwice("calm mode", { firstMayStore: true });
+      await calmMode(!calm);
     } else if (draw < 0.64) {
       const all = (await db.select().from(layoutPreferences).where(eq(layoutPreferences.userId, id))).filter((p) => p.kind === "hide_section" || p.kind === "ban_component");
       if (all.length) await lift(r.pick(all));
