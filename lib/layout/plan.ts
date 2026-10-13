@@ -4,6 +4,7 @@
 import { z } from "zod";
 import { isRegistryComponent, type RegistryComponent } from "./registry";
 import type { ProjectSignal, Signals } from "./signals";
+import type { LayoutPreference } from "./validator";
 import { byUrgency, type Urgency } from "@/lib/project-order";
 
 export const planSectionSchema = z
@@ -133,18 +134,37 @@ export function quietAheadOfUrgent(plan: LayoutPlan, signals: Signals): boolean 
 }
 
 /**
- * Whether a STORED plan is kept as it stands (SPEC §3 invariant 4, v1.02).
- * Always when its order is the user's own: he arranged it (the arrange tool
- * and the chat edit name their plans user-… and chat-…), or it carries a pin
- * of his. A plan the system wrote (planner, rules, default) only while it has
- * no card that is not urgent ahead of an urgent one, counting the cards an
- * urgent project is owed; once it has, it is not kept and the default is
- * shown, like any other stored plan that fails. The system's own stale order
- * is nobody's to protect.
+ * The two names a plan the user arranged carries: arrange_dashboard (voice,
+ * a tap) writes `user-…` (lib/layout/arrange.ts) and the chat's
+ * edit_layout_plan writes `chat-…` (lib/secretary/tools.ts). Everything else
+ * is the system's: `default`, `rules-…`, `llm-…`.
  */
-export function standsAsStored(plan: LayoutPlan, pins: string[], signals: Signals): boolean {
-  const users = /^(user|chat)-/.test(plan.plan_id) || plan.sections.some((s) => pins.includes(sectionKey(s)));
-  return users || !quietAheadOfUrgent(withUrgentCards(plan, signals), signals);
+export const arrangedByUser = (planId: string): boolean => /^(user|chat)-/.test(planId);
+
+/**
+ * Is this stored plan the user's own? The one place that says (SPEC §3
+ * invariants 4 and 7): he arranged it (either name above; a chat edit pins
+ * nothing, so the name is all it has), or it carries a pin of his, wherever
+ * the pin is kept: on the plan's row (`pinned`) or as a pin_section
+ * preference. A pin on a section that is not in the plan is not a pin on it.
+ */
+export function isUsersPlan(plan: LayoutPlan, pinned: string[], preferences: LayoutPreference[]): boolean {
+  if (arrangedByUser(plan.plan_id)) return true;
+  const pins = new Set([...pinned, ...preferences.filter((p) => p.kind === "pin_section").map((p) => p.value.section)]);
+  return plan.sections.some((s) => pins.has(sectionKey(s)));
+}
+
+/**
+ * Whether a STORED plan is kept as it stands (SPEC §3 invariant 4, v1.02).
+ * Always when it is the user's own (isUsersPlan). A plan the system wrote
+ * (planner, rules, default) only while it has no card that is not urgent
+ * ahead of an urgent one, counting the cards an urgent project is owed;
+ * once it has, it is not kept and the default is shown, like any other
+ * stored plan that fails. The system's own stale order is nobody's to
+ * protect.
+ */
+export function standsAsStored(plan: LayoutPlan, pinned: string[], preferences: LayoutPreference[], signals: Signals): boolean {
+  return isUsersPlan(plan, pinned, preferences) || !quietAheadOfUrgent(withUrgentCards(plan, signals), signals);
 }
 
 /**

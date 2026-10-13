@@ -8,7 +8,7 @@ import { Fragment, useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Pin, Sparkles, Undo2 } from "lucide-react";
 import type { LayoutPlan, PlanSection } from "@/lib/layout/plan";
-import { sectionKey } from "@/lib/layout/plan";
+import { arrangedByUser, sectionKey } from "@/lib/layout/plan";
 import { openDetail, type DocRow, type EventRow, type TaskRow } from "./shared";
 import { ProjectProgressStrip, pickTimelineProject } from "./timeline-board";
 import { buildLanes, datePresets, DEFAULT_FILTERS, pickedDay } from "@/lib/timeline";
@@ -513,7 +513,7 @@ export function PlanView({
           <span className="inline-flex items-center gap-1.5">
             <Sparkles size={12} className="text-accent" aria-hidden />
             {/* A board the user arranged says so (SEC-A003b), not "for you". */}
-            {/^(user|chat)-/.test(plan.plan_id) ? "Arranged by you" : (plan.reason_summary ?? "Arranged for you")}
+            {arrangedByUser(plan.plan_id) ? "Arranged by you" : (plan.reason_summary ?? "Arranged for you")}
             {updatedAt && <span>· v{version}</span>}
           </span>
           <button

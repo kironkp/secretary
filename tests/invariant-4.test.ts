@@ -8,7 +8,7 @@
 process.env.TZ = "UTC";
 
 import { beforeEach, describe, expect, it } from "vitest";
-import { defaultPlan, isUrgent, sectionKey, withUrgentCards, type LayoutPlan, type PlanSection } from "@/lib/layout/plan";
+import { defaultPlan, isUrgent, isUsersPlan, sectionKey, withUrgentCards, type LayoutPlan, type PlanSection } from "@/lib/layout/plan";
 import { planFromRules } from "@/lib/layout/plan-from-rules";
 import { clearPlanCache, planWithFallback } from "@/lib/layout/plan-from-llm";
 import { validatePlan, type ValidationContext } from "@/lib/layout/validator";
@@ -286,6 +286,19 @@ describe("a stored plan is kept as it stands only when the user made it", () => 
       llmEnabled: false,
     });
     expect(viaPreference.source).toBe("previous");
+  });
+
+  it("whose plan it is, said in one place: his by either name, or by a pin kept in either place", () => {
+    const plan = quietOnTop("llm-abc");
+    const pinPreference = [{ kind: "pin_section" as const, value: { section: "stat_row" } }];
+    expect(isUsersPlan({ ...plan, plan_id: "user-m1a2" }, [], [])).toBe(true);
+    expect(isUsersPlan({ ...plan, plan_id: "chat-m1a2" }, [], [])).toBe(true);
+    expect(isUsersPlan(plan, ["stat_row"], [])).toBe(true);
+    expect(isUsersPlan(plan, [], pinPreference)).toBe(true);
+    // The system's own names, with no pin on the plan: not his.
+    for (const id of ["default", "rules-1x", "llm-3:abc", "plan-20260917", "userland", "chatty"]) expect(isUsersPlan({ ...plan, plan_id: id }, [], []), id).toBe(false);
+    expect(isUsersPlan(plan, ["kanban"], [{ kind: "pin_section", value: { section: "burndown" } }])).toBe(false);
+    expect(isUsersPlan(plan, [], [{ kind: "hide_section", value: { section: "stat_row" } }])).toBe(false);
   });
 
   it("(d) a system plan with no such pair is kept: the planner's work is not thrown away for nothing", async () => {

@@ -194,11 +194,7 @@ export async function planWithFallback(
   // wrote is kept only while no card that is not urgent sits ahead of an
   // urgent one; a planner's order from weeks ago is not kept over late work,
   // and the default below is shown instead.
-  const pins = [
-    ...opts.pinnedSections,
-    ...opts.preferences.filter((p) => p.kind === "pin_section").map((p) => p.value.section),
-  ];
-  if (opts.previousPlan && standsAsStored(opts.previousPlan, pins, signals)) {
+  if (opts.previousPlan && standsAsStored(opts.previousPlan, opts.pinnedSections, opts.preferences, signals)) {
     const prev = validatePlan(withUrgentCards(opts.previousPlan, signals), { ...ctx, kept: true });
     if (prev.ok) return { plan: finish(prev.plan), source: "previous", called };
   }

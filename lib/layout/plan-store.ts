@@ -68,11 +68,7 @@ export async function computeCurrentPlan(userId: string): Promise<PlanBundle> {
     // A plan the system wrote is not served from the cache once a card that
     // is not urgent sits ahead of an urgent one (invariant 4): the chain
     // below decides, and ends at the default.
-    standsAsStored(
-      previousPlan,
-      [...(head.pinned ?? []), ...preferences.filter((p) => p.kind === "pin_section").map((p) => p.value.section)],
-      signals
-    )
+    standsAsStored(previousPlan, head.pinned ?? [], preferences, signals)
   ) {
     // Durable cache (SPEC §6): same signals as the stored head → zero calls.
     // The stored plan as it stands, plus the card of any urgent project it

@@ -40,12 +40,14 @@ async function board(late: number) {
   await add("Shopping", null, "list");
   const ctx = liveTurnContext({ userId: id, timezone: TZ, attachmentCount: 0 });
   const arrange = (operations: { op: string; section: string }[]) => executeTool(ctx, "arrange_dashboard", { operations });
+  /** The chat's own tool for the same thing: "move X above Y", typed. */
+  const chatEdit = (operations: Record<string, unknown>[]) => executeTool(ctx, "edit_layout_plan", { operations });
   const head = async () => ((await getPlanHead(id))!.spec as LayoutPlan).sections.map(sectionKey);
   const rendered = async () => (await computeCurrentPlan(id)).plan;
   /** Something changes in his data, so the next render is a new situation. */
   const newTask = (project: string, due: number | null = null) =>
     db.insert(tasks).values({ userId: id, projectId: ids[project], title: `${project}: another task ${crypto.randomUUID().slice(0, 4)}`, status: "todo", source: "spoken", dueAt: due === null ? null : day(due) });
-  return { id, ids, add, arrange, head, rendered, newTask, card: (name: string) => `project_card:${ids[name]}` };
+  return { id, ids, add, arrange, chatEdit, head, rendered, newTask, card: (name: string) => `project_card:${ids[name]}` };
 }
 
 beforeEach(() => clearPlanCache());
@@ -201,6 +203,36 @@ describe("a stored plan the system wrote, with a quiet card ahead of late work, 
     const pinned = await withPlannerPlan();
     await db.update(layoutSpecs).set({ pinned: ["stat_row"] }).where(eq(layoutSpecs.id, pinned.row.id));
     expect((await computeCurrentPlan(pinned.b.id)).plan.sections.map(sectionKey)).toEqual(pinned.stored.sections.map(sectionKey));
+  });
+});
+
+describe("a board he arranged in the chat is his too, though that tool pins nothing", () => {
+  it("edit_layout_plan moves a quiet card above the late ones; a project goes late; his order is kept and only its card is added", async () => {
+    const b = await board(5);
+    const before = (await b.rendered()).sections.map(sectionKey);
+    const firstCard = before.findIndex((k) => k.startsWith("project_card:"));
+    const { result } = await b.chatEdit([{ op: "move", section: b.card("Iris"), to: firstCard }]);
+    expect(result).toMatchObject({ applied: true });
+
+    const head = (await getPlanHead(b.id))!;
+    expect((head.spec as LayoutPlan).plan_id).toMatch(/^chat-/);
+    expect(head.pinned).toEqual([]);
+    const arranged = await b.head();
+    expect(arranged[firstCard]).toBe(b.card("Iris"));
+
+    // The next situation, and the next day: still his board.
+    await db.update(layoutSpecs).set({ createdAt: day(-2) }).where(eq(layoutSpecs.userId, b.id));
+    await b.newTask("Atlas");
+    expect((await b.rendered()).sections.map(sectionKey)).toEqual(arranged);
+
+    // A project goes late: one card added, in the stated place, and nothing else moves.
+    await b.add("Juniper", -2);
+    const bundle = await computeCurrentPlan(b.id);
+    const keys = bundle.plan.sections.map(sectionKey);
+    expect(keys.filter((k) => k !== b.card("Juniper"))).toEqual(arranged);
+    expect(keys.filter((k) => k === b.card("Juniper"))).toHaveLength(1);
+    expect(bundle.plan.sections.find((s) => s.props?.project_id === b.ids.Juniper)?.why).toBe("Back on your board: it has late work");
+    expect(keys[firstCard]).toBe(b.card("Iris"));
   });
 });
 
