@@ -99,6 +99,26 @@
 // of today's keeps off it. Two refusals the model predicts: a request about
 // a component he banned, and a size asked for in calm mode.
 //
+// THE ROUND TRIP, a check that comes from no rule. The model above says
+// where a section goes with the same sentences the product uses, so a wrong
+// sentence passes: twice the model and the product agreed on a board that
+// was not the one he had (the strip back under the cards; a card he had
+// placed moved down one when Needs a date came back). After the steps of
+// every walk (and before the scripted move of a scripted one), on a board where the system's sections and the cards stand as
+// the default board has them, the walker hides each section of the system's
+// and shows it, nothing else changing, and requires the board to be exactly
+// the one he had. No reading of "in step", no place worked out: two lists
+// compared. (Left out: a section with something he placed right above or
+// right below it, where nothing can say on which side of that it stood.)
+//
+// EVERYTHING ELSE IS WHERE IT WAS, the other check from no rule, on every
+// single request that names one section of the system's (hide, show, ban,
+// a ban or a hide lifted, pin, let go): take that section out of the board
+// he had and out of the board he has, and the two are the same board. Asked
+// where nothing of the system's stands on the wrong side of the cards
+// before or after, so the one move ruling A allows is not in play. No model
+// of where the section goes.
+//
 // WHERE THE WALK STANDS. The last five defects were all found on a board in
 // one of a few states, so the tally counts them, step by step: a crossing
 // (the system's own sections on the wrong side of each other); the strip
@@ -370,6 +390,22 @@ function cardsWhereTheRulePutsThem(board: string[], placed: string[]): string[] 
   }
   return [...banner, ...placeInto([...system.slice(0, best), ...cards, ...system.slice(best)], readPlaces(board, placed))];
 }
+/**
+ * Whether the system's sections and the cards stand as the default board has them (what he placed aside): next up,
+ * the tiles, the strip, the cards in one run, Needs a date, People, whichever of them are there. Read off the list;
+ * nothing of the product's is asked.
+ */
+function asTheDefaultHasIt(board: string[], placed: string[]): boolean {
+  const rest = without(board, BANNER).filter((k) => !placed.includes(k));
+  const sections = rest.filter((k) => !isCard(k));
+  if (sections.join() !== DEFAULT_SECTIONS.filter((k) => sections.includes(k)).join()) return false;
+  const cardAt = rest.map((k, i) => (isCard(k) ? i : -1)).filter((i) => i >= 0);
+  if (!cardAt.length) return true;
+  const oneRun = cardAt.at(-1)! - cardAt[0] + 1 === cardAt.length;
+  const upperAbove = ["hero_next_up", "stat_row", "timeline"].every((k) => !rest.includes(k) || rest.indexOf(k) < cardAt[0]);
+  const lowerBelow = ["date_chase", "people_index"].every((k) => !rest.includes(k) || rest.indexOf(k) > cardAt.at(-1)!);
+  return oneRun && upperAbove && lowerBelow;
+}
 const canon = (value: unknown): unknown =>
   Array.isArray(value) ? value.map(canon) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value as Record<string, unknown>).filter(([, v]) => v !== undefined).toSorted(([a], [b]) => (a < b ? -1 : 1)).map(([k, v]) => [k, canon(v)])) : value;
 /** A board as whole sections: the component, its props, its why and its place. */
@@ -575,6 +611,13 @@ async function walk(index: number, scripted = false) {
     const stored = keysOf((await head()).spec as LayoutPlan);
     const [stood, systemsBefore] = [standsOn(before, placedSet()), systemsOf(before, placedSet())];
     const hadBefore = systemsOn(before, placedSet());
+    const hadPlaced = placedSet();
+    /** Nothing of the system's on the wrong side of the cards he has not placed: read off the board. */
+    const rightWayUp = (list: string[], his: string[]) => {
+      const rest = without(list, BANNER).filter((k) => !his.includes(k));
+      const cardAt = rest.map((k, i) => (isCard(k) ? i : -1)).filter((i) => i >= 0);
+      return !cardAt.length || wrongSide(rest.filter((k) => !isCard(k)), cardAt[0]) === 0;
+    };
     if (expected) {
       // The list as the request leaves it, then the cards where the rule puts them on that list. Counted for the
       // summary: how often a request of his changed the system's list on a crossed board, and how often the cards moved.
@@ -604,6 +647,12 @@ async function walk(index: number, scripted = false) {
     if (stored.join() !== board.join()) complain("7 the stored board is the next open", `${what}: stored ${row(stored)} | open ${row(board)}`);
     const said = extra?.(first.bundle.plan);
     if (said) complain("the reply's own claim", `${what}: ${said}`);
+    // Everything else is where it was: a request that names one section of the system's, on boards with nothing of
+    // the system's on the wrong side of the cards. Read straight off the two boards.
+    if (subject.length === 1 && isDefault(subject[0]) && [before, board].every((list) => rightWayUp(list, list === before ? hadPlaced : placedSet()))) {
+      const [had, has] = [without(before, subject[0]), without(board, subject[0])];
+      if (had.join() !== has.join()) complain("everything else is where it was", `${what}: without ${subject[0]}, he had ${row(had)} | he has ${row(has)}`);
+    }
     // No order the rules can produce that was accepted against the board he had is refused against the board he has.
     for (const rules of RULES_ORDERS) {
       const has = systemsOn(board, placedSet());
@@ -1156,6 +1205,24 @@ async function walk(index: number, scripted = false) {
       await openTwice("his data changed", { firstMayStore: true });
     }
   }
+  // --- the round trip: each section of the system's hidden and shown, on a board as the default has it ----------
+  const roundTrips = async () => {
+    for (const key of DEFAULT_SECTIONS) {
+      const had = await boardNow();
+      if (!asTheDefaultHasIt(had, placedSet()) || !had.includes(key) || placedSet().includes(key)) continue;
+      // (Where something he placed stands right above or right below it, nothing can say on which side of that it
+      // stood: nothing remembers. Those are left out; what he placed anywhere else is the point of the check.)
+      if ([had[had.indexOf(key) - 1], had[had.indexOf(key) + 1]].some((k) => k !== undefined && placedSet().includes(k))) continue;
+      moves.push(`round trip: ${key} hidden and shown`);
+      count("round trips");
+      nothingElseChanges = true;
+      await arrange([{ op: "hide", key }]);
+      if ((await hiddenNow()).has(key)) await arrange([{ op: "show", key }]);
+      nothingElseChanges = false;
+      const has = await boardNow();
+      if (has.join() !== had.join()) complain("hidden and shown, the board is the one he had", `${key}: he had ${row(had)} | he has ${row(has)}`);
+    }
+  };
   // --- a scripted walk: after its few steps, one scripted move ----------------------------
   // (Three of them, below; one is drawn for each scripted walk.)
   // Walked into on purpose, after the Reviewer's seed 27182818 found it by chance: a section of the usual board
@@ -1239,8 +1306,11 @@ async function walk(index: number, scripted = false) {
       await route({ action: "calm_mode", enabled: false });
       await openTwice("calm mode", { firstMayStore: true });
     }
+    // (The round trips first, on the board the few steps left: nearer the default board than a whole walk leaves it.)
+    await roundTrips();
     await rs.pick([backOntoABoardWithoutIt, backUnderTheStrip, besideAWaitingMove])();
   }
+  await roundTrips();
   return { complaints, moves, counts, refusals, size, storedBoard: await marked() };
 }
 
