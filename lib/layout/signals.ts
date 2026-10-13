@@ -67,6 +67,13 @@ export type Signals = {
     weekday: string;
     time_of_day: "morning" | "afternoon" | "evening";
     days_since_layout_change: number;
+    /**
+     * The sections that are not cards which the system put on the board less
+     * than a day ago: invariant 8 keeps them today. Not in the hash: a day
+     * going by is not a new situation. Absent on a hand-built signals
+     * object, where the layout clock stands in as it did before v1.02 r5.
+     */
+    sections_new_today?: string[];
     pinned_sections: string[];
     calm_mode: boolean;
   };
@@ -94,6 +101,7 @@ const dayDiff = (later: Date, earlier: Date) =>
 
 export async function computeSignals(userId: string, now = new Date()): Promise<Signals> {
   const ago24h = new Date(now.getTime() - 86400000);
+  const twoDaysAgo = new Date(now.getTime() - 2 * 86400000);
   const ago14d = new Date(now.getTime() - 14 * 86400000);
   const in14d = new Date(now.getTime() + 14 * 86400000);
   const startOfDay = new Date(now);
@@ -149,15 +157,25 @@ export async function computeSignals(userId: string, now = new Date()): Promise<
           createdAt: layoutSpecs.createdAt,
         })
         .from(layoutSpecs)
-        // The newest rows, and every row of the last two days: the layout
-        // clock below is exact about "today" however many rows a day wrote.
+        // The newest ten rows, and every row of the last two days with the
+        // one before the oldest of them (a row is judged against the row it
+        // follows): the layout clock below is exact about "today" however
+        // many rows a day wrote.
         .where(
           and(
             eq(layoutSpecs.userId, userId),
             eq(layoutSpecs.kind, "plan"),
             or(
-              gte(layoutSpecs.createdAt, new Date(now.getTime() - 2 * 86400000)),
-              gte(layoutSpecs.version, sql`(select coalesce(max(version), 0) - 9 from layout_specs where user_id = ${userId} and kind = 'plan')`)
+              gte(layoutSpecs.version, sql`(select coalesce(max(version), 0) - 9 from layout_specs where user_id = ${userId} and kind = 'plan')`),
+              // (No row in the last two days: nothing is added to the ten.)
+              gte(
+                layoutSpecs.version,
+                sql`coalesce(
+                  (select max(o.version) from layout_specs o where o.user_id = ${userId} and o.kind = 'plan'
+                    and o.version < (select min(r.version) from layout_specs r where r.user_id = ${userId} and r.kind = 'plan' and r.created_at >= ${twoDaysAgo})),
+                  (select min(r.version) from layout_specs r where r.user_id = ${userId} and r.kind = 'plan' and r.created_at >= ${twoDaysAgo}),
+                  2147483647)`
+              )
             )
           )
         )
@@ -254,6 +272,17 @@ export async function computeSignals(userId: string, now = new Date()): Promise<
   if (daysSinceChange === Number.MAX_SAFE_INTEGER && headRows.length === CLOCK_ROWS) {
     daysSinceChange = dayDiff(now, headRows[headRows.length - 1].createdAt);
   }
+  // What the system put on the board less than a day ago (a banner, a
+  // section a planner added): on the newest row as the system's, and on
+  // every row before it back to one written today that it first appears on.
+  // Invariant 8 keeps these today: what he saw today does not silently go.
+  const newToday: string[] = [];
+  for (const component of systemsOn(headRows[0] ?? { spec: null })) {
+    let first = 0;
+    while (first + 1 < headRows.length && systemsOn(headRows[first + 1]).includes(component)) first++;
+    const sinceBeforeTheRowsRead = first === headRows.length - 1 && headRows.length > 1;
+    if (!sinceBeforeTheRowsRead && dayDiff(now, headRows[first].createdAt) < 1) newToday.push(component);
+  }
 
   const hour = now.getHours();
   return {
@@ -317,6 +346,7 @@ export async function computeSignals(userId: string, now = new Date()): Promise<
       weekday: now.toLocaleDateString("en-US", { weekday: "long" }),
       time_of_day: hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening",
       days_since_layout_change: Math.min(daysSinceChange, 3650),
+      sections_new_today: newToday,
       pinned_sections: headRows[0]?.pinned ?? [],
       calm_mode: userRow?.calmMode ?? false,
     },
@@ -330,39 +360,36 @@ const CLOCK_ROWS = 150;
 type StoredBoard = { spec: unknown; pinned?: string[] | null };
 type StoredSection = { component: string; props?: Record<string, unknown>; place?: unknown };
 
-/** The sections of the default board that are not cards: his to hide and show, never the system's to add or drop. */
-export const DEFAULT_COMPONENTS: ReadonlySet<string> = new Set(["hero_next_up", "stat_row", "timeline", "date_chase", "people_index"]);
+/** The sections of a stored board that are not cards, and which of them are his (placed) rather than the system's. */
+function readBoard(board: StoredBoard) {
+  const sections = ((board.spec as { sections?: StoredSection[] } | null)?.sections ?? []).filter((s) => s.component !== "project_card");
+  const his = new Set([...sections.filter((s) => s.place !== undefined && s.place !== null).map((s) => s.component), ...(board.pinned ?? [])]);
+  return { his, systems: sections.map((s) => s.component).filter((c) => !his.has(c)) };
+}
+/** The system's own sections on a stored board, the banner among them. */
+const systemsOn = (board: StoredBoard): string[] => readBoard(board).systems;
 
 /**
- * Whether the SYSTEM changed the layout between two stored boards, the older
- * and the newer (SPEC §2, v1.02 r5). The system is measured against the
- * system: only the sections that are the system's on both boards are
- * compared. Not the project cards, which follow the data. Not the banner,
- * which is always first when there is one: it comes and goes with the
- * planner's reading of the day, and counted, a planner that writes one every
- * time it is asked paid for a call a day for ever. Not what he placed (it
- * carries its place, or is on the row's pins). And not a section of the
- * default board coming or going, which only he can do (a hide, a show, a
- * ban). So none of his own requests spends the system's ration.
+ * Whether the SYSTEM changed the ORDER of the layout between two stored
+ * boards, the older and the newer (SPEC §2, v1.02 r5). The system is
+ * measured against the system: only the sections that are the system's on
+ * both boards are compared, by their order. Not the project cards, which
+ * follow the data. Not the banner, which is always first when there is one.
+ * Not what he placed (it carries its place, or is on the row's pins). And
+ * not a section coming or going: that is not a change of order, whoever did
+ * it (what the system added today is kept today by invariant 8, through
+ * `sections_new_today`). Counted, the banner made a planner that writes one
+ * every time it is asked a paid call a day for ever: its row reset the
+ * clock, and the clock's flip a day later was a new situation.
  *
- * What is left: the system's sections in a different order, or a section
- * outside the default board that the system added or took away. One
- * function, because the store asks the same question before it writes a row
- * (hashOnceStored, lib/layout/plan-store.ts): will this row reset the clock?
+ * One function, because the store asks the same question before it writes a
+ * row (hashOnceStored, lib/layout/plan-store.ts): will this row reset the
+ * clock?
  */
 export function layoutChanged(older: StoredBoard, newer: StoredBoard): boolean {
-  const read = (board: StoredBoard) => {
-    const sections = ((board.spec as { sections?: StoredSection[] } | null)?.sections ?? []).filter(
-      (s) => s.component !== "project_card" && s.component !== "focus_banner"
-    );
-    const his = new Set([...sections.filter((s) => s.place !== undefined && s.place !== null).map((s) => s.component), ...(board.pinned ?? [])]);
-    return { his, systems: sections.map((s) => s.component).filter((c) => !his.has(c)) };
-  };
-  const [a, b] = [read(older), read(newer)];
+  const [a, b] = [readBoard(older), readBoard(newer)].map((r) => r.systems.filter((c) => c !== "focus_banner"));
   const common = (list: string[], other: string[]) => list.filter((c) => other.includes(c)).join("|");
-  if (common(a.systems, b.systems) !== common(b.systems, a.systems)) return true;
-  const extra = (c: string) => !DEFAULT_COMPONENTS.has(c);
-  return a.systems.some((c) => extra(c) && !b.systems.includes(c) && !b.his.has(c)) || b.systems.some((c) => extra(c) && !a.systems.includes(c) && !a.his.has(c));
+  return common(a, b) !== common(b, a);
 }
 
 /**

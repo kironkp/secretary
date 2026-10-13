@@ -175,7 +175,7 @@ function canonical(value: unknown): unknown {
   }
   return value;
 }
-const planContent = (p: LayoutPlan) => JSON.stringify(canonical([p.sections, p.reason_summary ?? null]));
+export const planContent = (p: LayoutPlan) => JSON.stringify(canonical([p.sections, p.reason_summary ?? null]));
 
 /**
  * Persist a newly-computed plan as the head, then (when signals changed) let

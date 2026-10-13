@@ -180,8 +180,12 @@ name, never its key.
   remove is a request like any other.
 
 **Show, add back, unpin: where the system has it.** A card goes where the
-data puts it; another section goes to its default place among the system's
-sections on the board. (Where a planner had it is not kept for a section
+data puts it; another section goes where today's system order has it (the
+rules plan's; the default's in calm mode): under the nearest of the system's
+sections above it there that is on the board, else on top of them. Not its
+default place regardless: with the strip sent up by a rule, that would put
+the tiles above the strip, and the rules plan would then be refused against
+the board he had just been told. (Where a planner had it is not kept for a section
 that was his while the plan was made; that returns with the split below.)
 Everything else keeps the order he saw: the section goes in under the
 system's section it follows there, and the places of what he placed are read
@@ -226,22 +230,30 @@ components taken out before it is judged, so a ban does not hold the plan
 either.
 
 **The layout clock** (`days_since_layout_change`) is read on the same
-projection (`layoutChanged`, `lib/layout/signals.ts`). A stored row changes
-the layout when the system's own sections are in a different order than on
-the row before, or when a section outside the default board that was the
-system's came or went. Not counted: the project cards (they follow the
-data); the banner (always first when there is one; counted, a planner that
-writes one every time it is asked was paid for once a day for ever);
-anything he placed; a section of the default board coming or going (only
-he can hide or show one). So his own request does not spend the system's
-daily ration, and a request is stored under the hash the next open works
-out (`hashOnceStored`), so the planner is not asked about a board it has
-already answered. The clock reads every stored row of the last two days,
-not the newest ten: ten rows in one day used to push that day's change out
-of sight, the clock read "never", and the ration was open again.
-One imprecision, stated: he hides or bans a section the PLANNER had added;
-the rows cannot tell that from the system taking it away, so it counts as
-a change (one more planner call the next day).
+projection (`layoutChanged`, `lib/layout/signals.ts`): a stored row changes
+the layout when the sections that are the system's on it and on the row
+before are in a different ORDER. Not counted: the project cards (they
+follow the data); the banner (always first when there is one); anything he
+placed; a section coming or going, whoever did it. So his own request does
+not spend the system's daily ration, and a request is stored under the hash
+the next open works out (`hashOnceStored`), so the planner is not asked
+about a board it has already answered. Counted, the banner made a planner
+that writes one every time it is asked a paid call a day for ever: its row
+reset the clock, and the clock turning over a day later was a new
+situation.
+
+The clock reads every stored row of the last two days (and the row the
+oldest of them follows), not the newest ten: ten rows in one day used to
+push that day's change out of sight, the clock read "never", and the ration
+was open again the same day.
+
+**What the system added today stays today (invariant 8)** is no longer read
+off that clock. The signals carry `sections_new_today`: the sections that
+are not cards which the system put on the board less than a day ago (a
+banner, a section a planner added). A system plan without one of them is
+refused that day, so the rules plan does not take a planner's banner off at
+the next change in his data; a day later it may. The list is not in the
+signals hash: a day going by is not a new situation.
 
 **A stated limit: what the system moved does not go back by itself.** After
 the strip has been sent to the top it stays there when the talk about dates
@@ -252,9 +264,14 @@ without one is refused. As before v1.02 for the strip. Task 1.06.
 **Put it back** is a request: the earlier row's board, with what he had
 placed on it at the places that row wrote, on today's data and under today's
 hides; through an open, written, answered, and every place read again. It
-does not bring back what he hid; hides live outside the versions. A section
-he had added that the earlier board does not have goes with it (whether he
-added it since or only had it hidden then); he asks for it again.
+does not bring back what he hid: **Put it back does not undo a hide or a
+show**; hides live outside the versions. A section he had added that the
+earlier board does not have goes with it, whether he added it since or only
+had it hidden then. He will meet the asymmetry, so it is written down: add
+kanban, hide it, show it, Put it back, and kanban is gone, not hidden ("show
+kanban" says there is none; he adds it again); hide the tiles, show them,
+Put it back, and the tiles stay shown, because a section of the usual board
+that is not hidden is always drawn.
 
 No tool answers that a change was applied when the next render will not show
 it. A size or accent set with `set_props` is checked on the board like any
@@ -433,6 +450,7 @@ type Signals = {
   context: {
     date: string; weekday: string; time_of_day: "morning"|"afternoon"|"evening";
     days_since_layout_change: number;
+    sections_new_today?: string[];   // what the system put on the board less than a day ago (v1.02 r5, §2); not in the hash
     pinned_sections: string[]; calm_mode: boolean;
   };
 };

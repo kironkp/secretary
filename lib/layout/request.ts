@@ -17,8 +17,9 @@ import { db } from "@/lib/db";
 import { layoutPreferences, layoutSpecs, projects } from "@/lib/db/schema";
 import { bannerFirst, readPlaces } from "./compose";
 import { nameOfKey, type NamedProject } from "./names";
+import { planFromRules } from "./plan-from-rules";
 import { defaultPlan, isUrgent, sectionKey, urgencyLabel, type LayoutPlan, type PlanSection } from "./plan";
-import { hashOnceStored, loadState, markPinPreferences, openOn, placedOn, type BoardState } from "./plan-store";
+import { hashOnceStored, loadState, markPinPreferences, openOn, placedOn, planContent, type BoardState } from "./plan-store";
 import { REGISTRY_COMPONENTS, REGISTRY_VERSION } from "./registry";
 import { layoutChanged, signalsHash } from "./signals";
 import type { LayoutPreference } from "./validator";
@@ -56,7 +57,6 @@ export type BoardReply =
 const sectionFor = (key: string): PlanSection =>
   isCardKey(key) ? { component: CARD, props: { project_id: key.slice(CARD.length + 1), variant: "full" } } : { component: key };
 const samePreference = (a: LayoutPreference, b: { kind: string; value: unknown }) => a.kind === b.kind && JSON.stringify(a.value) === JSON.stringify(b.value);
-const content = (sections: PlanSection[]) => JSON.stringify(sections.map((s) => [sectionKey(s), s.props ?? {}, s.why ?? null, s.place ?? null]));
 
 export async function requestBoard(userId: string, request: BoardRequest): Promise<BoardReply> {
   const [state, projectRows, lifted] = await Promise.all([
@@ -172,12 +172,13 @@ export async function requestBoard(userId: string, request: BoardRequest): Promi
         placed.add(key);
       } else if (!has(key)) floating.add(key);
     } else if (op.op === "hide") {
-      if (!has(key)) return refuse(`There's no ${say(key)} on the dashboard to hide.`);
+      // (Shown earlier in this same request, it is on its way back to the board: the last word wins.)
+      if (!has(key) && !floating.has(key)) return refuse(`There's no ${say(key)} on the dashboard to hide.`);
       const project = active.get(key);
       if (project && isUrgent(project)) {
         return refuse(`That would break a dashboard rule: urgent project "${project.name}" (${urgencyLabel(project)}) would have no card. Nothing was changed.`);
       }
-      take(key);
+      if (has(key)) take(key);
       placed.delete(key);
       floating.delete(key);
       hides.add(key);
@@ -277,14 +278,23 @@ export async function requestBoard(userId: string, request: BoardRequest): Promi
     const flow = systems.sections.filter((s) => s.place === undefined && s.component !== BANNER);
     const drawnBy = new Set(systems.sections.map((s) => sectionKey(s)));
     const told = standing.filter((s) => drawnBy.has(sectionKey(s)));
-    flow.forEach((s, i) => {
-      if (told.some((t) => sectionKey(t) === sectionKey(s))) return;
-      // Under the nearest of the system's sections above it that is on the board; else on top of them.
-      const above = flow.slice(0, i).findLast((f) => told.some((t) => sectionKey(t) === sectionKey(f)));
-      const firstOwn = told.findIndex((t) => t.component !== BANNER && !placed.has(sectionKey(t)));
-      const at = above ? told.findIndex((t) => sectionKey(t) === sectionKey(above)) + 1 : firstOwn !== -1 ? firstOwn : told[0]?.component === BANNER ? 1 : 0;
+    // The system's order today: the rules plan's (the default's in calm
+    // mode). A section that comes back goes where THAT has it, so the board
+    // he is told is not one the rules plan would then be refused against.
+    const todays = (signals.context.calm_mode ? defaultPlan(signals) : planFromRules(signals)).sections.map((s) => sectionKey(s));
+    for (const s of flow) {
+      const key = sectionKey(s);
+      if (told.some((t) => sectionKey(t) === key)) continue;
+      const own = (t: PlanSection) => t.component !== BANNER && !placed.has(sectionKey(t));
+      // Under the nearest of the system's sections above it that is on the
+      // board; else on top of them. A card's neighbours are the run's, in
+      // data order; another section's are today's system order.
+      const order = isCard(s) || !todays.includes(key) ? flow.map((f) => sectionKey(f)) : todays;
+      const above = order.slice(0, order.indexOf(key)).findLast((k) => told.some((t) => sectionKey(t) === k && own(t)));
+      const firstOwn = told.findIndex(own);
+      const at = above ? told.findIndex((t) => sectionKey(t) === above) + 1 : firstOwn !== -1 ? firstOwn : told[0]?.component === BANNER ? 1 : 0;
       told.splice(at, 0, s);
-    });
+    }
     board = await openWith(told);
   }
 
@@ -329,10 +339,12 @@ export async function requestBoard(userId: string, request: BoardRequest): Promi
   for (const key of hides) {
     if (!hiddenBefore.has(key)) await db.insert(layoutPreferences).values({ userId, kind: "hide_section", value: { section: key } });
   }
-  const reply = { ok: true as const, plan, shown: [...claims.present].filter((key) => hiddenBefore.has(key)), hidden: [...claims.absent], sized };
+  // "Shown" is what came back where the system has it; what he asked to be put somewhere is placed, not merely shown.
+  const reply = { ok: true as const, plan, shown: [...claims.present].filter((key) => hiddenBefore.has(key) && !stillPlaced.includes(key)), hidden: [...claims.absent], sized };
   // The stored board is already this one: nothing to write (a ban of something not on it, a pin already there).
   const head = state.head;
-  if (!reverted && head && content(head.spec.sections) === content(plan.sections) && head.pinned.join() === stillPlaced.join()) {
+  // (Compared as content: what comes back from the database has its keys in the database's order.)
+  if (!reverted && head && planContent(head.spec) === planContent(plan) && head.pinned.join() === stillPlaced.join()) {
     return { ...reply, version: head.version };
   }
   if (reverted) await db.update(layoutSpecs).set({ outcome: "reverted" }).where(eq(layoutSpecs.id, reverted.id));

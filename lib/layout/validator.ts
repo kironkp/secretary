@@ -263,10 +263,13 @@ export function movementReasons(plan: LayoutPlan, ctx: ValidationContext): strin
   const newKeys = plan.sections.filter(systems).map(sectionKey);
   // Invariant 8: same-day system plans may add or re-emphasize, but
   // removals wait — a section the user saw today can't silently vanish.
-  if (ctx.signals.context.days_since_layout_change < 1) {
-    for (const key of prevKeys) {
-      if (!newKeys.includes(key)) reasons.push(`removal is rationed today: "${key}" would vanish`);
-    }
+  // "Today" is the section's own: what the system put on the board less than
+  // a day ago (v1.02 r5). On a hand-built signals object without that list,
+  // the layout clock stands in for it, as it did before.
+  const newToday = ctx.signals.context.sections_new_today;
+  const keptToday = (key: string) => (newToday ? newToday.includes(key) : ctx.signals.context.days_since_layout_change < 1);
+  for (const key of prevKeys) {
+    if (!newKeys.includes(key) && keptToday(key)) reasons.push(`removal is rationed today: "${key}" would vanish`);
   }
   const common = new Set(prevKeys.filter((k) => newKeys.includes(k)));
   const prevSeq = prevKeys.filter((k) => common.has(k));
