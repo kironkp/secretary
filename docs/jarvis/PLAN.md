@@ -7,15 +7,15 @@ beside me in a workshop."*
 
 ## Now
 
-- **Cycle counter: 100** (shown as 1.00). See §9 for how cycles are numbered.
-- **1.00** — this plan. Three review rounds: the first two failed on wrong
-  claims, corrected here.
-- **1.01** — measured baseline (§7). With the Executor.
-- **Next after that:** 1.02 land the parked Overview round (A007), then
-  Phase 2a.
-- **Decided by Kiron, 2026-10-12** (§10): background work stays on at $3 a day
-  or less; the Findit team may build an API; he is on the highest Claude plan.
-- **Asked of the Findit planner, 2026-10-12:** a read-only API (§10).
+- **Cycle counter: 102.** 1.00 is accepted; 1.01 and 1.02 are open. See §9.
+- **1.00** — this plan. Accepted and live: `34fc1f1`, Heroku v63, 2026-10-12.
+- **1.01** — the measured baseline, `docs/jarvis/BASELINE.md`. Measured and
+  checked by the Reviewer, except production: the Executor's session is refused
+  production reads, so Kiron runs the one read-only command in BASELINE §2.
+- **1.02** — land the parked Overview round (A007). With the Executor.
+- **Next:** Phase 2a, then the Workspace branch on top of 1.02.
+- **Waiting on Kiron:** the production command; his yes to the Findit planner,
+  given in the Findit session; decisions 4 to 6 in §10.
 
 ## 1. What is true today
 
@@ -89,6 +89,38 @@ figures re-added by the Reviewer):
   round (`lib/secretary/chat-claude.ts:57-61`, `docs/HANDOFF.md` §Cost).
 - **Voice:** 41,240 input tokens a call, $0.08 a call (22 calls, $1.85).
 
+### Measured in 1.01 (2026-10-12)
+
+By the Executor on a local copy of September's data, each line re-run or
+re-derived by the Reviewer. Commands and detail are in `docs/jarvis/BASELINE.md`.
+
+- **Every chat round sends about 30,500 tokens again**: tool schemas 19,339,
+  the live briefing about 6,700, fixed instructions about 4,400. A typical turn
+  is two rounds, so about 62,000. It was already about 24,300 in September; the
+  15,600 in the code comment was low.
+- **Caching hits** on Fable and on Opus. The Fable rows with no cached count
+  all predate the commit that added caching (`72f04b7`, 09-09).
+- **Tablet and desktop: touch drag, touch resize and undo work first try and
+  survive a reload**, one board save each, no model call. Chromium only; WebKit
+  and a real iPad are unchecked.
+- **Phone: the board draws drag handles and says "Drag to arrange", and a drag
+  does nothing.**
+- **The stored board has overlapping widgets** and sits in a 672 px column
+  (`app/(app)/workspace/page.tsx:53`).
+- **The Canvas throws on load, intermittently, at any size**: a frame whose
+  document is not there yet (`components/canvas/canvas-view.tsx:271`).
+- **A page load cancels a promised follow-up.** Loading any page marks an open
+  expectation as missed, and the next briefing carries neither the opener nor
+  the promise (`lib/secretary/briefing.ts:574-583`). Proven by the Reviewer
+  with a test.
+- **Recorded cost runs a little under the bill**: a cache write is priced as
+  plain input (`lib/pricing.ts:191-195`).
+- **A spoken Canvas move goes to the model.** The persona never names
+  `arrange_canvas` and sends "move this above that" to `edit_canvas`
+  (`lib/secretary/persona.ts`), though a move should need no model call.
+- **The September copy has no AV or event project and no lists.** Production
+  is unchecked.
+
 ### Missing
 
 - **Findit.** No connection in this repo. Findit is a separate Django app on
@@ -104,12 +136,12 @@ figures re-added by the Reviewer):
   that says what the money bought.**
 - **Resumable tasks, initiative, VR.** Nothing.
 
-### Unknown (1.01 answers these)
+### Unknown (the production run answers the first three)
 
-- Whether Kiron's data holds an AV event project and an equipment list.
-- What the app spends on a day with no new data, since 10-07.
-- Which chat model Kiron's settings hold now, and how many rounds a turn takes.
-- Whether touch-drag and resize work on a tablet-width touch screen.
+- Whether Kiron's live data holds an AV event project and an equipment list.
+- What the app has spent since 10-07, and on days with no new data.
+- Which chat model Kiron's settings hold now.
+- Touch on WebKit and on a real iPad.
 
 ### A naming trap
 
@@ -146,8 +178,8 @@ by the shell, one validated op list, undo.
    left/right/top/bottom, the focused one, the last two referenced. This is for
    knowing what "this" is. It does not shrink the bill.
 8. **The bill shrinks another way:** send only the tools a turn needs instead of
-   all 62, take fewer rounds, and keep the cached prefix stable. Sized in 1.01
-   before anything is built.
+   all 62 (they are 19,339 of the 30,500 tokens in a round), take fewer rounds,
+   and keep the cached prefix stable.
 9. **One spend gate** every billable call passes: purpose tag, reserve before
    sending, reconcile after, caps applied together, a stop switch.
 10. **Custom artifacts later, in a sandboxed frame** with a narrow message
@@ -166,7 +198,7 @@ The twenty outcomes are Kiron's. Order and scope are adjusted to what exists.
 | 2b | Prompt diet | 1 | A chat turn under a token budget agreed from 1.01's numbers. Does not hold up Phase 3 | Sized in 1.01 |
 | 3 | Persistent workspace | 1 | Board survives reload and dyno restart; it is the home surface | Built; hidden; A007 then A008 to land |
 | 4 | Workspace operations | 3 | Each op changes only its target; a write without a current `version` is refused | move, resize, collapse, raise, focus, undo, tidy, remove built |
-| 5 | Direct manipulation, **including writes in place** | 4 | Tick, add a row and open a row's detail work and persist; touch-drag and resize on a tablet; keyboard; reorder on a phone; the network log shows no model call | Mouse drag and resize at 768 px+ only. Tick, keyboard, touch-drag: not built or untested |
+| 5 | Direct manipulation, **including writes in place** | 4 | Tick, add a row and open a row's detail work and persist; touch-drag and resize on a real iPad; keyboard; reorder on a phone; the network log shows no model call | Drag and resize work by mouse and by touch at 768 px+ (Chromium). Tick, add-row, keyboard: not built |
 | 6 | Built-in widgets | 5 | Checklist, equipment list, project overview, notes, table: each does its real actions and keeps state | Read-only task, event and project bindings |
 | 7 | Conversational control | 4, 6 | Voice or text creates and edits existing widgets; ids and unrelated state unchanged | WIP on `sec-a008a-workspace` |
 | 8 | Reference resolution | 7 | A fixed set of "this / that list / on the right" commands resolves or asks once | Not started |
@@ -185,6 +217,18 @@ The twenty outcomes are Kiron's. Order and scope are adjusted to what exists.
 
 Rule for the order: nothing in 12–20 starts before 11 is recorded.
 
+Small defects the baseline found, each a short task of its own:
+
+| Defect | Goes with |
+|---|---|
+| A page load cancels a promised follow-up | Its own task, straight after 1.02 |
+| Cache writes priced as plain input | Phase 2a |
+| At the cap an email's attachments are skipped and never retried | Phase 2a |
+| The phone board says "Drag to arrange" and cannot | Phase 5 |
+| The stored board has overlapping widgets in a 672 px column | Phase 3 |
+| A spoken Canvas move goes to the model | Phase 7 |
+| The Canvas load race | Only if cheap; the Canvas is the legacy surface |
+
 ## 4. Who does what
 
 - **Planner** (this session): this plan, task contracts, `CLAUDE.md`, talking to
@@ -193,6 +237,10 @@ Rule for the order: nothing in 12–20 starts before 11 is recorded.
 - **Executor:** all code, tests and measurements, one worktree per task under
   `~/code/secretary-extras/worktrees/`. Ends with a RESULT: SHAs, what changed,
   the evidence, how to check it.
+- **The repository is public.** Committed files carry counts and code
+  references only. Anything holding Kiron's own content (project and list
+  names, task titles, people, screenshots, query output) stays in
+  `~/code/secretary-extras/round-evidence/`.
 - **Reviewer:** checks behaviour independently in `~/code/sec-review`, in a real
   browser for anything a person touches. Ends with a VERDICT, PASS or FAIL,
   naming the SHA range. Never fixes the code itself. A cycle is *accepted* when
@@ -218,11 +266,25 @@ one reading taken after the caps showed $1.59, with the next run refused.
 
 A consequence of v62, found by the Reviewer: reading's own cap ($3) now equals
 the cap on all background work ($3). On a day reading spends its full $3,
-extraction, the dashboard planner and inbound email wait until that spend rolls
-off, and a "Background work paused" push goes out
-(`lib/spend-guard.ts:160-163`). Nothing is lost: extraction keeps its place
-(`lib/secretary/extraction.ts:517-519`). Before v62 there was $1 of room.
-Lowering reading's own cap to $2 would restore it (§10, decision 6).
+extraction and the dashboard planner wait until that spend rolls off, and a
+"Background work paused" push goes out (`lib/spend-guard.ts:160-163`).
+Extraction keeps its place and loses nothing
+(`lib/secretary/extraction.ts:517-519`). An email that arrives then is stored,
+but its attachments are not read by the model, and nothing retries that
+(`lib/email-intake.ts:129-130`). Before v62 there was $1 of room.
+
+How much room each setting of reading's own cap leaves. A run is held at $1.50
+before it starts (`lib/understanding/run.ts:1028-1037`), so new runs stop once
+the day's reading passes the cap less $1.50:
+
+| Reading cap | New runs stop after | Room left for the rest |
+|---|---|---|
+| $3 (today) | $1.50 | none |
+| $2.50 | $1.00 | $0.50 |
+| $2 | $0.50 | $1.00 |
+
+The rest of the background work averaged about $0.07 a day in the 30-day file.
+Recommended: $2.50 (§10, decision 6).
 
 Proposed for chat and voice, not yet agreed with Kiron:
 
@@ -382,6 +444,12 @@ Answered by Kiron, 2026-10-12:
    read-only search and item lookup returning name, quantity, location path,
    photo URL, a link back to the item and its last-changed time. No model calls
    on that path. The token goes from Kiron to Heroku, never through a message.
+   Their answer, the same day: not started until Kiron confirms it in the
+   Findit session; then it is the round after their v2.30. Shape agreed: search
+   by literal words only, so no paid call (Secretary sends a few plain queries
+   instead); at most 50 rows with a flag when more matched; a location path of
+   mixed parts (spot, thing, person) that may be empty; each item marked his
+   own or shared with him; the token made by Kiron on his Findit Account page.
 3. **He is on the highest Claude plan.**
 
 Still open:
@@ -392,7 +460,7 @@ Still open:
    the organisation that owns the app's key will show it.
 5. **The chat and voice caps in §5** ($1 a session, $2 a day, $40 a month) are
    my proposal. Phase 2a builds them as settings; the numbers are Kiron's.
-6. **Split the $3.** I recommend reading at $2 a day, leaving $1 for the rest
-   of the background work, so a heavy reading day cannot stall extraction. One
-   Heroku setting, Kiron's to run:
-   `heroku config:set UNDERSTANDING_DAILY_CAP_USD=2 -a secretary-kiron`.
+6. **Split the $3.** I recommend reading at $2.50 a day, which leaves $0.50
+   for the rest of the background work (table in §5). One Heroku setting,
+   Kiron's to run:
+   `heroku config:set UNDERSTANDING_DAILY_CAP_USD=2.5 -a secretary-kiron`.

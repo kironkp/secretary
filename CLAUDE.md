@@ -85,6 +85,11 @@ whether the code runs.
   retitled, squashed or rewritten; the PASS names the range and the Planner
   pushes that exact SHA to main, as the Pushing rules say. Unfinished work
   pushed along the way is `WIP 1.NN …` and is not a version. No git tags.
+- The GitHub repository is public. Commit counts and code references only:
+  no project or list names beyond those already in the code, no task titles,
+  no people's names, no screenshots, no query output. That evidence lives in
+  `~/code/secretary-extras/round-evidence/`. A local app holding a copy of
+  Kiron's data is started bound to 127.0.0.1.
 - Secretary worktrees go under `~/code/secretary-extras/worktrees/`, not loose
   in `~/code`. `touch sim/.disabled` in a new worktree before its first
   commit: the post-commit hook otherwise starts the simulator, which makes
