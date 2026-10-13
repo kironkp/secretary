@@ -17,12 +17,19 @@ beside me in a workshop."*
 - **1.02** — the Overview round (A007), rebuilt on `jarvis-1.02-overview-r2`
   from main with made-up fixture names. The first offer (`3eb1142`, branch
   `jarvis-1.02-overview`) FAILED and stays untouched. `v1.02 r3` (`d32121f`,
-  the render composed instead of chosen, below) FAILED on 2026-10-13: on the
-  held path a pinned card turned the board upside down, and a cached render
-  showed yesterday's "Due tomorrow". `v1.02 r4` is with the Executor. This
-  is the second FAIL; a third stops the loop (§4). Not yet done by anyone
-  independent: a browser pass on real data, because the Reviewer's session
-  refuses to copy the database. Kiron's say is needed.
+  the render composed instead of chosen, below) FAILED on a pinned card
+  turning the board upside down and a cached "Due tomorrow". `v1.02 r4`
+  (`fbcccef`) fixed both, confirmed on screen, and FAILED on the pin rule
+  itself: two sections he placed at one place swap at every open once the
+  board is shorter than that place. **Third FAIL: the loop is stopped (§4).**
+  No r5 is being built. The Executor is writing a diagnosis; the Reviewer is
+  reading a draft change of approach before anything is contracted: places
+  kept distinct when he speaks, the composition a pure function that never
+  reads the stored board's order, and a random-walk property test in the
+  repo as the gate before any offer (the Reviewer's walks found what three
+  rounds of example tests did not). Not done by anyone independent: a
+  browser pass on real data; the Reviewer's session refuses to copy the
+  database and Kiron's say is needed.
 - **1.03** — a page load no longer cancels a promised follow-up. Accepted and
   live: `7073e9a`, Heroku v64, 2026-10-12.
 - **1.04** — the background bill counted right (first slice of Phase 2a): the
