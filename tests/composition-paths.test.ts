@@ -376,6 +376,13 @@ describe("where the card run goes is one rule", () => {
     const others = plan.sections.filter((s) => s.component !== "project_card");
     const cards = plan.sections.filter((s) => s.component === "project_card");
     expect(runPlace([...others, ...cards])).toBe(3);
+    // Each of next up and the tiles bounds it on its own: whichever stands lower.
+    expect(runPlace([cards[0], others[1], others[0], ...others.slice(2), ...cards.slice(1)])).toBe(2);
+    expect(runPlace([cards[0], others[0], ...others.slice(2), ...cards.slice(1)])).toBe(1); // the tiles are his: next up alone
+    expect(runPlace([cards[0], others[1], ...others.slice(2), ...cards.slice(1)])).toBe(1); // next up is his: the tiles alone
+    // A plan with no card of its own: after next up, the tiles and the strip, and still above Needs a date.
+    expect(runPlace(others)).toBe(3);
+    expect(runPlace([others[3], others[0], others[1], others[2], others[4]])).toBe(4); // Needs a date raised: top wins
   });
 
   describe("the right way up, whatever the system's plan says", () => {
