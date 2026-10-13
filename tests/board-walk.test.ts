@@ -485,7 +485,10 @@ async function walk(index: number) {
     const said = extra?.(first.bundle.plan);
     if (said) complain("the reply's own claim", `${what}: ${said}`);
     history[history.length - 1] = told.map((t) => ({ ...t }));
-    if (heldBefore !== "previous" && (await sourceNow()) === "previous") complain("his own request does not hold the plan", what);
+    // Asked here, before the open below lets a rule's waiting move land: that move resets the layout clock, and the
+    // rules plan is then held for the day by the rule's own doing, not by his request. (The ban's check stood after
+    // that open until a seed of the Reviewer's, 14142135, had a ban of something already banned blamed for it.)
+    if (heldBefore !== "previous" && (await sourceNow()) === "previous") complain(/^(un)?ban /.test(what) ? "a ban alone does not hold the plan" : "his own request does not hold the plan", what);
     // The same again on an open that is NOT served from the stored row: something else in his data changes.
     const names = [...ids.keys()];
     if (names.length) {
@@ -779,7 +782,6 @@ async function walk(index: number) {
         const expected = remove ? (stillHidden ? before : his ? [...before, component] : isDefault(component) ? returnModel(before, component, placedSet(), await systemOrder()) : null) : without(before, component);
         const placedNow = remove ? (his ? [...new Set([...placedSet(), component])] : placedSet()) : without(placedSet(), component);
         await afterRequest(`${remove ? "unban" : "ban"} ${component}`, before, expected, [component], null, placedNow, heldBefore);
-        if (heldBefore !== "previous" && (await sourceNow()) === "previous") complain("a ban alone does not hold the plan", `${remove ? "unban" : "ban"} ${component}`);
       }
     } else if (draw < 0.73) {
       moves.push("the next day");
