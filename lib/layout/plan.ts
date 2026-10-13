@@ -69,6 +69,58 @@ const urgencyOf = (p: ProjectSignal): Urgency => ({
 });
 
 /**
+ * SPEC §3 invariant 4: a project is urgent when it has late open work, or its
+ * date is within the week. A list is never urgent: it is not work to chase.
+ */
+export function isUrgent(p: ProjectSignal): boolean {
+  if (p.kind === "list") return false;
+  const late = typeof p.soonest_days === "number" && p.soonest_days < 0;
+  return late || (p.days_left !== null && p.days_left <= 7);
+}
+
+/** How urgent, in words for a refusal: "5d late", "3d". */
+export function urgencyLabel(p: ProjectSignal): string {
+  return typeof p.soonest_days === "number" && p.soonest_days < 0 ? `${-p.soonest_days}d late` : `${p.days_left}d`;
+}
+
+/** The cards' order: urgent projects first, then the rest, each in the one urgency order; lists last. */
+const cardOrder = (a: ProjectSignal, b: ProjectSignal): number =>
+  Number(a.kind === "list") - Number(b.kind === "list") ||
+  Number(isUrgent(b)) - Number(isUrgent(a)) ||
+  byUrgency(urgencyOf(a), urgencyOf(b));
+
+/**
+ * Invariant 4, presence (SPEC §3, v1.02): a plan that has come to lack the
+ * card of an urgent project gets it back, and nothing else moves. The card
+ * goes after the last urgent card (at the end of the cards when there is
+ * none), with a why the user can read. This is how a stored plan is kept
+ * when a project goes late after the user arranged the board, or after he
+ * hid its card: the arrangement survives, and the late work is on screen.
+ * Pure; returns the same plan when nothing is missing.
+ */
+export function withUrgentCards(plan: LayoutPlan, signals: Signals): LayoutPlan {
+  const idOf = (s: PlanSection) => String(s.props?.project_id ?? "");
+  const urgent = signals.projects.filter(isUrgent);
+  const have = new Set(plan.sections.filter((s) => s.component === "project_card").map(idOf));
+  const missing = urgent.filter((p) => !have.has(p.id)).toSorted(cardOrder);
+  if (!missing.length) return plan;
+  const urgentIds = new Set(urgent.map((p) => p.id));
+  const sections = [...plan.sections];
+  for (const p of missing) {
+    const cards = sections.flatMap((s, i) => (s.component === "project_card" ? [i] : []));
+    const lastUrgent = cards.filter((i) => urgentIds.has(idOf(sections[i]))).at(-1);
+    const after = lastUrgent ?? cards.at(-1) ?? sections.length - 1;
+    const late = typeof p.soonest_days === "number" && p.soonest_days < 0;
+    sections.splice(after + 1, 0, {
+      component: "project_card",
+      props: { project_id: p.id, variant: "full" },
+      why: late ? "Back on your board: it has late work" : "Back on your board: it is due within a week",
+    });
+  }
+  return { ...plan, sections };
+}
+
+/**
  * DEFAULT_PLAN (SPEC §2): also the fallback and the calm-mode plan. Depends on
  * the user's active projects, so it's a function of signals. Deterministic:
  * same signals → deep-equal plan (F1 relies on this).
@@ -82,13 +134,14 @@ export function defaultPlan(signals: Signals): LayoutPlan {
       { component: "stat_row" },
       // The projects progress strip (registry v3, SEC-A007), above the cards it sums up.
       { component: "timeline", props: { span_days: 21, expanded: false } },
-      // The order the strip and the Timeline use (lib/project-order.ts):
-      // late first by how late, then the nearest date, then undated, lists
-      // (Shopping) last. Urgent and late cards stay above the fold (§3
-      // invariant 4), and the cards agree with the strip above them.
+      // Urgent projects first (§3 invariant 4: the default never has a
+      // card that is not urgent ahead of one that is), then the rest, each
+      // in the order the strip and the Timeline use (lib/project-order.ts):
+      // late first by how late, then the nearest date, then undated; lists
+      // (Shopping) last.
       ...signals.projects
         .filter((p) => !p.parent_id)
-        .toSorted((a, b) => byUrgency(urgencyOf(a), urgencyOf(b)))
+        .toSorted(cardOrder)
         .map((p): PlanSection => ({
           component: "project_card",
           props: { project_id: p.id, variant: "full" },

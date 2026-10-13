@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { openai, PLANNER_MODEL } from "@/lib/openai";
 import type Anthropic from "@anthropic-ai/sdk";
 import { REGISTRY_VERSION } from "./registry";
-import { defaultPlan, type LayoutPlan } from "./plan";
+import { defaultPlan, withUrgentCards, type LayoutPlan } from "./plan";
 import { planFromRules } from "./plan-from-rules";
 import { signalsHash, type Signals } from "./signals";
 import { applyBans, validatePlan, type LayoutPreference } from "./validator";
@@ -134,13 +134,17 @@ export async function planWithFallback(
   // previous plan named "default" as the default (SEC-A007), so a model that
   // wrote "default" would loosen the rationing for the plan after it.
   const serverId = (plan: LayoutPlan): LayoutPlan => ({ ...plan, plan_id: `llm-${key}` });
+  // Whatever plan leaves here: the user's bans and hidden sections come out,
+  // and then an urgent project's card goes back in if that took it away
+  // (invariant 4: a card he hid returns while its project is late).
+  const finish = (plan: LayoutPlan): LayoutPlan => withUrgentCards(applyBans(plan, opts.preferences), signals);
   let called = false;
 
   if (opts.llmEnabled !== false) {
     const cached = planCache.get(key);
     if (cached) {
       const v = validatePlan(serverId(cached), ctx);
-      if (v.ok) return { plan: applyBans(v.plan, opts.preferences), source: "llm-cache" };
+      if (v.ok) return { plan: finish(v.plan), source: "llm-cache" };
     }
     try {
       const call = opts.call ?? livePlannerCall;
@@ -172,7 +176,7 @@ export async function planWithFallback(
           if (oldest) planCache.delete(oldest);
         }
         planCache.set(key, plan);
-        return { plan: applyBans(plan, opts.preferences), source: "llm", called };
+        return { plan: finish(plan), source: "llm", called };
       }
     } catch {
       // fall through to rules
@@ -180,14 +184,18 @@ export async function planWithFallback(
   }
 
   const rules = validatePlan(planFromRules(signals), ctx);
-  if (rules.ok) return { plan: applyBans(rules.plan, opts.preferences), source: "rules", called };
+  if (rules.ok) return { plan: finish(rules.plan), source: "rules", called };
 
+  // The stored plan, kept as it stands (SPEC §3 invariant 4, v1.02). It is
+  // not judged as a new plan: nothing in it moved, and the order in it may be
+  // the user's own. If a project went late since it was stored, its card is
+  // added rather than the whole arrangement being thrown away for lacking it.
   if (opts.previousPlan) {
-    const prev = validatePlan(opts.previousPlan, ctx);
-    if (prev.ok) return { plan: applyBans(prev.plan, opts.preferences), source: "previous", called };
+    const prev = validatePlan(withUrgentCards(opts.previousPlan, signals), { ...ctx, kept: true });
+    if (prev.ok) return { plan: finish(prev.plan), source: "previous", called };
   }
 
-  return { plan: applyBans(defaultPlan(signals), opts.preferences), source: "default", called };
+  return { plan: finish(defaultPlan(signals)), source: "default", called };
 }
 
 /** test hook */

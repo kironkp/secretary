@@ -2,7 +2,7 @@
 // applies rules in order; later rules may not violate earlier ones. Every
 // deviation carries a user-addressed `why` naming the signal.
 import { REGISTRY_VERSION } from "./registry";
-import { defaultPlan, type LayoutPlan, type PlanSection } from "./plan";
+import { defaultPlan, isUrgent, type LayoutPlan, type PlanSection } from "./plan";
 import {
   isStrongEngagement,
   isStrongScheduleTalk,
@@ -78,8 +78,16 @@ export function planFromRules(signals: Signals): LayoutPlan {
         const from = plan.sections.indexOf(card);
         plan.sections.splice(from, 1);
         const heroIdx = plan.sections.findIndex((s) => s.component === "hero_next_up");
-        plan.sections.splice(heroIdx + 1, 0, card);
-        reordered = true;
+        // Invariant 4: the system does not put a card that is not urgent
+        // ahead of an urgent one. An engaged project that is urgent goes to
+        // the top; one that is not stops just below the last urgent card.
+        const urgentIds = new Set(signals.projects.filter(isUrgent).map((p) => p.id));
+        const lastUrgent = plan.sections.findLastIndex(
+          (s) => s.component === "project_card" && urgentIds.has(String(s.props?.project_id))
+        );
+        const to = isUrgent(engaged) || lastUrgent === -1 ? heroIdx + 1 : lastUrgent + 1;
+        plan.sections.splice(to, 0, card);
+        reordered = to !== from;
       }
     }
     firedRules.push(`${engaged.name} dominating the conversation`);

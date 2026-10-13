@@ -8,12 +8,12 @@
 // - Two accents → auto-demoted to one: the accent on the soonest-deadline
 //   project wins; ties keep the first. (Rejected-not-demoted was the
 //   alternative; demotion degrades more gracefully mid-conversation.)
-// - "Above the fold" = the first 8 sections of the plan.
+// - Invariant 4 has no fixed position (v1.02; it was "the first 8 sections"):
+//   an urgent project always has a card, and the system does not move a card
+//   that is not urgent ahead of one that is.
 import { PROP_SCHEMAS, RETIRED_COMPONENTS, isRegistryComponent, type RegistryComponent } from "./registry";
-import { layoutPlanSchema, sectionKey, type LayoutPlan, type PlanSection } from "./plan";
+import { isUrgent, layoutPlanSchema, sectionKey, urgencyLabel, type LayoutPlan, type PlanSection } from "./plan";
 import type { Signals } from "./signals";
-
-export const ABOVE_THE_FOLD = 8;
 
 export type LayoutPreference = {
   /** hide_section: { section } — the user said "hide Z"; that one section stays off the board until they show it. */
@@ -31,6 +31,12 @@ export type ValidationContext = {
   defaultPlan: LayoutPlan;
   /** User-initiated changes are exempt from movement rationing (invariant 3). */
   userInitiated?: boolean;
+  /**
+   * The stored plan itself, kept as it stands (planWithFallback's last
+   * resort before the default). Nothing in it moved, so there is nothing to
+   * ration and no order to refuse (invariant 4), and its whys are its own.
+   */
+  kept?: boolean;
   /** Names of approved dynamic components (SPEC v1.3) — valid section names. */
   dynamicComponents?: string[];
 };
@@ -152,7 +158,7 @@ export function validatePlan(input: unknown, ctx: ValidationContext): Validation
   // — that's model self-talk, not a user-facing reason. Strip why from any
   // section whose props match its DEFAULT_PLAN counterpart.
   for (const s of plan.sections) {
-    if (!s.why) continue;
+    if (!s.why || ctx.kept) continue;
     const base = ctx.defaultPlan.sections.find((d) => sectionKey(d) === sectionKey(s));
     if (base && JSON.stringify(s.props ?? {}) === JSON.stringify(base.props ?? {})) {
       delete s.why;
@@ -194,19 +200,43 @@ export function validatePlan(input: unknown, ctx: ValidationContext): Validation
     }
   }
 
-  // Invariant 4 — nothing urgent disappears: every project with days_left <= 7
-  // must have its card above the fold. Compact allowed; absent = rejected.
-  // Late open work is urgent too (SEC-A007): days_left skips the past.
-  for (const p of ctx.signals.projects) {
-    const late = typeof p.soonest_days === "number" && p.soonest_days < 0;
-    if ((p.days_left !== null && p.days_left <= 7) || late) {
-      const idx = plan.sections.findIndex(
-        (s) => s.component === "project_card" && s.props?.project_id === p.id
-      );
-      if (idx === -1 || idx >= ABOVE_THE_FOLD) {
-        reasons.push(`urgent project "${p.name}" (${late ? `${-(p.soonest_days as number)}d late` : `${p.days_left}d`}) not above the fold`);
+  // Invariant 4 — nothing urgent disappears (SPEC §3, v1.02). Urgent is late
+  // open work or a date within the week (isUrgent); a list never is.
+  const urgent = new Map(ctx.signals.projects.filter(isUrgent).map((p) => [p.id, p]));
+  const cards = plan.sections
+    .filter((s) => s.component === "project_card")
+    .map((s) => String(s.props?.project_id ?? ""));
+  // Presence: an urgent project always has a card. Compact allowed; absent =
+  // rejected. (A STORED plan that has come to lack one is repaired before it
+  // gets here: withUrgentCards.)
+  for (const p of urgent.values()) {
+    if (!cards.includes(p.id)) reasons.push(`urgent project "${p.name}" (${urgencyLabel(p)}) would have no card`);
+  }
+  // Order: a plan the SYSTEM writes may not move a card that is not urgent
+  // ahead of an urgent one. Judged on what it changed: a pair the plan it
+  // replaces already had in that order stands (the user may have made it),
+  // and with no plan to replace, any such pair is refused. A plan kept as it
+  // stands and a change the user asked for are never refused for order; there
+  // is no fixed position, so six late projects are as valid as one.
+  if (!ctx.userInitiated && !ctx.kept) {
+    const stood = new Map(
+      (ctx.previousPlan?.sections ?? [])
+        .filter((s) => s.component === "project_card")
+        .map((s, i) => [String(s.props?.project_id ?? ""), i] as const)
+    );
+    const nameOf = (id: string) => ctx.signals.projects.find((p) => p.id === id)?.name ?? id;
+    const refused = new Set<string>();
+    cards.forEach((quiet, i) => {
+      if (urgent.has(quiet)) return;
+      for (const later of cards.slice(i + 1)) {
+        if (!urgent.has(later) || refused.has(later)) continue;
+        const a = stood.get(quiet);
+        const b = stood.get(later);
+        if (a !== undefined && b !== undefined && a < b) continue;
+        refused.add(later);
+        reasons.push(`"${nameOf(quiet)}" is not urgent and would move ahead of urgent project "${urgent.get(later)!.name}" (${urgencyLabel(urgent.get(later)!)})`);
       }
-    }
+    });
   }
 
   // Invariant 3 — movement is rationed for SYSTEM-initiated plans: reordering
@@ -218,7 +248,7 @@ export function validatePlan(input: unknown, ctx: ValidationContext): Validation
   // would keep every unarranged board on it forever. A retired component's
   // section is not on anyone's screen, so its absence is not a removal.
   const baseline = ctx.previousPlan?.plan_id === "default" ? ctx.defaultPlan : ctx.previousPlan;
-  if (!ctx.userInitiated && baseline) {
+  if (!ctx.userInitiated && !ctx.kept && baseline) {
     const prevKeys = baseline.sections.filter((s) => !RETIRED_COMPONENTS.has(s.component)).map(sectionKey);
     const newKeys = plan.sections.map(sectionKey);
     // Invariant 8: same-day system plans may add or re-emphasize, but
@@ -252,7 +282,7 @@ export function validatePlan(input: unknown, ctx: ValidationContext): Validation
   // plan, against the PLANNERS. The user's own request moves what it moves:
   // "put the shopping list at the top" shifts a pinned section down a place,
   // and refusing that broke "user-initiated changes apply immediately".
-  if (ctx.previousPlan && !ctx.userInitiated) {
+  if (ctx.previousPlan && !ctx.userInitiated && !ctx.kept) {
     const pinKeys = new Set([
       ...ctx.pinnedSections,
       ...ctx.preferences.filter((p) => p.kind === "pin_section").map((p) => p.value.section),

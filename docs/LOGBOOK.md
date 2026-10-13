@@ -9,8 +9,10 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 ## v1.02 — A clear Overview (2026-10-12)
 
-`7a53974` to `de5dc87` (written 2026-10-06 as v0.34 and parked: node would not
-start that day, so nothing was run), `a4b8966`, this commit
+`b980803` (the round as one commit: written 2026-10-06 as v0.34 and parked,
+because node would not start that day and nothing was run; verified
+2026-10-12 and first offered on another branch), `a42f04e` (the spec),
+the commit before this one (the code), this commit
 
 Kiron on the Overview: "make it make sense", "a random graph", "I don't
 understand all the whats". sec rev's round 2 (SEC-A007).
@@ -63,8 +65,37 @@ understand all the whats". sec rev's round 2 (SEC-A007).
   board the cards, the strip and the Timeline were then compared with an
   order worked out by hand in SQL, at 393, 820 and 1440 wide: one order on
   all three, the most overdue project first.
-- Checks: 1,176 tests, the production build, 70 browser specs on local
-  Chromium. App spend: $0.
+- Round 2, after review. **Invariant 4 changed, for a reason, not to pass a
+  test.** "Nothing urgent disappears" used to mean "urgent cards above the
+  fold", the first 8 sections. Once late work counted as urgent that could
+  not be met: on a board with four late projects and one due soon, "put the
+  shopping list at the top" was refused; with six late projects the default
+  and the rules plan were refused themselves, every arrange request was
+  refused, and a planner answer was paid for and thrown away on each new
+  situation. The rule now (docs/adaptive-ui/SPEC.md §3):
+  - Presence. An urgent project always has a card. A plan the system writes
+    without one is rejected. A stored plan that has come to lack one (a
+    project went late after he arranged the board, or after he hid its card)
+    is repaired: the card goes in after the last urgent card with a "Back on
+    your board" why, and nothing else moves.
+  - Order. The system may not move a card that is not urgent ahead of an
+    urgent one, and it is judged only on what it changed. A board left as it
+    stands is never refused for its order, and neither is anything the user
+    asked for. A list is never urgent. There is no fixed position.
+  - The default puts urgent cards first, and the rules planner's "you keep
+    talking about this" move stops below the urgent cards for a project that
+    is not urgent.
+  - What this fixes that nobody had asked about yet: after he arranged his
+    board, the next change in his data re-checked his own plan as if the
+    planner had written it; with a late card below the fold it failed, and
+    the board went back to the default overnight.
+- Round 2 also: the test fixtures are made-up boards (no project of his by
+  name), and five behaviours the Reviewer's mutants showed untested now have
+  tests: finished and suggested tasks do not count as a project's soonest
+  date, days are his calendar days, a project's own deadline is read, a
+  Timeline lane is ordered by its due day, and a list never takes a cell
+  among the project cards.
+- Checks: CHECKS_LINE App spend: $0.
 
 ---
 

@@ -6,7 +6,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { layoutPreferences, layoutSpecs } from "@/lib/db/schema";
 import { REGISTRY_VERSION } from "./registry";
-import { defaultPlan, sectionKey, type LayoutPlan } from "./plan";
+import { defaultPlan, sectionKey, withUrgentCards, type LayoutPlan } from "./plan";
 import { planWithFallback, type PlannerCall } from "./plan-from-llm";
 import { computeSignals, signalsHash, type Signals } from "./signals";
 import { listDynamicComponents, openPriorityWishes } from "./slow-loop";
@@ -59,14 +59,17 @@ export async function computeCurrentPlan(userId: string): Promise<PlanBundle> {
   let wantsLlmRefinement = false;
   if (signals.context.calm_mode) {
     // Invariant 7: DEFAULT_PLAN unconditionally — no planner of any kind.
-    plan = applyBans(defaultPlan(signals), preferences);
+    // (Invariant 4 still holds: a hidden card is back while its project is late.)
+    plan = withUrgentCards(applyBans(defaultPlan(signals), preferences), signals);
   } else if (
     head?.signalsHash &&
     head.signalsHash === signalsHash(signals, REGISTRY_VERSION) &&
     previousPlan
   ) {
     // Durable cache (SPEC §6): same signals as the stored head → zero calls.
-    plan = applyBans(previousPlan, preferences);
+    // The stored plan as it stands, plus the card of any urgent project it
+    // has come to lack (invariant 4).
+    plan = withUrgentCards(applyBans(previousPlan, preferences), signals);
   } else {
     ({ plan } = await planWithFallback(signals, {
       previousPlan,

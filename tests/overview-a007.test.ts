@@ -86,7 +86,7 @@ describe("DEFAULT_PLAN, top to bottom", () => {
     expect(res.ok ? "ok" : res.reasons).toBe("ok");
   });
 
-  it("an urgent project made last still has its card above the fold, among nine", () => {
+  it("an urgent project made last has its card ahead of every card that is not urgent, among nine", () => {
     const signals = baseSignals();
     for (let i = 0; i < 5; i++) {
       signals.projects.push({ ...signals.projects[3], id: `quiet-${i}`, name: `quiet ${i}` });
@@ -217,21 +217,35 @@ describe("one urgency order for cards, strip and Timeline (sec rev: late first)"
     ];
     const cards = defaultPlan(signals).sections.filter((s) => s.component === "project_card").map((s) => String(s.props?.project_id));
     expect(cards).toEqual(["garden-shed", "house-concert", "campus-move", "paperwork", "sailing-club", "kitchen-remodel", "deck-repair", "field-notes", "model-railway"]);
-    // And every late card is above the fold, so the plan is valid as it stands.
+    // And no card that is not urgent comes before a late one, so the plan is valid as it stands.
     const res = validatePlan(defaultPlan(signals), ctx({ signals }));
     expect(res.ok ? "ok" : res.reasons).toBe("ok");
   });
 
-  it("invariant 4 protects late work too: a late project's card below the fold is refused", () => {
+  it("invariant 4 protects late work too: a plan without a late project's card is refused", () => {
     const signals = baseSignals();
-    signals.projects[3] = { ...signals.projects[3], soonest_days: -5 }; // caltrans: undated deadline, late task
+    signals.projects[3] = { ...signals.projects[3], soonest_days: -5 }; // no deadline of its own, one late task
     const plan = defaultPlan(signals);
-    const card = plan.sections.find((s) => s.props?.project_id === "caltrans")!;
-    const pushedDown = { ...plan, sections: [...plan.sections.filter((s) => s !== card), ...Array.from({ length: 6 }, () => ({ component: "people_index" })), card] };
+    const without = { ...plan, sections: plan.sections.filter((s) => s.props?.project_id !== "caltrans") };
+    const res = validatePlan(without, ctx({ signals }));
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.reasons.join(" ")).toMatch(/urgent project "caltrans" \(5d late\) would have no card/);
+  });
+
+  it("and the system may not put a card that is not urgent ahead of it (tests/invariant-4.test.ts has the rest)", () => {
+    const signals = baseSignals();
+    signals.projects[3] = { ...signals.projects[3], soonest_days: -5 };
+    const plan = defaultPlan(signals);
+    // The late project's card last among the cards: every quiet card is now ahead of it.
+    const late = plan.sections.find((s) => s.props?.project_id === "caltrans")!;
+    const lastCard = plan.sections.findLastIndex((s) => s.component === "project_card");
+    const rest = plan.sections.filter((s) => s !== late);
+    const pushedDown = { ...plan, sections: [...rest.slice(0, lastCard), late, ...rest.slice(lastCard)] };
     const res = validatePlan(pushedDown, ctx({ signals }));
     expect(res.ok).toBe(false);
     if (res.ok) return;
-    expect(res.reasons.join(" ")).toMatch(/urgent project "caltrans" \(5d late\) not above the fold/);
+    expect(res.reasons.join(" ")).toMatch(/is not urgent and would move ahead of urgent project "caltrans" \(5d late\)/);
   });
 });
 

@@ -147,6 +147,25 @@ describe("a card with nothing to draw gets no cell in the grid", () => {
     expect(grids).toEqual([["A has work", "C has work"]]);
   });
 
+  it("a list never takes a cell among the project cards: it stands on its own, and splits the grid where it sits", async () => {
+    const [list] = await db.insert(projects).values({ userId: V.id, name: "Packing", kind: "list", status: "active" }).returning();
+    await db.insert(tasks).values({ userId: V.id, projectId: list.id, title: "Tent", status: "todo", source: "spoken" });
+    const el = (await DashboardPanel({ userId: V.id, timezone: TZ })) as {
+      props: { tasks: TaskRow[]; events: EventRow[]; planProjects: PlanProject[] };
+    };
+    const { planProjects } = el.props;
+    const id = (name: string) => planProjects.find((p) => p.name === name)!.id;
+    const card = (name: string): PlanSection => ({ component: "project_card", props: { project_id: id(name), variant: "full" } });
+    // The list's card between two project cards, as the user might arrange it.
+    const groups = groupCards([card("A has work"), card("Packing"), card("C has work")], planProjects);
+    expect(groups.map((g) => g.kind)).toEqual(["cards", "one", "cards"]);
+    expect(groups.flatMap((g) => (g.kind === "cards" ? g.sections.map(({ section }) => section.props?.project_id) : []))).toEqual([
+      id("A has work"),
+      id("C has work"),
+    ]);
+    await db.delete(projects).where(eq(projects.id, list.id));
+  });
+
   it("a compact card always draws its row, so it keeps its cell", async () => {
     const el = (await DashboardPanel({ userId: V.id, timezone: TZ })) as {
       props: { tasks: TaskRow[]; events: EventRow[]; planProjects: PlanProject[] };

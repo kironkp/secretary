@@ -216,6 +216,23 @@ describe("lanes in the one urgency order (SEC-A007, lib/project-order.ts)", () =
     expect(lanes.map((l) => l.name)).toEqual(["Gamma", "Beta", "Alpha"]);
   });
 
+  it("a lane is ordered by when its work is DUE, not by when it was planned to start", () => {
+    const lanes = buildLanes(
+      [P("alpha", "Alpha"), P("beta", "Beta")],
+      [
+        // Started ten days ago, due in five: not late, and after Beta.
+        task({ projectId: "alpha", startAt: "2026-09-26T19:00:00Z", dueAt: "2026-10-11T19:00:00Z" }),
+        task({ projectId: "beta", dueAt: "2026-10-08T19:00:00Z" }), // due in two days
+      ],
+      [],
+      TZ,
+      NOW,
+      DEFAULT_FILTERS
+    );
+    expect(lanes.map((l) => l.name)).toEqual(["Beta", "Alpha"]);
+    expect(lanes.find((l) => l.name === "Alpha")?.soonest).toBe(TODAY + 5);
+  });
+
   it("the order is the same whatever the status filter shows", () => {
     const projects = [P("alpha", "Alpha"), P("zeta", "Zeta")];
     const tasks = [
