@@ -24,8 +24,11 @@
 // section for section. What he placed, and where, is read off that EXPECTED
 // board, never off what the product stored. For a section of the default
 // board that comes back (shown, added back, let go, a hide or a ban lifted)
-// the model says where: under the nearest of the system's sections above it
-// in today's system order. Only for a CARD that comes back can it say no
+// the model says where: where today's rules plan would keep it (returnModel,
+// with the walker's own reading of which sections are in step with that
+// plan: every run tried, not the validator's table). It is put onto the list
+// after everything else the request asked for. Only for a CARD that comes back can it say no
+
 // more than "by the data": there it asks that the card is drawn, that
 // everything else kept its order, and the standing questions (the cards he
 // did not place are one run in data order). It keeps its own history, one entry per stored version, and
@@ -180,21 +183,49 @@ function editModel(board: string[], operation: { op: string; section?: string; c
   return board; // set_props
 }
 /**
+ * The walker's own reading of "in step" (SPEC §2): of the keys in `list`, the
+ * longest run that stands in the same order in `order`; of two equally long,
+ * the one that ends latest in `order`, then the one whose section before
+ * that stands latest, and so on. Every run is tried, one by one: nothing here
+ * is the product's.
+ */
+function longestInStep(list: string[], order: string[]): string[] {
+  const at = (run: string[]) => run.map((k) => order.indexOf(k)).toSorted((x, y) => y - x);
+  const endsLater = (a: string[], b: string[]) => {
+    const [x, y] = [at(a), at(b)];
+    const i = x.findIndex((n, j) => n !== y[j]);
+    return i !== -1 && x[i] > y[i];
+  };
+  let best: string[] = [];
+  for (let mask = 0; mask < 1 << list.length; mask++) {
+    const run = list.filter((_, i) => mask & (1 << i));
+    if (!run.every((k, i) => i === 0 || order.indexOf(run[i - 1]) < order.indexOf(k))) continue;
+    if (run.length > best.length || (run.length === best.length && endsLater(run, best))) best = run;
+  }
+  return best;
+}
+/**
  * Where a section of the default board goes when it comes back (shown, added
- * back, let go, a hide or a ban lifted): where the system has it today.
- * `order` is today's system order (the rules plan's; the default's in calm
- * mode), which the walker takes from the product: the rules are not what
- * this walk tests. Among the sections on the board that are the system's
- * (not placed, not the banner) it stands under the nearest one above it in
- * that order; with none above, on top of them; with none at all, first
- * under the banner.
+ * back, let go, a hide or a ban lifted): where today's rules plan would keep
+ * it. `order` is today's system order (the rules plan's; the default's in
+ * calm mode), which the walker takes from the product: the rules are not
+ * what this walk tests. Of the system's sections on the board (not placed,
+ * not the banner, not the cards), those in step with that order are the ones
+ * the rules plan would not itself move. The section goes directly under the
+ * last of them that precedes it in that order; with none, directly above the
+ * first that follows it; with nothing of the system's on the board but
+ * cards, in front of those; on a board with nothing of the system's at all,
+ * first under the banner.
  */
 function returnModel(board: string[], key: string, placed: string[], order: string[]): string[] {
   const rest = without(board, key);
   const own = (k: string) => k !== BANNER && !placed.includes(k);
-  const above = order.slice(0, Math.max(0, order.indexOf(key))).findLast((k) => rest.includes(k) && own(k));
+  const kept = longestInStep(rest.filter((k) => own(k) && !isCard(k) && order.includes(k)), order);
+  const here = order.indexOf(key);
+  const above = order.slice(0, Math.max(0, here)).findLast((k) => kept.includes(k));
+  const below = order.slice(here + 1).find((k) => kept.includes(k));
   const firstOwn = rest.findIndex(own);
-  const at = above ? rest.indexOf(above) + 1 : firstOwn !== -1 ? firstOwn : rest[0] === BANNER ? 1 : 0;
+  const at = above ? rest.indexOf(above) + 1 : below ? rest.indexOf(below) : firstOwn !== -1 ? firstOwn : rest[0] === BANNER ? 1 : 0;
   return insertAt(rest, key, at);
 }
 /** The places of what he placed, read off a board he was told: from the bottom when nothing upper stands below. */
@@ -522,8 +553,11 @@ async function walk(index: number) {
     const predicted: string[] = [];
     const banned = await bannedNow();
     const order = await systemOrder();
+    /** The default sections this request brings back: put onto the list after everything else it asked for. */
+    const returning: string[] = [];
     for (const { op, key } of ops) {
       const onBoard = (model ?? before).includes(key);
+
       if (op !== "hide" && banned.has(key.split(":")[0])) predicted.push("he asked never to be shown it");
       // A card he hid whose project has since been archived: there is no card to show or to move.
       if (op !== "hide" && isCard(key) && ![...ids.values()].some((pid) => `project_card:${pid}` === key)) predicted.push("a card for something that is not on the board");
@@ -538,8 +572,13 @@ async function walk(index: number) {
       else if (added.has(key)) placedNow = [...new Set([...placedNow, key])]; // a section he added comes back placed
       // A show of something not on the board: one he added, at the end; one of the default board's, where the system has it.
       if (op === "show" && was && !was.includes(key) && added.has(key)) model = [...was, key];
-      if (op === "show" && was && !was.includes(key) && isDefault(key)) model = returnModel(was, key, placedNow, order);
+      if (op === "show" && was && !was.includes(key) && isDefault(key)) {
+        model = was;
+        returning.push(key);
+      }
+      if (op === "hide" && returning.includes(key)) returning.splice(returning.indexOf(key), 1);
     }
+    for (const key of DEFAULT_SECTIONS) if (model && returning.includes(key) && !model.includes(key)) model = returnModel(model, key, placedNow, order);
     const res = (await executeTool(ctx, "arrange_dashboard", { operations: ops.map((o) => ({ op: o.op, section: nameOf(o.key) })) })).result as { applied?: boolean; error?: string; order?: string[] };
     if (!res.applied) return refused(res.error ?? "no reason given", predicted.length ? predicted : null);
     if (predicted.length) complain("a request the model refuses was applied", `${predicted.join(" / ")}: arrange ${ops.map((o) => `${o.op} ${short(o.key)}`).join(" + ")}`);
