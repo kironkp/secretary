@@ -707,6 +707,17 @@ describe("what a tool says it did is on the composed board, or nothing is change
     expect((await b.head()).version).toBe(before);
   });
 
+  it("showing a card the board cannot have (a subproject's) is not 'applied' either: the voice tool says so and stores nothing", async () => {
+    const b = await board(3);
+    await b.render();
+    const before = (await b.head()).version;
+    await db.insert(projects).values({ userId: b.id, name: "Paperwork", status: "active", parentId: b.ids.Atlas });
+    const res = (await b.arrange([{ op: "show", section: "Paperwork" }])).result as { applied?: boolean; error?: string };
+    expect(res.applied).not.toBe(true);
+    expect(res.error).toMatch(/would not show on the dashboard.*Nothing was changed/);
+    expect((await b.head()).version).toBe(before);
+  });
+
   it("in one request the last word about a section wins: hidden and shown again is shown, at its own place, and no hide is kept", async () => {
     const b = await board(3);
     const start = await b.keys();

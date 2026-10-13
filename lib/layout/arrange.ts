@@ -181,15 +181,15 @@ export async function arrangeDashboard(userId: string, ops: ArrangeOp[]): Promis
       continue;
     }
     const [moved] = sections.splice(idx, 1);
-    // A focus banner owns the very top (validator); "the top" is just under it.
-    const top = sections[0]?.component === "focus_banner" ? 1 : 0;
+    // "The top" is just under a banner. That is said in one place for both
+    // tools (bannerFirst, where the candidate is built), not worked out here.
     const to =
       op.op === "move_to_top"
-        ? top
+        ? 0
         : op.op === "move_to_bottom"
           ? sections.length
           : op.op === "move_up"
-            ? Math.max(top, idx - 1)
+            ? Math.max(0, idx - 1)
             : Math.min(sections.length, idx + 1);
     sections.splice(to, 0, moved);
     pins.add(hit.key);
