@@ -85,11 +85,19 @@ whether the code runs.
   retitled, squashed or rewritten; the PASS names the range and the Planner
   pushes that exact SHA to main, as the Pushing rules say. Unfinished work
   pushed along the way is `WIP 1.NN …` and is not a version. No git tags.
+- The package version never goes down. A cycle that reaches main after a
+  later one keeps its own LOGBOOK heading and leaves `package.json` alone.
+- One exception to "nothing is squashed": if a pushed commit carries personal
+  content that must not reach main, the round is rebuilt as fresh commits on a
+  NEW branch from main, so that no commit in the range holds it. The old
+  branch is left exactly as it is; deleting it is Kiron's call.
 - The GitHub repository is public. Commit counts and code references only:
   no project or list names beyond those already in the code, no task titles,
   no people's names, no screenshots, no query output. That evidence lives in
   `~/code/secretary-extras/round-evidence/`. A local app holding a copy of
   Kiron's data is started bound to 127.0.0.1.
+- A local build shows the new Dashboard only with `ADAPTIVE_V2=true`; without
+  it you are looking at the legacy screen.
 - Secretary worktrees go under `~/code/secretary-extras/worktrees/`, not loose
   in `~/code`. `touch sim/.disabled` in a new worktree before its first
   commit: the post-commit hook otherwise starts the simulator, which makes
