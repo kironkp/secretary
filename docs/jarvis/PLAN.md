@@ -21,15 +21,15 @@ beside me in a workshop."*
   turning the board upside down and a cached "Due tomorrow". `v1.02 r4`
   (`fbcccef`) fixed both, confirmed on screen, and FAILED on the pin rule
   itself: two sections he placed at one place swap at every open once the
-  board is shorter than that place. **Third FAIL: the loop is stopped (§4).**
-  No r5 is being built. The Executor is writing a diagnosis; the Reviewer is
-  reading a draft change of approach before anything is contracted: places
-  kept distinct when he speaks, the composition a pure function that never
-  reads the stored board's order, and a random-walk property test in the
-  repo as the gate before any offer (the Reviewer's walks found what three
-  rounds of example tests did not). Not done by anyone independent: a
-  browser pass on real data; the Reviewer's session refuses to copy the
-  database and Kiron's say is needed.
+  board is shorter than that place. **Third FAIL: the loop was stopped (§4)
+  and the approach changed.** `v1.02 r5` is contracted, two days, to start
+  when 1.04 has landed. What is different: the rule was drafted twice and
+  read by both the Executor and the Reviewer against the code BEFORE being
+  contracted; a seeded random-walk property test is written first, must
+  fail on `fbcccef`, and is the gate before any offer; the Reviewer reads
+  that walker for width before the fix is judged. Not done by anyone
+  independent: a browser pass on real data; the Reviewer's session refuses
+  to copy the database and Kiron's say is needed.
 - **1.03** — a page load no longer cancels a promised follow-up. Accepted and
   live: `7073e9a`, Heroku v64, 2026-10-12.
 - **1.04** — the background bill counted right (first slice of Phase 2a): the
@@ -52,30 +52,34 @@ beside me in a workshop."*
   the card's "Due in N days" chip read the calendar count, because it sat
   beside a date that contradicted it; thresholds, "urgent" and the hash
   wait for 1.06.
-- **1.07** — arranging by voice is honest. A place is counted among what is
-  drawn (today a card that draws nothing still counts, so "up one" can be
-  stored and change nothing on the page); a placed section can be let go by
-  voice and on a phone (the pin button is hover only); "Put it back" undoes
-  his last action, not the latest stored version, and brings back what he
-  hid; the pin button is 13 px and does not show on a phone tap.
+- **1.07** — the stored row split: the system's plan as the system wrote
+  it, his placements as their own list, the composed board never read back.
+  With it: "Put it back" undoes his last action and brings back what he hid.
+  Then arranging by voice is honest: a place counted among what is drawn
+  (today a card that draws nothing still counts, so "up one" can change
+  nothing on the page), a placed section let go by voice and on a phone (the
+  pin button is 13 px and hover only).
 - **Next:** reserve before sending so two requests cannot overshoot, and email
   attachments retried when there is room. Then the Workspace branch rebuilt
   on main after 1.02.
-- **Where a card sits on the Overview, since 1.02** (the binding text is
-  `docs/adaptive-ui/SPEC.md` §2 and §3 once 1.02 lands). Each render is
-  composed: today's system plan (emphasis, banner, places of sections that
-  are not cards), then the sections Kiron placed put back where he put them,
-  then the cards he did not place in data order around those (urgent first,
-  then the one urgency order), then his hides, then presence. A pin holds a
-  place on the board: n-th section from the top, or last. The set of cards is the data's:
-  every active project and list has one unless he hid it, and a hidden card
-  returns while its project is urgent (late work, or a week or less to go; a
-  list never is). The system never places or drops a card. A stored plan is
-  only his pins, the baseline for rationing the system's other moves, the
-  planner's cache and history. Plan ids play no part. No fixed position:
-  "above the fold" is gone. The rule was restated three times in one evening
-  before the Executor's diagnosis showed it needed this pipeline, not a
-  validator fix.
+- **Where a section sits on the Overview, as contracted for 1.02 r5** (the
+  binding text is `docs/adaptive-ui/SPEC.md` §2 and §3 once it lands). Each
+  render is composed: today's system plan (emphasis, banner, places of
+  sections that are not cards), the sections Kiron placed at their places,
+  the cards he did not place in data order around those (urgent first, then
+  the one urgency order), his hides, then presence. Everything that belongs
+  on the board and is not hidden is drawn: every active project and list,
+  the system's default sections, and what he added. The system never places
+  or drops a card or a default section. A place is a position on the board
+  he was told: every request of his goes through one function that starts
+  from what an open shows, answers with what an open computes after the
+  write, and then reads every placed section's place again from that board,
+  counted from the top, or from the bottom when it stands below the cards.
+  So two placed sections never share a place, "up one" is a swap, and "to
+  the bottom" stays the bottom. Show, unpin and add-back put a section where
+  the system has it. Known and named: the stored row is still a composed
+  board read through one door; splitting it into the system's plan and his
+  placements is the next Overview task.
 - **Not decided:** whether the understanding loop should read an open,
   past-due follow-up as missed (since 1.03 the word appears only after a
   session raised it).
