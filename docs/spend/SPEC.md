@@ -68,6 +68,11 @@ Until v1.04 such a call left no row at all, so the caps could not see it.
 - A call the provider refused before doing any work (a rate limit, a bad
   key, no credit, a malformed request: HTTP 4xx) cost nothing and writes no
   row.
+- A call that reported its usage and then failed (a refusal, an answer that
+  does not validate) was answered: it is recorded as it reported, not
+  estimated.
+- When the app stops waiting for a call, it aborts the request as well. A
+  call left running is billed for an answer nobody reads.
 - v1.04 does this for the dashboard planner. The other background call
   sites are listed in the LOGBOOK entry with what each leaves today.
 
