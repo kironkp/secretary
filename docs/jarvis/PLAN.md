@@ -126,7 +126,23 @@ beside me in a workshop."*
   show, nothing else changing: the board he had), the bias made to reach
   calm mode, and the Reviewer probing the half-sentence in their own
   model before the burn-in counts. Mutants before this fix: 135, all
-  caught without the walk. The Executor's pass on a copy of his
+  caught without the walk. **Then 2 of 3**, found by hand with that
+  round-trip check on the usual board: he hides Needs a date and shows
+  it, and a card he had placed among the cards moves down one (the rule
+  put the section on the list above the cards, the count moved the cards
+  over it, and his place was read off the list). It came in with the
+  restated rule; `472c2a7` did not have it; the half-sentence had the
+  same hole on its other side. Replaced by one sentence: the returning
+  section stands next to its section in step, on the side of the cards
+  the default board has it, so on a board the system has not crossed the
+  list a request builds is the board that is drawn. Asked with it: a
+  second check from no rule, on every single request (take the named
+  section out of the board before and after: the same board); whether the
+  order among the system's sections can change (then every "accepted
+  before, refused after" number is run again); the Reviewer's probe and
+  their view on whether the sentence closes the family or the model
+  itself should change. A third defect stops the fixing and I decide.
+  The Executor's pass on a copy of his
   real board was repeated on `472c2a7` as the landing day goes and found
   nothing (their own check, not an independent one; it did not stand on
   either of those two states). Found on main while building it and live
