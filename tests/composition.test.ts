@@ -374,6 +374,41 @@ describe("movement is measured without the cards and without his pins (invariant
     expect(movementReasons(moved, ctx(signals, { previousPlan: stored }))).toEqual(['moved section "timeline" has no why']);
   });
 
+  it("what he hid or banned is not 'removed by the system', even while the stored board still has it", () => {
+    // The system is measured against the system: a section that changes
+    // hands is neither moved nor removed.
+    const stored = compose(defaultPlan(signals), signals);
+    const today = structuredClone(signals);
+    today.context.days_since_layout_change = 0;
+    const mine: LayoutPreference[][] = [
+      [{ kind: "hide_section", value: { section: "people_index" } }],
+      [{ kind: "ban_component", value: { component: "people_index" } }],
+    ];
+    for (const preferences of mine) {
+      const plan = compose(defaultPlan(today), today, stored, [], preferences);
+      expect(keys(plan)).not.toContain("people_index");
+      expect(movementReasons(plan, ctx(today, { previousPlan: stored, preferences }))).toEqual([]);
+    }
+    // Nobody's: the same board without it is a removal, and waits a day.
+    const without: LayoutPlan = { ...stored, sections: stored.sections.filter((s) => s.component !== "people_index") };
+    expect(movementReasons(without, ctx(today, { previousPlan: stored }))).toEqual([expect.stringContaining("people_index")]);
+    // And what he has just placed is not "moved by the system".
+    const moved = pinnedAt(stored, "date_chase", 0);
+    expect(movementReasons(moved, ctx(today, { previousPlan: stored }))).toEqual([]);
+    const systemsMove: LayoutPlan = { ...moved, sections: moved.sections.map(({ place: _place, ...s }) => (void _place, s)) };
+    expect(movementReasons(systemsMove, ctx(today, { previousPlan: stored }))).toEqual([expect.stringContaining("reordering is rationed")]);
+  });
+
+  it("a place a planner writes on a section is not read: the section is where its plan has it, with its reason, and is nobody's pin", async () => {
+    const plan = defaultPlan(signals);
+    const strip: PlanSection = { component: "timeline", props: { span_days: 14, expanded: true }, why: "Dates first this week", place: 5 };
+    const answer = { ...plan, plan_id: "p", reason_summary: "Dates first", sections: [strip, ...plan.sections.filter((s) => s.component !== "timeline")] };
+    const res = await planWithFallback(signals, { previousPlan: compose(plan, signals), preferences: [], pinnedSections: [], llmEnabled: true, call: async () => JSON.stringify(answer) });
+    expect(res.source).toBe("llm");
+    expect(res.plan.sections[0]).toMatchObject({ component: "timeline", why: "Dates first this week" });
+    expect(res.plan.sections.filter((s) => s.place !== undefined)).toEqual([]);
+  });
+
   it("D5: a pin is applied, not checked: with Needs a date pinned inside the cards, a new project does not get the rules plan refused", async () => {
     const stored = pinnedAt(compose(planFromRules(signals), signals), "date_chase", 5);
     const more = changed(signals, (p) => [...p, project("Brand new", -9)]);
@@ -533,6 +568,75 @@ describe("a section he placed stays where he put it", () => {
     // The projects come back: each is at the place it was told, since nothing was said meanwhile.
     const back = keys(compose(defaultPlan(signals), signals, twice, pins));
     expect([back[6], back[7]]).toEqual(["date_chase", "people_index"]);
+  });
+
+  it("a section counted from the bottom never goes in front of one counted from the top, on a board grown too short for both", () => {
+    // He was told a card in the middle of the board and, further down, Needs
+    // a date above People. Every other project goes: counted alone, Needs a
+    // date ("second from the bottom") would land above the card. They keep
+    // the order he was told.
+    const card = "project_card:quiet-two";
+    const at = keys(base).indexOf(card);
+    const told = pinnedAt(pinnedAt(base, card, at), "date_chase", keys(base).indexOf("date_chase"));
+    const pins = [card, "date_chase"];
+    const places = Object.fromEntries(told.sections.filter((s) => s.place !== undefined).map((s) => [sectionKey(s), s.place]));
+    expect(places).toEqual({ [card]: { from: "top", n: at }, date_chase: { from: "bottom", n: 1 } });
+    const few = changed(signals, (p) => p.filter((x) => x.id === "quiet-two"));
+    const once = compose(defaultPlan(few), few, told, pins);
+    expect(keys(once)).toEqual(["hero_next_up", "stat_row", "timeline", "people_index", card, "date_chase"]);
+    expect(keys(compose(once, few, once, pins))).toEqual(keys(once));
+  });
+
+  it("two sections a round-4 row stored at one number keep their stored order, and composing again does not turn them over", () => {
+    // Only a test database has such a row (round 4 never reached main), but
+    // it is the state that round failed on: A,B then B,A then A,B.
+    const sections = [...base.sections];
+    const [a, b] = [sections.findIndex((s) => sectionKey(s) === "date_chase"), sections.findIndex((s) => sectionKey(s) === "people_index")];
+    const row: LayoutPlan = { ...base, sections: sections.map((s, i) => (i === a || i === b ? { ...s, place: 20 } : s)) };
+    const pins = ["date_chase", "people_index"];
+    const once = compose(defaultPlan(signals), signals, row, pins);
+    expect(keys(once).slice(-2)).toEqual(["date_chase", "people_index"]);
+    const twice = compose(once, signals, once, pins);
+    expect(keys(twice)).toEqual(keys(once));
+  });
+
+  it("'to the top' stays the top on a board with no other card: the system's upper sections below it count", () => {
+    const alone = changed(signals, (p) => p.filter((x) => x.id === "shopping"));
+    const start = compose(defaultPlan(alone), alone);
+    const told = pinnedAt(start, "project_card:shopping", 0);
+    expect(told.sections[0].place).toEqual({ from: "top", n: 0 }); // next up, the tiles and the strip stand below it
+    const later = changed(alone, (p) => [...p, project("Brand new", -4)]);
+    expect(keys(compose(defaultPlan(later), later, told, ["project_card:shopping"]))[0]).toBe("project_card:shopping");
+  });
+
+  it("on a board with nothing upper at all, everything counts from the bottom: a project made later has its card above (accepted, and said in the spec)", () => {
+    const alone = changed(signals, (p) => p.filter((x) => x.id === "shopping"));
+    const prefs: LayoutPreference[] = ["hero_next_up", "stat_row", "timeline"].map((section) => ({ kind: "hide_section", value: { section } }));
+    const start = compose(defaultPlan(alone), alone, null, [], prefs);
+    expect(keys(start)).toEqual(["project_card:shopping", "date_chase", "people_index"]);
+    const told = pinnedAt(start, "project_card:shopping", 0);
+    expect(told.sections[0].place).toEqual({ from: "bottom", n: 2 });
+    const later = changed(alone, (p) => [...p, project("Brand new", -4)]);
+    expect(keys(compose(defaultPlan(later), later, told, ["project_card:shopping"], prefs))).toEqual(["project_card:brand-new", "project_card:shopping", "date_chase", "people_index"]);
+  });
+
+  it("'Back on your board' is said only while it is true: shown again, the card does not keep that reason from the stored board", () => {
+    const hide: LayoutPreference[] = [{ kind: "hide_section", value: { section: "project_card:late-a" } }];
+    const back = compose(defaultPlan(signals), signals, null, [], hide);
+    expect(cardOf(back, "late-a")?.why).toMatch(/^Back on your board/);
+    // The stored board is served again for the same signals; the hide has been lifted meanwhile.
+    expect(cardOf(compose(back, signals, back, []), "late-a")?.why).toBeUndefined();
+    // Still hidden, it is said again: written at each render, never read back.
+    expect(cardOf(compose(back, signals, back, [], hide), "late-a")?.why).toMatch(/^Back on your board/);
+  });
+
+  it("a place as rounds 3 and 4 wrote it is still read: a number is from the top, 'last' is the bottom", () => {
+    expect(asPlace(3)).toEqual({ from: "top", n: 3 });
+    expect(asPlace("last")).toEqual({ from: "bottom", n: 0 });
+    expect(asPlace({ from: "bottom", n: 2 })).toEqual({ from: "bottom", n: 2 });
+    expect(asPlace(undefined)).toBeNull();
+    const row: LayoutPlan = { ...base, sections: base.sections.map((s) => (sectionKey(s) === "project_card:late-a" ? { ...s, place: "last" as const } : s)) };
+    expect(keys(compose(defaultPlan(signals), signals, row, ["project_card:late-a"])).at(-1)).toBe("project_card:late-a");
   });
 
   it("the banner is not counted: a section pinned at the top is first under it, and first when it is gone", () => {

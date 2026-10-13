@@ -387,7 +387,8 @@ const systemsOn = (board: StoredBoard): string[] => readBoard(board).systems;
  * clock?
  */
 export function layoutChanged(older: StoredBoard, newer: StoredBoard): boolean {
-  const [a, b] = [readBoard(older), readBoard(newer)].map((r) => r.systems.filter((c) => c !== "focus_banner"));
+  // (The banner needs no taking out: it is first on any board that has it, so it cannot change the order of what both have.)
+  const [a, b] = [readBoard(older), readBoard(newer)].map((r) => r.systems);
   const common = (list: string[], other: string[]) => list.filter((c) => other.includes(c)).join("|");
   return common(a, b) !== common(b, a);
 }

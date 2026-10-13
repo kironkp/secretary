@@ -13,7 +13,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { conversations, layoutPreferences, layoutSpecs, messages, projects, tasks, usage, user } from "@/lib/db/schema";
 import { defaultPlan, sectionKey, type LayoutPlan } from "@/lib/layout/plan";
-import { clearPlanCache, lastPlannerUsage } from "@/lib/layout/plan-from-llm";
+import { clearPlanCache, lastPlannerUsage, planWithFallback } from "@/lib/layout/plan-from-llm";
 import { computeCurrentPlan, getPlanHead, persistPlan } from "@/lib/layout/plan-store";
 import { requestBoard } from "@/lib/layout/request";
 import { REGISTRY_VERSION } from "@/lib/layout/registry";
@@ -901,3 +901,144 @@ describe("the model is told the board as it renders now, not as it was last stor
     expect(shown.indexOf(b.card("Harbor"))).toBe(iris.position);
   });
 });
+
+// r5. Behaviours the walk reaches only on a long run, each pinned down by an
+// example after a mutant of it survived the suite's small walk.
+describe("the request function, case by case", { timeout: 30_000 }, () => {
+  const hideRows = (userId: string) => db.select().from(layoutPreferences).where(and(eq(layoutPreferences.userId, userId), eq(layoutPreferences.kind, "hide_section")));
+  const tools = (userId: string) => liveTurnContext({ userId, timezone: TZ, attachmentCount: 0 });
+
+  it("a section he added: unpin is refused in words; hidden and shown again it is back at the end, placed, and still there the next day", async () => {
+    const b = await board(3);
+    await b.render();
+    await b.chatEdit([{ op: "add", component: "kanban", at: 2 }]);
+    const refused = await requestBoard(b.id, { ops: [{ op: "unpin", key: "kanban" }] });
+    expect(refused).toMatchObject({ ok: false, error: expect.stringContaining("kanban stays where you put it") });
+    expect((await b.head()).pinned).toContain("kanban");
+    await b.arrange([{ op: "hide", section: "kanban" }]);
+    expect(await b.keys()).not.toContain("kanban");
+    expect((await b.arrange([{ op: "show", section: "kanban" }])).result).toMatchObject({ applied: true });
+    expect((await b.keys()).at(-1)).toBe("kanban");
+    expect((await b.head()).pinned).toContain("kanban");
+    await b.nextDay();
+    await b.newTask("Iris", -40);
+    expect((await b.keys()).at(-1)).toBe("kanban");
+  });
+
+  it("a ban works like a hide, nothing brings the section back while it stands, and lifting it brings back a section he had added, at the end", async () => {
+    const b = await board(3);
+    await b.render();
+    await b.chatEdit([{ op: "add", component: "kanban", at: 1 }]);
+    const start = await b.keys();
+    await executeTool(tools(b.id), "set_layout_preference", { kind: "ban_component", component: "kanban" });
+    expect(await b.keys()).toEqual(start.filter((k) => k !== "kanban"));
+    expect(((await b.chatEdit([{ op: "add", component: "kanban" }])).result as { error?: string }).error).toMatch(/never to be shown kanban/);
+    expect((await executeTool(tools(b.id), "set_layout_preference", { kind: "ban_component", component: "kanban", remove: true })).result).toMatchObject({ removed: true });
+    const back = await b.keys();
+    expect(back.at(-1)).toBe("kanban");
+    expect(back.slice(0, -1)).toEqual(start.filter((k) => k !== "kanban"));
+    expect((await b.head()).pinned).toContain("kanban");
+  });
+
+  it("a size asked for in calm mode is refused in those words, and nothing is stored", async () => {
+    const b = await board(3);
+    await db.update(user).set({ calmMode: true }).where(eq(user.id, b.id));
+    await b.render();
+    const before = (await b.head()).version;
+    const res = (await b.chatEdit([{ op: "set_props", section: b.card("Grove"), props: { variant: "compact" } }])).result as { applied?: boolean; error?: string };
+    expect(res.applied).toBeUndefined();
+    expect(res.error).toMatch(/calm mode/);
+    expect((await b.head()).version).toBe(before);
+  });
+
+  it("a move by index is for what is on the board: it does not bring back what he hid", async () => {
+    const b = await board(3);
+    await b.render();
+    await b.chatEdit([{ op: "remove", section: "people_index" }]);
+    const res = (await b.chatEdit([{ op: "move", section: "people_index", to: 0 }])).result as { applied?: boolean; error?: string };
+    expect(res.applied).toBeUndefined();
+    expect(res.error).toMatch(/There's no people on the dashboard/);
+    expect(await b.keys()).not.toContain("people_index");
+    expect(await hideRows(b.id)).toHaveLength(1);
+  });
+
+  it("showing something the board cannot draw is refused: the claim is checked on the board, and the hide stays", async () => {
+    const b = await board(3);
+    await b.render();
+    const before = (await b.head()).version;
+    // A hide left from before the component was retired.
+    await db.insert(layoutPreferences).values({ userId: b.id, kind: "hide_section", value: { section: "open_loops" } });
+    const res = await requestBoard(b.id, { ops: [{ op: "show", key: "open_loops" }] });
+    expect(res).toMatchObject({ ok: false, error: expect.stringMatching(/would not show on the dashboard.*Nothing was changed/) });
+    expect((await b.head()).version).toBe(before);
+    expect(await hideRows(b.id)).toHaveLength(1);
+  });
+
+  it("a preference pin from before r5 is given its place by his next request as well, and marked", async () => {
+    const b = await board(5);
+    await b.render();
+    const key = b.card("Grove");
+    const at = (await b.keys()).indexOf(key);
+    await db.insert(layoutPreferences).values({ userId: b.id, kind: "pin_section", value: { section: key } });
+    // A request, with no open in between.
+    expect((await b.arrange([{ op: "move_to_top", section: "shopping list" }])).result).toMatchObject({ applied: true });
+    const rows = await db.select().from(layoutPreferences).where(and(eq(layoutPreferences.userId, b.id), eq(layoutPreferences.kind, "pin_section")));
+    expect(rows.map((r) => r.value)).toEqual([{ section: key, migrated: "1" }]);
+    expect((await b.head()).pinned).toContain(key);
+    expect((await b.keys()).indexOf(key)).toBe(at + 1); // the list went in above it; everything else as he saw it
+  });
+
+  it("a section that comes back goes where today's system order has it: with the strip sent up by a rule, the tiles come back under the strip", async () => {
+    const b = await board(3);
+    await b.render();
+    await b.nextDay();
+    await b.say("when is the deadline?", 6);
+    expect((await b.keys())[0]).toBe("timeline"); // rule 3
+    // A day on, and he is still asking: the rules plan has the strip first today as well.
+    await b.nextDay();
+    expect((await b.keys())[0]).toBe("timeline");
+    expect(await pin(b.id, "hero_next_up", true)).toBe(true); // next up is his: it is not a neighbour the tiles can follow
+    await b.arrange([{ op: "hide", section: "stats" }]);
+    expect((await b.arrange([{ op: "show", section: "stats" }])).result).toMatchObject({ applied: true });
+    const shown = await b.keys();
+    expect(shown.indexOf("stat_row")).toBe(shown.indexOf("timeline") + 1);
+    // And the board he was told is one the rules plan is not refused against (round 4 held the plan here).
+    const signals = await computeSignals(b.id);
+    const head = await b.head();
+    expect((await planWithFallback(signals, { previousPlan: head.spec as LayoutPlan, preferences: [], pinnedSections: head.pinned, llmEnabled: false })).source).toBe("rules");
+  });
+
+  it("Put it back puts what he had placed at the place the earlier board wrote, on today's data", async () => {
+    const b = await board(5);
+    await b.render();
+    await b.arrange([{ op: "move_up", section: "needs a date" }]);
+    const at = (await b.keys()).indexOf("date_chase");
+    const away = NAMES.slice(2, 8);
+    for (const name of away) await b.archive(name);
+    expect((await b.keys()).indexOf("date_chase")).toBeLessThan(at); // a short board: it stands at the end of what is left
+    for (const name of away) await db.update(projects).set({ status: "active" }).where(eq(projects.id, b.ids[name]));
+    expect((await b.keys()).indexOf("date_chase")).toBe(at); // they are back, and so is it
+    // The version before this one is the short board. Put back on today's data, Needs a date is where he was told.
+    expect((await requestBoard(b.id, { revert: true })).ok).toBe(true);
+    expect((await b.keys()).indexOf("date_chase")).toBe(at);
+  });
+
+  it("Put it back is a request: every place is read again from the board he is told", async () => {
+    const b = await board(5);
+    await b.render();
+    await b.arrange([{ op: "move_up", section: "needs a date" }]);
+    const at = (await b.keys()).indexOf("date_chase");
+    for (const name of NAMES.slice(2, 8)) await b.archive(name);
+    const short = await b.keys(); // stored: Needs a date at the end, its place still the one he was told
+    const placeOf = async () => ((await b.head()).spec as LayoutPlan).sections.find((s) => s.component === "date_chase")?.place;
+    expect(await placeOf()).toEqual({ from: "top", n: at });
+    expect(await pin(b.id, "stat_row", true)).toBe(true); // any request, so there is something to put back
+    expect((await requestBoard(b.id, { revert: true })).ok).toBe(true);
+    expect(await b.keys()).toEqual(short);
+    // The known cost, accepted: past the end of a board grown short, the place is where it stands when he next speaks.
+    expect(await placeOf()).not.toEqual({ from: "top", n: at });
+    const stood = short.length - 1 - short.indexOf("date_chase");
+    expect(await placeOf()).toEqual({ from: "bottom", n: stood });
+  });
+});
+
