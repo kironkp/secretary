@@ -24,13 +24,22 @@
 // section for section. What he placed, and where, is read off that EXPECTED
 // board, never off what the product stored. For a section of the default
 // board that comes back (shown, added back, let go, a hide or a ban lifted)
-// the model says where: where today's rules plan would keep it (returnModel,
-// with the walker's own reading of which sections are in step with that
-// plan: every run tried, not the validator's table; and its own reading of
-// whether the rules plan would be refused against the list anyway, in which
-// case a tie is read against a section the rules can move or one that
-// carries a reason on the board). It is put onto the list after everything
-// else the request asked for. Only for a CARD that comes back can it say no
+// the model says where (returnModel): its place in the first order the rules
+// can produce that is accepted against the board as it stands (the usual
+// order first, then the strip sent up); if none is accepted, by today's
+// order, a tie read against a section that carries a reason on the board, or
+// else one the rules can move. All of it in the walker's own code: its own
+// statement of the two orders, its own reading of "accepted" and of which
+// sections are in step (every run tried, not the validator's table). It is
+// put onto the list after everything else the request asked for.
+//
+// HIS REQUEST LEAVES NO HOLD BEHIND. After every request the walker judges
+// the board he had and the board he has against each order the rules can
+// produce, by its own reading: an order accepted before and refused after is
+// a hold his request left for a later day (the talk stops, a rule starts),
+// which no check that only looks at today can see. A seed is not needed to
+// find one: on 472c2a7 a section hidden and shown on the day the strip rose
+// froze the system's plan from the next day on. Only for a CARD that comes back can it say no
 // more than "by the data": there it asks that the card is drawn, that
 // everything else kept its order, and the standing questions (the cards he
 // did not place are one run in data order). It keeps its own history, one entry per stored version, and
@@ -244,34 +253,53 @@ function longestInStep(list: string[], order: string[]): string[] {
   }
   return best;
 }
+/** The orders the rules can produce, the one that moves the least first, each with what it gives a reason for moving. The walker's own statement of them. */
+const RULES_ORDERS = [
+  { name: "the usual order", order: DEFAULT_SECTIONS, reasons: [] as string[] },
+  { name: "the strip sent up", order: ["timeline", ...DEFAULT_SECTIONS.filter((k) => k !== "timeline")], reasons: ["timeline"] },
+];
+/** The system's sections on a board he sees: not the banner, not the cards, not what he placed. */
+const systemsOn = (board: string[], placed: string[]) => board.filter((k) => k !== BANNER && !isCard(k) && !placed.includes(k) && DEFAULT_SECTIONS.includes(k));
+/** The walker's own reading of "accepted against a list, a day on": every section out of step with the order is one the order gives a reason for moving. */
+function acceptedAgainst(system: string[], rules: (typeof RULES_ORDERS)[number]): boolean {
+  const kept = longestInStep(system, rules.order);
+  return system.every((k) => kept.includes(k) || rules.reasons.includes(k));
+}
 /**
  * Where a section of the default board goes when it comes back (shown, added
- * back, let go, a hide or a ban lifted): where today's rules plan would keep
- * it. `order` is today's system order (the rules plan's; the default's in
- * calm mode), which the walker takes from the product: the rules are not
- * what this walk tests. Of the system's sections on the board (not placed,
- * not the banner, not the cards), those in step with that order are the ones
- * the rules plan would not itself move. The section goes directly under the
- * last of them that precedes it in that order; with none, directly above the
- * first that follows it; with nothing of the system's on the board but
- * cards, in front of those; on a board with nothing of the system's at all,
- * first under the banner.
- * `held`: the rules plan would be refused against the board anyway (the
- * walker's own reading, refusedAnyway). Then, of two sections that could
- * each be read as the one out of step, one the rules can move or one that
- * carries a reason on the board (`reasoned`) is the one read as moved: a
- * section could be read so when a run as long stands without it; if a run
- * as long stands without all of those, that run is the one in step, else
- * (both could, or neither) the reading above stands.
+ * back, let go, a hide or a ban lifted): its place in the first order the
+ * rules can produce that is accepted against the board as it stands (in calm
+ * mode, the usual order). Of the system's sections on the board, those in
+ * step with that order are the ones a plan in it would not move. The section
+ * goes directly under the last of them that precedes it in the order; with
+ * none, directly above the first that follows it; with nothing of the
+ * system's on the board but cards, in front of those; on a board with
+ * nothing of the system's at all, first under the banner.
+ * If no order is accepted (a planner has moved something), the order is
+ * today's (`todays`, taken from the product: the rules are not what this
+ * walk tests), and of two sections that could each be read as the one out
+ * of step (a run as long stands without it), one that carries a reason on
+ * the board (`reasoned`) is the one read as moved; with no such section, one
+ * the rules can move. If a run as long stands without all the sections of
+ * that kind that could be read so, that run is the one in step; if not (both
+ * sections of the tie are of the kind), the plain reading stands.
  */
-function returnModel(board: string[], key: string, placed: string[], order: string[], held: boolean, reasoned: string[]): string[] {
+function returnModel(board: string[], key: string, placed: string[], todays: string[], reasoned: string[], calm: boolean): string[] {
   const rest = without(board, key);
   const own = (k: string) => k !== BANNER && !placed.includes(k);
+  const accepted = calm ? RULES_ORDERS[0] : RULES_ORDERS.find((rules) => acceptedAgainst(systemsOn(rest, placed), rules));
+  const order = accepted ? accepted.order : todays;
   const system = rest.filter((k) => own(k) && !isCard(k) && order.includes(k));
-  const all = longestInStep(system, order);
-  const could = system.filter((k) => (RULES_MOVE.includes(k) || reasoned.includes(k)) && longestInStep(without(system, k), order).length === all.length);
-  const still = longestInStep(system.filter((k) => !could.includes(k)), order);
-  const kept = held && still.length === all.length ? still : all;
+  let kept = longestInStep(system, order);
+  if (!accepted) {
+    for (const likely of [reasoned, RULES_MOVE]) {
+      const could = system.filter((k) => likely.includes(k) && longestInStep(without(system, k), order).length === kept.length);
+      if (!could.length) continue;
+      const still = longestInStep(system.filter((k) => !could.includes(k)), order);
+      if (still.length === kept.length) kept = still;
+      break;
+    }
+  }
   const here = order.indexOf(key);
   const above = order.slice(0, Math.max(0, here)).findLast((k) => kept.includes(k));
   const below = order.slice(here + 1).find((k) => kept.includes(k));
@@ -397,6 +425,8 @@ async function walk(index: number, scripted = false) {
   const added = new Set<string>();
   /** One entry per stored version: what he had placed, and where, when it was stored. */
   const history: Told[][] = [];
+  /** Set while a scripted move takes a section off and brings it back: nothing else changes in between (see afterRequest). */
+  let nothingElseChanges = false;
   const complain = (check: string, detail: string) => complaints.push({ check, detail: `step ${moves.length} (${moves.at(-1) ?? "start"}): ${detail}` });
   const blank = (reason: string) => reason.replace(/"[^"]*"/g, '"…"').replace(/\b[0-9a-f]{8}-[0-9a-f-]{27}\b/g, "<id>").slice(0, 110);
   /**
@@ -541,6 +571,7 @@ async function walk(index: number, scripted = false) {
   const afterRequest = async (what: string, before: string[], expected: string[] | null, subject: string[], reply: string[] | null, placedNow: string[], heldBefore: string, extra?: (first: LayoutPlan) => string | null) => {
     const stored = keysOf((await head()).spec as LayoutPlan);
     const [stood, systemsBefore] = [standsOn(before, placedSet()), systemsOf(before, placedSet())];
+    const hadBefore = systemsOn(before, placedSet());
     if (expected) {
       // The list as the request leaves it, then the cards where the rule puts them on that list. Counted for the
       // summary: how often a request of his changed the system's list on a crossed board, and how often the cards moved.
@@ -570,6 +601,11 @@ async function walk(index: number, scripted = false) {
     if (stored.join() !== board.join()) complain("7 the stored board is the next open", `${what}: stored ${row(stored)} | open ${row(board)}`);
     const said = extra?.(first.bundle.plan);
     if (said) complain("the reply's own claim", `${what}: ${said}`);
+    // No order the rules can produce that was accepted against the board he had is refused against the board he has.
+    for (const rules of RULES_ORDERS) {
+      const has = systemsOn(board, placedSet());
+      if (acceptedAgainst(hadBefore, rules) && !acceptedAgainst(has, rules)) complain("his request leaves no hold behind", `${what}: ${rules.name} was accepted against ${row(hadBefore)} and is refused against ${row(has)}`);
+    }
     if (systemsOf(board, placedSet()) !== systemsBefore) {
       count("requests: a section of the system's came or went");
       if (stood.crossing || stood.stripUnder || stood.hisOnTop) count("requests: ... on a board in one of those states");
@@ -579,9 +615,11 @@ async function walk(index: number, scripted = false) {
     // rules plan is then held for the day by the rule's own doing, not by his request. (The ban's check stood after
     // that open until a seed of the Reviewer's, 14142135, had a ban of something already banned blamed for it.)
     if (heldBefore !== "previous" && (await sourceNow()) === "previous") complain(/^(un)?ban /.test(what) ? "a ban alone does not hold the plan" : "his own request does not hold the plan", what);
-    // The same again on an open that is NOT served from the stored row: something else in his data changes.
+    // The same again on an open that is NOT served from the stored row: something else in his data changes. (Not
+    // inside a scripted off-and-back: there the board has to stay as it is between his two requests, with the
+    // rule's move still waiting or the strip still under the cards. That open would let the rules plan land.)
     const names = [...ids.keys()];
-    if (names.length) {
+    if (names.length && !nothingElseChanges) {
       const other = r.pick(names);
       await db.insert(tasks).values({ userId: id, projectId: ids.get(other)!, title: `${other}: one more ${crypto.randomUUID().slice(0, 4)}`, status: "todo", source: "spoken" });
       await openTwice(`${what}, then his data changes elsewhere`, { firstMayStore: true });
@@ -600,30 +638,11 @@ async function walk(index: number, scripted = false) {
     return keysOf(signals.context.calm_mode ? defaultPlan(signals) : planFromRules(signals));
   };
   const isDefault = (key: string) => DEFAULT_SECTIONS.includes(key);
-  /**
-   * The walker's own reading of "the rules plan would be refused against this list anyway" (SPEC §2), on a list as it
-   * stands before a section is put back: for its order (a section of the system's out of step with today's plan that
-   * the plan gives no reason for moving, or any out of step on a day the layout has already changed), or for
-   * something the system put on the board today that today's plan does not have. Today's rules plan and the two
-   * signals (the layout clock, what is new today) are taken from the product, as the order is.
-   */
-  const refusedAnyway = async (list: string[], his: string[]) => {
-    const signals = (await computeCurrentPlan(id)).signals;
-    if (signals.context.calm_mode) return false;
-    const plan = planFromRules(signals);
-    const today = keysOf(plan);
-    const system = without(list, BANNER).filter((k) => !isCard(k) && !his.includes(k) && today.includes(k));
-    const inStep = longestInStep(system, today);
-    const moved = system.filter((k) => !inStep.includes(k));
-    const reasons = plan.sections.filter((s) => s.why).map(sectionKey);
-    const forItsOrder = moved.length > 0 && (signals.context.days_since_layout_change < 1 || moved.some((k) => !reasons.includes(k)));
-    const forWhatIsNew = (signals.context.sections_new_today ?? []).some((k) => list.includes(k) && !his.includes(k) && !isCard(k) && !today.includes(k));
-    return forItsOrder || forWhatIsNew;
-  };
   /** The sections that carry a reason on the board he sees (not the cards: theirs are about the data). */
   const reasonedNow = async () => (await computeCurrentPlan(id)).plan.sections.filter((s) => s.why && s.component !== "project_card").map(sectionKey);
-  /** A section of the default board back on a list (returnModel), the list judged as it stands before the section is put in. */
-  const backOn = async (list: string[], key: string, his: string[]) => returnModel(list, key, his, await systemOrder(), await refusedAnyway(without(list, key), his), await reasonedNow());
+  const calmNow = async () => (await computeCurrentPlan(id)).signals.context.calm_mode;
+  /** A section of the default board back on a list (returnModel). */
+  const backOn = async (list: string[], key: string, his: string[]) => returnModel(list, key, his, await systemOrder(), await reasonedNow(), await calmNow());
 
   /** One or more operations by voice in one request; the last word about a section wins. */
   const arrange = async (ops: { op: string; key: string }[]) => {
@@ -660,9 +679,8 @@ async function walk(index: number, scripted = false) {
       }
       if (op === "hide" && returning.includes(key)) returning.splice(returning.indexOf(key), 1);
     }
-    const held = model && returning.length ? await refusedAnyway(model, placedNow) : false;
-    const reasoned = returning.length ? await reasonedNow() : [];
-    for (const key of DEFAULT_SECTIONS) if (model && returning.includes(key) && !model.includes(key)) model = returnModel(model, key, placedNow, order, held, reasoned);
+    const [reasoned, calm] = returning.length ? [await reasonedNow(), await calmNow()] : [[], false];
+    for (const key of DEFAULT_SECTIONS) if (model && returning.includes(key) && !model.includes(key)) model = returnModel(model, key, placedNow, order, reasoned, calm);
     const res = (await executeTool(ctx, "arrange_dashboard", { operations: ops.map((o) => ({ op: o.op, section: nameOf(o.key) })) })).result as { applied?: boolean; error?: string; order?: string[] };
     if (!res.applied) return refused(res.error ?? "no reason given", predicted.length ? predicted : null);
     if (predicted.length) complain("a request the model refuses was applied", `${predicted.join(" / ")}: arrange ${ops.map((o) => `${o.op} ${short(o.key)}`).join(" + ")}`);
@@ -876,6 +894,13 @@ async function walk(index: number, scripted = false) {
   const says = async (text: string) => {
     const [conv] = await db.insert(conversations).values({ userId: id, mode: "text" }).returning();
     await db.insert(messages).values(Array.from({ length: 6 }, (_, i) => ({ userId: id, conversationId: conv.id, role: "user" as const, content: `${text} ${MARK} (${i})`, mode: "text" as const })));
+  };
+  /** Something else changes in his data, so the next open is not served from the stored row. */
+  const somethingElseChanges = async (why: string) => {
+    const names = [...ids.keys()];
+    if (!names.length) return;
+    await db.insert(tasks).values({ userId: id, projectId: ids.get(rs.pick(names))!, title: `one more ${crypto.randomUUID().slice(0, 4)}`, status: "todo", source: "spoken" });
+    await openTwice(why, { firstMayStore: true });
   };
   /** A section of the usual board taken off and brought back, one of the ways he can. */
   const WAYS = ["hidden, shown", "hidden and shown in one request", "hidden, added back", "hidden, the hide lifted in Settings", "pinned, let go", "banned, the ban lifted"] as const;
@@ -1168,11 +1193,14 @@ async function walk(index: number, scripted = false) {
     moves.push(`scripted: every card first; ${keys.map((k, i) => `${k} ${ways[i]}`).join("; ")}`);
     count("scripted: the strip under the cards, and a section of the bottom comes back");
     await plannerAnswers("every card first, the rest as it stands");
+    nothingElseChanges = true;
     for (const [i, key] of keys.entries()) {
       if (!(await boardNow()).includes(key)) continue;
       if (await stripUnderTheCards()) count("scripted: ... and the strip did stand under the cards");
       await offAndBack(key, ways[i]);
     }
+    nothingElseChanges = false;
+    await somethingElseChanges("scripted: after it, his data changes");
   };
   // The Reviewer's probe: a rule's move left waiting. A banner lands; the same day he asks about dates, and the
   // strip's move up is held (the banner is new today); a day later nothing in his data has changed, the stored
@@ -1190,8 +1218,15 @@ async function walk(index: number, scripted = false) {
     await openTwice("rules: he asks about dates", { firstMayStore: true });
     await nextDay();
     if (!(await boardNow()).includes(key)) return;
-    if (await stripIsWaiting()) count("scripted: ... and the strip's move was waiting");
+    const waiting = await stripIsWaiting();
+    if (waiting) count("scripted: ... and the strip's move was waiting");
+    nothingElseChanges = true;
     await offAndBack(key, way);
+    nothingElseChanges = false;
+    // Then his data changes, and the rule's move lands by itself: the strip on top of the system's sections.
+    await somethingElseChanges("scripted: after it, his data changes");
+    const systems = systemsOn(await boardNow(), placedSet());
+    if (waiting && systems.includes("timeline") && systems[0] !== "timeline" && !(await calmNow())) complain("the rule's waiting move lands after his request", `${key} ${way}: ${row(systems)}`);
   };
   const onBoard = without(await boardNow(), BANNER);
   if (scripted && onBoard.length) {
