@@ -8,8 +8,8 @@ beside me in a workshop."*
 ## Now
 
 - **Cycle counter: 108.** 1.00, 1.03 and 1.04 are accepted; 1.01 and 1.02 are
-  open; then 1.09, 1.08, then Kiron's feedback of 2026-10-13 (1.10 to
-  1.13), then 1.05, 1.06, 1.07. See §9.
+  open; then 1.09, 1.11, 1.10, 1.13, 1.12, 1.14 (Kiron's feedback, his
+  mockup approved 2026-10-14), then 1.08, 1.05, 1.06, 1.07. See §9.
 - **1.00** — this plan. Accepted and live: `34fc1f1`, Heroku v63, 2026-10-12.
 - **1.01** — the measured baseline, `docs/jarvis/BASELINE.md`. Measured and
   checked by the Reviewer, except production: the Executor's session is refused
@@ -248,9 +248,15 @@ beside me in a workshop."*
   Reminders, Heard, From. Each task below starts with a diagnosis, and
   the two with a new screen start with a mockup he approves. Drawn
   2026-10-13 with made-up content (the task screen, the project list
-  with its grab handle, the roadmap on a phone and on a wide screen) and
-  sent to him; not approved yet, and nothing is built from it until he
-  says so.
+  with its grab handle, the roadmap on a phone and on a wide screen).
+  **Approved 2026-10-14**: "your designs look great … make all these
+  designs and make the projects movable and do everything we talked
+  about." Each ships on its own as it passes. Contracted to the Executor
+  after r5, with one read-only diagnosis first (the cut chat turn; how one
+  project order meets the Overview's run of cards; every place priority
+  reaches him; what a task's `stages` is; every table pointing at a
+  project; database room and the map service for 1.14). Notes already
+  written are not touched until he answers whether to clean them.
   - **1.10** — a task reads like a reminder. The model writes field
     labels into a task's notes (owner, dependency, effort, next action,
     evidence, status of record): "completely unnecessary for me to
@@ -278,6 +284,11 @@ beside me in a workshop."*
     checklist. He liked that table in Notion and not Notion's clutter.
     Spec and mockup first (a task already has `stages`; the diagnosis
     says whether a roadmap is that or a new thing).
+  - **1.14** — tags, a place with a small map, a link, images and files
+    on a task (the second part of 1.10). New columns or tables, additive.
+    Diagnosis first: room left in the database for files, a per-file
+    cap, and which map and place lookup, its cost and what leaves the
+    app. A paid service or a bigger database plan is Kiron's call.
 - **1.05** — "asked means asked", the rest of what 1.03 began, built on main
   after 1.04: clarifications, understanding questions and nudges marked only
   after the hand-over; voice settles when the call really ran, not when the
