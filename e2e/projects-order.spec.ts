@@ -21,6 +21,8 @@ const order = async (page: Page) =>
   (await page.locator("[data-project-group='active'] [data-project-row]").evaluateAll((rows) => rows.map((r) => r.getAttribute("data-project-name") ?? ""))).filter((n) => MINE.includes(n));
 const row = (page: Page, name: string) => page.locator(`[data-project-group='active'] [data-project-row][data-project-name="${name}"]`);
 const handle = (page: Page, name: string) => page.getByRole("button", { name: `Reorder ${name}` });
+/** The store of a move has answered (the row moved before it did). */
+const stored = (page: Page) => page.waitForResponse((r) => r.url().includes("/api/projects/order") && r.request().method() === "POST");
 /** A drag by the mouse from one handle to just above another row. */
 async function drag(page: Page, name: string, aboveName: string) {
   const from = (await handle(page, name).boundingBox())!;
@@ -120,9 +122,14 @@ test("a drag by the handle moves the project at once, and the order stays after 
   await page.mouse.move(from.x + 22, from.y - 40, { steps: 4 });
   await expect(row(page, "Tax paperwork")).toHaveAttribute("data-lifted", "true");
   await page.screenshot({ path: `${DIR}/projects-390-dragging.png` });
+  // Back where it started before letting go: no move, nothing stored.
+  await page.mouse.move(from.x + 22, from.y + 22, { steps: 4 });
   await page.mouse.up();
+  expect(await order(page)).toEqual(MINE);
+  const second = stored(page);
   await drag(page, "Tax paperwork", "Garden shed");
   expect(await order(page)).toEqual(["Tax paperwork", "Garden shed", "Kitchen repaint", "Spring concert set"]);
+  await second;
   await page.reload();
   expect(await order(page)).toEqual(["Tax paperwork", "Garden shed", "Kitchen repaint", "Spring concert set"]);
 });
@@ -146,9 +153,11 @@ test("the handle's arrow keys move the project one place", async ({ page }) => {
   const before = await order(page);
   const last = before.at(-1)!;
   await handle(page, last).focus();
+  const saved = stored(page);
   await page.keyboard.press("ArrowUp");
   const moved = [...before.slice(0, -2), last, before.at(-2)!];
   await expect.poll(() => order(page)).toEqual(moved);
+  await saved;
   await page.reload();
   expect(await order(page)).toEqual(moved);
 });
