@@ -127,9 +127,14 @@ every way the board can change, with a model of its own.
    the whys, the banner and the order of the sections that are not cards.
    Whatever card order it carries is ignored: the system never places a card.
 2. **Everything that belongs is drawn.** A card for every active project and
-   list; every section of the default board; every section he added. If the
-   system's plan or the stored board lacks one, it is drawn at its default
-   place. A planner cannot drop a default section, as it cannot drop a card.
+   list; every section of the default board; every section he added. A
+   planner cannot drop a default section, as it cannot drop a card. A
+   section of the default board that the plan being composed lacks (it was
+   hidden or banned when that board was stored and is not now; a planner
+   left it out; it was his and he let it go) is put in among the system's
+   sections where the rules would keep it (one rule, below),
+   BEFORE the place for the cards is worked out (3): nothing of the
+   system's is added after the count.
 3. **The cards he did not place, in data order** (urgent first, then the one
    urgency order, lists last), in one run where the system's plan has it.
    The right way up, whatever that plan says: **the cards go where the
@@ -199,20 +204,27 @@ name, never its key.
   else keeps the order he saw; the cards he has not placed stand where the
   rule above puts them on the board as it now is. On the usual order
   nothing moves. On a board where the system has moved the tiles under the
-  cards, or Needs a date above them, a request that takes away or brings
-  back one of next up, the tiles, Needs a date or People (hide, show, ban,
-  lift, pin, unpin, remove, add back) can move the cards to the other side
-  of the tiles. Pin is the oddest of these: "Pin this section here" on
-  Needs a date makes it his, so it is no longer one of the system's
-  sections the cards are counted against. The reply shows him the board he
-  gets. The plain consequence: the system can keep the tiles under the
+  cards, or Needs a date above them, a request that takes away one of next
+  up, the tiles, Needs a date or People (hide, ban, pin, remove) can move
+  the cards to the other side of the tiles. Pin is the oddest of these:
+  "Pin this section here" on Needs a date makes it his, so it is no longer
+  one of the system's sections the cards are counted against. A section
+  that comes back (show, lift, unpin, add back) moves no card on any board:
+  it comes back on its own side of the cards (below). The reply shows him
+  the board he gets. The plain consequence: the system can keep the tiles under the
   cards only while Needs a date or People stands between them. A limit
   until the split (1.07), when a section a planner moved with a reason can
-  be told apart.
-- **A place is a position, not a neighbour.** When the card run moves (the
-  bound above, a rule sending the strip up), a section he placed in the
-  middle of the board keeps its count from the top or the bottom and may
-  get new neighbours.
+  be told apart. This is for the cards only: what he placed goes with the
+  neighbour it had (below).
+- **A place is a position, not a neighbour, between his requests.** When
+  the SYSTEM moves the card run or a section at an open (a rule sending the
+  strip up, a planner's answer, the data sorting the cards again), a
+  section he placed in the middle of the board keeps its count from the top
+  or the bottom and may get new neighbours. (The cards on top, a card of
+  his second among them; a rule sends the strip up: the strip is first, and
+  his card, still second, stands under the strip and above the first card.)
+  At a request of HIS it keeps the neighbour it had (below): the limit is
+  gone there, and stays here until the split (1.07).
 - **Rows main wrote.** A component retired since (main still stored it, the
   page draws nothing for it) is taken out of a stored row wherever the row
   is read as a board: at the composition's door, for the row as the system
@@ -222,12 +234,15 @@ name, never its key.
   it; its place is read once from that stored order. A card he moved above next up
   with main's chat tool was never pinned on main: it is read as the
   system's, follows the data, and does not say where the run goes. Main
-  lost that move at the next change in his data anyway.
+  lost that move at the next change in his data anyway. The same for
+  People or Needs a date that stood above the cards on main's row without
+  a pin (moved with main's chat tool): at the first open it goes under the
+  cards.
 - **A place goes with its section.** When a section he placed leaves the
   board (its project is archived, its component banned, he hides it), its
   place is gone for good, with the first board worked out without it.
   Brought back, a card follows the data and a section of the usual board
-  goes to its default place.
+  goes where the rules would keep it (below).
 - Rows stored before r5, and a pin kept as a `pin_section` preference: the
   place is read once from the stored order at the first open and written
   back. It is the only read of the stored order for a place. The preference
@@ -236,21 +251,225 @@ name, never its key.
   with its key in the row's `pinned`. Settings lists pins from there, and its
   remove is a request like any other.
 
-**Show, add back, unpin: where the system has it.** A card goes where the
-data puts it; another section goes where today's system order has it (the
-rules plan's; the default's in calm mode): under the nearest of the system's
-sections above it there that is on the board, else on top of them. Not its
-default place regardless: with the strip sent up by a rule, that would put
-the tiles above the strip, and the rules plan would then be refused against
-the board he had just been told. (Where a planner had it is not kept for a section
-that was his while the plan was made; that returns with the split below.)
-Everything else keeps the order he saw: the section goes in under the
-system's section it follows there, and the places of what he placed are read
-again. Nothing remembers the index a section had when it was hidden. A
+**A section of the system's that a list lacks goes where the rules would
+keep it.** One rule, decided in one place (`withSystems` and `systemsPlace`,
+`lib/layout/compose.ts`), for both ways a list can lack a section of the
+default board: a board being composed that does not have it (2, above), and
+a request of his that brings one back (show, add back, unpin, a hide or a
+ban lifted).
+
+*It takes its place in the first order the rules can produce that is
+accepted against the list as it stands, the clock a day on (the usual order
+first, then the others in the rules' own order; today the strip sent up).
+If none is accepted, it goes by today's order, and a tie is read against the
+section that carries a reason on the board, or else one the rules can move.*
+
+- The orders the rules can produce are said where the rules live
+  (`ordersTheRulesCanProduce`: the default board; the strip sent up by rule
+  3, with its reason), built from the same lines the rule uses, next to the
+  sections the rules can move (`RULES_CAN_MOVE`: the strip). A test fails if
+  a rule produces an order, or moves a section, that is not there.
+- "Accepted against the list" is the validator's own verdict
+  (`movementReasons`) on that order against the system's own sections on
+  the list as it stands before the section is put in (what he placed, hid
+  or banned is not the system's), a day on: the layout clock past its day
+  and nothing new today, which is every day the rules can produce the order
+  on. A banner new today does not say where a section goes.
+- The place in an order: take the system's sections on the list (not the
+  banner, not what he placed). The ones that stand in step with the order
+  are the ones a plan in that order would not itself move: the validator's
+  own reading (`lib/layout/in-step.ts`: the longest run in step), called,
+  not written a second time, so the two cannot disagree. And the run of the
+  system's cards counts as a section of the order, between the strip and
+  Needs a date: next up, the tiles and the strip have the cards below them,
+  Needs a date and People have them above. The cards are never asked which
+  sections are in step (with the strip under the cards, asked, they put
+  Needs a date above the strip) and are never read as moved. The section
+  goes under everything that precedes it in the order: the sections in
+  step, and the cards when they precede it. With nothing before it, above
+  everything that follows it. With nothing of the system's on the list at
+  all, first under the banner. Next to a section in step, never next to one
+  the order would move.
+- Where "next to its section in step" and its side of the cards cannot both
+  hold, the side of the cards wins, both ways: next up, the tiles and the
+  strip never go below the first card of the run, Needs a date and People
+  never above its last. (A planner has the tiles above next up, the cards
+  under both; Needs a date comes back behind the cards, not between the
+  two.) For next up, the tiles and the strip it comes to this: when the
+  section in step it would go under stands under the first card, it goes
+  directly in front of that card instead. Three kinds: next up under the
+  strip (next up and the tiles hidden, a planner has the cards above the
+  strip, he talks dates so the strip is first in today's order; next up
+  comes back in front of the cards); the tiles under next up or the strip
+  (a planner has Needs a date and next up under the cards; the tiles come
+  back in front of the cards, above both); the strip under next up or the
+  tiles (the same board; the strip comes back in front of the cards). For
+  Needs a date and People nothing more is needed: the cards already count
+  among what precedes them. So a section that comes back
+  stands on its own side of the cards, the count that follows (3) has
+  nothing to put right, and no card moves for it. The two can fail to hold
+  together only on a board no order of the rules is accepted against, so
+  no accepted order is lost by it (shown by the same tests as the rest).
+  Taking a section away can still move the cards on a crossed board
+  (above), which is why a request does not read his places off its list
+  ("What he placed keeps the neighbour it had", below).
+- When no order of the rules is accepted (a planner has moved something,
+  and it stays), today's order is the rules plan's (the default's in calm
+  mode, where no plan is asked for), and two readings of what is out of
+  step can be equally long. A section could be read as the one out of step
+  when a run just as long stands without it. Then a section that carries a
+  reason on the board is the one read as moved; with no such section, one
+  the rules can move. If a run just as long does not stand without all the
+  sections of that kind (both sections of the tie carry a reason), or
+  neither is of either kind, the validator's reading stands. (A reason is
+  on a section only when it changed something: the validator takes one off
+  a section whose props are the default's.)
+
+What follows from it, each a test and not a sentence of its own:
+- **His request leaves no hold.** No order the rules can produce that was
+  accepted against the board he had is refused against the board he has.
+  For the order the place was taken from, that is how the place is made;
+  for the other it is shown for every list and every section (975 cases,
+  the validator as judge), and it rests on how the validator reads a tie:
+  two sections tie, and the one standing later on the stored board is read
+  as moved. A test pins that reading by name, with the eleven boards it
+  decides (the usual order with exactly one of next up and the tiles above
+  the strip, against the strip sent up: the strip is the one read as moved,
+  and the strip has the reason).
+- **His "show" does not perform the system's move.** A section the rules
+  are about to move is no guide for the others while it waits (he asked
+  about dates on a day a banner was new; a day later the stored board is
+  still served, the strip still to go up): next up comes back above the
+  tiles, Needs a date under the strip, each where it stood. And when the
+  strip itself is the one that comes back, it comes back to its usual
+  place, and the rule's move lands by itself, with its reason, at the next
+  open that is not served from the stored board. The same on a board where
+  the strip was sent up and is held there after the talk stopped: hidden
+  and shown, the strip goes to its usual place, and the stuck move is
+  undone. That is intended.
+- The strip sent up and still there (he still talks dates, or the talk has
+  stopped, or it is the very day it rose): "the strip sent up" is the order
+  accepted, so the tiles come back under next up and next up under the
+  strip. On the day it rose, a section hidden and shown froze the system's
+  plan from the next day on until this rule (472c2a7).
+
+What it cannot do, named, under the same limit as the cards after a request
+(above): nothing remembers where a section stood.
+- The strip sent up, and only ONE of next up and the tiles among the
+  system's sections (the other hidden, or his). He hides that one and shows
+  it. The list left behind is the strip, Needs a date, People: it shows no
+  move at all, the usual order is accepted against it, and the section
+  comes back ABOVE the strip. A board he did not have before, and harmless:
+  both orders stay accepted, and the rule sends the strip up again at the
+  first change in his data after a day.
+- A planner moved one section, and the list left behind is in an order the
+  rules can produce: the returning section goes by that order, and the
+  planner's move is stepped over. (Needs a date raised above the strip
+  with a reason; he hides the strip and shows it: the strip comes back
+  above Needs a date.)
+- A planner's answer that leaves a default section out, on a board whose
+  order an earlier planner's answer changed, can be refused for where the
+  section is put. The answer is thrown away: that one call, and none after
+  it for the same situation. As measured, on a board where an earlier
+  answer raised Needs a date above the strip: an answer that leaves out
+  the strip (which stood under the raised section) is thrown away; one
+  that leaves out next up, the tiles or People lands.
+- The system's strip under the cards (a planner listed the cards above
+  it): he hides the strip and shows it, and it comes back in front of the
+  cards. The sentence working (the strip has the cards below it), not a
+  defect; but he will see it.
+- Needs a date raised above next up by a planner, the cards on top of
+  both, and the tiles come back: in front of the cards, so above next up.
+  Its side of the cards has won over its section in step.
+- He hides a section and shows it, and something he placed stood right
+  beside it. The section comes back right beside its neighbour (the section
+  in step, or the first or last card of the run), so his thing may be on
+  the other side of it than before. Until the split (1.07).
+
+(Three earlier rules, each of which left a hold: the default place
+regardless, which with the strip sent up by a rule put the tiles above the
+strip in a way the rules plan was refused for; under the nearest section
+above it, cards counted, which with the strip under the cards put Needs a
+date above the strip; and where today's rules plan alone would keep it,
+which was accepted that day and refused once the talk stopped.)
+
+A card that comes back goes where the data puts it. (Where a planner had a
+section is not kept for one that was his while the plan was made; that
+returns with the split below.) Everything else keeps the order he saw. What
+a request brings back is put onto the list after everything else it asked
+for (when it brings back several, the order they are put in does not change
+where any of them goes). Nothing remembers the index a section had when it
+was hidden. A
 section he ADDED (or any section outside the default board that he has
 placed) is always placed: unpin does not apply to it and says so; hidden and
 shown again it comes back placed at the end, as the bare component, because
 its props lived only on the board.
+
+**What he placed keeps the neighbour it had.** A place is stored as a count,
+and a count read off the list a request builds is right only while that list
+is the board. So a request does it in this order, in one place (`settle`,
+`lib/layout/request.ts`): the composition and its count settle the system's
+sections and the cards FIRST (in calm mode, the default board's order);
+then each thing of his is stood next to the neighbour it had on the list;
+and his places are read off THAT board and stored. It is the list and the
+board. The stored form does not change.
+
+- One neighbour each, by the test a place already uses (above). Counted
+  from the top (a card of the run, or next up, the tiles or the strip,
+  stands somewhere below it): the nearest thing above it that is not his;
+  with none, the top. Counted from the bottom: the nearest thing below it
+  that is not his; with none, the bottom. So what he sent to the top or
+  the bottom is first or last, and stays so.
+- Two things of his side by side are not each other's neighbour: each looks
+  past the other, and their order is kept.
+- The section the request names: if it stays the system's (show, unpin) it
+  is a neighbour like any other. If the request takes it out of the
+  system's (hide; a pin or a move makes it his) it is no neighbour, and the
+  next thing that is not his serves.
+- A move puts his thing on the list where he said, and it takes its
+  neighbour there. Calm mode: the same steps; only the board the system's
+  sections and the cards settle into differs.
+- A card that comes back (shown again, or let go) is not put on the list
+  at all. The composition draws it in the run by the data, and it is
+  nobody's neighbour: what he placed above the first card stays under the
+  section it stood under when the first card comes back. A card let go
+  keeps the emphasis it had: it is in the draft the composition is asked
+  with, last, where it does not say where the run goes. (The request used
+  to guess a place for the card on its list; that guess is gone.)
+- The guard (below) tries its other places through the same steps.
+
+(The cause this takes out, found three times in r5 and once in 472c2a7: a
+place said in two places. With nothing of the system's above the strip, the
+strip came back under the cards and stayed. On the plainest board, Needs a
+date came back onto the list above the cards, the count put the cards
+right, and a card he had placed among them moved down one. On a board a
+planner had rearranged, next up came back under the strip and so under the
+cards, the count moved the cards under it, and his card was left behind
+under the strip (next up now comes back in front of the cards there, and
+nothing moves). And on a
+board where a planner had Needs a date above next up, with the cards on
+top, he hid Needs a date, the cards went under next up, and his card stayed
+on top: that one 472c2a7 already had.)
+
+**The guard: his request leaves no hold.** Before it writes, a request asks
+two things of the board he is about to be told, against the board as it is.
+What a new open would be served today (the rules chain, in memory, no model
+call): the rules plan now and held after is a hold. And each order the
+rules can produce, a day on: accepted now and refused after is a hold left
+for a later day. If his request would leave either, a section it brought
+back is tried at the other places among the system's sections, nearest
+first (of two as near the upper one: they are tried in order from the top),
+and the first place that leaves no hold is taken. If no place does, or nothing was brought back, his
+request is applied all the same (it is never refused for this) and one line
+goes to the server log, with counts only. Not for Put it back (it puts the
+system's own order back, and that may hold the plan for the day like any
+change of the system's order), and not in calm mode (no plan is asked for
+there). With the rules as they are the guard never fires: the rule above is
+the same question read the other way. It fires only if a rule ever SINKS a
+section with a reason; a test makes such a rule, as today's plan and as an
+order the rules can produce, to show the next place taken and the line
+written. Not covered, and named: a planner's next answer. A request of his
+cannot be held to every plan a planner might write.
 
 **Lifting a hide when there is nothing to show.** The project was archived
 or deleted since, or the component retired: the hide simply goes (it must not
