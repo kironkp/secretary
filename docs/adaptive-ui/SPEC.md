@@ -102,10 +102,12 @@ version number; the validator loads prop-schemas from it.
 `DEFAULT_PLAN` (also the fallback and calm mode), since registry v3:
 `[hero_next_up, stat_row, timeline(21, false), project_card × each active project (full), project_card × each list, date_chase(all missing), people_index]`
 
-The project cards: urgent projects first (invariant 4's meaning of urgent),
-then the rest, each group in the one urgency order every screen uses
-(`lib/project-order.ts`: late first by how late, then the nearest date or
-deadline, then no date, then name); lists after them.
+The project cards: in the one order every screen uses (`lib/project-order.ts`,
+docs/projects/SPEC.md §1, v1.11): projects before lists; the ones he placed
+in his project order first, in that order; then urgent projects
+(invariant 4's meaning of urgent), then the rest, each group in the one
+urgency order (late first by how late, then the nearest date or deadline,
+then no date, then name).
 
 A plan whose head is the default (nobody arranged it) is measured against the
 NEW default for movement and removals (§3 invariants 3 and 8): a product
@@ -135,8 +137,11 @@ every way the board can change, with a model of its own.
    sections where the rules would keep it (one rule, below),
    BEFORE the place for the cards is worked out (3): nothing of the
    system's is added after the count.
-3. **The cards he did not place, in data order** (urgent first, then the one
-   urgency order, lists last), in one run where the system's plan has it.
+3. **The cards he did not place, in data order** (the one order of
+   docs/projects/SPEC.md §1: his project order first, then urgent first,
+   then the one urgency order, lists last), in one run where the system's
+   plan has it. His project order moves this run, never a card he placed on
+   the board itself (until 1.07).
    The right way up, whatever that plan says: **the cards go where the
    fewest of the system's sections end up on the wrong side of them.** Take
    the system's own sections that are not cards, in its order: the ones
@@ -535,6 +540,20 @@ banner, a section a planner added). A system plan without one of them is
 refused that day, so the rules plan does not take a planner's banner off at
 the next change in his data; a day later it may. The list is not in the
 signals hash: a day going by is not a new situation.
+
+**His project order is not in the signals or their hash either (v1.11).**
+A move in his project order (docs/projects/SPEC.md §2) is not a new
+situation: the signals list the projects in the order they were made, each
+carrying its place for the composition, and the hash leaves the place out.
+The next render is the stored plan composed again, with no planner call.
+
+**Rows read in no order are put in one (v1.11).** Wherever the order rows
+come back in reaches what he reads (a section's "why" when two wishes name
+the same section; the names listed when a spoken name finds nothing, or two
+things), the signals hash (two events at the same instant) or a model's
+prompt (the planner's; get_current_plan), the read has a fixed order: by
+when the row was made, then its id (events: by when they start, then id).
+The same rows read in any order give the same text, hash and prompt.
 
 **A stated limit: what the system moved does not go back by itself.** After
 the strip has been sent to the top it stays there when the talk about dates
