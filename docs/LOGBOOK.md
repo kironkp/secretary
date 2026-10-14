@@ -7,6 +7,62 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 ---
 
+## v1.11 — His project order (2026-10-14)
+
+`8ecf219`, `a1b70a6`, `b2577e2` (the spec, docs/projects/SPEC.md, new, with
+the approved screen beside it; docs/adaptive-ui/SPEC.md), `bed4cf3`,
+`8f05c09`, `3d08996` (the tests, first and red), `f504a9c`, `0e4b4ef` (the
+walker), `a22b59f`, `c801213` (the code), `8657e36` (1.09 r2 merged in), this
+commit.
+
+Kiron, 2026-10-13, after comparing one project in Secretary and in Notion: he
+wants to drag a project to the top, or say "move that project to the top", and
+have it stay. Approved with the Projects screen on 2026-10-14: "make the
+projects movable".
+
+- One order on every screen that lists his projects (lib/project-order.ts):
+  lists after projects; the ones he placed, in his order; then urgent first;
+  then the urgency order. The Overview's run of cards, its progress strip,
+  the Timeline's lanes, the Projects tab, list_projects and the briefing all
+  read it. Until he moves something nothing is placed, and the Overview and
+  the Timeline stand as before; the Projects tab changes (it was
+  alphabetical).
+- A move: a project to a place in its group (active, lists, set aside), and it
+  and everything above it placed in the order they now stand; the unplaced
+  ones below keep the urgency order. One function (lib/projects/order.ts), in
+  one transaction behind a lock on his rows, for the drag, the handle's
+  arrow keys, and move_project in the chat and on a call. The answer says
+  where it is now; when its card is one he placed on the Overview himself,
+  that card stays where he put it, and the answer says so. A project that
+  changes group arrives unplaced.
+- A move asks no model: the order is not in the signals the planner is asked
+  about, nor in their hash. Counted in a test: after a drag and after the
+  tool, planner 0, model 0, the hash the same. The Overview's walk moves
+  projects too, and asks the same after every move.
+- The Projects screen in the approved look: each group a white card on the
+  grey ground, rows of 56 px, a 12 px dot, the name, "N open", and a grab
+  handle in a 44 × 44 box that is the only place a drag starts. The row moves
+  at once; moves are stored one after the other; a failed store puts it back
+  with a plain line. "New project" opens a row with its name field focused
+  and makes the project by the chat's own path. Measured at 390 wide against
+  the approved screen's values, light and dark.
+- Rows read in no order are put in one: the wishes whose need is a section's
+  "why", the events of one instant (which one is next is in the hash), the
+  preferences, tasks and messages the planner and get_current_plan are
+  handed. Shuffled, the same rows give the same text, hash and prompts.
+
+The database: one column added, `projects.position`, a whole number that may be
+empty. Nothing is backfilled.
+
+Changed expectations: the Projects tab's order (alphabetical, now the one
+order); the walk-63 clock tests name walk 63's new step 16 (the draw changed).
+Two new tokens, the accent for text and the hairline between rows.
+
+Limits, named: a card he placed on the Overview keeps its place when the project
+moves in his order (until 1.07); a project that changes group does not return
+to its old place; the filter chips and the task editor's picker keep their own
+orders.
+
 ## v1.09 — A chat answer reaches him, once (2026-10-14)
 
 `8c68ef7`, `e44cc51` (the spec, docs/chat/SPEC.md, new, and docs/spend/SPEC.md
