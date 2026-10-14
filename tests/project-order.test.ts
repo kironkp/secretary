@@ -53,6 +53,7 @@ import { anthropicToolDefs, VOICE_TOOL_NAMES } from "@/lib/secretary/tool-schema
 import { executeTool, liveTurnContext } from "@/lib/secretary/tools";
 import { POST as orderRoute } from "@/app/api/projects/order/route";
 import { PATCH as projectRoute } from "@/app/api/projects/[id]/route";
+import { POST as newProjectRoute } from "@/app/api/projects/route";
 
 const TZ = "America/Los_Angeles";
 const users: string[] = [];
@@ -299,6 +300,28 @@ describe("the Overview", () => {
     // A project whose card he did not place: no such sentence.
     const plain = await executeTool(h.ctx, "move_project", { project: "Dune", to: "top" });
     expect((plain.result as { says: string }).says).not.toMatch(/Overview/);
+  });
+});
+
+describe("New project, on the Projects tab", () => {
+  const make = (name: string) =>
+    newProjectRoute(new Request("http://localhost/api/projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }));
+  it("makes the project by the chat's own path: it arrives unplaced, at its urgency place", async () => {
+    const h = await his();
+    await h.move("Fjord", "top");
+    const res = await make("Bike tune-up");
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({ name: "Bike tune-up", alreadyExisted: false });
+    expect((await h.positions())["Bike tune-up"]).toBeNull();
+    expect((await h.tab()).active).toEqual(["Fjord", "Birch", "Atlas", "Cedar", "Bike tune-up", "Dune", "Ember"]);
+  });
+  it("an empty name makes nothing; a name he already has is that project, not a second one", async () => {
+    const h = await his();
+    const before = (await db.select().from(projects).where(eq(projects.userId, h.id))).length;
+    expect((await make("   ")).status).toBe(400);
+    const again = await make("ember");
+    expect(await again.json()).toMatchObject({ name: "Ember", alreadyExisted: true });
+    expect((await db.select().from(projects).where(eq(projects.userId, h.id))).length).toBe(before);
   });
 });
 

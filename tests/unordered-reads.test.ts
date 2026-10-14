@@ -5,11 +5,11 @@
 //
 // Rows are shuffled without changing what they say: each is updated to itself,
 // newest first, which writes a new copy of it, so Postgres hands them back in
-// another order. The test checks that it did (otherwise it would prove
-// nothing), then reads everything again.
+// another order. The test checks that it did where it can (otherwise it would
+// prove nothing), then reads everything again.
 process.env.TZ = "UTC";
 
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq, sql } from "drizzle-orm";
 
 vi.mock("next/headers", () => ({ cookies: async () => ({ get: () => undefined }), headers: async () => new Headers() }));
@@ -102,13 +102,25 @@ async function reading(userId: string, ctx: ReturnType<typeof liveTurnContext>) 
   };
 }
 
+/** Where two texts part, with a little of each around it. */
+const firstDifference = (a: string, b: string) => {
+  let i = 0;
+  while (i < a.length && a[i] === b[i]) i++;
+  return `${i}: "${a.slice(Math.max(0, i - 80), i + 80)}" | "${b.slice(Math.max(0, i - 80), i + 80)}"`;
+};
+
 beforeEach(() => clearPlanCache());
+afterEach(() => vi.useRealTimers());
 afterAll(async () => {
   for (const id of users) await db.delete(user).where(eq(user.id, id));
 });
 
 describe("the same rows read in another order", () => {
   it("give the same why, the same hash and the same prompts", async () => {
+    // One instant for both readings: a project nobody mentioned is "last touched" now (signals.ts), which is the
+    // clock, not the rows.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date());
     const h = await his();
     const before = await reading(h.id, h.ctx);
     expect(before.why).toMatch(/closest I have until the A (Gantt|calendar)/);
@@ -116,14 +128,20 @@ describe("the same rows read in another order", () => {
     expect(before.next).not.toBeNull();
     const orders = Object.fromEntries(await Promise.all(Object.values(TABLES).map(async (t) => [t, await rawOrder(t, h.id)])));
     await shuffle(h.id);
-    // The shuffle did turn the read order over, table by table; otherwise this test would prove nothing.
-    for (const t of Object.values(TABLES)) expect(await rawOrder(t, h.id), t).toEqual([...orders[t]].reverse());
+    // The shuffle must have turned the read order over, or this test proves nothing. It always can for the three
+    // whose order reached the why, the hash and the prompts on 51d4828 (wishes, preferences, events). Tasks and
+    // messages Postgres may read through an index in an order of its own, which no update moves (it did on one
+    // test database and not on another): those are reported, not required.
+    const turned: string[] = [];
+    for (const t of Object.values(TABLES)) if ((await rawOrder(t, h.id)).join() !== orders[t].join()) turned.push(t);
+    for (const t of ["wishlist", "layout_preferences", "events"]) expect(turned, `turned over: ${turned.join(", ")}`).toContain(t);
+    console.log(`unordered-reads: the shuffle turned over ${turned.join(", ")}`);
     const after = await reading(h.id, h.ctx);
     expect(after.why).toBe(before.why);
     expect(after.next).toBe(before.next);
     expect(after.hash).toBe(before.hash);
-    expect(after.prompt).toBe(before.prompt);
-    expect(after.currentPlan).toBe(before.currentPlan);
+    expect(after.prompt === before.prompt, `the prompts first differ at: ${firstDifference(before.prompt, after.prompt)}`).toBe(true);
+    expect(after.currentPlan === before.currentPlan, `get_current_plan first differs at: ${firstDifference(before.currentPlan, after.currentPlan)}`).toBe(true);
   });
 
   it("the fixed orders are the ones the spec names: wishes oldest first (the newer need stands), events at one instant by id", async () => {

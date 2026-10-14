@@ -153,6 +153,24 @@ test("the handle's arrow keys move the project one place", async ({ page }) => {
   expect(await order(page)).toEqual(moved);
 });
 
+test("New project: a row at the top of Active, the name field focused; Enter makes it, an empty name makes nothing", async ({ page }) => {
+  await page.goto("/projects");
+  const count = await page.locator("[data-project-group='active'] [data-project-row]").count();
+  await page.getByRole("button", { name: "New project" }).click();
+  const field = page.getByRole("textbox", { name: "New project name" });
+  await expect(field).toBeFocused();
+  await page.screenshot({ path: `${DIR}/projects-390-new.png` });
+  // Nothing typed, the field left: nothing is made, the row goes.
+  await field.blur();
+  await expect(field).toHaveCount(0);
+  expect(await page.locator("[data-project-group='active'] [data-project-row]").count()).toBe(count);
+  await page.getByRole("button", { name: "New project" }).click();
+  await page.getByRole("textbox", { name: "New project name" }).fill("Bike tune-up");
+  await page.keyboard.press("Enter");
+  await expect(row(page, "Bike tune-up")).toBeVisible();
+  expect(await page.locator("[data-project-group='active'] [data-project-row]").count()).toBe(count + 1);
+});
+
 test("a store that fails puts the row back and says so plainly", async ({ page }) => {
   await page.goto("/projects");
   const before = await order(page);
