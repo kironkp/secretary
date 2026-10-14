@@ -223,7 +223,14 @@ beside me in a workshop."*
   the contract: bytes within a few seconds and kept flowing (streamed
   text is the goal, a heartbeat the least); if the connection still
   drops, the page shows the saved answer and not an error; a retry never
-  runs or pays for the same turn twice.
+  runs or pays for the same turn twice. Diagnosed 2026-10-14: a cut turn
+  runs to the end (saved and paid) but the page shows "Not delivered"
+  until a reload, and a resend runs and pays a second time. Contracted
+  with two additions: the Claude rounds spent before a fallback to OpenAI
+  are recorded as usage (they were not: a hole in the caps), and the
+  project tool's merge, which today moves tasks only and then DELETES the
+  old project with its records, is turned off until 1.12 (it says merging
+  is not available yet).
 - **1.08** — after 1.09, ahead of 1.05: an understanding
   call that was sent and not answered is counted, and a provider failure
   backs off. Today: up to 3 attempts a sweep per project, every 10 minutes,
