@@ -7,6 +7,85 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 ---
 
+## v1.09 — A chat answer reaches him, once (2026-10-14)
+
+`8c68ef7`, `e44cc51` (the spec, docs/chat/SPEC.md, new, and docs/spend/SPEC.md
+§1.2), `c667a3c`, `3aa8bc9` (the tests, first and red), `084fe17` (the code),
+`4e6d93c` (the browser spec's project), this commit.
+
+Kiron, 2026-10-13: "error try again". One chat answer took longer than 30
+seconds, and Heroku's router cut the request at 30,007 ms while Claude was up.
+The route sent nothing until the whole answer, tools and all, was done, and
+Heroku allows 30 seconds to the first byte. Read on main the next day: the cut
+turn ran on to the end, was saved and was paid for; the page said "Not
+delivered" until a reload; and the tap to retry ran and paid for the same turn
+again.
+
+- The answer streams over the same request. The first line goes out as soon as
+  his message is stored, before any model is asked; Claude's text follows as it
+  is written; a ping goes out whenever nothing else has for 5 seconds; the last
+  line is the answer, the same as the plain JSON, which a request that does not
+  ask for the stream still gets (a page opened before this release, and the
+  tests that read the answer whole). Measured on the built app (`next start`,
+  compression on, as on Heroku) with a stand-in for Claude that held its
+  answer 20 seconds, asking for gzip as a browser does: the response was not
+  compressed at all, the first line arrived at 47 ms, a ping about every 6
+  seconds (the longest silence 5.98 s), the answer at 21.1 s. Asking for no
+  compression: the first line at 20 ms, the answer at 21.0 s. Nothing between
+  the route and the page holds the stream back, so it needs no
+  `Cache-Control: no-transform`.
+- A turn runs once. The page names each turn, and the server keeps a row per
+  turn (`chat_turns`, new: the user, the page's id, the conversation, his
+  message, the reply's id, the toasts, the failure's sentence, when it was last
+  heard from). A resend of a turn that is done gets the saved answer, with no
+  model call and nothing written; one still running is waited on. A running
+  turn says it is alive every 12 seconds on a timer of its own, whatever the
+  model is doing, and only one silent for a minute counts as gone, so a long
+  model call is never run twice. A failed turn, or a gone one, is run again only
+  by his tap, and taking it over is one conditional update, so two taps can
+  never both run it. In real time, once, outside CI, on the built app with the
+  stand-in holding its answer 90 seconds and a second ask with the same turn
+  id at 70 seconds: one model call, and both asks got the same answer, the
+  same reply (the first: its first line at 19 ms, 17 pings, the longest
+  silence 6.0 s, the answer at 91 s). The tests do the same in the same
+  ratios, a hundred times faster.
+- A cut connection: the turn runs on to the end and is saved, as before; the
+  page now asks again for the same turn, marked resume, at once, after 2 s and
+  after 5 s. A resume only fetches or waits, and never makes the server run a
+  model. When all three fail, or the turn failed, the message says so with "tap
+  to retry", and the tap asks for the same turn.
+- Money: rounds that did not end in an answer from their provider are counted
+  (docs/spend/SPEC.md §1.2). Claude's rounds before the turn fell back to
+  OpenAI, and OpenAI's before it failed part way, left no row until now; they
+  are counted as they reported, and a round sent and never answered at the
+  estimate, nothing for one refused with a 4xx.
+- Safety: update_project's merge is off until 1.12. It moved the tasks and then
+  deleted the old project, and with it everything else that belonged to it. It
+  now answers that merging projects is not available yet and changes nothing,
+  whatever else the call asks for. The tool's description, the persona and the
+  delete refusal no longer point at it, and the description asks the model not
+  to empty a duplicate by moving its tasks one by one. On a call, the voice is
+  no longer sent to the chat for a merge the chat cannot do; the persona's
+  line tells both to say plainly that merging is not available yet.
+
+The database: one table added, `chat_turns`, keyed by the user and the page's
+turn id; nothing else changes, nothing is backfilled. The release applies it
+with the same `drizzle-kit push` as every additive change.
+
+Changed expectations (doubt these first): tests/resolve-project.test.ts, the
+merge (it moved the task and deleted the duplicate; now both stay) and the
+delete refusal (it pointed at merge_into; it is now asked of the duplicate,
+which still holds its task). Changed fixtures only: the fake Claude in five
+test files gains `messages.stream`, built on its own `create`
+(tests/fixtures/claude-stream.ts).
+
+Limits, named: the OpenAI fallback sends no pieces, only pings and the answer;
+an ask waiting on another's run gets pings and the answer, not the pieces; when
+Claude fails part way the turn runs again on OpenAI from the start and the
+tools Claude already ran run again, a duplicate write and not only a cost
+(placed in 1.08); a page opened before the release keeps the 30-second limit
+until reloaded; turn rows are kept; voice does not use this route.
+
 ## v1.02 — A clear Overview (2026-10-13)
 
 `b980803` (the round as one commit: written 2026-10-06 as v0.34 and parked,
