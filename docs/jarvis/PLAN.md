@@ -8,8 +8,10 @@ beside me in a workshop."*
 ## Now
 
 - **Cycle counter: 108.** 1.00, 1.03 and 1.04 are accepted; 1.01 and 1.02 are
-  open; then 1.09, 1.11, 1.10, 1.13, 1.12, 1.14 (Kiron's feedback, his
-  mockup approved 2026-10-14), then 1.08, 1.05, 1.06, 1.07. See §9.
+  open; then 1.09, 1.11, 1.10, 1.13, 1.12, 1.14, 1.15 (Kiron's feedback,
+  his mockup approved 2026-10-14, and the whole site in its look), then
+  1.08, 1.05, 1.06, 1.07. Each pushed to Heroku as it passes (Kiron:
+  "Push to heroku for each update"). See §9.
 - **1.00** — this plan. Accepted and live: `34fc1f1`, Heroku v63, 2026-10-12.
 - **1.01** — the measured baseline, `docs/jarvis/BASELINE.md`. Measured and
   checked by the Reviewer, except production: the Executor's session is refused
@@ -289,6 +291,18 @@ beside me in a workshop."*
     Diagnosis first: room left in the database for files, a per-file
     cap, and which map and place lookup, its cost and what leaves the
     app. A paid service or a bigger database plan is Kiron's call.
+  - **1.15** — the whole site in the new look. Kiron: "This a full
+    website redesign with different fonts etc based off the pictures you
+    gave." The reference is the four approved screens and the rules drawn
+    from them (type scale, colours, grouped cards and rows, pills, grab
+    handle, tab bar, plain content), kept with the pictures outside the
+    repo in `secretary-extras/design/2026-10-14-simple-screens/` and given
+    to both peers; each cycle copies its own screen's reference into the
+    spec. The font is the system face the app already has; sizes,
+    weights, spacing and cards change. Screen by screen, smallest risk
+    first, shared tokens and pieces, no per-screen copies; the Overview
+    keeps its behaviour. A screen that needs a new layout rather than a
+    restyle is drawn for Kiron first.
 - **1.05** — "asked means asked", the rest of what 1.03 began, built on main
   after 1.04: clarifications, understanding questions and nudges marked only
   after the hand-over; voice settles when the call really ran, not when the
