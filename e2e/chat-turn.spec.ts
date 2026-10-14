@@ -188,16 +188,19 @@ test.describe("the thread follows the answer as it is written", () => {
   });
 
   test("scrolled up while it is written, he is left there", async ({ page }) => {
-    await streamAnswers(page, [{ pieces: LONG, delayMs: 150 }]);
+    await streamAnswers(page, [{ pieces: [...LONG, ...LONG], delayMs: 150 }]);
     await open(page);
     await send(page, "E2E: a long plan please");
     await expect(page.locator("[data-live-answer]")).toBeVisible();
-    await page.waitForTimeout(900);
-    const at = await page.evaluate(() => {
+    // Up only once there is room to go up: the thread followed at least 220 px down.
+    await expect.poll(() => page.evaluate(() => (document.querySelector("[data-thread-scroll]") as HTMLElement).scrollTop), { timeout: 10_000 }).toBeGreaterThanOrEqual(220);
+    const [was, at] = await page.evaluate(() => {
       const el = document.querySelector("[data-thread-scroll]") as HTMLElement;
-      el.scrollTop = Math.max(0, el.scrollTop - 200);
-      return el.scrollTop;
+      const before = el.scrollTop;
+      el.scrollTop = before - 200;
+      return [before, el.scrollTop];
     });
+    expect(was - at, "he did go up").toBeGreaterThanOrEqual(190);
     await page.waitForTimeout(600);
     const after = await page.evaluate(() => (document.querySelector("[data-thread-scroll]") as HTMLElement).scrollTop);
     expect(Math.abs(after - at)).toBeLessThanOrEqual(2);
@@ -210,12 +213,15 @@ test.describe("the thread follows the answer as it is written", () => {
     await open(page);
     await send(page, "E2E: a long plan please");
     await expect(page.locator("[data-live-answer]")).toBeVisible();
-    await page.waitForTimeout(500);
-    const at = await page.evaluate(() => {
+    // Up only once there is room to go up: the thread followed at least 140 px down.
+    await expect.poll(() => page.evaluate(() => (document.querySelector("[data-thread-scroll]") as HTMLElement).scrollTop), { timeout: 10_000 }).toBeGreaterThanOrEqual(140);
+    const [was, at] = await page.evaluate(() => {
       const el = document.querySelector("[data-thread-scroll]") as HTMLElement;
-      el.scrollTop = Math.max(0, el.scrollTop - 120);
-      return el.scrollTop;
+      const before = el.scrollTop;
+      el.scrollTop = before - 120;
+      return [before, el.scrollTop];
     });
+    expect(was - at, "he did go up").toBeGreaterThanOrEqual(110);
     // Watched until it lands: never taken back down.
     const seen: number[] = [];
     while (await page.locator("[data-live-answer]").count()) {
