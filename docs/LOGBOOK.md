@@ -14,7 +14,9 @@ commits it covers so `git show <hash>` always reaches the real diff.
 `4e6d93c` (the browser spec's project), `cba3898` (this entry's first
 version); then the two follow-ups from 1.02 r5's review, `8fc8f2f` (the
 walker's guard) and `c87d744` (a test of the Reviewer's board), and
-`dd96229` (the chat tests no longer race), this commit.
+`dd96229` (the chat tests no longer race), `c736a06` (this entry again),
+this commit (the r5q test reads the stored plan as a plan: the typecheck
+failed on it).
 
 Kiron, 2026-10-13: "error try again". One chat answer took longer than 30
 seconds, and Heroku's router cut the request at 30,007 ms while Claude was up.

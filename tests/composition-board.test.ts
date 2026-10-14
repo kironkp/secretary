@@ -1464,14 +1464,14 @@ describe("the request function, case by case", { timeout: 30_000 }, () => {
     const cardsOf = (...names: string[]) => names.map((n) => b.card(n));
     const sunk = await b.keys();
     expect(sunk).toEqual(["hero_next_up", "timeline", ...cardsOf("Birch", "Atlas", "Cedar", "Dune", "Ember", "Fjord", "Grove", "Harbor", "Iris", "Shopping"), "date_chase", "people_index", "stat_row"]);
-    expect((await b.head()).spec.sections.filter((s) => s.why).map(sectionKey)).toEqual(["stat_row"]);
+    expect(((await b.head()).spec as LayoutPlan).sections.filter((s) => s.why).map(sectionKey)).toEqual(["stat_row"]);
     // Ember to the place right above People: right under Needs a date.
     expect((await b.chatEdit([{ op: "move", section: b.card("Ember"), to: sunk.indexOf("people_index") - 1 }])).result).toMatchObject({ applied: true });
     const had = ["hero_next_up", "timeline", ...cardsOf("Birch", "Atlas", "Cedar", "Dune", "Fjord", "Grove", "Harbor", "Iris", "Shopping"), "date_chase", b.card("Ember"), "people_index", "stat_row"];
     expect(await b.keys()).toEqual(had);
     const head = await b.head();
     expect(head.pinned).toEqual([b.card("Ember")]);
-    expect(head.spec.sections.find((s) => sectionKey(s) === b.card("Ember"))?.place).toEqual({ from: "top", n: 12 });
+    expect((head.spec as LayoutPlan).sections.find((s) => sectionKey(s) === b.card("Ember"))?.place).toEqual({ from: "top", n: 12 });
     // Grove goes and comes back, nothing else happening in between.
     expect((await b.arrange([{ op: "hide", section: "Grove" }])).result).toMatchObject({ applied: true });
     expect(await b.keys()).toEqual(had.filter((k) => k !== b.card("Grove")));
