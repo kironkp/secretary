@@ -118,6 +118,14 @@ export default defineConfig({
       testMatch: /pins\.spec\.ts/,
       use: { ...devices["iPhone 15"] },
     },
+    {
+      // His project order (v1.11, docs/projects/SPEC.md §5): the Projects
+      // screen at 390 wide against the approved values, the grab handle, a
+      // failed store. After pins: it changes the shared user's project order.
+      name: "projects",
+      testMatch: /projects-order\.spec\.ts/,
+      use: { ...devices["iPhone 15"] },
+    },
   ],
 
   webServer: {

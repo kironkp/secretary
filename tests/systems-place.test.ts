@@ -243,7 +243,8 @@ describe("a tie on a list no order of the rules is accepted against (today's ord
     expect(at(list, "stat_row", false)).toBe(0);
   });
 
-  it("every list, for the two orders the rules can produce, with a reason on none, one or two of its sections: this file's own reading (4,890 cases)", () => {
+  // An explicit ceiling, like spend-cuts': 4,890 cases ran 5.8 s once on a loaded machine and hit vitest's 5 s default.
+  it("every list, for the two orders the rules can produce, with a reason on none, one or two of its sections: this file's own reading (4,890 cases)", { timeout: 30_000 }, () => {
     let [cases, differs] = [0, 0];
     for (const order of [FIVE, STRIP_UP]) {
       for (const key of FIVE) {
