@@ -307,7 +307,14 @@ beside me in a workshop."*
     no merge tool. Wanted: the tasks, notes and the rest move into the
     one that stays, the other is archived (not deleted) and it can be
     undone; and when it cannot do what he asked it says so instead of
-    doing something else (1.05's rule).
+    doing something else (1.05's rule). Found by the Reviewer in 1.09:
+    deleting a project still deletes its saved understanding record with
+    it (records.project_id cascades): chat's update_project with
+    delete:true on an empty project, and the page's DELETE
+    /api/projects/[id] on any project (its tasks are unfiled). Voice
+    cannot. 1.12 makes these archive or keep the record; and update_task
+    can still empty a project one task at a time, which only the tool's
+    description asks the model not to do.
   - **1.13** — a roadmap for a project: steps in order, each with a
     plain-English goal, the gate to move on, and a status; and a plain
     checklist. He liked that table in Notion and not Notion's clutter.
