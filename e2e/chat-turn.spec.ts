@@ -93,6 +93,15 @@ test("a resume that brings back Not delivered stops there; his tap asks again fo
 // line being written stands above the composer, and the answer's top does not move when it lands.
 test.describe("the thread follows the answer as it is written", () => {
   test.use({ viewport: { width: 390, height: 844 } });
+  // CHAT_CPU_THROTTLE=4 slows the page's CPU fourfold (Chromium only, through the DevTools protocol): the Reviewer's
+  // way to find a race the machine's speed hides. Off in CI.
+  test.beforeEach(async ({ page, browserName }) => {
+    const rate = Number(process.env.CHAT_CPU_THROTTLE ?? 0);
+    if (rate > 1 && browserName === "chromium") {
+      const cdp = await page.context().newCDPSession(page);
+      await cdp.send("Emulation.setCPUThrottlingRate", { rate });
+    }
+  });
   const LONG = Array.from({ length: 14 }, (_, i) => `Line ${i + 1} of the plan says what to do next and why it matters this week. `);
   const SHORT = ["E2E: three short lines. ", "The shed roof first. ", "Then the tax papers."];
 
@@ -192,6 +201,29 @@ test.describe("the thread follows the answer as it is written", () => {
     await page.waitForTimeout(600);
     const after = await page.evaluate(() => (document.querySelector("[data-thread-scroll]") as HTMLElement).scrollTop);
     expect(Math.abs(after - at)).toBeLessThanOrEqual(2);
+  });
+
+  test("pieces every 40 ms and one step up the thread: he is never pulled back to the bottom", async ({ page }) => {
+    // The race of v1.09 r2: the scroll event comes a frame or more after his scroll, and a piece arriving in between
+    // must not take him back down. Pieces come faster than frames here.
+    await streamAnswers(page, [{ pieces: [...LONG, ...LONG], delayMs: 40 }]);
+    await open(page);
+    await send(page, "E2E: a long plan please");
+    await expect(page.locator("[data-live-answer]")).toBeVisible();
+    await page.waitForTimeout(500);
+    const at = await page.evaluate(() => {
+      const el = document.querySelector("[data-thread-scroll]") as HTMLElement;
+      el.scrollTop = Math.max(0, el.scrollTop - 120);
+      return el.scrollTop;
+    });
+    // Watched until it lands: never taken back down.
+    const seen: number[] = [];
+    while (await page.locator("[data-live-answer]").count()) {
+      seen.push(await page.evaluate(() => (document.querySelector("[data-thread-scroll]") as HTMLElement).scrollTop));
+      await page.waitForTimeout(30);
+    }
+    expect(seen.length).toBeGreaterThan(5);
+    expect(Math.max(...seen) - at, `scrollTop went from ${at} to as much as ${Math.max(...seen)}`).toBeLessThanOrEqual(2);
   });
 
   test("a three-line answer in a thread that scrolls: followed, and it lands where it was written", async ({ page }) => {
