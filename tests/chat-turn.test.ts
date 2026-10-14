@@ -144,6 +144,12 @@ const ask = (body: Record<string, unknown>, stream = true) =>
     })
   );
 
+/**
+ * Every answer a test opened. After each test they are read to their end, so a test that failed part way
+ * never leaves its turn running into the next one (where it would take the next test's scripted answer).
+ */
+const opened: { drain: () => Promise<unknown> }[] = [];
+
 /** The lines of a streamed answer, as they arrive. A plain JSON answer reads as one line. */
 function linesOf(res: Response) {
   const reader = res.body!.getReader();
@@ -178,7 +184,7 @@ function linesOf(res: Response) {
     if (line) seen.push(line);
     return line;
   };
-  return {
+  const lines = {
     seen,
     next,
     /** Reads on until a line of this type, and returns it. */
@@ -197,6 +203,8 @@ function linesOf(res: Response) {
     },
     cancel: () => reader.cancel(),
   };
+  opened.push({ drain: () => lines.rest(10_000) });
+  return lines;
 }
 /** The last line of a whole streamed answer. */
 const lastOf = async (res: Response) => (await linesOf(res).rest()).at(-1)!;
@@ -232,7 +240,10 @@ beforeEach(async () => {
   chip.model = "claude-sonnet-5";
   await freshUser();
 });
-afterEach(() => vi.unstubAllEnvs());
+afterEach(async () => {
+  for (const o of opened.splice(0)) await o.drain().catch(() => {});
+  vi.unstubAllEnvs();
+});
 afterAll(async () => {
   for (const id of users) await db.delete(user).where(eq(user.id, id));
 });
@@ -247,12 +258,14 @@ describe("bytes within a second, and kept flowing (§1)", () => {
       const res = await within(ask({ message: "plan my week", turnId }), 2000, "a response while the model is still working");
       expect(res.headers.get("content-type")).toMatch(/application\/x-ndjson/);
       const lines = linesOf(res);
-      const first = await lines.next(2000, "a first line while the model is still working");
+      // Storing his message can take longer than this test's 50 ms heartbeat: pings may come first, nothing else.
+      const first = await lines.until("accepted", 2000);
+      expect(lines.seen.slice(0, -1).every((l) => l.type === "ping"), JSON.stringify(lines.seen)).toBe(true);
       expect(first).toMatchObject({ type: "accepted", turnId });
       const [his] = await db.select().from(messages).where(and(eq(messages.userId, U.id), eq(messages.role, "user")));
       expect(first).toMatchObject({ userMessageId: his.id, conversationId: his.conversationId });
-      // Held for six heartbeats: pings, and nothing else, while the model works.
-      await sleep(300);
+      // Held for eight heartbeats: pings, and nothing else, while the model works.
+      await sleep(400);
       held.open();
       const rest = await lines.rest();
       const pings = rest.findIndex((l) => l.type !== "ping");
