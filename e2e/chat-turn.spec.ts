@@ -146,11 +146,21 @@ test.describe("the thread follows the answer as it is written; only his hands st
   /** Every animation frame from now: the live answer's box (null once it has landed), the composer, the thread. */
   const watch = (page: import("@playwright/test").Page) =>
     page.evaluate(() => {
-      const w = window as unknown as { __frames: Frame[]; __stop: boolean; __wheelAt: number | null };
+      const w = window as unknown as { __frames: Frame[]; __stop: boolean; __wheelAt: number | null; __wheelTop: number | null };
       w.__frames = [];
       w.__stop = false;
       w.__wheelAt = null;
-      document.addEventListener("wheel", () => (w.__wheelAt ??= performance.now()), { capture: true, passive: true });
+      w.__wheelTop = null;
+      // His first wheel event: when, and where the thread stood (the event comes before the scroll it makes).
+      document.addEventListener(
+        "wheel",
+        () => {
+          if (w.__wheelAt !== null) return;
+          w.__wheelAt = performance.now();
+          w.__wheelTop = (document.querySelector("[data-thread-scroll]") as HTMLElement).scrollTop;
+        },
+        { capture: true, passive: true }
+      );
       const tick = () => {
         const live = document.querySelector("[data-live-answer]");
         const composer = document.querySelector("[data-composer]");
@@ -169,14 +179,18 @@ test.describe("the thread follows the answer as it is written; only his hands st
       w.__stop = true;
       return w.__frames;
     });
-  /** The frames from his first wheel event on, and how far the thread was ever moved back down between two of them. */
+  /** The frames from his first wheel event on, where the thread stood at that event, and how far it was ever moved
+   *  back down between two frames after it. */
   const afterWheel = async (page: import("@playwright/test").Page) => {
-    const wheelAt = await page.evaluate(() => (window as unknown as { __wheelAt: number | null }).__wheelAt);
-    const seen = await frames(page);
-    const after = seen.filter((f) => wheelAt !== null && f.t >= wheelAt);
+    const { wheelAt, wheelTop } = await page.evaluate(() => {
+      const w = window as unknown as { __wheelAt: number | null; __wheelTop: number | null };
+      return { wheelAt: w.__wheelAt, wheelTop: w.__wheelTop };
+    });
+    expect(wheelAt, "his wheel event reached the page").not.toBeNull();
+    const after = (await frames(page)).filter((f) => f.t >= wheelAt!);
     let pulled = 0;
     for (let i = 1; i < after.length; i++) pulled = Math.max(pulled, after[i].scroll - after[i - 1].scroll);
-    return { before: seen.filter((f) => wheelAt === null || f.t < wheelAt).at(-1), after, pulled };
+    return { wheelTop: wheelTop!, after, pulled };
   };
   /** In every frame the answer is being written, its last line stands above the composer. */
   const followed = (seen: Frame[]) => {
@@ -264,10 +278,10 @@ test.describe("the thread follows the answer as it is written; only his hands st
     await watch(page);
     await wheel(page, -120);
     await landed(page);
-    const { before, after, pulled } = await afterWheel(page);
+    const { wheelTop, after, pulled } = await afterWheel(page);
     expect(after.filter((f) => f.bottom !== null).length, "frames written after his wheel").toBeGreaterThan(10);
     expect(pulled, "moved back down between two frames after his wheel").toBeLessThanOrEqual(2);
-    expect(before!.scroll - after.at(-1)!.scroll, "and the wheel did move him up").toBeGreaterThanOrEqual(100);
+    expect(wheelTop - after.at(-1)!.scroll, "and the wheel did move him up").toBeGreaterThanOrEqual(100);
   });
 
   test("a wheel up while the panel opens (input: wheel): never pulled back, and left where it settled", async ({ page }) => {
