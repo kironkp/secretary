@@ -185,6 +185,21 @@ killed part way through a turn still loses the rounds it held in memory
 (writing each round as it is answered would make every turn several usage
 rows).
 
+**r3** (`6226c9c`, `487ae0a` the tests, `965bcff`, `20f0067` the code, this
+commit). The Reviewer failed `3d43f46` once more, on the same screen: "he
+scrolled up while it was written, and is left there" failed about one run in
+three. The thread decided he had scrolled up only when the scroll event came,
+a frame or more after his scroll, and a piece arriving in between took him
+back down. Now the follow itself looks first. That alone still failed three
+times in 140 runs; logged, one cause was the chat panel opening while the
+first pieces came: its view grew taller, the browser pulled the thread's
+position down to fit, and the follow took that for his scroll up. It now
+counts as his only when the thread is above both where it was put and what
+that pull leaves. The other was the test's own (it "scrolled up" before
+there was anything to scroll). On the tip: the chat spec 20 times, 140 of 140,
+and 5 times with the processor slowed fourfold, 35 of 35, a test with pieces
+every 40 ms among them.
+
 ## v1.02 — A clear Overview (2026-10-13)
 
 `b980803` (the round as one commit: written 2026-10-06 as v0.34 and parked,
