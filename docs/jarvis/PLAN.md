@@ -244,7 +244,10 @@ beside me in a workshop."*
   nothing; an unparsed conversation tried at most 3 times while unchanged)
   are a DRAFT, to be answered with a diagnosis and probed by the Reviewer
   before they are contracted. Later, small: the slow loop's
-  tool answers "building" on Heroku, where it cannot run at all.
+  tool answers "building" on Heroku, where it cannot run at all. Also
+  from 1.09's spec: when Claude fails part way through a chat turn, the
+  OpenAI rerun runs his tools again from the start, so a write can happen
+  twice (a task made twice), not only a second bill.
 - **Kiron's feedback, 2026-10-13** (he ran one project prompt through
   Secretary and through Notion and compared; typed into the Executor's
   session, relayed to me; his screenshots hold real names and stay out of
