@@ -430,7 +430,13 @@ export function ChatThread({
   };
   useLayoutEffect(() => {
     const el = scrollRef.current;
-    if (!liveAnswer?.text || !el || !follow.current) return;
+    if (!liveAnswer?.text || !el) return;
+    // Decided here, not only in the scroll event: that event comes a frame or
+    // more after his scroll, and a piece arriving in between would otherwise
+    // pull him back to the bottom (v1.09 r3). The text growing below never
+    // moves scrollTop, so the thread above where it was last put is his doing.
+    if (followedTo.current !== null && el.scrollTop < followedTo.current - 4) follow.current = false;
+    if (!follow.current) return;
     el.scrollTop = el.scrollHeight;
     followedTo.current = el.scrollTop;
   }, [liveAnswer?.text]);
