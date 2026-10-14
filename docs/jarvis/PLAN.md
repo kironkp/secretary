@@ -251,7 +251,11 @@ beside me in a workshop."*
   tool answers "building" on Heroku, where it cannot run at all. Also
   from 1.09's spec: when Claude fails part way through a chat turn, the
   OpenAI rerun runs his tools again from the start, so a write can happen
-  twice (a task made twice), not only a second bill.
+  twice (a task made twice), not only a second bill. The Executor's
+  design, from 1.09: the Claude failure carries the tool calls it already
+  made with their results, and the OpenAI input opens with them, so the
+  fallback goes on from where Claude stopped (about 20 lines; test: Claude
+  runs create_task and fails, and the task exists once).
 - **Kiron's feedback, 2026-10-13** (he ran one project prompt through
   Secretary and through Notion and compared; typed into the Executor's
   session, relayed to me; his screenshots hold real names and stay out of
