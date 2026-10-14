@@ -168,8 +168,9 @@ describe("update_task project moves + update_project merge", () => {
   });
 
   it("delete refuses when tasks are attached, and says so without pointing at a merge", async () => {
+    // The duplicate still holds its task now that the merge above changes nothing.
     const res = await executeTool(ctx, "update_project", {
-      project: "Jazz music project",
+      project: "Duplicate Zone",
       delete: true,
     });
     expect((res.result as { error: string }).error).toMatch(/still has \d+ task/);
