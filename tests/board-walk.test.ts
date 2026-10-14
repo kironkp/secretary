@@ -157,7 +157,7 @@
 process.env.TZ = "UTC";
 
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { and, desc, eq, inArray, like, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, like, sql, type SQL } from "drizzle-orm";
 
 const session = vi.hoisted(() => {
   process.env.ADAPTIVE_V2 = "true"; // the layout route reads it when it is loaded
@@ -238,6 +238,93 @@ function rng(seed: number) {
   };
   return { next, int: (n: number) => Math.floor(next() * n), pick: <T,>(list: readonly T[]): T => list[Math.floor(next() * list.length)], chance: (p: number) => next() < p };
 }
+
+/**
+ * The walker's clock. A walk reads no wall clock: it starts at noon in his zone on a day its seed picks (in May or
+ * June, far from a change of summer time), and its time then moves only by the walk's own steps and by the real
+ * seconds the walk takes. (Regression walk 63 of seed 990017 once ran across his midnight on the wall clock: his due
+ * dates moved a day between an edit and its open, and the open rightly stored a board the walk had not asked for. And
+ * a seed has to say the same thing whenever it is run.) Rows the database stamps for the walker's user (layout rows,
+ * messages, usage, …) take the same clock: a trigger in the test database stamps them from `test_walk.clock`, keyed
+ * by his id, a second behind the app's clock as the database's own stamps are; the row of anyone without a clock row
+ * keeps the database's stamp. The table and the function live in a schema of their own, out of drizzle's way, and
+ * the setup is made again at every start (a push that recreates a table drops its trigger).
+ */
+const walkStart = (seed: number, index: number, scripted: boolean) =>
+  new Date(Date.UTC(2026, 4, 1, 19) + ((seed + index * 7919 + (scripted ? 4337 : 0)) % 61) * 86_400_000);
+/** The walker writes into the database it runs on, a trigger included: a local or CI test database only. */
+const dbHost = (() => {
+  try {
+    return new URL(process.env.DATABASE_URL ?? "").hostname;
+  } catch {
+    return "";
+  }
+})();
+const LOCAL_DB = ["localhost", "127.0.0.1", "::1", "[::1]"].includes(dbHost);
+let clockReady: Promise<void> | null = null;
+const installClock = () =>
+  (clockReady ??= (async () => {
+    if (!LOCAL_DB) throw new Error(`The walker runs only on a local or CI test database: it puts a trigger in the database it runs on, so DATABASE_URL's host must be localhost or 127.0.0.1 (it is "${dbHost || "not set"}").`);
+    // Several processes may make it at the same moment: a statement that meets another's is tried again.
+    const run = async (statement: SQL) => {
+      for (let i = 0; ; i++) {
+        try {
+          await db.execute(statement);
+          return;
+        } catch (e) {
+          if (i >= 5) throw e;
+          await new Promise((r) => setTimeout(r, 100 * (i + 1)));
+        }
+      }
+    };
+    await run(sql`create schema if not exists test_walk`);
+    await run(sql`create table if not exists test_walk.clock (user_id text primary key, at timestamptz not null, set_at timestamptz not null)`);
+    await run(
+      sql.raw(`create or replace function test_walk.stamp() returns trigger language plpgsql as $f$
+        declare t timestamptz; col text; r jsonb := to_jsonb(NEW);
+        begin
+          select c.at + (clock_timestamp() - c.set_at) - interval '1 second' into t from test_walk.clock c where c.user_id = NEW.user_id::text;
+          if t is null then return NEW; end if;
+          -- Only a stamp the database gave (a default now()); a time the code wrote is kept.
+          foreach col in array TG_ARGV loop
+            if (r ->> col)::timestamptz = now() then NEW := jsonb_populate_record(NEW, jsonb_build_object(col, t)); end if;
+          end loop;
+          return NEW;
+        end $f$`)
+    );
+    const stamped = (await db.execute(sql`
+      select c.table_name as t, array_agg(c.column_name::text order by c.column_name) as cols from information_schema.columns c
+      where c.table_schema = 'public' and c.data_type = 'timestamp with time zone' and c.column_default ilike '%now()%'
+        and exists (select 1 from information_schema.columns u where u.table_schema = 'public' and u.table_name = c.table_name and u.column_name = 'user_id')
+      group by c.table_name`)) as unknown as { rows: { t: string; cols: string[] }[] };
+    for (const { t, cols } of stamped.rows) {
+      await run(sql.raw(`create or replace trigger test_walk_stamp before insert on public."${t}" for each row execute function test_walk.stamp(${cols.map((c) => `'${c}'`).join(", ")})`));
+    }
+  })());
+/**
+ * The app's side of a walk's clock: Date reads the real clock moved by an offset, so the walk's time runs at the real
+ * rate from where it was set, as the database's does. (A fake clock that ticks in steps stands still between ticks:
+ * an open made in the same tick as a task due "in four days" counts four days left, the next open three.)
+ */
+const RealDate = Date;
+let clockOffset = 0;
+const WalkDate = function (this: unknown, ...args: unknown[]) {
+  if (!new.target) return new RealDate(RealDate.now() + clockOffset).toString();
+  return args.length ? Reflect.construct(RealDate, args) : new RealDate(RealDate.now() + clockOffset);
+} as unknown as DateConstructor;
+Object.assign(WalkDate, { now: () => RealDate.now() + clockOffset, parse: RealDate.parse, UTC: RealDate.UTC });
+Object.defineProperty(WalkDate, "prototype", { value: RealDate.prototype });
+Object.defineProperty(WalkDate, Symbol.hasInstance, { value: (x: unknown) => x instanceof RealDate });
+/** Sets the clock of a walk: the app's, and the database's for this user. */
+const setWalkClock = async (id: string, at: Date) => {
+  clockOffset = at.getTime() - RealDate.now();
+  globalThis.Date = WalkDate;
+  await db.execute(sql`insert into test_walk.clock (user_id, at, set_at) values (${id}, ${at}, clock_timestamp()) on conflict (user_id) do update set at = excluded.at, set_at = excluded.set_at`);
+};
+const stopWalkClock = () => {
+  globalThis.Date = RealDate;
+  clockOffset = 0;
+};
 
 // --- the model: plain operations on a list of section keys ---------------------
 type Told = { key: string; from: "top" | "bottom"; n: number };
@@ -467,14 +554,27 @@ const whole = (plan: LayoutPlan) => plan.sections.map((s) => JSON.stringify(cano
 
 type Complaint = { check: string; detail: string };
 
-async function walk(index: number, scripted = false) {
-  const r = rng(SEED + index * 7919 + (scripted ? 4337 : 0));
+/** For the tests of the walker's own clock: another seed or length, another start, and one jump of the clock at a step. */
+type WalkOptions = { seed?: number; steps?: number; start?: Date; jump?: { step: number; where: "before the edit" | "before the open"; to: Date } };
+
+async function walk(index: number, scripted = false, opts: WalkOptions = {}) {
+  await installClock();
+  const seed = opts.seed ?? SEED;
+  const r = rng(seed + index * 7919 + (scripted ? 4337 : 0));
   /** What is scripted draws from a generator of its own. */
-  const rs = rng(SEED * 31 + index * 104_729 + 17);
-  const steps = scripted ? rs.int(7) : STEPS;
+  const rs = rng(seed * 31 + index * 104_729 + 17);
+  const steps = scripted ? rs.int(7) : (opts.steps ?? STEPS);
   const size = [9, 5, 3, 9, 1, 0][index % 6];
   const id = `test-walk-${crypto.randomUUID()}`;
   users.push(id);
+  const start = opts.start ?? walkStart(seed, index, scripted);
+  await setWalkClock(id, start);
+  let jumped = false;
+  const jump = async (where: string) => {
+    if (jumped || opts.jump?.where !== where || opts.jump.step !== moves.length) return;
+    jumped = true;
+    await setWalkClock(id, opts.jump.to);
+  };
   const me = { id, email: `${id}@v102.test`, name: "Walker", timezone: TZ };
   await db.insert(user).values({ id, name: me.name, email: me.email, timezone: TZ });
   const ids = new Map<string, string>(); // name -> id, active top-level projects and lists
@@ -562,6 +662,7 @@ async function walk(index: number, scripted = false) {
 
   // --- an open, and everything asked of it ----------------------------------------
   const open = async (why: string, opts: { mayStore: boolean; planner?: (signals: Signals) => string; retell?: string[] }) => {
+    await jump("before the open");
     const before = await versions();
     const bundle = await computeCurrentPlan(id);
     // The model could not say where a section went (it is where the system has it): what he placed is read off this board.
@@ -842,6 +943,7 @@ async function walk(index: number, scripted = false) {
   };
   /** One or more operations in the chat tool in one request. */
   const edit = async (operations: { op: string; section?: string; component?: string; props?: Record<string, unknown>; to?: number; at?: number }[]) => {
+    await jump("before the edit");
     const before = await boardNow();
     const hidden = await hiddenNow();
     const urgent = new Set((await computeCurrentPlan(id)).signals.projects.filter(isUrgent).map((p) => `project_card:${p.id}`));
@@ -1483,11 +1585,12 @@ async function walk(index: number, scripted = false) {
     await rs.pick([backOntoABoardWithoutIt, backUnderTheStrip, besideAWaitingMove, hisAmongTheCardsWhenTheyMove])();
   }
   await roundTrips();
-  return { complaints, moves, counts, refusals, size, storedBoard: await marked() };
+  return { complaints, moves, counts, refusals, size, storedBoard: await marked(), id, jumped, clock: { start, end: new Date() } };
 }
 
 afterAll(async () => {
   if (users.length) await db.delete(user).where(inArray(user.id, users));
+  if (clockReady && users.length) await db.execute(sql`delete from test_walk.clock where user_id in (${sql.join(users.map((u) => sql`${u}`), sql`, `)})`);
 });
 
 describe(`a random walk over the Overview (${WALKS} walks of ${STEPS} steps, seed ${SEED})`, { timeout: 1_200_000 }, () => {
@@ -1497,7 +1600,12 @@ describe(`a random walk over the Overview (${WALKS} walks of ${STEPS} steps, see
 
   const run = async (index: number, scripted: boolean) => {
     clearPlanCache();
-    const result = await walk(index, scripted);
+    let result: Awaited<ReturnType<typeof walk>>;
+    try {
+      result = await walk(index, scripted);
+    } finally {
+      stopWalkClock();
+    }
     for (const c of result.complaints) tally.set(c.check, (tally.get(c.check) ?? 0) + 1);
     for (const [k, n] of result.counts) reached.set(k, (reached.get(k) ?? 0) + n);
     for (const [k, n] of result.refusals) refusedFor.set(k, (refusedFor.get(k) ?? 0) + n);
@@ -1522,6 +1630,71 @@ describe(`a random walk over the Overview (${WALKS} walks of ${STEPS} steps, see
 // (lib/due.ts), with the clock moved across midnight and across the due hour:
 // a committed deadline ahead, today and past, and a task due at 17:00 (the
 // date the system infers, which is where round 3 failed).
+describe("the walker's own clock (a test of the walker, not of the product)", { timeout: 1_200_000 }, () => {
+  afterEach(() => stopWalkClock());
+  const timeFor = new Intl.DateTimeFormat("en-US", { timeZone: TZ, hour: "numeric", minute: "numeric", hourCycle: "h23" });
+  const dayFor = new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" });
+
+  it("a walk starts at noon in his zone on its seed's day, its clock moves by nothing but the real seconds it takes, and it stays far from his midnight", async () => {
+    for (const seed of [SEED, 990017, 20261013, 57721566]) {
+      for (let index = 0; index < 240; index++) {
+        for (const scripted of [false, true]) {
+          const at = walkStart(seed, index, scripted);
+          expect(timeFor.format(at)).toBe("12:00");
+          // Eleven hours on it is still his day: the longest walk takes minutes.
+          expect(dayFor.format(new Date(at.getTime() + 11 * 3_600_000))).toBe(dayFor.format(at));
+        }
+      }
+    }
+    const wall0 = performance.now();
+    const result = await walk(1, false, { steps: 8 });
+    const wall = performance.now() - wall0;
+    stopWalkClock();
+    expect(result.clock.start.getTime()).toBe(walkStart(SEED, 1, false).getTime());
+    const moved = result.clock.end.getTime() - result.clock.start.getTime();
+    expect(moved).toBeGreaterThanOrEqual(0);
+    expect(moved).toBeLessThanOrEqual(wall + 1_000);
+    expect(dayFor.format(result.clock.end)).toBe(dayFor.format(result.clock.start));
+    // What the database stamped for the walk (its projects, never aged by a step) is on the walk's clock too.
+    const made = await db.select({ at: projects.createdAt }).from(projects).where(eq(projects.userId, result.id));
+    expect(made.length).toBeGreaterThan(0);
+    for (const { at } of made) {
+      expect(at.getTime()).toBeGreaterThanOrEqual(result.clock.start.getTime() - 2_000);
+      expect(at.getTime()).toBeLessThanOrEqual(result.clock.end.getTime());
+    }
+  });
+
+  it("a row the database stamps takes the walk's clock for the walker's user, and the database's own for anyone else", async () => {
+    await installClock();
+    const [walker, other] = [`test-walk-${crypto.randomUUID()}`, `test-walk-${crypto.randomUUID()}`];
+    users.push(walker, other);
+    await db.insert(user).values([walker, other].map((id) => ({ id, name: "Clock", email: `${id}@v102.test`, timezone: TZ })));
+    const at = walkStart(SEED, 0, false);
+    await setWalkClock(walker, at);
+    const [mine] = await db.insert(projects).values({ userId: walker, name: "Atlas", status: "active" }).returning();
+    const [theirs] = await db.insert(projects).values({ userId: other, name: "Atlas", status: "active" }).returning();
+    stopWalkClock();
+    expect(Math.abs(mine.createdAt.getTime() - at.getTime())).toBeLessThan(5_000);
+    expect(Math.abs(theirs.createdAt.getTime() - Date.now())).toBeLessThan(60_000);
+  });
+
+  // Regression walk 63 of seed 990017 ran across his midnight on the wall clock: step 16 is an edit, and the first open
+  // after it stored a board. Here its clock starts two hours before his midnight and jumps once, at step 16.
+  const night = walkStart(990017, 63, false).getTime() + 12 * 3_600_000;
+  it.each([
+    ["across his midnight between the edit and its open: the open stores a board the walk did not ask for", "before the open", night + 30_000, ["an unchanged open stores nothing"]],
+    ["the same jump staying short of his midnight: nothing (the day does it, not the jump)", "before the open", night - 30_000, []],
+    ["across his midnight just before the edit: nothing (the edit is made on the new day, and stores what the open draws)", "before the edit", night + 30_000, []],
+  ] as const)("walk 63 of seed 990017, its clock moved %s", async (_, where, to, checks) => {
+    const result = await walk(63, false, { seed: 990017, steps: 17, start: new Date(night - 2 * 3_600_000), jump: { step: 16, where, to: new Date(to) } });
+    stopWalkClock();
+    expect(result.moves[15], "the path changed: step 16 of walk 63 is no longer the edit this test was written for; find a step again where his midnight changes the board (BOARD_PRINT=all shows the steps)").toBe("edit move Birch to 11");
+    expect(result.jumped, "the clock never jumped").toBe(true);
+    expect(result.complaints.map((c) => c.check)).toEqual(checks);
+    for (const c of result.complaints) expect(c.detail).toMatch(/^step 16 \(edit move Birch to 11\): edit move Birch to 11, first open: /);
+  });
+});
+
 describe("the chip under a deadline says what the date beside it says", { timeout: 60_000 }, () => {
   afterEach(() => vi.useRealTimers());
   // In November Los Angeles is eight hours behind UTC: 17:00 there is 01:00 UTC the next day.
