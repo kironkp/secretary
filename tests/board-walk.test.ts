@@ -1766,10 +1766,10 @@ describe("the walker's own clock (a test of the walker, not of the product)", { 
   ] as const)("walk 63 of seed 990017, its clock moved %s", async (_, where, to, checks) => {
     const result = await walk(63, false, { seed: 990017, steps: 17, bias: false, start: new Date(night - 2 * 3_600_000), jump: { step: 16, where, to: new Date(to) } });
     stopWalkClock();
-    expect(result.moves[15], "the path changed: step 16 of walk 63 is no longer the edit this test was written for; find a step again where his midnight changes the board (BOARD_PRINT=all shows the steps)").toBe("edit move Birch to 11");
+    expect(result.moves[15], "the path changed: step 16 of walk 63 is no longer the edit this test was written for; find a step again where his midnight changes the board (BOARD_PRINT=all shows the steps)").toBe("edit move Atlas to 10");
     expect(result.jumped, "the clock never jumped").toBe(true);
     expect(result.complaints.map((c) => c.check)).toEqual(checks);
-    for (const c of result.complaints) expect(c.detail).toMatch(/^step 16 \(edit move Birch to 11\): edit move Birch to 11, first open: /);
+    for (const c of result.complaints) expect(c.detail).toMatch(/^step 16 \(edit move Atlas to 10\): edit move Atlas to 10, first open: /);
   });
 });
 
