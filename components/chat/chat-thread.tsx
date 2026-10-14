@@ -417,28 +417,34 @@ export function ChatThread({
   // landing moves nothing.
   const scrollRef = useRef<HTMLDivElement>(null);
   const follow = useRef(true);
-  /** Where the thread was last put by the following, to tell his own scroll up from it. */
+  /** Where the thread was last put by the following, and how tall its content was then, to tell his own scroll up from it. */
   const followedTo = useRef<number | null>(null);
+  const followedHeight = useRef(0);
   /** This turn's answer came in pieces: when it is saved, nothing scrolls. */
   const streamed = useRef(false);
   const landing = useRef(false);
+  /** Back at the bottom, the thread follows again. (Whether he left it is decided where it follows, below.) */
   const onThreadScroll = () => {
     const el = scrollRef.current;
-    if (!el) return;
-    if (followedTo.current !== null && el.scrollTop < followedTo.current - 4) follow.current = false;
-    if (el.scrollHeight - el.scrollTop - el.clientHeight < 32) follow.current = true;
+    if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 32) follow.current = true;
   };
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!liveAnswer?.text || !el) return;
-    // Decided here, not only in the scroll event: that event comes a frame or
-    // more after his scroll, and a piece arriving in between would otherwise
-    // pull him back to the bottom (v1.09 r3). The text growing below never
-    // moves scrollTop, so the thread above where it was last put is his doing.
-    if (followedTo.current !== null && el.scrollTop < followedTo.current - 4) follow.current = false;
+    // Decided here, not in the scroll event: that event comes a frame or more
+    // after his scroll, and a piece arriving in between would otherwise pull
+    // him back to the bottom (v1.09 r3). The text growing below never moves
+    // scrollTop; the panel growing taller can (the browser pulls scrollTop
+    // down to what the content still allows), so the thread counts as moved
+    // only when it is above where it was put AND above what that clamp leaves.
+    if (followedTo.current !== null) {
+      const unmoved = Math.min(followedTo.current, followedHeight.current - el.clientHeight);
+      if (el.scrollTop < unmoved - 4) follow.current = false;
+    }
     if (!follow.current) return;
     el.scrollTop = el.scrollHeight;
     followedTo.current = el.scrollTop;
+    followedHeight.current = el.scrollHeight;
   }, [liveAnswer?.text]);
 
   useEffect(() => {
