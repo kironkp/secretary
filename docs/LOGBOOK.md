@@ -11,7 +11,10 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 `8c68ef7`, `e44cc51` (the spec, docs/chat/SPEC.md, new, and docs/spend/SPEC.md
 §1.2), `c667a3c`, `3aa8bc9` (the tests, first and red), `084fe17` (the code),
-`4e6d93c` (the browser spec's project), this commit.
+`4e6d93c` (the browser spec's project), `cba3898` (this entry's first
+version); then the two follow-ups from 1.02 r5's review, `8fc8f2f` (the
+walker's guard) and `c87d744` (a test of the Reviewer's board), and
+`dd96229` (the chat tests no longer race), this commit.
 
 Kiron, 2026-10-13: "error try again". One chat answer took longer than 30
 seconds, and Heroku's router cut the request at 30,007 ms while Claude was up.
@@ -67,6 +70,21 @@ again.
   to empty a duplicate by moving its tasks one by one. On a call, the voice is
   no longer sent to the chat for a merge the chat cannot do; the persona's
   line tells both to say plainly that merging is not available yet.
+- From 1.02 r5's review, test and walker only. The Overview's random walk
+  refuses to run unless its database is local; it read the host from the URL,
+  while pg takes a host given in the query string first, so
+  `…@localhost:5434/x?host=example.invalid` passed and went elsewhere. It now
+  reads the host the way pg does, refuses any host or hostaddr parameter, and
+  the five other tests in its file that write to a database stand behind it
+  too. And a committed test of the Reviewer's board where a card that comes
+  back, put onto the request's list, would drag a section he placed in among
+  the cards: a mutant that does that survived every other test, the long
+  walk included; this one fails on it.
+- The chat stream's tests ran green here and failed in the CI-exact run: one
+  read the first line as the accepted one when a ping had come first, and
+  its turn, still running, took the next test's answer. The test now reads
+  past pings, and every answer a test opens is read to its end before the
+  next test starts.
 
 The database: one table added, `chat_turns`, keyed by the user and the page's
 turn id; nothing else changes, nothing is backfilled. The release applies it
