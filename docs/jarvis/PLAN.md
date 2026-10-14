@@ -234,7 +234,17 @@ beside me in a workshop."*
   are recorded as usage (they were not: a hole in the caps), and the
   project tool's merge, which today moves tasks only and then DELETES the
   old project with its records, is turned off until 1.12 (it says merging
-  is not available yet).
+  is not available yet). Three FAILs, 2026-10-14, all on the thread
+  following the streamed answer (`51d4828`: it did not follow; `3d43f46`: a
+  piece racing his scroll-up pulled him back; `43ee5b9`: in WebKit a
+  second round shorter than the first stops it for good); the streaming,
+  the turns, paying once and the usage all passed each time. **The loop is
+  stopped (§4).** The cause of all three: his intent was read from
+  scrollTop, which the layout also moves. The changed approach, drafted
+  to both peers before any build: following stops only on his own input
+  in the thread (wheel, touch, pointer, scroll keys) and resumes at the
+  bottom; tests sample every frame in the page, in Chromium and in local
+  WebKit, 20 runs each.
 - **1.08** — after 1.09, ahead of 1.05: an understanding
   call that was sent and not answered is counted, and a provider failure
   backs off. Today: up to 3 attempts a sweep per project, every 10 minutes,
