@@ -59,7 +59,16 @@ arrow keys, or says "move Garden shed to the top" in the chat or on a call:
   there, no other group.
 - The answer says where it is now, in his words ("Garden shed is at the top
   of your projects"). When its card on the Overview is one he placed there
-  himself, the answer says that card stays where he put it (see §4).
+  himself, the answer says that card stays where he put it ("On the
+  Overview, its card stays where you put it"), whether he dragged or asked
+  (see §4).
+- One move is one transaction: the group's rows are read and written
+  together, so two moves at once cannot interleave into an order neither
+  asked for.
+
+**A project that changes group** (set aside, made active again, made a list
+or a project) arrives in its new group unplaced, at its urgency place, and
+loses its place in the group it left; the group it left keeps its order.
 
 ## 3. A move costs nothing
 
@@ -98,10 +107,16 @@ styles.
   a 44 × 44 button named "Reorder <project>". While held it is accent
   (`#3a5bd0`) and the row is lifted: its own white card, shadow
   `0 10px 28px rgba(0,0,0,0.18)`, 6 px wider on each side, the name
-  semibold. The rows it passes make room for it. Let go, it stays there and
-  the order is stored; if the store fails it goes back, and a line says so.
-- On a phone the handle is dragged straight away (it is a handle, not the
-  row: no long press, and the page does not scroll while it is held). With
+  semibold. The rows it passes make room for it. Let go, it stays there at
+  once, before the server has answered, and the order is stored; if the
+  store fails it goes back, and a plain line says so ("Couldn't move Garden
+  shed. It's back where it was."). Two drags in quick succession are stored
+  in the order he made them, one after the other; an answer to the first
+  never puts the list back under the second.
+- Touch: the handle's hit box is 44 × 44, and a drag starts only there. On
+  a phone the handle is dragged straight away (no long press; the page does
+  not scroll while it is held). The rest of the row still scrolls the page
+  and still opens the project on a tap; a drag never starts from it. With
   the keyboard, the handle's arrow keys move the project one place.
 - Motion: 340 ms on the app's own curve for the rows making room; none
   with reduced motion.
@@ -113,6 +128,6 @@ styles.
 
 - A card placed on the Overview keeps its place when the project moves in
   his order (§4), until 1.07.
-- A project that changes group (set aside, then active again) keeps its
-  number, and is placed among its new group by it.
+- A project that changes group starts unplaced in the new one (§2): set
+  aside and brought back, it does not return to its old place.
 - The filter chips and the task editor's picker keep their own orders (§1).
