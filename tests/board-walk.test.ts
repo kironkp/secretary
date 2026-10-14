@@ -554,12 +554,14 @@ const whole = (plan: LayoutPlan) => plan.sections.map((s) => JSON.stringify(cano
 
 type Complaint = { check: string; detail: string };
 
-/** For the tests of the walker's own clock: another seed or length, another start, and one jump of the clock at a step. */
-type WalkOptions = { seed?: number; steps?: number; start?: Date; jump?: { step: number; where: "before the edit" | "before the open"; to: Date } };
+/** For the tests of the walker's own clock: another seed or length, BOARD_BIAS set either way (it draws from the walk's
+ *  generator, so it changes the path), another start, and one jump of the clock at a step. */
+type WalkOptions = { seed?: number; steps?: number; bias?: boolean; start?: Date; jump?: { step: number; where: "before the edit" | "before the open"; to: Date } };
 
 async function walk(index: number, scripted = false, opts: WalkOptions = {}) {
   await installClock();
   const seed = opts.seed ?? SEED;
+  const bias = opts.bias ?? BIAS;
   const r = rng(seed + index * 7919 + (scripted ? 4337 : 0));
   /** What is scripted draws from a generator of its own. */
   const rs = rng(seed * 31 + index * 104_729 + 17);
@@ -1201,7 +1203,9 @@ async function walk(index: number, scripted = false, opts: WalkOptions = {}) {
   for (let step = 0; step < steps; step++) {
     const full = await boardNow();
     const board = without(full, BANNER);
-    const hidden = [...(await hiddenNow())];
+    // Sorted: the preferences come back in no order of their own (the rows' order on disk), and a draw from them by
+    // position must not depend on that.
+    const hidden = [...(await hiddenNow())].toSorted();
     const stands = standsOn(full, placedSet());
     count("steps");
     if (stands.crossing) count("stands: on a crossing");
@@ -1222,7 +1226,7 @@ async function walk(index: number, scripted = false, opts: WalkOptions = {}) {
       await route({ action: "calm_mode", enabled });
       await openTwice("calm mode", { firstMayStore: true });
     };
-    if (BIAS && board.length) {
+    if (bias && board.length) {
       const b = r.next();
       if (!stands.crossing && !stands.stripUnder && b < 0.3) {
         // Onto such a board: a day on (a planner may move a section a day after the layout last changed), a planner's
@@ -1351,10 +1355,12 @@ async function walk(index: number, scripted = false, opts: WalkOptions = {}) {
     } else if (draw < 0.6) {
       await calmMode(!calm);
     } else if (draw < 0.64) {
-      const all = (await db.select().from(layoutPreferences).where(eq(layoutPreferences.userId, id))).filter((p) => p.kind === "hide_section" || p.kind === "ban_component");
+      const all = (await db.select().from(layoutPreferences).where(eq(layoutPreferences.userId, id)))
+        .filter((p) => p.kind === "hide_section" || p.kind === "ban_component")
+        .toSorted((a, b) => `${a.kind}:${JSON.stringify(a.value)}`.localeCompare(`${b.kind}:${JSON.stringify(b.value)}`));
       if (all.length) await lift(r.pick(all));
     } else if (draw < 0.69) {
-      const banned = [...(await bannedNow())];
+      const banned = [...(await bannedNow())].toSorted();
       const remove = banned.length > 0 && r.chance(0.6);
       const component = remove ? r.pick(banned) : r.pick(["people_index", "stat_row", "kanban", "date_chase", "coming_up"]);
       await ban(component, remove);
@@ -1388,7 +1394,7 @@ async function walk(index: number, scripted = false, opts: WalkOptions = {}) {
         await db.update(tasks).set({ dueAt: due === null ? null : day(due) }).where(and(eq(tasks.userId, id), eq(tasks.projectId, ids.get(name)!)));
       } else if ((kind === "a task finished" || kind === "a task deleted") && names.length) {
         const name = r.pick(names);
-        const open = await db.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.userId, id), eq(tasks.projectId, ids.get(name)!), eq(tasks.status, "todo")));
+        const open = await db.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.userId, id), eq(tasks.projectId, ids.get(name)!), eq(tasks.status, "todo"))).orderBy(tasks.createdAt);
         if (open.length) {
           moves.push(`data: ${kind} on ${name}`);
           if (kind === "a task finished") await db.update(tasks).set({ status: "done", completedAt: new Date() }).where(eq(tasks.id, r.pick(open).id));
@@ -1588,10 +1594,11 @@ async function walk(index: number, scripted = false, opts: WalkOptions = {}) {
   return { complaints, moves, counts, refusals, size, storedBoard: await marked(), id, jumped, clock: { start, end: new Date() } };
 }
 
+// The delete of a long run's users (240 walks and more, every row they made) takes far longer than vitest's 10 s for a hook.
 afterAll(async () => {
   if (users.length) await db.delete(user).where(inArray(user.id, users));
   if (clockReady && users.length) await db.execute(sql`delete from test_walk.clock where user_id in (${sql.join(users.map((u) => sql`${u}`), sql`, `)})`);
-});
+}, 1_800_000);
 
 describe(`a random walk over the Overview (${WALKS} walks of ${STEPS} steps, seed ${SEED})`, { timeout: 1_200_000 }, () => {
   const tally = new Map<string, number>();
@@ -1686,7 +1693,7 @@ describe("the walker's own clock (a test of the walker, not of the product)", { 
     ["the same jump staying short of his midnight: nothing (the day does it, not the jump)", "before the open", night - 30_000, []],
     ["across his midnight just before the edit: nothing (the edit is made on the new day, and stores what the open draws)", "before the edit", night + 30_000, []],
   ] as const)("walk 63 of seed 990017, its clock moved %s", async (_, where, to, checks) => {
-    const result = await walk(63, false, { seed: 990017, steps: 17, start: new Date(night - 2 * 3_600_000), jump: { step: 16, where, to: new Date(to) } });
+    const result = await walk(63, false, { seed: 990017, steps: 17, bias: false, start: new Date(night - 2 * 3_600_000), jump: { step: 16, where, to: new Date(to) } });
     stopWalkClock();
     expect(result.moves[15], "the path changed: step 16 of walk 63 is no longer the edit this test was written for; find a step again where his midnight changes the board (BOARD_PRINT=all shows the steps)").toBe("edit move Birch to 11");
     expect(result.jumped, "the clock never jumped").toBe(true);
