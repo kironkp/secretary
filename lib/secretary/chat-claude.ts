@@ -4,11 +4,31 @@
 // OpenAI if this throws (refusal included) — the chip can never brick chat.
 import type Anthropic from "@anthropic-ai/sdk";
 import { cacheControl } from "@/lib/prompt-cache";
+import { estimateSentTokens, mayHaveBeenBilled } from "@/lib/unanswered";
 import { anthropicToolDefs } from "./tool-schemas";
 import { anthropicAttachmentBlocks } from "./attachment-blocks";
 import type { ToolContext, ToolOutcome } from "./tools";
 
 const MAX_TOOL_ROUNDS = 8;
+
+/** What the rounds that answered reported, summed the way a usage row wants it. */
+export type ClaudeSpent = { inputTokens: number; outputTokens: number; cachedInputTokens: number; cacheWriteInputTokens: number };
+
+/**
+ * The turn failed on Claude, and the route falls back to OpenAI. It carries
+ * what was already spent (docs/spend/SPEC.md §1.2): the rounds that answered,
+ * as they reported (a refusal included), and the estimate for a round that was
+ * sent and never answered (0 when Claude refused it before doing any work).
+ */
+export class ClaudeChatFailure extends Error {
+  constructor(
+    readonly reason: unknown,
+    readonly spent: ClaudeSpent,
+    readonly unansweredInputTokens: number
+  ) {
+    super(reason instanceof Error ? reason.message : String(reason));
+  }
+}
 
 export type ClaudeChatResult = {
   text: string;
@@ -37,6 +57,8 @@ export async function runClaudeChat(opts: {
   attachments: { mime: string; name: string; data: Buffer }[];
   toolCtx: ToolContext;
   executeTool: (ctx: ToolContext, name: string, args: unknown) => Promise<ToolOutcome>;
+  /** Each piece of text as Claude writes it, with the round it belongs to (docs/chat/SPEC.md §1). */
+  onText?: (round: number, text: string) => void;
 }): Promise<ClaudeChatResult> {
   const userContent: Anthropic.ContentBlockParam[] = [
     ...(opts.message.trim()
@@ -84,15 +106,27 @@ export async function runClaudeChat(opts: {
     { type: "text", text: opts.instructions.live, cache_control: cacheControl() },
   ];
 
+  const spent = (): ClaudeSpent => ({ inputTokens, outputTokens, cachedInputTokens, cacheWriteInputTokens });
+
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-    const response = await opts.client.messages.create({
+    const request = {
       model: opts.model,
       max_tokens: 8000,
       system: cachedSystem,
       output_config: { effort: opts.effort as "low" | "medium" | "high" | "xhigh" | "max" },
       tools: cachedTools,
       messages,
-    });
+    };
+    let response: Anthropic.Message;
+    try {
+      // Streamed so the page sees the answer as it is written; read whole at the end, as before.
+      const stream = opts.client.messages.stream(request);
+      if (opts.onText) stream.on("text", (piece) => opts.onText!(round, piece));
+      response = await stream.finalMessage();
+    } catch (e) {
+      // Sent and never answered: counted at the estimate unless refused before any work.
+      throw new ClaudeChatFailure(e, spent(), mayHaveBeenBilled(e) ? estimateSentTokens([JSON.stringify(request)]) : 0);
+    }
     // cache_read is billed at ~10% and cache_creation at ~125%, so both are
     // counted as input and each portion is reported separately: the read one
     // is the only way to know the cache is actually being HIT rather than
@@ -105,7 +139,8 @@ export async function runClaudeChat(opts: {
     cacheWriteInputTokens += cacheWrite;
     outputTokens += response.usage.output_tokens;
 
-    if (response.stop_reason === "refusal") throw new Error("claude refusal");
+    // A refusal answered, and reported what it cost: counted as reported.
+    if (response.stop_reason === "refusal") throw new ClaudeChatFailure(new Error("claude refusal"), spent(), 0);
 
     const toolUses = response.content.filter(
       (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"

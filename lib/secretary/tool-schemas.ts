@@ -113,11 +113,11 @@ export const toolSchemas = {
     merge_into: z
       .string()
       .optional()
-      .describe("Move ALL of its tasks into this other project, then delete it"),
+      .describe("Merging projects is not available yet: a call with this changes nothing"),
     delete: z
       .boolean()
       .optional()
-      .describe("Delete the project — only allowed when it has no tasks (use merge_into otherwise)"),
+      .describe("Delete the project — only allowed when it has no tasks"),
   }),
   create_event: z.object({
     title: z.string().min(1),
@@ -673,7 +673,7 @@ const toolDescriptions: Record<ToolName, string> = {
   list_projects:
     "All projects with open/done counts. Check this before filing a task when unsure of the exact project name.",
   update_project:
-    "Rename a project, change its color, MERGE it into another (merge_into moves all tasks then deletes the duplicate), or delete an empty one. Use this to clean up duplicate projects.",
+    "Rename a project, change its color, or delete an empty one. Merging projects is not available yet: for a duplicate, say so plainly; do not move its tasks one by one to empty it.",
   create_event:
     "Put an event on the user's calendar — meetings, appointments, plans, a daily reminder — and, when Google Calendar is connected, on their Google Calendar at once. One-off or recurring (recurrence), with reminder times. Call it only once the user has asked for it; then say back read_back exactly as returned, which says what was made and whether it reached Google. Never say it was added before this returns.",
   update_event:

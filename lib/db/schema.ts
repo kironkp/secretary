@@ -7,6 +7,7 @@ import {
   numeric,
   pgEnum,
   pgTable,
+  primaryKey,
   real,
   text,
   timestamp,
@@ -255,6 +256,33 @@ export const messages = pgTable(
     index("messages_user_conversation_created_idx").on(t.userId, t.conversationId, t.createdAt),
     index("messages_user_created_idx").on(t.userId, t.createdAt),
   ]
+);
+
+// One written chat turn, named by the page (docs/chat/SPEC.md §2): a resend of
+// a turn that is done or still running gets that turn, and never runs or pays
+// for it twice. The reply's text is its message row; this keeps the id.
+export const chatTurns = pgTable(
+  "chat_turns",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    /** The page's own id for the turn: one user's ids say nothing about another's. */
+    id: text("id").notNull(),
+    conversationId: text("conversation_id").references(() => conversations.id, { onDelete: "cascade" }),
+    userMessageId: text("user_message_id").references(() => messages.id, { onDelete: "set null" }),
+    status: text("status").$type<"running" | "done" | "failed">().notNull(),
+    replyMessageId: text("reply_message_id").references(() => messages.id, { onDelete: "set null" }),
+    toasts: jsonb("toasts").$type<unknown[]>(),
+    uiActions: jsonb("ui_actions").$type<unknown[]>(),
+    /** A failed turn: the sentence the page shows. */
+    error: text("error"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Written on a timer of its own while the turn runs; silent for a minute means its process is gone. */
+    aliveAt: timestamp("alive_at", { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.id] })]
 );
 
 // Uploaded photos/files (chat intake). Rows are created on upload with a null

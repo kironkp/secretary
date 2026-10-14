@@ -30,6 +30,7 @@ import {
 import type { BriefingCard } from "@/lib/secretary/briefing";
 import { INLINE_MIME } from "@/lib/attachments";
 import { requestCanvasRefresh } from "@/lib/canvas/refresh";
+import { newTurnId, sendTurn } from "@/lib/chat/turn-client";
 import { unlockRemoteAudio } from "@/lib/realtime/remote-audio";
 import { AttachSheet } from "./attach-sheet";
 import { DictationBar } from "./dictation-bar";
@@ -261,6 +262,9 @@ export function ChatThread({
   const call = useVoiceCall();
   const liveLines = call.active ? call.session.transcript : [];
   const [sending, setSending] = useState(false);
+  // The answer as Claude writes it (docs/chat/SPEC.md §1), drawn where the
+  // saved answer will stand; a later round starts it over.
+  const [liveAnswer, setLiveAnswer] = useState<{ round: number; text: string } | null>(null);
   const [error, setError] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -407,7 +411,7 @@ export function ChatThread({
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [msgs.length, liveLines.length]);
+  }, [msgs.length, liveLines.length, liveAnswer?.round]);
 
   // Opening the panel (bar → peek/full) must land at the newest message —
   // instant, because the panel itself is already animating its height.
@@ -416,33 +420,36 @@ export function ChatThread({
   }, [dockState]);
 
   // Payloads for undelivered messages, keyed by their local id — a failed
-  // bubble can be re-sent verbatim (text + already-uploaded attachment ids).
-  const retryPayloads = useRef(new Map<string, { text: string; attachmentIds: string[] }>());
+  // bubble can be re-sent verbatim (text + already-uploaded attachment ids),
+  // under the turn id it was first sent with, so the tap never runs or pays
+  // for a turn that finished or is still running (docs/chat/SPEC.md §2).
+  const retryPayloads = useRef(new Map<string, { text: string; attachmentIds: string[]; turnId: string }>());
 
   const deliver = async (tempId: string) => {
     const payload = retryPayloads.current.get(tempId);
     if (!payload || sending) return;
     setSending(true);
+    setLiveAnswer(null);
     setMsgs((m) => m.map((msg) => (msg.id === tempId ? { ...msg, failed: undefined } : msg)));
     try {
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: payload.text,
-          conversationId,
-          attachmentIds: payload.attachmentIds,
-        }),
+      const out = await sendTurn({
+        turnId: payload.turnId,
+        body: { message: payload.text, conversationId, attachmentIds: payload.attachmentIds },
+        onLine: (line) => {
+          // His message is stored: what he sends next belongs to the same conversation, whatever happens to this answer.
+          if (line.type === "accepted") setConversationId(line.conversationId);
+          if (line.type === "text") {
+            setLiveAnswer((live) =>
+              live && live.round === line.round ? { round: line.round, text: live.text + line.text } : { round: line.round, text: line.text }
+            );
+          }
+        },
       });
-      const body = await res.json();
-      if (!res.ok) {
-        setMsgs((m) =>
-          m.map((msg) =>
-            msg.id === tempId ? { ...msg, failed: body.error ?? "Message failed" } : msg
-          )
-        );
+      if (!out.ok) {
+        setMsgs((m) => m.map((msg) => (msg.id === tempId ? { ...msg, failed: out.error } : msg)));
         return;
       }
+      const body = out.answer;
       retryPayloads.current.delete(tempId);
       setConversationId(body.conversationId);
       setMsgs((m) => [
@@ -458,6 +465,7 @@ export function ChatThread({
       );
     } finally {
       setSending(false);
+      setLiveAnswer(null);
     }
   };
 
@@ -483,7 +491,7 @@ export function ChatThread({
     // does: the answer arrives where the user can read it.
     if (dock && dock.state !== "full") dock.setState("full");
     const tempId = `local-${++localKey.current}`;
-    retryPayloads.current.set(tempId, { text, attachmentIds: sentAttachments.map((a) => a.id) });
+    retryPayloads.current.set(tempId, { text, attachmentIds: sentAttachments.map((a) => a.id), turnId: newTurnId() });
     setMsgs((m) => [
       ...m,
       {
@@ -866,11 +874,17 @@ export function ChatThread({
                   </span>
                 </div>
               ))}
-          {sending && (
+          {sending && liveAnswer?.text.trim() ? (
+            // Drawn as the saved answer will be, so its arrival changes nothing on screen but the text.
+            <div className="max-w-[94%] rounded-[18px] text-[16px] leading-[1.45]">
+              <span className="whitespace-pre-wrap">{liveAnswer.text}</span>
+              <span className="animate-pulse text-faint">…</span>
+            </div>
+          ) : sending ? (
             <div className="text-[16px] text-faint">
               <span className="animate-pulse">…</span>
             </div>
-          )}
+          ) : null}
           <div ref={bottomRef} />
               </div>
             </div>

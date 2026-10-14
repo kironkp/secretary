@@ -896,32 +896,14 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
 
   async update_project(ctx, args) {
     const a = toolSchemas.update_project.parse(args);
+    // Off until 1.12 (docs/chat/SPEC.md §5): it moved the tasks and then
+    // deleted the old project, and with it everything else that belonged to
+    // it. Nothing in the call is done, whatever else it asks for.
+    if (a.merge_into) {
+      return { result: { error: "Merging projects is not available yet; nothing was changed." } };
+    }
     const src = await resolveProject(ctx.userId, a.project, { create: false });
     if (!src.project) return { result: { error: `No project matching "${a.project}"` } };
-
-    if (a.merge_into) {
-      const target = await resolveProject(ctx.userId, a.merge_into, { create: false });
-      if (!target.project) return { result: { error: `No project matching "${a.merge_into}"` } };
-      if (target.project.id === src.project.id) {
-        return { result: { error: "Source and target are the same project" } };
-      }
-      const moved = await db
-        .update(tasks)
-        .set({ projectId: target.project.id, updatedAt: new Date() })
-        .where(and(eq(tasks.userId, ctx.userId), eq(tasks.projectId, src.project.id)))
-        .returning({ id: tasks.id });
-      await db
-        .delete(projects)
-        .where(and(eq(projects.userId, ctx.userId), eq(projects.id, src.project.id)));
-      return {
-        result: {
-          merged: src.project.name,
-          into: target.project.name,
-          moved_tasks: moved.length,
-        },
-        toast: { icon: "▣", text: `Merged: ${src.project.name} → ${target.project.name}` },
-      };
-    }
 
     if (a.delete) {
       const [attached] = await db
@@ -931,7 +913,7 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
       if ((attached?.n ?? 0) > 0) {
         return {
           result: {
-            error: `"${src.project.name}" still has ${attached!.n} task(s) — use merge_into to move them first`,
+            error: `"${src.project.name}" still has ${attached!.n} task(s); a project with tasks cannot be deleted`,
           },
         };
       }
@@ -948,7 +930,7 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     if (a.name) updates.name = a.name;
     if (a.color) updates.color = a.color;
     if (Object.keys(updates).length === 0) {
-      return { result: { error: "Nothing to change — give name, color, merge_into, or delete" } };
+      return { result: { error: "Nothing to change — give name, color, or delete" } };
     }
     const [updated] = await db
       .update(projects)
