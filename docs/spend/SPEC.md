@@ -76,6 +76,13 @@ Until v1.04 such a call left no row at all, so the caps could not see it.
   planner the wait is 60 seconds, or `PLANNER_TIMEOUT_MS`.
 - v1.04 does this for the dashboard planner. The other background call
   sites are listed in the LOGBOOK entry with what each leaves today.
+- v1.09 does it for a chat turn whose Claude rounds fail and that is then
+  answered by OpenAI (docs/chat/SPEC.md §4). Until then those rounds left no
+  row: only OpenAI's answer was recorded. Now the Claude rounds that answered
+  are one `chat` row at Claude's model, as they reported (a refusal
+  included); the round that was sent and never answered is a second row at
+  the estimate, unless Claude refused it with a 4xx. The OpenAI answer is its
+  own row, as before.
 
 ## 2. What stops
 
