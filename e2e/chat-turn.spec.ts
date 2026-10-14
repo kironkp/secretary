@@ -213,10 +213,11 @@ test.describe("the thread follows the answer as it is written; only his hands st
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await page.mouse.wheel(0, dy);
   }
-  /** The answer being written has been drawn, and then has landed (before its first piece there is nothing to wait on). */
-  const landed = async (page: import("@playwright/test").Page) => {
-    await expect(page.locator("[data-live-answer]")).toHaveCount(1, { timeout: 15_000 });
-    await expect(page.locator("[data-live-answer]")).toHaveCount(0, { timeout: 15_000 });
+  /** The n-th answer of the page has landed: saved, and nothing left being written. (Not "no live answer": that is
+   *  true before the first piece too.) */
+  const landed = async (page: import("@playwright/test").Page, n: number) => {
+    await expect(page.locator(`#m-e2e-reply-${n}`)).toBeAttached({ timeout: 20_000 });
+    await expect(page.locator("[data-live-answer]")).toHaveCount(0);
   };
   /** Until the thread has followed this far down: room for a step up. A precondition, read every 50 ms; not how the
    *  follow is measured. (Not waitForFunction: Playwright's WebKit on this Mac evaluates it as a string, which the
@@ -238,7 +239,7 @@ test.describe("the thread follows the answer as it is written; only his hands st
     await open(page);
     await watch(page);
     await send(page, "E2E: a long plan please");
-    await landed(page);
+    await landed(page, 1);
     const seen = await frames(page);
     const f = followed(seen);
     expect(f.live).toBeGreaterThan(20);
@@ -255,7 +256,7 @@ test.describe("the thread follows the answer as it is written; only his hands st
     await fillThread(page, 6);
     await watch(page);
     await send(page, "E2E: three lines please");
-    await landed(page);
+    await landed(page, 7);
     const seen = await frames(page);
     expect(followed(seen).under).toBe(0);
     const last = seen.filter((x) => x.top !== null).at(-1)!;
@@ -263,13 +264,16 @@ test.describe("the thread follows the answer as it is written; only his hands st
   });
 
   test("two rounds, the second shorter (input: none): the round that starts over is followed too", async ({ page }) => {
-    const roundZero = Array.from({ length: 6 }, (_, i) => `E2E: round zero, sentence ${i + 1}, long enough to wrap. `);
-    await streamAnswers(page, [...earlier(5), { rounds: [roundZero, ["E2E: round one, ", "short."]], delayMs: 120 }]);
+    // Round 1 is half as long as round 0, and still more than the thread shows below where round 0 ended: when it
+    // starts over, the thread shrinks (the browser pulls its position down) and then grows again past the composer.
+    const roundZero = Array.from({ length: 12 }, (_, i) => `E2E: round zero, sentence ${i + 1}, long enough to wrap. `);
+    const roundOne = Array.from({ length: 6 }, (_, i) => `E2E: round one, sentence ${i + 1}, shorter but it wraps. `);
+    await streamAnswers(page, [...earlier(5), { rounds: [roundZero, roundOne], delayMs: 120 }]);
     await open(page);
     await fillThread(page, 5);
     await watch(page);
     await send(page, "E2E: two rounds please");
-    await landed(page);
+    await landed(page, 6);
     const seen = await frames(page);
     const f = followed(seen);
     expect(f.under, `${f.under} of ${f.live} frames under the composer`).toBe(0);
@@ -285,7 +289,7 @@ test.describe("the thread follows the answer as it is written; only his hands st
     await followedDown(page, 200);
     await watch(page);
     await wheel(page, -120);
-    await landed(page);
+    await landed(page, 1);
     const { wheelTop, after, pulled } = await afterWheel(page);
     expect(after.filter((f) => f.bottom !== null).length, "frames written after his wheel").toBeGreaterThan(10);
     expect(pulled, "moved back down between two frames after his wheel").toBeLessThanOrEqual(2);
@@ -304,7 +308,7 @@ test.describe("the thread follows the answer as it is written; only his hands st
     // A tenth of a second into the panel's 340 ms: it is still growing when he scrolls up, and after.
     await page.waitForTimeout(100);
     await wheel(page, -700);
-    await landed(page);
+    await landed(page, 7);
     const { after, pulled } = await afterWheel(page);
     expect(after.length).toBeGreaterThan(10);
     expect(pulled, "moved back down between two frames after his wheel").toBeLessThanOrEqual(2);
@@ -321,7 +325,7 @@ test.describe("the thread follows the answer as it is written; only his hands st
     await expect(page.locator("[data-live-answer]")).toBeVisible();
     await page.waitForTimeout(500);
     await page.setViewportSize({ width: 390, height: 520 });
-    await landed(page);
+    await landed(page, 1);
     const seen = await frames(page);
     const f = followed(seen);
     expect(f.under, `${f.under} of ${f.live} frames under the composer`).toBe(0);
@@ -337,7 +341,7 @@ test.describe("the thread follows the answer as it is written; only his hands st
     await wheel(page, 2000);
     await page.waitForTimeout(400);
     await watch(page);
-    await landed(page);
+    await landed(page, 1);
     const seen = await frames(page);
     const f = followed(seen);
     expect(f.live).toBeGreaterThan(5);
@@ -366,7 +370,7 @@ test.describe("the thread follows the answer as it is written; only his hands st
     );
     await page.waitForTimeout(100);
     await watch(page);
-    await landed(page);
+    await landed(page, 1);
     const seen = await frames(page);
     expect(Math.max(...seen.map((f) => f.scroll)) - at).toBeLessThanOrEqual(2);
   });
@@ -381,7 +385,7 @@ test.describe("the thread follows the answer as it is written; only his hands st
     await expect(page.locator("[data-live-answer]")).toBeVisible();
     await page.waitForTimeout(500);
     await page.setViewportSize({ width: 390, height: 844 });
-    await landed(page);
+    await landed(page, 5);
     const f = followed(await frames(page));
     expect(f.under, `${f.under} of ${f.live} frames under the composer`).toBe(0);
   });
@@ -392,10 +396,10 @@ test.describe("the thread follows the answer as it is written; only his hands st
     await send(page, "E2E: a long plan please");
     await followedDown(page, 200);
     await wheel(page, -300);
-    await landed(page);
+    await landed(page, 1);
     await watch(page);
     await send(page, "E2E: and another");
-    await landed(page);
+    await landed(page, 2);
     const f = followed(await frames(page));
     expect(f.live).toBeGreaterThan(5);
     expect(f.under, `${f.under} of ${f.live} frames under the composer after his send`).toBe(0);
