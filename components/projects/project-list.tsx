@@ -43,7 +43,7 @@ function Dots() {
 
 type Drag = { index: number; pointerId: number; startY: number; dy: number; target: number; centers: number[]; height: number };
 
-export function ProjectList({ group, rows }: { group: string; rows: ProjectRowView[] }) {
+export function ProjectList({ group, rows, leading = null }: { group: string; rows: ProjectRowView[]; leading?: React.ReactNode }) {
   const reduced = useReducedMotion();
   const [state, setState] = useState<MoveQueueState<ProjectRowView[]>>({ shown: rows, line: null, says: null });
   const queue = useMemo(
@@ -110,6 +110,7 @@ export function ProjectList({ group, rows }: { group: string; rows: ProjectRowVi
   return (
     <>
       <ul data-project-group={group} className="relative flex flex-col rounded-[12px] bg-card">
+        {leading}
         {shown.map((p, i) => {
           const lifted = drag?.index === i;
           return (
@@ -122,7 +123,7 @@ export function ProjectList({ group, rows }: { group: string; rows: ProjectRowVi
               data-project-row=""
               data-project-name={p.name}
               data-lifted={lifted ? "true" : undefined}
-              className={`relative flex min-h-14 items-center gap-3 pl-4 pr-1 ${i > 0 ? "border-t border-hairline" : ""} ${
+              className={`relative flex min-h-14 items-center gap-3 pl-4 pr-1 ${i > 0 || leading ? "border-t border-hairline" : ""} ${
                 lifted ? "z-10 -mx-1.5 select-none rounded-[12px] border-transparent bg-card pl-[22px]" : "bg-card first:rounded-t-[12px] last:rounded-b-[12px]"
               }`}
               style={{
