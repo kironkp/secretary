@@ -213,10 +213,18 @@ test.describe("the thread follows the answer as it is written; only his hands st
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await page.mouse.wheel(0, dy);
   }
-  const landed = (page: import("@playwright/test").Page, timeout = 15_000) => expect(page.locator("[data-live-answer]")).toHaveCount(0, { timeout });
-  /** Until the thread has followed this far down: room for a step up. */
+  /** The answer being written has been drawn, and then has landed (before its first piece there is nothing to wait on). */
+  const landed = async (page: import("@playwright/test").Page) => {
+    await expect(page.locator("[data-live-answer]")).toHaveCount(1, { timeout: 15_000 });
+    await expect(page.locator("[data-live-answer]")).toHaveCount(0, { timeout: 15_000 });
+  };
+  /** Until the thread has followed this far down: room for a step up. A precondition, read every 50 ms; not how the
+   *  follow is measured. (Not waitForFunction: Playwright's WebKit on this Mac evaluates it as a string, which the
+   *  app's script policy refuses.) */
   const followedDown = (page: import("@playwright/test").Page, px: number) =>
-    page.waitForFunction((px) => (document.querySelector("[data-thread-scroll]") as HTMLElement).scrollTop >= px, px, { timeout: 15_000 });
+    expect
+      .poll(() => thread(page).evaluate((el) => el.scrollTop), { timeout: 15_000, intervals: [50] })
+      .toBeGreaterThanOrEqual(px);
   const fillThread = async (page: import("@playwright/test").Page, n: number) => {
     for (let i = 0; i < n; i++) {
       await send(page, `E2E: earlier question ${i + 1}`);
@@ -271,7 +279,7 @@ test.describe("the thread follows the answer as it is written; only his hands st
   });
 
   test("pieces every 40 ms and one wheel step up (input: wheel): he is never pulled back", async ({ page }) => {
-    await streamAnswers(page, [{ rounds: [[...LONG, ...LONG]], delayMs: 40 }]);
+    await streamAnswers(page, [{ rounds: [[...LONG, ...LONG, ...LONG]], delayMs: 40 }]);
     await open(page);
     await send(page, "E2E: a long plan please");
     await followedDown(page, 200);
