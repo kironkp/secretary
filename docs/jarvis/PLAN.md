@@ -7,8 +7,9 @@ beside me in a workshop."*
 
 ## Now
 
-- **Cycle counter: 108.** 1.00, 1.03 and 1.04 are accepted; 1.01 and 1.02 are
-  open; then 1.09, 1.11, 1.10, 1.13, 1.12, 1.14, 1.15 (Kiron's feedback,
+- **Cycle counter: 108.** 1.00, 1.02, 1.03 and 1.04 are accepted; 1.01 is
+  open; 1.09 is being built (on `jarvis-1.09-chat-stream`, from `bdf56fc`,
+  with the Reviewer's two r5 follow-ups, test and walker only); then 1.11, 1.10, 1.13, 1.12, 1.14, 1.15 (Kiron's feedback,
   his mockup approved 2026-10-14, and the whole site in its look), then
   1.08, 1.05, 1.06, 1.07. Each pushed to Heroku as it passes (Kiron:
   "Push to heroku for each update"). See §9.
@@ -17,8 +18,11 @@ beside me in a workshop."*
   checked by the Reviewer, except production: the Executor's session is refused
   production reads, so Kiron runs the one read-only command in BASELINE §2.
   This branch (`jarvis-1.01-plan`) is merged into it when it is offered.
-- **1.02** — the Overview round (A007), rebuilt on `jarvis-1.02-overview-r2`
-  from main with made-up fixture names. The first offer (`3eb1142`, branch
+- **1.02** — the Overview round (A007). **Accepted and live: `bdf56fc`,
+  Heroku v66, 2026-10-14** (Reviewer PASS covering 02160d6..bdf56fc: CI-exact,
+  five unseen seeds exit 0, 2,903 replayed requests differ 0, every read
+  without an ORDER BY shuffled and the board unchanged). Rebuilt on
+  `jarvis-1.02-overview-r2` from main with made-up fixture names. The first offer (`3eb1142`, branch
   `jarvis-1.02-overview`) FAILED and stays untouched. `v1.02 r3` (`d32121f`,
   the render composed instead of chosen, below) FAILED on a pinned card
   turning the board upside down and a cached "Due tomorrow". `v1.02 r4`
