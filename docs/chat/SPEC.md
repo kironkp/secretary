@@ -33,6 +33,14 @@ JSON object per line, in this order:
 A request refused before any work (not signed in, nothing said and nothing
 attached) keeps its HTTP status and its JSON body, as before.
 
+**On the page (v1.09 r2).** While he reads at the bottom of the thread, each
+piece keeps the line being written in view, at once (a smooth scroll falls
+behind the text). If he scrolls up he is left where he is; back at the
+bottom, it follows again. The answer is drawn where the saved answer will
+stand, so when it lands nothing moves. "Not delivered — tap to retry" is a
+44 px tall target: with this version it is the only way he runs a turn
+again.
+
 A request that does not ask for a stream gets the plain JSON answer as before:
 a page opened before this release, and the tests that read the answer whole.
 It is the same turn underneath, written once; only the wrapping differs.
@@ -120,6 +128,15 @@ answered are counted as they reported; a round that was sent and never
 answered at the estimate, unless the provider refused it before doing any
 work.
 
+**In this order, once a model has answered (v1.09 r2):** first its usage, in a
+write of its own; then the reply and the turn's done mark, in one
+transaction; then, the answer being saved, the follow-ups it raised are
+settled and OpenAI's chain id stored. So a database error after the model
+answered never loses what it cost, and never leaves a reply on a turn that
+failed: his tap runs it again (a new attempt, counted again) and stores the
+one reply. A failure in the last step is said in the log; the turn stays
+done, and a follow-up not settled is asked again next time.
+
 ## 5. What a turn may not do yet: merge projects
 
 `update_project` with `merge_into` answers that merging projects is not
@@ -142,4 +159,10 @@ same tool, so the same holds there.
 - A page opened before this release posts without a turn id and reads JSON,
   so it keeps the 30-second limit until it is reloaded.
 - Turn rows are kept (one small row per message); nothing deletes them yet.
+- A turn's usage is one row, written when the model has answered. A process
+  killed part way through a turn (a restart in the middle of its rounds)
+  loses the rounds it had answered so far: they are in memory until then.
+  Writing each round as it is answered would make every turn several rows,
+  and every count that reads a turn as one row would change; not done in
+  v1.09.
 - Voice does not use this route.
