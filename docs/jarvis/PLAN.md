@@ -314,7 +314,11 @@ beside me in a workshop."*
   survives (in 1.02 it lasts until the next render). 1.02 r3 already makes
   the card's "Due in N days" chip read the calendar count, because it sat
   beside a date that contradicted it; thresholds, "urgent" and the hash
-  wait for 1.06.
+  wait for 1.06. Also here: his midnight as a step of the board walk (a
+  request at 23:59, the open at 00:01). Found in 1.02 r5: the walk read
+  the wall clock, so a run across his midnight complained; the walk now
+  starts each walk at a fixed instant, and a day passing between a
+  request and its open is not walked until this.
 - **1.07** — the stored row split: the system's plan as the system wrote
   it, his placements as their own list, the composed board never read back.
   With it: "Put it back" undoes his last action and brings back what he hid.
