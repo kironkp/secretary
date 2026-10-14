@@ -89,9 +89,11 @@ test("a resume that brings back Not delivered stops there; his tap asks again fo
 });
 
 // v1.09 r4 (docs/chat/SPEC.md §1): the thread follows the answer, and only his hands stop it. A stand-in for fetch
-// streams each answer piece by piece (rounds too), as the route does. Every animation frame is sampled in the page
-// (requestAnimationFrame): where the line being written stands against the composer, where the thread stands, and
-// whether it is following. His input is the mouse wheel, in Chromium and in WebKit alike: Playwright cannot send a
+// streams each answer piece by piece (rounds too), as the route does. Whether the answer being written is in view is
+// judged at paint, by an IntersectionObserver (it reports every change, computed after the page's ResizeObserver,
+// just before the frame is painted); every animation frame is also sampled in the page (requestAnimationFrame, each
+// read once the frame is drawn): where the line being written stands against the composer and where the thread
+// stands, for the checks that he is never pulled back and that the answer lands without moving. His input is the mouse wheel, in Chromium and in WebKit alike: Playwright cannot send a
 // wheel to mobile WebKit, nor drag a touch anywhere, so these run as a 390 × 844 page that is not "mobile" (real
 // touch, momentum, VoiceOver and the iOS indicator are seen only on a device, and named in the spec).
 test.describe("the thread follows the answer as it is written; only his hands stop it", () => {
@@ -143,7 +145,10 @@ test.describe("the thread follows the answer as it is written; only his hands st
   }
 
   type Frame = { t: number; top: number | null; bottom: number | null; composerTop: number; scroll: number; height: number; view: number };
-  /** Every animation frame from now: the live answer's box (null once it has landed), the composer, the thread. */
+  /** Every animation frame from now: the live answer's box (null once it has landed), the composer, the thread. Each
+   *  frame's requestAnimationFrame callback posts a read that runs once that frame is drawn: the callbacks run before
+   *  the frame's layout and its ResizeObserver callbacks (which keep the bottom in view when the thread changes size),
+   *  so a read inside one sees, while the panel animates shorter, a state the screen never shows. */
   const watch = (page: import("@playwright/test").Page) =>
     page.evaluate(() => {
       const w = window as unknown as { __frames: Frame[]; __stop: boolean; __wheelAt: number | null; __wheelTop: number | null };
@@ -161,7 +166,36 @@ test.describe("the thread follows the answer as it is written; only his hands st
         },
         { capture: true, passive: true }
       );
-      const tick = () => {
+      // At paint: whether the answer being written is wholly in the thread's view. An IntersectionObserver's
+      // intersections are computed after the frame's ResizeObserver callbacks, just before it is painted; its root is
+      // the thread with the top pushed far up, so only the thread's bottom edge (the composer's top) can cut it off.
+      const ww = w as unknown as { __out: { t: number; ratio: number }[] };
+      ww.__out = [];
+      const ios = new Map<Element, IntersectionObserver>();
+      let seenLive: Element | null = null;
+      const look = () => {
+        const live = document.querySelector("[data-live-answer]");
+        const root = live?.closest("[data-thread-scroll]");
+        if (!live || !root || live === seenLive) return;
+        seenLive = live;
+        let io = ios.get(root);
+        if (!io) {
+          io = new IntersectionObserver(
+            (entries) =>
+              entries.forEach((e) => {
+                // A removed answer (it landed) reports an empty box: not a paint of it.
+                if (e.boundingClientRect.height > 0 && e.intersectionRatio < 1) ww.__out.push({ t: e.time, ratio: e.intersectionRatio });
+              }),
+            { root, rootMargin: "100000px 0px 0px 0px", threshold: [1] }
+          );
+          ios.set(root, io);
+        }
+        io.observe(live);
+      };
+      new MutationObserver(look).observe(document.body, { childList: true, subtree: true });
+      look();
+      const drawn = new MessageChannel();
+      drawn.port1.onmessage = () => {
         const live = document.querySelector("[data-live-answer]");
         const composer = document.querySelector("[data-composer]");
         const el = document.querySelector("[data-thread-scroll]") as HTMLElement | null;
@@ -169,7 +203,11 @@ test.describe("the thread follows the answer as it is written; only his hands st
           const r = live?.getBoundingClientRect();
           w.__frames.push({ t: performance.now(), top: r ? r.top : null, bottom: r ? r.bottom : null, composerTop: composer.getBoundingClientRect().top, scroll: el.scrollTop, height: el.scrollHeight, view: el.clientHeight });
         }
-        if (!w.__stop) requestAnimationFrame(tick);
+      };
+      const tick = () => {
+        if (w.__stop) return;
+        drawn.port2.postMessage(0);
+        requestAnimationFrame(tick);
       };
       requestAnimationFrame(tick);
     });
@@ -192,11 +230,19 @@ test.describe("the thread follows the answer as it is written; only his hands st
     for (let i = 1; i < after.length; i++) pulled = Math.max(pulled, after[i].scroll - after[i - 1].scroll);
     return { wheelTop: wheelTop!, after, pulled };
   };
-  /** In every frame the answer is being written, its last line stands above the composer. */
-  const followed = (seen: Frame[]) => {
+  /** The answer being written, two ways: at paint, how many times it was not wholly in the thread's view (the check);
+   *  and in the frames read once drawn, how many had its last line under the composer (shown beside it). */
+  const followed = async (page: import("@playwright/test").Page, seen: Frame[]) => {
+    // Intersection reports are delivered as tasks after the paint: let the last ones in.
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0))));
+    const out = await page.evaluate(() => (window as unknown as { __out: { t: number; ratio: number }[] }).__out);
     const live = seen.filter((f) => f.bottom !== null);
-    return { live: live.length, under: live.filter((f) => f.bottom! > f.composerTop + 1).length };
+    const r = { live: live.length, out: out.length, drawnUnder: live.filter((f) => f.bottom! > f.composerTop + 1).length };
+    console.log(`[follow] ${test.info().title}: at paint ${r.out} not wholly in view; read once drawn ${r.drawnUnder} of ${r.live} under`);
+    return r;
   };
+  const inViewMessage = (f: { live: number; out: number; drawnUnder: number }) =>
+    `${f.out} paints with the answer being written not wholly in view (read once drawn: ${f.drawnUnder} of ${f.live} frames under)`;
   const topOf = (page: import("@playwright/test").Page, id: string) => page.evaluate((id) => document.getElementById(id)!.getBoundingClientRect().top, `m-${id}`);
   const thread = (page: import("@playwright/test").Page) => page.locator("[data-thread-scroll]");
   async function open(page: import("@playwright/test").Page) {
@@ -241,9 +287,9 @@ test.describe("the thread follows the answer as it is written; only his hands st
     await send(page, "E2E: a long plan please");
     await landed(page, 1);
     const seen = await frames(page);
-    const f = followed(seen);
+    const f = await followed(page, seen);
     expect(f.live).toBeGreaterThan(20);
-    expect(f.under, `${f.under} of ${f.live} frames had the line being written under the composer`).toBe(0);
+    expect(f.out, inViewMessage(f)).toBe(0);
     const last = seen.filter((x) => x.top !== null).at(-1)!;
     expect(Math.abs((await topOf(page, "e2e-reply-1")) - last.top!)).toBeLessThanOrEqual(1);
     mkdirSync("screenshots", { recursive: true });
@@ -258,7 +304,8 @@ test.describe("the thread follows the answer as it is written; only his hands st
     await send(page, "E2E: three lines please");
     await landed(page, 7);
     const seen = await frames(page);
-    expect(followed(seen).under).toBe(0);
+    const f = await followed(page, seen);
+    expect(f.out, inViewMessage(f)).toBe(0);
     const last = seen.filter((x) => x.top !== null).at(-1)!;
     expect(Math.abs((await topOf(page, "e2e-reply-7")) - last.top!)).toBeLessThanOrEqual(1);
   });
@@ -275,8 +322,8 @@ test.describe("the thread follows the answer as it is written; only his hands st
     await send(page, "E2E: two rounds please");
     await landed(page, 6);
     const seen = await frames(page);
-    const f = followed(seen);
-    expect(f.under, `${f.under} of ${f.live} frames under the composer`).toBe(0);
+    const f = await followed(page, seen);
+    expect(f.out, inViewMessage(f)).toBe(0);
     // Landed in view: its bottom above the composer.
     const box = await page.evaluate(() => document.getElementById("m-e2e-reply-6")!.getBoundingClientRect().bottom);
     expect(box).toBeLessThanOrEqual(seen.at(-1)!.composerTop + 1);
@@ -327,8 +374,8 @@ test.describe("the thread follows the answer as it is written; only his hands st
     await page.setViewportSize({ width: 390, height: 520 });
     await landed(page, 1);
     const seen = await frames(page);
-    const f = followed(seen);
-    expect(f.under, `${f.under} of ${f.live} frames under the composer`).toBe(0);
+    const f = await followed(page, seen);
+    expect(f.out, inViewMessage(f)).toBe(0);
   });
 
   test("a wheel back down to within 32 px while pieces keep coming (input: wheel): following resumes", async ({ page }) => {
@@ -343,9 +390,9 @@ test.describe("the thread follows the answer as it is written; only his hands st
     await watch(page);
     await landed(page, 1);
     const seen = await frames(page);
-    const f = followed(seen);
+    const f = await followed(page, seen);
     expect(f.live).toBeGreaterThan(5);
-    expect(f.under, `${f.under} of ${f.live} frames under the composer after he came back`).toBe(0);
+    expect(f.out, inViewMessage(f)).toBe(0);
   });
 
   test("a script scroll with no input and no size change (input: none, standing in for the indicator or VoiceOver): following off", async ({ page }) => {
@@ -386,8 +433,8 @@ test.describe("the thread follows the answer as it is written; only his hands st
     await page.waitForTimeout(500);
     await page.setViewportSize({ width: 390, height: 844 });
     await landed(page, 5);
-    const f = followed(await frames(page));
-    expect(f.under, `${f.under} of ${f.live} frames under the composer`).toBe(0);
+    const f = await followed(page, await frames(page));
+    expect(f.out, inViewMessage(f)).toBe(0);
   });
 
   test("a new send turns following on (input: wheel, then a send)", async ({ page }) => {
@@ -400,8 +447,8 @@ test.describe("the thread follows the answer as it is written; only his hands st
     await watch(page);
     await send(page, "E2E: and another");
     await landed(page, 2);
-    const f = followed(await frames(page));
+    const f = await followed(page, await frames(page));
     expect(f.live).toBeGreaterThan(5);
-    expect(f.under, `${f.under} of ${f.live} frames under the composer after his send`).toBe(0);
+    expect(f.out, inViewMessage(f)).toBe(0);
   });
 });
