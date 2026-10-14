@@ -106,6 +106,29 @@ tools Claude already ran run again, a duplicate write and not only a cost
 (placed in 1.08); a page opened before the release keeps the 30-second limit
 until reloaded; turn rows are kept; voice does not use this route.
 
+**r2** (`3a7fe60` the spec, `ceb0743` the tests, red first, `46a5ed8` the code,
+this commit). The Reviewer failed `51d4828` on one thing he would see: the
+thread did not follow the answer as it was written. It scrolled when a
+message was added, never when the text grew, so in a long answer the line
+being written was under the composer, and the thread jumped about 400 px when
+the answer landed. Now, while he reads at the bottom, each piece keeps the
+line being written in view, at once; if he scrolls up he is left there; the
+answer lands where it was written and nothing moves. Measured in a browser
+at 390 wide, frame by frame: on the old code with only the measuring marks
+added, 51 of 95 frames of a 14-sentence answer had the line under the
+composer; now none, and the answer's top does not move when it lands. "Tap
+to retry" is a 44 px target (it was 16), being the only way he runs a turn
+again. And the Reviewer's money finding: the follow-ups, the reply and the
+usage were all written before the turn was marked done, so a database error
+after the model answered could lose what it cost, or leave a reply on a turn
+that then failed, and a tap would pay again and could store a second reply.
+Now the usage is written first, on its own; the reply and the done mark in
+one transaction; the follow-ups and the chain id after, unable to undo the
+answer. Tested with each write made to fail. Named, not done: a process
+killed part way through a turn still loses the rounds it held in memory
+(writing each round as it is answered would make every turn several usage
+rows).
+
 ## v1.02 — A clear Overview (2026-10-13)
 
 `b980803` (the round as one commit: written 2026-10-06 as v0.34 and parked,

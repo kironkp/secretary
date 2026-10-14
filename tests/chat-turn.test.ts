@@ -5,8 +5,9 @@
 // 60 s) are shrunk with the route's own knobs, in the same ratios.
 process.env.TZ = "UTC";
 
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { and, eq } from "drizzle-orm";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { and, eq, sql } from "drizzle-orm";
+import { parse as parseConnectionString } from "pg-connection-string";
 
 /** One answer of the fake Claude. */
 type ClaudeStep = {
@@ -110,7 +111,7 @@ vi.mock("@/lib/openai", async (importOriginal) => {
 });
 
 import { db } from "@/lib/db";
-import { chatTurns, conversations, messages, tasks, usage, user } from "@/lib/db/schema";
+import { chatTurns, conversations, expectations, messages, tasks, usage, user } from "@/lib/db/schema";
 import { POST as chat } from "@/app/api/chat/route";
 
 type Line = { type?: string; [k: string]: unknown };
@@ -452,6 +453,60 @@ describe("a cut connection (§3)", () => {
     } finally {
       held.open();
     }
+  });
+});
+
+describe("money: once the model has answered, a database error never loses what it cost nor leaves a second reply (§4, v1.09 r2)", () => {
+  // Failures are injected by triggers that fire only for a user this test switches on, so the other files that
+  // share the database never meet them. Local or CI test database only.
+  beforeAll(async () => {
+    const host = parseConnectionString(process.env.DATABASE_URL ?? "").host ?? "";
+    if (!["localhost", "127.0.0.1", "::1", "[::1]"].includes(host)) throw new Error("these triggers go into a local or CI test database only");
+    await db.execute(sql`create table if not exists test_fail_switch (user_id text not null, what text not null, primary key (user_id, what))`);
+    const trigger = async (name: string, table: string, when: string, what: string) => {
+      await db.execute(sql.raw(`create or replace function ${name}() returns trigger language plpgsql as $$ begin if ${when} and exists (select 1 from test_fail_switch s where s.user_id = new.user_id and s.what = '${what}') then raise exception 'injected: the ${what} write fails'; end if; return new; end $$`));
+      await db.execute(sql.raw(`drop trigger if exists ${name} on ${table}`));
+      await db.execute(sql.raw(`create trigger ${name} before ${table === "messages" ? "insert" : "update"} on ${table} for each row execute function ${name}()`));
+    };
+    await trigger("test_fail_reply", "messages", "new.role = 'assistant'", "reply");
+    await trigger("test_fail_done", "chat_turns", "new.status = 'done'", "done");
+    await trigger("test_fail_settle", "expectations", "new.status = 'missed'", "settle");
+  });
+  afterAll(async () => {
+    for (const [name, table] of [["test_fail_reply", "messages"], ["test_fail_done", "chat_turns"], ["test_fail_settle", "expectations"]]) {
+      await db.execute(sql.raw(`drop trigger if exists ${name} on ${table}`));
+      await db.execute(sql.raw(`drop function if exists ${name}()`));
+    }
+    await db.execute(sql`drop table if exists test_fail_switch`);
+  });
+  const fail = (what: string) => db.execute(sql`insert into test_fail_switch (user_id, what) values (${U.id}, ${what}) on conflict do nothing`);
+  const heal = () => db.execute(sql`delete from test_fail_switch where user_id = ${U.id}`);
+
+  it.each([
+    ["the reply's insert", "reply"],
+    ["the turn's done mark", "done"],
+  ])("%s fails: the usage is counted, no reply is stored, the turn says it failed; his tap stores the one reply", async (_what, what) => {
+    await fail(what);
+    claude.script = [{ text: ["First answer."] }, { text: ["Second answer."] }];
+    const turnId = newTurnId();
+    expect(await lastOf(await ask({ message: "plan my week", turnId }))).toMatchObject({ type: "error" });
+    expect(await counts()).toEqual({ his: 1, replies: 0, usage: 1 });
+    expect(await turnRow(turnId)).toMatchObject({ status: "failed", replyMessageId: null });
+    await heal();
+    expect(await lastOf(await ask({ message: "plan my week", turnId }))).toMatchObject({ type: "done", assistantMessage: { content: "Second answer." } });
+    // Two model runs, both paid and both counted; one reply.
+    expect(await counts()).toEqual({ his: 1, replies: 1, usage: 2 });
+  });
+
+  it("settling the follow-ups fails: the answer is saved and the turn done all the same; the follow-up stays open", async () => {
+    const [due] = await db.insert(expectations).values({ userId: U.id, commitment: "the shed roof", expectedUpdateBy: new Date(Date.now() - 3_600_000), onMiss: "nag" }).returning();
+    await fail("settle");
+    const turnId = newTurnId();
+    expect(await lastOf(await ask({ message: "hello", turnId }))).toMatchObject({ type: "done" });
+    expect(await counts()).toEqual({ his: 1, replies: 1, usage: 1 });
+    expect(await turnRow(turnId)).toMatchObject({ status: "done" });
+    expect((await db.select().from(expectations).where(eq(expectations.id, due.id)))[0].status).toBe("open");
+    await heal();
   });
 });
 

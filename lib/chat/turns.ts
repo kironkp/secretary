@@ -83,12 +83,16 @@ export async function noteTurnMessage(userId: string, id: string, conversationId
   await db.update(chatTurns).set({ conversationId, userMessageId }).where(mine(userId, id));
 }
 
+/** The database, or a transaction the write is part of (the reply and the done mark go in one). */
+type Writer = Pick<typeof db, "update">;
+
 export async function finishTurn(
   userId: string,
   id: string,
-  end: { replyMessageId: string; toasts: unknown[]; uiActions: unknown[] } | { error: string }
+  end: { replyMessageId: string; toasts: unknown[]; uiActions: unknown[] } | { error: string },
+  writer: Writer = db
 ) {
-  await db
+  await writer
     .update(chatTurns)
     .set(
       "error" in end

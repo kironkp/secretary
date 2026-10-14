@@ -4,7 +4,7 @@
 // bar; the conversation lives in a panel that rises above it. Three states —
 // bar (composer only), peek (the exchange since the dock last opened), full
 // (whole history + briefing). The caret expands and minimizes.
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -409,9 +409,39 @@ export function ChatThread({
     bottomRef.current?.scrollIntoView();
   }, [anchorMessageId]);
 
+  // The thread follows what is being written while he reads at the bottom
+  // (docs/chat/SPEC.md §1): each piece of a streamed answer keeps its last line
+  // in view at once, not smoothly, because a smooth scroll falls behind the
+  // text. If he scrolls up he is left there; back at the bottom, it follows
+  // again. A streamed answer that lands is already where he reads it, so its
+  // landing moves nothing.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const follow = useRef(true);
+  /** Where the thread was last put by the following, to tell his own scroll up from it. */
+  const followedTo = useRef<number | null>(null);
+  /** This turn's answer came in pieces: when it is saved, nothing scrolls. */
+  const streamed = useRef(false);
+  const landing = useRef(false);
+  const onThreadScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    if (followedTo.current !== null && el.scrollTop < followedTo.current - 4) follow.current = false;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 32) follow.current = true;
+  };
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!liveAnswer?.text || !el || !follow.current) return;
+    el.scrollTop = el.scrollHeight;
+    followedTo.current = el.scrollTop;
+  }, [liveAnswer?.text]);
+
   useEffect(() => {
+    if (landing.current) {
+      landing.current = false;
+      return;
+    }
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [msgs.length, liveLines.length, liveAnswer?.round]);
+  }, [msgs.length, liveLines.length]);
 
   // Opening the panel (bar → peek/full) must land at the newest message —
   // instant, because the panel itself is already animating its height.
@@ -430,6 +460,9 @@ export function ChatThread({
     if (!payload || sending) return;
     setSending(true);
     setLiveAnswer(null);
+    streamed.current = false;
+    follow.current = true;
+    followedTo.current = null;
     setMsgs((m) => m.map((msg) => (msg.id === tempId ? { ...msg, failed: undefined } : msg)));
     try {
       const out = await sendTurn({
@@ -439,6 +472,7 @@ export function ChatThread({
           // His message is stored: what he sends next belongs to the same conversation, whatever happens to this answer.
           if (line.type === "accepted") setConversationId(line.conversationId);
           if (line.type === "text") {
+            streamed.current = true;
             setLiveAnswer((live) =>
               live && live.round === line.round ? { round: line.round, text: live.text + line.text } : { round: line.round, text: line.text }
             );
@@ -451,6 +485,8 @@ export function ChatThread({
       }
       const body = out.answer;
       retryPayloads.current.delete(tempId);
+      // Drawn where the pieces stood: its landing moves nothing.
+      landing.current = streamed.current;
       setConversationId(body.conversationId);
       setMsgs((m) => [
         ...m.map((msg) => (msg.id === tempId ? { ...msg, id: body.userMessageId } : msg)),
@@ -718,7 +754,12 @@ export function ChatThread({
                 </button>
               )}
             </div>
-            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-3 [-webkit-overflow-scrolling:touch]">
+            <div
+              ref={scrollRef}
+              onScroll={onThreadScroll}
+              data-thread-scroll=""
+              className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-3 [-webkit-overflow-scrolling:touch]"
+            >
               <div className="mx-auto w-full max-w-2xl space-y-4 px-4">
           {hasBriefing && (
             <div className="rounded-2xl bg-surface-2/70 p-5">
@@ -846,7 +887,8 @@ export function ChatThread({
                 <button
                   onClick={() => void deliver(m.id)}
                   disabled={sending}
-                  className="mt-1 flex items-center gap-1 text-xs font-semibold text-danger disabled:opacity-50"
+                  // A 44 px hit box: with v1.09 this is the only way he runs a turn again.
+                  className="flex min-h-11 items-center gap-1 text-xs font-semibold text-danger disabled:opacity-50"
                 >
                   <TriangleAlert size={11} strokeWidth={2.25} className="flex-none" />
                   {m.failed} — tap to retry
@@ -876,7 +918,7 @@ export function ChatThread({
               ))}
           {sending && liveAnswer?.text.trim() ? (
             // Drawn as the saved answer will be, so its arrival changes nothing on screen but the text.
-            <div className="max-w-[94%] rounded-[18px] text-[16px] leading-[1.45]">
+            <div data-live-answer="" className="max-w-[94%] rounded-[18px] text-[16px] leading-[1.45]">
               <span className="whitespace-pre-wrap">{liveAnswer.text}</span>
               <span className="animate-pulse text-faint">…</span>
             </div>
@@ -897,6 +939,7 @@ export function ChatThread({
             the pill, x to put the chat away. */}
         <div
           ref={pillRef}
+          data-composer=""
           className={`flex-none px-2 pb-2 pt-1 ${dockState === "bar" ? "touch-none" : ""}`}
         >
           {callInDock ? (
