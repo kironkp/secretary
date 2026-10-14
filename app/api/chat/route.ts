@@ -193,15 +193,8 @@ async function runTurn(
   const stopAlive = turnId ? keepTurnAlive(user.id, turnId) : () => {};
   try {
     const outcome = await runModels(user, parsed, attachRows, emit, turnId, earlier);
-    if (turnId) {
-      await finishTurn(
-        user.id,
-        turnId,
-        outcome.kind === "done"
-          ? { replyMessageId: outcome.answer.assistantMessage.id, toasts: outcome.answer.toasts, uiActions: outcome.answer.uiActions }
-          : { error: outcome.error }
-      );
-    }
+    // A turn that answered was marked done with its reply, in one transaction (runModels).
+    if (turnId && outcome.kind === "error") await finishTurn(user.id, turnId, { error: outcome.error });
     return outcome;
   } catch (e) {
     console.error("chat turn failed:", errorMessage(e));
@@ -523,33 +516,12 @@ async function runModels(
 
   if (!assistantText) assistantText = "(done)";
 
-  // A model answered this turn with the briefing in hand, so the follow-ups
-  // it raised have been asked (SPEC §11, v1.03). A turn that failed returned
-  // above and left them open for the next one.
-  await settleFollowUps(user.id, briefing.followUps);
-
-  if (!claudeServed && previousResponseId) {
-    await db
-      .update(conversations)
-      .set({ lastResponseId: previousResponseId })
-      .where(and(eq(conversations.id, conversationId), eq(conversations.userId, user.id)));
-  }
-
-  const [assistantMessage] = await db
-    .insert(messages)
-    .values({
-      userId: user.id,
-      conversationId,
-      role: "assistant",
-      content: assistantText,
-      mode: "text",
-    })
-    .returning();
-
-  // Priced through the shared recorder, and carrying the cached-input count so
-  // the spend panel shows whether prompt caching is actually being HIT. A cache
-  // that silently stops working looks exactly like one that works, until the
-  // bill arrives.
+  // The money first, in a write of its own (docs/chat/SPEC.md §4, v1.09 r2):
+  // whatever fails after this, what the model cost is counted. Priced through
+  // the shared recorder, and carrying the cached-input count so the spend
+  // panel shows whether prompt caching is actually being HIT. A cache that
+  // silently stops working looks exactly like one that works, until the bill
+  // arrives.
   await recordUsage({
     userId: user.id,
     kind: "chat",
@@ -559,6 +531,37 @@ async function runModels(
     cachedInputTokens: totalCached,
     cacheWriteInputTokens: totalCacheWrite,
   });
+
+  // The reply and the turn's done mark together: a reply is never stored on a
+  // turn that then fails, so his tap can never store a second one.
+  const assistantMessage = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .insert(messages)
+      .values({
+        userId: user.id,
+        conversationId,
+        role: "assistant",
+        content: assistantText,
+        mode: "text",
+      })
+      .returning();
+    if (turnId) await finishTurn(user.id, turnId, { replyMessageId: row.id, toasts, uiActions }, tx);
+    return row;
+  });
+
+  // Once the answer is saved, and never able to undo it: a model answered this
+  // turn with the briefing in hand, so the follow-ups it raised have been asked
+  // (SPEC §11, v1.03); and OpenAI's chain moves on. A turn that failed returned
+  // above and left them open for the next one. If one of these fails, it is
+  // said in the log and the turn stays done.
+  await settleFollowUps(user.id, briefing.followUps).catch((e) => console.error("chat: follow-ups not settled:", errorMessage(e)));
+  if (!claudeServed && previousResponseId) {
+    await db
+      .update(conversations)
+      .set({ lastResponseId: previousResponseId })
+      .where(and(eq(conversations.id, conversationId), eq(conversations.userId, user.id)))
+      .catch((e) => console.error("chat: the chain id not stored:", errorMessage(e)));
+  }
 
   return {
     kind: "done",
