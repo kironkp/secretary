@@ -33,17 +33,38 @@ JSON object per line, in this order:
 A request refused before any work (not signed in, nothing said and nothing
 attached) keeps its HTTP status and its JSON body, as before.
 
-**On the page (v1.09 r2).** While he reads at the bottom of the thread, each
-piece keeps the line being written in view, at once (a smooth scroll falls
-behind the text). If he scrolls up he is left where he is; back at the
-bottom, it follows again. The answer is drawn where the saved answer will
-stand, so when it lands nothing moves. "Not delivered — tap to retry" is a
-44 px tall target: with this version it is the only way he runs a turn
-again.
+**On the page: the thread follows the answer, and only his hands stop it
+(v1.09 r4).** Three versions guessed his intent from where the thread
+stood, and the layout moves that too (the panel opening, a round that
+starts over shorter, the keyboard). Now:
 
-A request that does not ask for a stream gets the plain JSON answer as before:
-a page opened before this release, and the tests that read the answer whole.
-It is the same turn underneath, written once; only the wrapping differs.
+1. **His hands pause it.** A touch or a pointer down on the thread (its
+   scrollbar included), a wheel, or a scroll key (PageUp, ArrowUp, Home, or
+   Space when no field has focus) pauses following at once. While his hands
+   are on the thread, and until it settles, nothing writes its scroll
+   position: it never fights a finger or stops a momentum scroll.
+2. **Settled, it decides once.** When no scroll event has come for 150 ms
+   after his last input (or the browser says the scroll has ended), it
+   decides once, by position only: within 32 px of the bottom, following
+   is on; otherwise it is off. Nothing is decided per scroll event.
+3. **While following, the bottom stays in view.** Every piece, every round
+   that starts over, and every change in the size of the thread or of what
+   it holds puts the bottom in view, at once. The layout never decides
+   anything.
+4. **A scroll with no input** (an indicator dragged, VoiceOver, an overlay
+   scrollbar, find in page) counts as his, and turns following off, only
+   when all of these hold: it leaves him more than 32 px above the bottom;
+   it is not the position the page last wrote; and neither the content's
+   height nor the view's has changed since the page last followed. A clamp
+   always changes one of those heights, so it never counts.
+5. **Each send of his turns following on.**
+
+The thread's own scrolls all go through this rule: his send and the panel
+opening put the bottom in view; a jump to a message found by search turns
+following off. While an answer is written, the space for the row that will
+hold its Copy and Read aloud buttons is kept below it, so when it lands
+nothing moves. "Not delivered — tap to retry" is a 44 px tall target: it is
+the only way he runs a turn again.
 
 **Compression.** `next start` gzips responses. Whether it, or anything else
 between the route and the page, holds a stream back is measured on the built
@@ -159,6 +180,11 @@ same tool, so the same holds there.
 - A page opened before this release posts without a turn id and reads JSON,
   so it keeps the 30-second limit until it is reloaded.
 - Turn rows are kept (one small row per message); nothing deletes them yet.
+- Seen only on a device, not in the browser tests: a real touch scroll, its
+  momentum after the finger lifts, VoiceOver, and dragging the iOS scroll
+  indicator. The rule above is written for them (a momentum tail keeps the
+  thread unsettled while its scroll events come; a scroll with no input
+  counts by rule 4); the browser tests drive the thread with a mouse wheel.
 - A turn's usage is one row, written when the model has answered. A process
   killed part way through a turn (a restart in the middle of its rounds)
   loses the rounds it had answered so far: they are in memory until then.
