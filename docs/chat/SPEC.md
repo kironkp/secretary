@@ -45,12 +45,14 @@ starts over shorter, the keyboard). Now:
    thread, and until it settles, nothing writes its scroll position: it
    never fights a finger or stops a momentum scroll.
 2. **Settled, it decides once.** When no scroll event has come for 150 ms
-   after his last input (or the browser says the scroll has ended), it
-   decides once, by position only: where his own scroll left him, within 32
-   px of the bottom, following is on; otherwise it is off. Nothing is
-   decided per scroll event, and what is written below him while it settles
-   is not his scroll: a wheel back to the bottom while pieces keep coming
-   still turns it on.
+   after his last input (or the browser says his scroll has ended), it
+   decides once, by position only: within 32 px of the bottom as it stood
+   when his input began, following is on; otherwise it is off. Nothing is
+   decided per scroll event, and what is written below him after his input
+   began is not his scroll: a browser takes a wheel to the bottom as it was
+   when the wheel came, though a piece may land before the scroll does, and
+   a wheel back to the bottom while pieces keep coming still turns it on.
+   The end of a scroll the page made itself is not the end of his.
 3. **While following, the bottom stays in view.** Every piece, every round
    that starts over, and every change in the size of the thread or of what
    it holds puts the bottom in view, at once. The layout never decides
