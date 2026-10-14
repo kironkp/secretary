@@ -1440,6 +1440,46 @@ describe("the request function, case by case", { timeout: 30_000 }, () => {
     expect((await b.head()).pinned.toSorted()).toEqual([cards.at(-1), "stat_row"].toSorted());
   });
 
+  it("a card that comes back is nobody's neighbour on a board a planner crossed: his card stays right under Needs a date (the Reviewer's r5q)", async () => {
+    // A planner sank the tiles below People, with a reason. He put Ember right under Needs a date, so its place
+    // counts from the top (the tiles, the system's and upper, stand below it). A quiet card goes and comes back.
+    // Were the returning card put onto the request's list (the Reviewer's mutant Q7), it would land right under
+    // Needs a date, as a card is in no order, and become Ember's neighbour above: Ember would be stood under it,
+    // in among the cards. Every other committed test, the suite-size walk included, let that through.
+    const b = await board(2);
+    await b.render();
+    await b.nextDay();
+    await b.newTask("Dune");
+    const bundle = await computeCurrentPlan(b.id);
+    await persistPlan(b.id, bundle, {
+      call: async () => {
+        lastPlannerUsage.model = "claude-sonnet-5";
+        lastPlannerUsage.input = 4_000;
+        lastPlannerUsage.output = 800;
+        const plan = defaultPlan(bundle.signals);
+        const tiles = { component: "stat_row", props: { tiles: [{ value: "2", label: "late" }] }, why: "Less to count today" };
+        return JSON.stringify({ ...plan, plan_id: "x", reason_summary: "A planner's view", sections: [...plan.sections.filter((s) => s.component !== "stat_row"), tiles] });
+      },
+    });
+    const cardsOf = (...names: string[]) => names.map((n) => b.card(n));
+    const sunk = await b.keys();
+    expect(sunk).toEqual(["hero_next_up", "timeline", ...cardsOf("Birch", "Atlas", "Cedar", "Dune", "Ember", "Fjord", "Grove", "Harbor", "Iris", "Shopping"), "date_chase", "people_index", "stat_row"]);
+    expect((await b.head()).spec.sections.filter((s) => s.why).map(sectionKey)).toEqual(["stat_row"]);
+    // Ember to the place right above People: right under Needs a date.
+    expect((await b.chatEdit([{ op: "move", section: b.card("Ember"), to: sunk.indexOf("people_index") - 1 }])).result).toMatchObject({ applied: true });
+    const had = ["hero_next_up", "timeline", ...cardsOf("Birch", "Atlas", "Cedar", "Dune", "Fjord", "Grove", "Harbor", "Iris", "Shopping"), "date_chase", b.card("Ember"), "people_index", "stat_row"];
+    expect(await b.keys()).toEqual(had);
+    const head = await b.head();
+    expect(head.pinned).toEqual([b.card("Ember")]);
+    expect(head.spec.sections.find((s) => sectionKey(s) === b.card("Ember"))?.place).toEqual({ from: "top", n: 12 });
+    // Grove goes and comes back, nothing else happening in between.
+    expect((await b.arrange([{ op: "hide", section: "Grove" }])).result).toMatchObject({ applied: true });
+    expect(await b.keys()).toEqual(had.filter((k) => k !== b.card("Grove")));
+    expect((await b.arrange([{ op: "show", section: "Grove" }])).result).toMatchObject({ applied: true });
+    expect(await b.keys()).toEqual(had);
+    expect((await b.head()).pinned).toEqual([b.card("Ember")]);
+  });
+
   it("a card he lets go keeps the size it had: back among the system's cards by the data, looking as it did", async () => {
     const b = await board(5);
     await b.render();
