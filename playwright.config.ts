@@ -103,6 +103,14 @@ export default defineConfig({
       use: { ...devices["iPhone 15"] },
     },
     {
+      // A chat answer reaches him (v1.09, docs/chat/SPEC.md §3): a cut stream
+      // or the router's 503 page is resumed, and only his tap runs the turn
+      // again. /api/chat is answered by page.route; no model is reached.
+      name: "chat",
+      testMatch: /chat-turn\.spec\.ts/,
+      use: { ...devices["iPhone 15"] },
+    },
+    {
       // Something he placed on the Overview stays there (v1.02): a list sent
       // to the top through the real tool, next up directly under it, after a
       // reload too. Last, because while it runs the shared board has a pin.

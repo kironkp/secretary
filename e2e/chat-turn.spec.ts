@@ -34,10 +34,13 @@ async function network(page: import("@playwright/test").Page, answers: ((route: 
   });
   return asks;
 }
+/** Opens the chat from its launcher (it starts closed) and sends a message. */
 async function say(page: import("@playwright/test").Page, text: string) {
   await page.goto("/today");
-  await page.getByLabel("Ask your secretary").fill(text);
-  await page.getByLabel("Send message").click();
+  await page.getByTestId("chat-launcher").click();
+  const field = page.getByRole("textbox", { name: "Ask your secretary" });
+  await field.fill(text);
+  await page.getByRole("button", { name: "Send message" }).click();
 }
 
 test("an answer cut off after its first pieces comes back by a resume, and the page shows it", async ({ page }) => {
