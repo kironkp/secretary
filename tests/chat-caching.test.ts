@@ -15,6 +15,7 @@ import { buildBriefing } from "@/lib/secretary/briefing";
 import { runClaudeChat } from "@/lib/secretary/chat-claude";
 import { buildInstructionParts } from "@/lib/secretary/persona";
 import { executeTool, type ToolContext } from "@/lib/secretary/tools";
+import { streamedFrom } from "./fixtures/claude-stream";
 
 const TZ = "America/Los_Angeles";
 const U = { id: `test-chat-cache-${crypto.randomUUID()}`, email: `chat-cache-${Date.now()}@sec-a004.test` };
@@ -22,33 +23,30 @@ const tok = (s: string) => Math.ceil(s.length / 4);
 
 function cachingClaude() {
   const cache = new Set<string>();
-  const client = {
-    messages: {
-      create: async (req: { tools: unknown[]; system: { text: string }[]; messages: unknown[] }) => {
-        let key = "";
-        let tokens = 0;
-        let read = 0;
-        const prefixes: string[] = [];
-        for (const part of [JSON.stringify(req.tools), ...req.system.map((b) => b.text)]) {
-          key += `\u0000${part}`;
-          tokens += tok(part);
-          if (cache.has(key)) read = tokens;
-          prefixes.push(key);
-        }
-        for (const p of prefixes) cache.add(p);
-        return {
-          content: [{ type: "text", text: "Okay." }],
-          stop_reason: "end_turn",
-          usage: {
-            input_tokens: tok(JSON.stringify(req.messages)),
-            output_tokens: 2,
-            cache_read_input_tokens: read,
-            cache_creation_input_tokens: tokens - read,
-          },
-        };
+  const create = async (req: { tools: unknown[]; system: { text: string }[]; messages: unknown[] }) => {
+    let key = "";
+    let tokens = 0;
+    let read = 0;
+    const prefixes: string[] = [];
+    for (const part of [JSON.stringify(req.tools), ...req.system.map((b) => b.text)]) {
+      key += `\u0000${part}`;
+      tokens += tok(part);
+      if (cache.has(key)) read = tokens;
+      prefixes.push(key);
+    }
+    for (const p of prefixes) cache.add(p);
+    return {
+      content: [{ type: "text", text: "Okay." }],
+      stop_reason: "end_turn",
+      usage: {
+        input_tokens: tok(JSON.stringify(req.messages)),
+        output_tokens: 2,
+        cache_read_input_tokens: read,
+        cache_creation_input_tokens: tokens - read,
       },
-    },
+    };
   };
+  const client = { messages: { create, stream: streamedFrom(create) } };
   return client as unknown as Anthropic;
 }
 

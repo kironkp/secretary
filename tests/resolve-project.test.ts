@@ -146,27 +146,33 @@ describe("update_task project moves + update_project merge", () => {
     expect(row2.projectId).toBeNull();
   });
 
-  it("update_project merge_into moves tasks and deletes the duplicate", async () => {
+  // v1.09: the merge is off until 1.12 (docs/chat/SPEC.md §5). Until then it
+  // moved the tasks and deleted the duplicate; now the duplicate and its task
+  // stay where they are (tests/project-merge-off.test.ts has the rest).
+  it("update_project merge_into is not available yet: the duplicate and its task stay", async () => {
     await executeTool(ctx, "create_project", { name: "Duplicate Zone" });
     await executeTool(ctx, "create_task", { title: "stranded task", project: "Duplicate Zone" });
     const merged = await executeTool(ctx, "update_project", {
       project: "Duplicate Zone",
       merge_into: "Jazz music project",
     });
-    expect((merged.result as { moved_tasks: number }).moved_tasks).toBe(1);
+    expect((merged.result as { error: string }).error).toMatch(/merging projects is not available yet/i);
     const remaining = await db
       .select()
       .from(projects)
       .where(eq(projects.userId, A.id))
       .then((r) => r.filter((p) => p.name === "Duplicate Zone"));
-    expect(remaining).toHaveLength(0);
+    expect(remaining).toHaveLength(1);
+    const stranded = await db.select().from(tasks).where(and(eq(tasks.userId, A.id), eq(tasks.title, "stranded task")));
+    expect(stranded.map((t) => t.projectId)).toEqual([remaining[0].id]);
   });
 
-  it("delete refuses when tasks are attached", async () => {
+  it("delete refuses when tasks are attached, and says so without pointing at a merge", async () => {
     const res = await executeTool(ctx, "update_project", {
       project: "Jazz music project",
       delete: true,
     });
-    expect((res.result as { error: string }).error).toContain("merge_into");
+    expect((res.result as { error: string }).error).toMatch(/still has \d+ task/);
+    expect((res.result as { error: string }).error).not.toMatch(/merge/i);
   });
 });

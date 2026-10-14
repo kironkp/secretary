@@ -41,17 +41,15 @@ vi.mock("@/lib/anthropic", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/lib/anthropic")>();
   const text = (v: unknown): string =>
     typeof v === "string" ? v : Array.isArray(v) ? v.map((b: { text?: string }) => b.text ?? "").join("\n") : "";
-  const client = {
-    messages: {
-      create: async (args: { system?: unknown; messages: { content: unknown }[] }) => {
-        model.calls++;
-        if (model.fail) throw new Error("the model is unavailable");
-        model.system = text(args.system);
-        model.user = text(args.messages.at(-1)?.content);
-        return { content: [{ type: "text", text: "Noted." }], stop_reason: "end_turn", usage: { input_tokens: 10, output_tokens: 5 } };
-      },
-    },
+  const create = async (args: { system?: unknown; messages: { content: unknown }[] }) => {
+    model.calls++;
+    if (model.fail) throw new Error("the model is unavailable");
+    model.system = text(args.system);
+    model.user = text(args.messages.at(-1)?.content);
+    return { content: [{ type: "text", text: "Noted." }], stop_reason: "end_turn", usage: { input_tokens: 10, output_tokens: 5 } };
   };
+  const { streamedFrom } = await import("@/tests/fixtures/claude-stream");
+  const client = { messages: { create, stream: streamedFrom(create) } };
   return {
     ...real,
     chatSettings: async () => ({ model: "claude-sonnet-5", effort: "low" }),

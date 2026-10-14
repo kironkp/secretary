@@ -32,21 +32,19 @@ vi.mock("next/server", async (importOriginal) => ({
 vi.mock("@/lib/anthropic", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/lib/anthropic")>();
   // One tool round, then a closing line: what Claude does for "add a daily reminder at 8".
-  const client = {
-    messages: {
-      create: async () => {
-        claude.creates++;
-        const usage = { input_tokens: 10, output_tokens: 5 };
-        return claude.creates % 2 === 1
-          ? {
-              content: [{ type: "tool_use", id: `tu-${claude.creates}`, name: claude.toolName, input: claude.toolInput }],
-              stop_reason: "tool_use",
-              usage,
-            }
-          : { content: [{ type: "text", text: "Done." }], stop_reason: "end_turn", usage };
-      },
-    },
+  const create = async () => {
+    claude.creates++;
+    const usage = { input_tokens: 10, output_tokens: 5 };
+    return claude.creates % 2 === 1
+      ? {
+          content: [{ type: "tool_use", id: `tu-${claude.creates}`, name: claude.toolName, input: claude.toolInput }],
+          stop_reason: "tool_use",
+          usage,
+        }
+      : { content: [{ type: "text", text: "Done." }], stop_reason: "end_turn", usage };
   };
+  const { streamedFrom } = await import("@/tests/fixtures/claude-stream");
+  const client = { messages: { create, stream: streamedFrom(create) } };
   return {
     ...real,
     chatSettings: async () => ({ model: "claude-sonnet-5", effort: "low" }),

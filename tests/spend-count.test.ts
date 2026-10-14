@@ -22,6 +22,7 @@ import { spendAllTime, spendReport, spendWindow } from "@/lib/spend";
 import { backgroundDailyCapUsd, paidCallAllowed } from "@/lib/spend-guard";
 import { runProject } from "@/lib/understanding/run";
 import { recordUsage } from "@/lib/usage";
+import { streamedFrom } from "./fixtures/claude-stream";
 import { minimalOutputFor } from "./fixtures/understanding";
 
 const TZ = "America/Los_Angeles";
@@ -180,17 +181,14 @@ describe("the recorders report what was written to the cache", () => {
     const userId = await newUser();
     let round = 0;
     const seen: unknown[] = [];
-    const client = {
-      messages: {
-        create: async (req: { tools: { cache_control?: unknown }[]; system: { cache_control?: unknown }[] }) => {
-          seen.push(req.tools.at(-1)?.cache_control, ...req.system.map((b) => b.cache_control));
-          round++;
-          return round === 1
-            ? { content: [{ type: "tool_use", id: "t1", name: "get_layout_plan", input: {} }], stop_reason: "tool_use", usage: { input_tokens: 120, output_tokens: 30, cache_creation_input_tokens: 24_000, cache_read_input_tokens: 0 } }
-            : { content: [{ type: "text", text: "Done." }], stop_reason: "end_turn", usage: { input_tokens: 400, output_tokens: 20, cache_creation_input_tokens: 300, cache_read_input_tokens: 24_000 } };
-        },
-      },
-    } as unknown as Anthropic;
+    const create = async (req: { tools: { cache_control?: unknown }[]; system: { cache_control?: unknown }[] }) => {
+      seen.push(req.tools.at(-1)?.cache_control, ...req.system.map((b) => b.cache_control));
+      round++;
+      return round === 1
+        ? { content: [{ type: "tool_use", id: "t1", name: "get_layout_plan", input: {} }], stop_reason: "tool_use", usage: { input_tokens: 120, output_tokens: 30, cache_creation_input_tokens: 24_000, cache_read_input_tokens: 0 } }
+        : { content: [{ type: "text", text: "Done." }], stop_reason: "end_turn", usage: { input_tokens: 400, output_tokens: 20, cache_creation_input_tokens: 300, cache_read_input_tokens: 24_000 } };
+    };
+    const client = { messages: { create, stream: streamedFrom(create) } } as unknown as Anthropic;
     const ctx: ToolContext = { userId, timezone: TZ };
     const result = await runClaudeChat({ client, model: "claude-fable-5", effort: "low", instructions: { stable: "S", live: "L" }, history: [], message: "hi", attachments: [], toolCtx: ctx, executeTool });
     expect(result).toMatchObject({ inputTokens: 120 + 24_000 + 400 + 300 + 24_000, cachedInputTokens: 24_000, cacheWriteInputTokens: 24_300, outputTokens: 50 });

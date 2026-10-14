@@ -27,7 +27,8 @@ vi.mock("next/server", async (importOriginal) => ({ ...(await importOriginal<typ
 vi.mock("@/lib/anthropic", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/lib/anthropic")>();
   const answer = () => ({ content: [{ type: "text", text: claude.text }], stop_reason: "end_turn", usage: claude.usage, parsed_output: claude.parsed });
-  const client = { messages: { create: async () => answer(), parse: async () => answer(), stream: () => ({ finalMessage: async () => answer() }) } };
+  const { streamedFrom } = await import("@/tests/fixtures/claude-stream");
+  const client = { messages: { create: async () => answer(), parse: async () => answer(), stream: streamedFrom(async () => answer()) } };
   return {
     ...real,
     chatSettings: async () => ({ model: "claude-sonnet-5", effort: "low" }),
