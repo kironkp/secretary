@@ -66,6 +66,20 @@ describe("where the card run goes: every order of every subset, every place the 
     expect(cases).toBe(326);
   });
 
+  it("a lone card that stands last in the plan says what no card at all would (326 cases)", () => {
+    // A request keeps a card he lets go in the draft it asks the composition with, for the card's emphasis, and
+    // puts it last. With other cards before it, the first of those says where the run goes. With none, it has to
+    // say nothing: the run goes where it would with no card in the plan.
+    let cases = 0;
+    for (const subset of subsets) {
+      for (const order of orders(subset)) {
+        expect(runPlace([...order.map(section), CARD]), order.join(" ")).toBe(runPlace(order.map(section)));
+        cases++;
+      }
+    }
+    expect(cases).toBe(326);
+  });
+
   it("the worked cases, in words", () => {
     const [H, S, T, D, P] = FIVE;
     const place = (order: string[], said: number) => runPlace([...order.slice(0, said).map(section), CARD, ...order.slice(said).map(section)]);

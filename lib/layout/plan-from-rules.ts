@@ -20,6 +20,44 @@ export function resolvePlan(
   return planner(signals);
 }
 
+/**
+ * The sections a rule can move (today: rule 3 sends the strip to the top).
+ * Read by the composition when it has to say which of two sections is out
+ * of step on a board no order of the rules is accepted against (SPEC §2). A
+ * rule that moves another section adds it here; a test fails if a rule
+ * moves one that is not.
+ */
+export const RULES_CAN_MOVE: readonly string[] = ["timeline"];
+
+/** Rule 3, the strip opened up, with its reason; and sent to the top. The rule and the list of orders below use these same lines. */
+function openTheStrip(plan: LayoutPlan): PlanSection | undefined {
+  const timeline = plan.sections.find((s) => s.component === "timeline");
+  if (!timeline) return undefined;
+  timeline.props = { span_days: 14, expanded: true };
+  timeline.why = "You've been talking dates all day — the two weeks ahead, opened up";
+  return timeline;
+}
+function sendTheStripUp(plan: LayoutPlan, timeline: PlanSection) {
+  plan.sections.splice(plan.sections.indexOf(timeline), 1);
+  plan.sections.unshift(timeline);
+}
+
+/**
+ * Every order the rules can produce for these signals, each with the reason
+ * it gives for what it moves, the one that moves the least first: the
+ * default board, and the strip sent up by rule 3. The composition puts a
+ * section a list lacks where the first of these that is accepted against the
+ * list has it, and a request checks that none of them it found accepted is
+ * refused against the board it leaves (SPEC §2). A rule that moves a section
+ * adds its order here; a test fails if a rule produces an order that is not.
+ */
+export function ordersTheRulesCanProduce(signals: Signals): LayoutPlan[] {
+  const stripUp = defaultPlan(signals);
+  const timeline = openTheStrip(stripUp);
+  if (timeline) sendTheStripUp(stripUp, timeline);
+  return [defaultPlan(signals), ...(timeline ? [stripUp] : [])];
+}
+
 export function planFromRules(signals: Signals): LayoutPlan {
   const base = defaultPlan(signals);
   const plan: LayoutPlan = structuredClone(base);
@@ -82,13 +120,10 @@ export function planFromRules(signals: Signals): LayoutPlan {
 
   // Rule 3 — schedule-talk.
   if (isStrongScheduleTalk(signals.conversation)) {
-    const timeline = plan.sections.find((s) => s.component === "timeline");
+    const timeline = openTheStrip(plan);
     if (timeline) {
-      timeline.props = { span_days: 14, expanded: true };
-      timeline.why = "You've been talking dates all day — the two weeks ahead, opened up";
       if (canReorder) {
-        plan.sections.splice(plan.sections.indexOf(timeline), 1);
-        plan.sections.unshift(timeline);
+        sendTheStripUp(plan, timeline);
         reordered = true;
       }
       for (const s of plan.sections) {

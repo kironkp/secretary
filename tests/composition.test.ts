@@ -94,6 +94,33 @@ const render = (signals: Signals, stored: LayoutPlan | null, pinned: string[] = 
 
 beforeEach(() => clearPlanCache());
 
+describe("a place counts from the top while something that belongs above the cards stands below it", () => {
+  // "Upper" is a card he has not placed, or one of the system's sections that belong above the cards: next up, the
+  // tiles AND the strip. (A mutant of the Reviewer's that made it next up alone passed every test.)
+  const places = (order: string[], placed: string[], signals: Signals = baseSignals()) => Object.fromEntries(readPlaces(order.map((component) => ({ component })), new Set(placed), signals));
+
+  it("the tiles below it, or the strip below it: from the top; only Needs a date and People below it: from the bottom", () => {
+    expect(places(["hero_next_up", "kanban", "stat_row", "timeline", "date_chase", "people_index"], ["kanban"])).toEqual({ kanban: { from: "top", n: 1 } });
+    expect(places(["hero_next_up", "stat_row", "kanban", "timeline", "date_chase", "people_index"], ["kanban"])).toEqual({ kanban: { from: "top", n: 2 } });
+    expect(places(["hero_next_up", "stat_row", "timeline", "kanban", "date_chase", "people_index"], ["kanban"])).toEqual({ kanban: { from: "bottom", n: 2 } });
+    expect(places(["kanban", "hero_next_up", "date_chase", "people_index"], ["kanban"])).toEqual({ kanban: { from: "top", n: 0 } });
+  });
+
+  it("the tiles or the strip he has placed himself are not upper: a section above only those counts from the bottom", () => {
+    expect(places(["hero_next_up", "kanban", "stat_row", "date_chase"], ["kanban", "stat_row"])).toEqual({ kanban: { from: "bottom", n: 2 }, stat_row: { from: "bottom", n: 1 } });
+    expect(places(["hero_next_up", "kanban", "timeline", "date_chase"], ["kanban", "timeline"])).toEqual({ kanban: { from: "bottom", n: 2 }, timeline: { from: "bottom", n: 1 } });
+  });
+
+  it("so a section he placed above the tiles stays above them when a project is added below", () => {
+    // Read from the bottom (next up alone as upper), kanban would stand a place lower on the longer board: under the tiles.
+    const signals = baseSignals();
+    const stored: LayoutPlan = { plan_id: "user-x", reason_summary: null, sections: placesRead([{ component: "hero_next_up" }, { component: "kanban" }, { component: "stat_row" }, { component: "timeline" }, { component: "date_chase" }, { component: "people_index" }], ["kanban"]) };
+    expect(stored.sections[1].place).toEqual({ from: "top", n: 1 });
+    const shown = keys(compose(stored, signals, stored, ["kanban"]));
+    expect(shown.slice(0, 3)).toEqual(["hero_next_up", "kanban", "stat_row"]);
+  });
+});
+
 describe("what counts as urgent", () => {
   it("late work, or a date within the week; a list never, however late its items", () => {
     expect(isUrgent(project("A", -1))).toBe(true);

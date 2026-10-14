@@ -8,7 +8,7 @@
 process.env.TZ = "UTC";
 
 import { afterAll, describe, expect, it } from "vitest";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { layoutPreferences, layoutSpecs, projects, tasks, user } from "@/lib/db/schema";
 import { sectionKey, type LayoutPlan, type PlanSection } from "@/lib/layout/plan";
@@ -171,6 +171,39 @@ describe("a row main wrote that is held on the landing day", () => {
     // Bounded, the run is right under the tiles, the strip under the cards: main's own look, until the next rules plan.
     expect(shown.indexOf("timeline")).toBeGreaterThan(shown.findLastIndex(isCard));
     expect(await b.open()).toEqual(shown);
+  });
+
+  it("on that board he hides Needs a date and shows it, then People: each comes back under the strip, and two days on the rules plan lands (a seed of the Reviewer's, 16180339)", { timeout: 30_000 }, async () => {
+    // The strip stands under the cards on the board he sees. On 472c2a7 a section that came back went under the
+    // nearest section above it in today's order, cards counted: under the last card, ABOVE the strip. The rules
+    // plan has the strip above both, so from then on it was refused, and main's banner stayed for good.
+    const b = await landed({
+      plan_id: "llm-old",
+      today: true,
+      sections: (card) => [{ component: "focus_banner", props: { text: "Two things are late", tone: "serious" } }, card("Atlas"), card("Birch"), ...mainsOrder(["Cedar", "Dune", "Shopping"].map(card))],
+    });
+    // An older row behind it, as on his board.
+    await db.insert(layoutSpecs).values({ userId: b.id, version: 6, spec: { plan_id: "plan-older", reason_summary: null, sections: mainsOrder(allCards((name) => ({ component: "project_card", props: { project_id: b.ids[name], variant: "full" } }))) }, pinned: [], kind: "plan", signalsHash: "from-main-older", outcome: "accepted", createdAt: day(-4) });
+    const say = async (operations: { op: string; section: string }[]) => ((await executeTool(b.ctx, "arrange_dashboard", { operations })).result as { applied?: boolean }).applied;
+    const first = await b.open();
+    const cards = first.filter(isCard);
+    expect(first).toEqual(["focus_banner", "hero_next_up", "stat_row", ...cards, "timeline", "date_chase", "people_index"]);
+    expect(await say([{ op: "hide", section: "needs a date" }])).toBe(true);
+    expect(await say([{ op: "show", section: "needs a date" }])).toBe(true);
+    expect(await b.open()).toEqual(first);
+    expect(await say([{ op: "hide", section: "people" }])).toBe(true);
+    expect(await say([{ op: "show", section: "people" }])).toBe(true);
+    expect(await b.open()).toEqual(first);
+    // Both in one request, and by the pin button (pinned, then let go).
+    expect(await say([{ op: "hide", section: "needs a date" }, { op: "show", section: "needs a date" }])).toBe(true);
+    expect((await requestBoard(b.id, { ops: [{ op: "pin", key: "people_index" }] })).ok).toBe(true);
+    expect((await requestBoard(b.id, { ops: [{ op: "unpin", key: "people_index" }] })).ok).toBe(true);
+    expect(await b.open()).toEqual(first);
+    // Two days on, something changes in his data: the banner goes and the rules plan is the board, the strip above the cards.
+    await db.update(layoutSpecs).set({ createdAt: sql`${layoutSpecs.createdAt} - interval '49 hours'` }).where(eq(layoutSpecs.userId, b.id));
+    await db.insert(tasks).values({ userId: b.id, projectId: b.ids.Cedar, title: "Cedar: one more", status: "todo", source: "spoken" });
+    const later = await b.open();
+    expect(later).toEqual(["hero_next_up", "stat_row", "timeline", ...later.filter(isCard), "date_chase", "people_index"]);
   });
 });
 

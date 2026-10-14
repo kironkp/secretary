@@ -15,9 +15,9 @@
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { layoutPreferences, layoutSpecs, projects } from "@/lib/db/schema";
-import { bannerFirst, readPlaces } from "./compose";
+import { acceptedOrders, bannerFirst, readPlaces, withSystems } from "./compose";
 import { nameOfKey, type NamedProject } from "./names";
-import { planFromRules } from "./plan-from-rules";
+import { planWithFallback } from "./plan-from-llm";
 import { defaultPlan, isUrgent, sectionKey, urgencyLabel, type LayoutPlan, type PlanSection } from "./plan";
 import { asStored, hashOnceStored, loadState, markPinPreferences, openOn, placedOn, planContent, type BoardState } from "./plan-store";
 import { REGISTRY_COMPONENTS, REGISTRY_VERSION } from "./registry";
@@ -247,61 +247,161 @@ export async function requestBoard(userId: string, request: BoardRequest): Promi
    * on it at the places read off it; or, for Put it back, at the places the
    * earlier row wrote (its board is not one he is looking at now).
    */
-  const openWith = async (list: PlanSection[], places: "read" | "kept" = "read") => {
-    const on = new Set(list.map((s) => sectionKey(s)));
-    const pinned = [...placed].filter((key) => on.has(key) && key !== BANNER);
-    const draft: LayoutPlan = { plan_id, reason_summary: reason, sections: places === "read" ? written(list, new Set(pinned)) : list };
-    // The state as it will be once written: this board is the stored one,
-    // for exactly these signals, with these pins and preferences. (Served
-    // again for the same signals, a stored board is composed without the
-    // layout clock being read; the row is stored under the hash the next
-    // open works out, clock and all, where it is written below.)
+  // The state as it will be once written: `draft` is the stored board, for
+  // exactly these signals, with these pins and preferences. (Served again
+  // for the same signals, a stored board is composed without the layout
+  // clock being read; the row is stored under the hash the next open works
+  // out, clock and all, where it is written below.)
+  const stateWith = (draft: LayoutPlan, pinned: string[]): BoardState => {
     const after = { ...signals, context: { ...signals.context, pinned_sections: pinned } };
-    const next: BoardState = {
+    return {
       ...state,
       signals: after,
       preferences,
       head: { spec: draft, pinned, signalsHash: signalsHash(after, REGISTRY_VERSION), version: (state.head?.version ?? 0) + 1, createdAt: new Date() },
     };
-    return (await openOn(next)).plan;
   };
+  const openWith = async (list: PlanSection[], places: "read" | "kept" = "read") => {
+    const on = new Set(list.map((s) => sectionKey(s)));
+    const pinned = [...placed].filter((key) => on.has(key) && key !== BANNER);
+    const draft: LayoutPlan = { plan_id, reason_summary: reason, sections: places === "read" ? written(list, new Set(pinned)) : list };
+    return (await openOn(stateWith(draft, pinned))).plan;
+  };
+  /** The cards this request lets go (unpinned): back with the system's cards, by the data. */
+  let letGo: PlanSection[] = [];
+  /**
+   * The board for a list he is told. The composition and its count settle
+   * the system's sections and the cards FIRST (in calm mode, the default
+   * board's order). Then everything he placed is stood next to the neighbour
+   * it had on the list, and his places are read off THAT board: it is the
+   * list and the board. A place is a number, and until this the number was
+   * read off the list: where the count then moved the cards, or the list had
+   * a section on the other side of them, the number pointed at another
+   * neighbour.
+   *
+   * Each thing of his has ONE neighbour, by the test its place already uses
+   * (readPlaces). Counted from the top (a card of the run, or next up, the
+   * tiles or the strip, stands somewhere below it): the nearest thing ABOVE
+   * it that is not his; with none, the top. Counted from the bottom: the
+   * nearest thing BELOW it that is not his; with none, the bottom. Two of
+   * his side by side look past each other, and several with one neighbour
+   * keep the order they had.
+   *
+   * A card that comes back (shown, let go) is not on the list: the
+   * composition draws it in the run by the data, and it is nobody's
+   * neighbour. A card let go is in the draft the composition is asked with,
+   * for its emphasis only: last, where it does not say where the run goes
+   * (the first card of a plan says that; and a lone card that stands last
+   * says what no card at all would, which a test shows for every order).
+   */
+  const settle = async (list: PlanSection[]): Promise<LayoutPlan> => {
+    const his = (s: PlanSection) => placed.has(sectionKey(s));
+    const first = await openWith([...list, ...letGo]);
+    const places = readPlaces(list, new Set(list.filter(his).map((s) => sectionKey(s))), signals);
+    const fromTop = (s: PlanSection) => places.get(sectionKey(s))?.from === "top";
+    const out = first.sections.filter((s) => s.place === undefined);
+    const at = (key: string) => out.findIndex((x) => sectionKey(x) === key);
+    // From the top: under the nearest thing above that is not his (or under the one of his just put there).
+    let above: string | null = null;
+    for (const s of list) {
+      if (his(s) && !fromTop(s)) continue;
+      if (his(s)) out.splice(above === null ? 0 : at(above) + 1, 0, s);
+      above = sectionKey(s);
+    }
+    // From the bottom: above the nearest thing below that is not his (or above the one of his just put there).
+    let below: string | null = null;
+    for (const s of list.toReversed()) {
+      if (his(s) && fromTop(s)) continue;
+      if (his(s)) out.splice(below === null ? out.length : at(below), 0, s);
+      below = sectionKey(s);
+    }
+    return openWith(out);
+  };
+  /** The system's own on a list he is told: not the banner, not what he placed. */
+  const own = (t: PlanSection) => t.component !== BANNER && !placed.has(sectionKey(t));
   // Put it back: the earlier row's board with what was placed on it, each at
   // the place that row wrote, on today's data and under today's hides.
   let board: LayoutPlan;
+  /** The list he is told, and the sections of the system's this request brings back onto it. */
+  let told: PlanSection[] = [];
+  let returning: PlanSection[] = [];
   if (request.revert) board = await openWith(bannerFirst(sections), "kept");
   else {
-    // Where the system has what this request sends back to it (a card by the
-    // data, another section at its default place) is the composition's to say:
-    // it is asked with those sections off the board, and they then go in under
-    // the system's section each one follows there. Everything else keeps the
-    // order he saw. An unpinned card stays in the draft for its emphasis only.
+    // What this request sends back to the system (shown again, added back,
+    // let go) goes where the system has it, and where that is, is the
+    // composition's to say, not this function's. It is asked with those
+    // sections off the board, for what will be drawn. Everything else keeps
+    // the order he saw.
     const standing = bannerFirst(sections).filter((s) => !floating.has(sectionKey(s)));
-    const run = standing.findIndex((s) => isCard(s) && !placed.has(sectionKey(s)));
-    const asked = [...standing];
-    // (Beside a card of the run, so it does not say where the run goes; with no run to stand in, it is left out.)
-    if (run !== -1) asked.splice(run + 1, 0, ...sections.filter((s) => floating.has(sectionKey(s)) && isCard(s)));
-    const systems = await openWith(asked);
-    const flow = systems.sections.filter((s) => s.place === undefined && s.component !== BANNER);
+    letGo = sections.filter((s) => floating.has(sectionKey(s)) && isCard(s));
+    const systems = await openWith(standing);
     const drawnBy = new Set(systems.sections.map((s) => sectionKey(s)));
-    const told = standing.filter((s) => drawnBy.has(sectionKey(s)));
-    // The system's order today: the rules plan's (the default's in calm
-    // mode). A section that comes back goes where THAT has it, so the board
-    // he is told is not one the rules plan would then be refused against.
-    const todays = (signals.context.calm_mode ? defaultPlan(signals) : planFromRules(signals)).sections.map((s) => sectionKey(s));
-    for (const s of flow) {
-      const key = sectionKey(s);
-      if (told.some((t) => sectionKey(t) === key)) continue;
-      const own = (t: PlanSection) => t.component !== BANNER && !placed.has(sectionKey(t));
-      // Under the nearest of the system's sections above it that is on the
-      // board; else on top of them. A card's neighbours are the run's, in
-      // data order; another section's are today's system order.
-      const order = isCard(s) || !todays.includes(key) ? flow.map((f) => sectionKey(f)) : todays;
-      const above = order.slice(0, order.indexOf(key)).findLast((k) => told.some((t) => sectionKey(t) === k && own(t)));
-      const firstOwn = told.findIndex(own);
-      const at = above ? told.findIndex((t) => sectionKey(t) === above) + 1 : firstOwn !== -1 ? firstOwn : told[0]?.component === BANNER ? 1 : 0;
-      told.splice(at, 0, s);
+    told = standing.filter((s) => drawnBy.has(sectionKey(s)));
+    const onIt = (s: PlanSection) => told.some((t) => sectionKey(t) === sectionKey(s));
+    // A section that comes back is put onto the list he saw by the
+    // composition's own function (systemsPlace: where the rules would keep
+    // it), so what he placed can have it for a neighbour. A card that comes
+    // back is not: the composition draws it in the run by the data.
+    returning = systems.sections.filter((s) => s.place === undefined && s.component !== BANNER && !isCard(s) && !onIt(s));
+    told = withSystems(told, returning, placed, signals);
+    board = await settle(told);
+  }
+  // --- the guard: his request does not hold the system's plan -----------------------------
+  // Every place is read again from the board he is told. What left the board
+  // (its project archived, its component banned) has no place any more.
+  const storedAs = (b: LayoutPlan): LayoutPlan => ({ ...b, plan_id, sections: written(b.sections, new Set(placedOn(b))) });
+  /** What a NEW open would be served on a state, one not served from the stored row: the rules chain, in memory. No model call. */
+  const served = async (on: BoardState) =>
+    on.signals.context.calm_mode
+      ? "calm"
+      : (await planWithFallback(on.signals, { previousPlan: on.head?.spec ?? null, preferences: on.preferences, pinnedSections: on.head?.pinned ?? [], llmEnabled: false, dynamicComponents: on.dynamic })).source;
+  // Before it writes, the request asks two things of the board he is about
+  // to be told, against the board as it is. What a new open would be served
+  // today: the rules plan now, and held after, is a hold. And each order the
+  // rules can produce, the clock a day on: accepted now and refused after is
+  // a hold left behind for a later day (the talk stops, a rule starts). If
+  // his request would leave either, a section it brought back stands at the
+  // wrong place: the other places among the system's sections are tried,
+  // nearest first and the upper one at equal distance, and the first that
+  // leaves no hold is taken. If none does, his request is applied at the
+  // rule's place all the same (it is never refused for this) and the server
+  // log says so. Not for Put it back, which puts the system's own order
+  // back. (In calm mode no plan is asked for, and both questions say so.)
+  // The rule is built so that none of this happens with the rules as they
+  // are (withSystems); this is the check that says so.
+  let leftHeld: string | null = null;
+  if (!request.revert) {
+    const servedNow = await served(state);
+    const orders = (spec: LayoutPlan | null, pinned: string[], prefs: LayoutPreference[]) => acceptedOrders(spec, pinned, prefs, signals).map((order) => order.join());
+    const ordersNow = orders(state.head?.spec ?? null, state.head?.pinned ?? [], state.preferences);
+    const held = async (b: LayoutPlan) => {
+      const [spec, pinned] = [storedAs(b), placedOn(storedAs(b))];
+      const after = orders(spec, pinned, preferences);
+      if (ordersNow.some((order) => !after.includes(order))) return true;
+      return servedNow === "rules" && (await served(stateWith(spec, pinned))) !== "rules";
+    };
+    if (await held(board)) {
+      let tried = 0;
+      let found = false;
+      search: for (const s of returning) {
+        const rest = told.filter((t) => t !== s);
+        const systemsAt = rest.flatMap((t, i) => (own(t) && !isCard(t) ? [i] : []));
+        const first = rest.findIndex(own);
+        const spot = (k: number) => (k === 0 ? (first !== -1 ? first : rest[0]?.component === BANNER ? 1 : 0) : systemsAt[k - 1] + 1);
+        const rule = systemsAt.filter((i) => i < told.indexOf(s)).length;
+        const others = Array.from({ length: systemsAt.length + 1 }, (_, k) => k).filter((k) => k !== rule);
+        // (Nearest first; of two as near, the upper one: the places are in order and the sort keeps it.)
+        for (const k of others.toSorted((a, b) => Math.abs(a - rule) - Math.abs(b - rule))) {
+          tried++;
+          const list = [...rest.slice(0, spot(k)), s, ...rest.slice(spot(k))];
+          const other = await settle(list);
+          if (await held(other)) continue;
+          [told, board, found] = [list, other, true];
+          break search;
+        }
+      }
+      if (!found) leftHeld = `[layout] a request leaves the rules plan held, now or on a later day: ${ops.length} operation(s), ${returning.length} section(s) brought back, ${tried} other place(s) tried`;
     }
-    board = await openWith(told);
   }
 
   // --- the claims, on that board ------------------------------------------------------
@@ -332,9 +432,8 @@ export async function requestBoard(userId: string, request: BoardRequest): Promi
   }
 
   // --- write, and answer with that board ------------------------------------------------
-  // Every place is read again from the board he is told. What left the board
-  // (its project archived, its component banned) has no place any more.
-  const plan: LayoutPlan = { ...board, plan_id, sections: written(board.sections, new Set(placedOn(board))) };
+  if (leftHeld) console.warn(leftHeld);
+  const plan = storedAs(board);
   const stillPlaced = placedOn(plan);
   if (lifted) await db.delete(layoutPreferences).where(and(eq(layoutPreferences.userId, userId), eq(layoutPreferences.id, lifted.id)));
   if (remembers) {

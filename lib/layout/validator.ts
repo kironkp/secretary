@@ -17,6 +17,7 @@
 //   move, and a pin is applied by the composition, not checked.
 import { PROP_SCHEMAS, RETIRED_COMPONENTS, isRegistryComponent, type RegistryComponent } from "./registry";
 import { placedKeys } from "./compose";
+import { inStep } from "./in-step";
 import { isUrgent, layoutPlanSchema, sectionKey, urgencyLabel, type LayoutPlan, type PlanSection } from "./plan";
 import type { Signals } from "./signals";
 
@@ -44,28 +45,6 @@ export type ValidationContext = {
   /** Names of approved dynamic components (SPEC v1.3) — valid section names. */
   dynamicComponents?: string[];
 };
-
-/** Longest common subsequence of two key arrays — sections outside it "moved". */
-function lcs(a: string[], b: string[]): Set<string> {
-  const dp: number[][] = Array.from({ length: a.length + 1 }, () =>
-    new Array<number>(b.length + 1).fill(0)
-  );
-  for (let i = 1; i <= a.length; i++)
-    for (let j = 1; j <= b.length; j++)
-      dp[i][j] = a[i - 1] === b[j - 1] ? dp[i - 1][j - 1] + 1 : Math.max(dp[i - 1][j], dp[i][j - 1]);
-  const keep = new Set<string>();
-  let i = a.length,
-    j = b.length;
-  while (i > 0 && j > 0) {
-    if (a[i - 1] === b[j - 1]) {
-      keep.add(a[i - 1]);
-      i--;
-      j--;
-    } else if (dp[i - 1][j] >= dp[i][j - 1]) i--;
-    else j--;
-  }
-  return keep;
-}
 
 export type ValidationResult =
   | { ok: true; plan: LayoutPlan; warnings: string[] }
@@ -278,7 +257,7 @@ export function movementReasons(plan: LayoutPlan, ctx: ValidationContext): strin
     if (ctx.signals.context.days_since_layout_change < 1) {
       reasons.push("reordering is rationed: layout already changed today");
     } else {
-      const kept = lcs(prevSeq, newSeq);
+      const kept = inStep(prevSeq, newSeq);
       for (const s of plan.sections) {
         const key = sectionKey(s);
         if (common.has(key) && !kept.has(key) && !s.why) reasons.push(`moved section "${key}" has no why`);

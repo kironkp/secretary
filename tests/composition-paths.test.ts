@@ -607,6 +607,21 @@ describe("a reason that counts days is today's count on every render (the chip u
     expect(whyOf(compose(stale, signals, stale, []))).toBe("Due in 2 days — you committed to this date");
   });
 
+  it("a committed date already past says how late it is, and the count is today's when the plan is served again", () => {
+    // (Until now only the chip test in the walker's file held these two: the wording, and that it is read back as a counted reason.)
+    const late = (days: number) => ({ ...morning().projects[0], deadline_type: "committed" as const, deadline_days: days });
+    expect(deadlineWhy(late(-3))).toBe("3 days late — you committed to this date");
+    expect(deadlineWhy(late(-1))).toBe("1 day late — you committed to this date");
+    expect(deadlineWhy(late(0))).toBe("Due today — you committed to this date");
+    expect(isDeadlineWhy("3 days late")).toBe(true);
+    expect(isDeadlineWhy("1 day late — you committed to this date")).toBe(true);
+    const signals = morning();
+    signals.projects = [late(-3), signals.projects[1]];
+    const base = compose(planFromRules(evening()), evening(), null, []);
+    const stale: LayoutPlan = { ...base, sections: base.sections.map((s) => (s.props?.project_id === "report" ? { ...s, why: "2 days late — you committed to this date" } : s)) };
+    expect(whyOf(compose(stale, signals, stale, []))).toBe("3 days late — you committed to this date");
+  });
+
   it("a planner's own words are left alone, and so is a 'Due' on a project with no date to count to", () => {
     const base = compose(planFromRules(evening()), evening(), null, []);
     const words = (why: string, id: string): LayoutPlan => ({ ...base, plan_id: "llm-x", sections: base.sections.map((s) => (s.props?.project_id === id ? { ...s, props: { ...s.props, variant: "compact" }, why } : s)) });

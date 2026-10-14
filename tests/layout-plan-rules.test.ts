@@ -1,7 +1,7 @@
 // Golden fixtures F1–F4, F6 (SPEC §8) over planFromRules + resolvePlan.
 import { describe, expect, it, vi } from "vitest";
 import { defaultPlan, sectionOrder, type LayoutPlan } from "@/lib/layout/plan";
-import { planFromRules, resolvePlan } from "@/lib/layout/plan-from-rules";
+import { planFromRules, resolvePlan, RULES_CAN_MOVE } from "@/lib/layout/plan-from-rules";
 import { baseSignals } from "./fixtures/layout";
 
 const cardFor = (plan: LayoutPlan, projectId: string) =>
@@ -135,5 +135,44 @@ describe("F6 calm-mode", () => {
     const plan = resolvePlan(signals, planner);
     expect(plan).toEqual(defaultPlan(signals));
     expect(planner).not.toHaveBeenCalled();
+  });
+});
+
+// SPEC §2 (v1.02 r5): the rules say which sections they can move, and the
+// composition reads that list when it has to say which of two sections is
+// out of step on a held board. So the list and the rules must not disagree.
+describe("what the rules can move", () => {
+  /** Every way the rules can fire, alone and together, on a day they may reorder and on a day they may not. */
+  function everySituation() {
+    const situations: ReturnType<typeof baseSignals>[] = [];
+    for (const days of [0, 2]) {
+      for (let mask = 0; mask < 16; mask++) {
+        const s = mask & 1 ? baseSignals() : quietBase(); // rule 1: a deadline in three days
+        s.context.days_since_layout_change = days;
+        if (mask & 2) s.engagement.caltrans = { mentions_24h: 14, baseline_mentions: 2, last_touched: "2026-08-07T08:00:00Z" }; // rule 2
+        if (mask & 4) s.conversation.schedule_word_share = 0.42; // rule 3
+        if (mask & 8) s.projects.find((p) => p.id === "album")!.subprojects = ["mixing", "artwork"].map((name) => ({ id: name, name, open_count: 1, done_count: 0 })); // rule 4
+        situations.push(s);
+      }
+    }
+    return situations;
+  }
+  /** The sections of a plan that are not cards, and the ones among them that do not stand as the default has them: the fewest that have to be taken out for the rest to agree. */
+  function moved(signals: ReturnType<typeof baseSignals>): string[] {
+    const keys = (plan: LayoutPlan) => plan.sections.filter((s) => s.component !== "project_card").map((s) => s.component);
+    const [now, usual] = [keys(planFromRules(signals)), keys(defaultPlan(signals))];
+    const subsets = Array.from({ length: 1 << now.length }, (_, mask) => now.filter((_, i) => mask & (1 << i))).toSorted((a, b) => a.length - b.length);
+    return subsets.find((out) => now.filter((k) => !out.includes(k)).join() === usual.filter((k) => !out.includes(k)).join())!;
+  }
+
+  it("a rule moves only a section on the list, and every section on the list is moved by some rule", () => {
+    const all = new Set(everySituation().flatMap(moved));
+    expect([...all].filter((k) => !RULES_CAN_MOVE.includes(k))).toEqual([]);
+    expect(RULES_CAN_MOVE.filter((k) => !all.has(k))).toEqual([]);
+    expect([...all]).toEqual(["timeline"]); // today: the strip, sent up by rule 3
+  });
+
+  it("nothing is moved on a day the layout has already changed", () => {
+    expect(everySituation().filter((s) => s.context.days_since_layout_change < 1).flatMap(moved)).toEqual([]);
   });
 });

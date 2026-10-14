@@ -14,7 +14,7 @@ import { db } from "@/lib/db";
 import { conversations, layoutPreferences, layoutSpecs, messages, projects, tasks, usage, user } from "@/lib/db/schema";
 import { defaultPlan, sectionKey, type LayoutPlan } from "@/lib/layout/plan";
 import { clearPlanCache, lastPlannerUsage, planWithFallback } from "@/lib/layout/plan-from-llm";
-import { computeCurrentPlan, getPlanHead, persistPlan } from "@/lib/layout/plan-store";
+import { computeCurrentPlan, getPlanHead, getPreferences, persistPlan } from "@/lib/layout/plan-store";
 import { nameOfKey } from "@/lib/layout/names";
 import { requestBoard } from "@/lib/layout/request";
 import { REGISTRY_VERSION } from "@/lib/layout/registry";
@@ -1080,6 +1080,382 @@ describe("the request function, case by case", { timeout: 30_000 }, () => {
     expect(await b.keys()).toEqual(["hero_next_up", "timeline", "stat_row", ...cards]);
   });
 
+  describe("Put it back onto a board that lacks a section of the usual board, on a crossed board: the boards written out", () => {
+    // A section the plan being composed lacks is put in among the system's
+    // sections BEFORE the place for the cards is worked out. Put in after
+    // (472c2a7), it could land on the wrong side of the cards: the request
+    // stored one board, the next open showed another and stored a second
+    // version, and a second Put it back stepped between those two.
+    const raised = { component: "date_chase", props: { item_ids: [] }, why: "Several things have no date" };
+    /** The next day, a new situation, and a planner's answer with Needs a date raised above next up. */
+    const land = async (b: Board, cards: "first" | "last") => {
+      await b.nextDay();
+      await b.newTask("Atlas");
+      const bundle = await computeCurrentPlan(b.id);
+      await persistPlan(b.id, bundle, {
+        call: async () => {
+          lastPlannerUsage.model = "claude-sonnet-5";
+          lastPlannerUsage.input = 4_000;
+          lastPlannerUsage.output = 800;
+          const plan = defaultPlan(bundle.signals);
+          const others = [raised, ...plan.sections.filter((s) => s.component !== "project_card" && s.component !== "date_chase")];
+          const run = plan.sections.filter((s) => s.component === "project_card");
+          return JSON.stringify({ plan_id: "p", reason_summary: "A busy week", sections: cards === "first" ? [...run, ...others] : [...others, ...run] });
+        },
+      });
+    };
+    const versions = async (b: Board) => (await db.select({ v: layoutSpecs.version }).from(layoutSpecs).where(eq(layoutSpecs.userId, b.id))).length;
+    const putItBack = async (b: Board, expected: string[]) => {
+      const before = await versions(b);
+      const reply = await requestBoard(b.id, { revert: true });
+      expect(reply.ok && reply.plan.sections.map(sectionKey)).toEqual(expected); // the request says the board
+      expect(await versions(b)).toBe(before + 1); // one version
+      expect(await b.keys()).toEqual(expected); // the next open shows it
+      expect(await b.keys()).toEqual(expected);
+      expect(await versions(b)).toBe(before + 1); // and stores nothing more
+    };
+
+    it("People hidden, Needs a date raised with the cards last, next up pinned by him, People brought back: People goes under the cards", async () => {
+      const b = await board(3);
+      await b.render();
+      await b.arrange([{ op: "hide", section: "people" }]);
+      await land(b, "last");
+      const cards = b.cardsOf(await b.keys());
+      expect(await b.keys()).toEqual(["date_chase", "hero_next_up", "stat_row", "timeline", ...cards]);
+      expect(await pin(b.id, "hero_next_up", true)).toBe(true);
+      await b.arrange([{ op: "move_down", section: "people" }]);
+      const his = ["date_chase", "hero_next_up", "stat_row", "timeline", ...cards, "people_index"];
+      expect(await b.keys()).toEqual(his);
+      // The earlier board has no People (hidden then); today it is not hidden.
+      await putItBack(b, ["date_chase", "hero_next_up", "stat_row", "timeline", ...cards, "people_index"]);
+      expect((await b.head()).pinned).toEqual(["hero_next_up"]); // People is the system's again, at its default place: under the cards
+      await putItBack(b, his); // the second one redoes his move
+      expect((await b.head()).pinned.toSorted()).toEqual(["hero_next_up", "people_index"]);
+    });
+
+    it("the tiles hidden, Needs a date raised with a card first, nothing his, the tiles brought back: in front of the cards, and no card moves", async () => {
+      const b = await board(3);
+      await b.render();
+      await b.arrange([{ op: "hide", section: "stats" }]);
+      await land(b, "first");
+      const cards = b.cardsOf(await b.keys());
+      // With the tiles hidden, the cards first is one of the places with the fewest on the wrong side, and the nearest to the plan's.
+      expect(await b.keys()).toEqual([...cards, "date_chase", "hero_next_up", "timeline", "people_index"]);
+      await b.arrange([{ op: "move_down", section: "stats" }]);
+      const his = [...cards, "date_chase", "hero_next_up", "timeline", "people_index", "stat_row"];
+      expect(await b.keys()).toEqual(his);
+      // Put back onto the board without the tiles, which are not hidden today. Their section in step, next up, stands
+      // under the cards, and the side of the cards wins: the tiles go in front of the cards and no card moves.
+      // (Before that won both ways: under next up, and the count moved every card under the tiles.)
+      await putItBack(b, ["stat_row", ...cards, "date_chase", "hero_next_up", "timeline", "people_index"]);
+      await putItBack(b, his);
+    });
+  });
+
+  it("a rule's move is waiting, he hides next up and shows it: it comes back above the tiles, nothing is logged, and the rules plan then lands (the Reviewer's probe)", async () => {
+    // A banner lands; the same day he asks about dates, and the strip's move up is held (the banner is new today).
+    // A day later nothing in his data has changed, the stored board is served, and the move is still to come.
+    // On 472c2a7 next up came back under the strip, its only predecessor in today's order; the tiles then read as
+    // moved with no reason, the rules plan was refused, and the banner never went.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const b = await board(3);
+    await b.render();
+    await b.nextDay();
+    await b.newTask("Atlas");
+    await b.landBanner();
+    await b.say("when is the deadline?", 6);
+    const held = await b.keys();
+    expect(held.slice(0, 4)).toEqual(["focus_banner", "hero_next_up", "stat_row", "timeline"]);
+    await b.nextDay();
+    const versions = async () => (await db.select({ v: layoutSpecs.version }).from(layoutSpecs).where(eq(layoutSpecs.userId, b.id))).length;
+    const before = await versions();
+    expect(await b.keys()).toEqual(held);
+    expect(await versions()).toBe(before); // served from the stored row: the strip's move is waiting
+    const source = async () => {
+      const head = await b.head();
+      return (await planWithFallback(await computeSignals(b.id), { previousPlan: head.spec as LayoutPlan, preferences: await getPreferences(b.id), pinnedSections: head.pinned, llmEnabled: false })).source;
+    };
+    expect(await source()).toBe("rules");
+    await b.arrange([{ op: "hide", section: "next up" }]);
+    expect(await source()).toBe("rules");
+    await b.arrange([{ op: "show", section: "next up" }]);
+    expect(await b.keys()).toEqual(held); // back above the tiles, where it stood
+    expect(await source()).toBe("rules"); // and his request did not hold the plan
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+    // Something changes in his data: the strip goes up and the banner goes.
+    await b.newTask("Birch");
+    expect((await b.keys()).slice(0, 3)).toEqual(["timeline", "hero_next_up", "stat_row"]);
+  });
+
+  it("what he places in the same request is not the system's when a section comes back with it: People to the top and Needs a date shown, while a rule's move waits", async () => {
+    // Needs a date goes by the first order of the rules accepted against the system's own sections. People, moved
+    // to the top in this very request, is his: without it the list is next up, the tiles, the strip, the usual
+    // order, and Needs a date takes its usual place under the strip. Counted as the system's, People on top would
+    // leave no order accepted, and by today's order (the strip first) Needs a date would go under the tiles.
+    const b = await board(3);
+    await b.render();
+    await b.arrange([{ op: "hide", section: "needs a date" }]);
+    await b.nextDay();
+    await b.newTask("Atlas");
+    await b.landBanner();
+    await b.say("when is the deadline?", 6);
+    await b.keys();
+    await b.nextDay();
+    const reply = await b.arrange([
+      { op: "move_to_top", section: "people" },
+      { op: "show", section: "needs a date" },
+    ]);
+    expect(reply.result).toMatchObject({ applied: true });
+    expect((await b.keys()).filter((k) => !k.startsWith("project_card:"))).toEqual(["focus_banner", "people_index", "hero_next_up", "stat_row", "timeline", "date_chase"]);
+    expect((await b.head()).pinned).toEqual(["people_index"]);
+  });
+
+  describe("what he placed keeps the neighbour it had when the cards move (the Reviewer's two boards)", () => {
+    // His places are numbers. Until the last fix of r5 a request read them off the list it had built, and the
+    // composition's count then moved the cards under those numbers: his card was left behind, under another
+    // neighbour. Now the composition and its count settle the system's sections and the cards first, and each
+    // thing of his is stood under the neighbour it had; the number is read off that board.
+    /** A planner's answer for a new situation, a day after the layout last changed. */
+    const lands = async (b: Board, sections: (plan: LayoutPlan) => LayoutPlan["sections"]) => {
+      await b.nextDay();
+      await b.newTask("Atlas");
+      const bundle = await computeCurrentPlan(b.id);
+      await persistPlan(b.id, bundle, {
+        call: async () => {
+          lastPlannerUsage.model = "claude-sonnet-5";
+          lastPlannerUsage.input = 4_000;
+          lastPlannerUsage.output = 800;
+          return JSON.stringify({ plan_id: "p", reason_summary: "A busy week", sections: sections(defaultPlan(bundle.signals)) });
+        },
+      });
+    };
+    const isCardKey = (k: string) => k.startsWith("project_card:");
+    const cardsIn = (plan: LayoutPlan) => plan.sections.filter((x) => x.component === "project_card");
+    const the = (plan: LayoutPlan, component: string) => plan.sections.find((x) => x.component === component)!;
+
+    it("a planner put the cards above the strip and Needs a date under People; next up shown: it comes back in front of the cards, nothing else moves, and his card stands under the card it stood under", async () => {
+      const b = await board(0);
+      await b.render();
+      await b.arrange([{ op: "hide", section: "stats" }]);
+      await b.arrange([{ op: "hide", section: "next up" }]);
+      // Two answers: a planner cannot swap the two in one. People's props never differ from the default's, so a
+      // reason on it is stripped, and in a swap of neighbours the validator reads the later one (People) as moved.
+      // So Needs a date goes above the strip first, and then to the bottom: each time it alone is read as moved.
+      const dates = (why: string) => ({ component: "date_chase", props: { item_ids: [] }, why });
+      await lands(b, (plan) => [...cardsIn(plan), dates("Several things have no date"), the(plan, "timeline"), the(plan, "people_index")]);
+      expect((await b.keys()).filter((k) => !isCardKey(k))).toEqual(["date_chase", "timeline", "people_index"]);
+      await lands(b, (plan) => [...cardsIn(plan), the(plan, "timeline"), the(plan, "people_index"), dates("Dates can wait this week")]);
+      const cards = b.cardsOf(await b.keys());
+      expect((await b.keys()).filter((k) => !isCardKey(k))).toEqual(["timeline", "people_index", "date_chase"]);
+      expect(await pin(b.id, cards[1], true)).toBe(true);
+      // He talks dates, a day on: today's order has the strip first, and the planner's board is held.
+      await b.say("when is the deadline?", 6);
+      await b.nextDay();
+      const before = await b.keys();
+      expect(before.slice(0, 3)).toEqual([cards[0], cards[1], cards[2]]);
+      expect((await b.arrange([{ op: "show", section: "next up" }])).result).toMatchObject({ applied: true });
+      const after = await b.keys();
+      // Its section in step (the strip, first in today's order) stands under the cards, and next up has the cards
+      // below it: the side of the cards wins. Next up comes back in front of the cards, and nothing he did not name
+      // moves. (Before: next up went under the strip, the count moved every card under it, and his card, a number
+      // read off the list, was left behind under the strip.)
+      expect(after).toEqual(["hero_next_up", ...before]);
+      expect(after[after.indexOf(cards[1]) - 1], "his card stands under the card it stood under").toBe(cards[0]);
+      expect((await b.head()).pinned).toEqual([cards[1]]);
+      expect(await b.keys()).toEqual(after);
+    });
+
+    // The side of the cards wins both ways, in its three kinds: the section in step that next up, the tiles or the
+    // strip would go under stands under the first card. Next up under the strip is the test above. These are the
+    // other two: the tiles under next up (the Reviewer's board), and the strip under next up.
+    it.each([
+      ["the tiles", "stats", "stat_row", ["stats"]],
+      ["the strip", "project progress", "timeline", ["stats", "project progress"]],
+    ])("a planner has Needs a date and next up under the cards; %s shown: in front of the cards, nothing else moves, and his card stands under the card it stood under", async (_what, said, key, hidden) => {
+      const b = await board(0);
+      await b.render();
+      for (const section of hidden) await b.arrange([{ op: "hide", section }]);
+      await lands(b, (plan) => [...cardsIn(plan), { component: "date_chase", props: { item_ids: [] }, why: "Several things have no date" }, ...plan.sections.filter((x) => !["project_card", "date_chase"].includes(x.component))]);
+      const cards = b.cardsOf(await b.keys());
+      expect(await pin(b.id, cards[1], true)).toBe(true);
+      const before = await b.keys();
+      // The cards first, with a card of his second; Needs a date above next up (the planner's), and next up under the cards.
+      expect(before.slice(0, 2)).toEqual([cards[0], cards[1]]);
+      expect(before.filter((k) => !isCardKey(k)).slice(0, 2)).toEqual(["date_chase", "hero_next_up"]);
+      expect((await b.arrange([{ op: "show", section: said }])).result).toMatchObject({ applied: true });
+      const after = await b.keys();
+      expect(after).toEqual([key, ...before]);
+      expect((await b.head()).pinned).toEqual([cards[1]]);
+      expect(await b.keys()).toEqual(after);
+    });
+
+    // The neighbour is two-sided (the Reviewer's correction). With the neighbour above alone, what he sends to the
+    // bottom of a crossed board would stand right under next up, above every card; and what stood last of all would
+    // stop being last when the cards move.
+    it.each([
+      ["Needs a date sent to the bottom: it is last", [{ op: "move_to_bottom", section: "needs a date" }], "date_chase"],
+      ["People his and last of all, Needs a date hidden: People stays last", [{ op: "hide", section: "needs a date" }], "people_index"],
+    ])("a planner has Needs a date and next up under the cards; %s, under the cards that went under next up", async (_what, operations, last) => {
+      const b = await board(0);
+      await b.render();
+      for (const section of ["stats", "project progress"]) await b.arrange([{ op: "hide", section }]);
+      if (last === "date_chase") await b.arrange([{ op: "hide", section: "people" }]);
+      await lands(b, (plan) => [...cardsIn(plan), { component: "date_chase", props: { item_ids: [] }, why: "Several things have no date" }, ...plan.sections.filter((x) => !["project_card", "date_chase"].includes(x.component))]);
+      const cards = b.cardsOf(await b.keys());
+      if (last === "people_index") expect((await b.arrange([{ op: "move_to_bottom", section: "people" }])).result).toMatchObject({ applied: true });
+      expect(await b.keys()).toEqual([...cards, "date_chase", "hero_next_up", ...(last === "people_index" ? ["people_index"] : [])]);
+      expect((await b.arrange(operations)).result).toMatchObject({ applied: true });
+      const after = await b.keys();
+      expect(after).toEqual(["hero_next_up", ...cards, last]);
+      expect(await b.keys()).toEqual(after);
+    });
+
+    it("a planner raised Needs a date above next up, the cards on top of both; Needs a date hidden, the cards move under next up: his card goes with them (472c2a7 already left it behind)", async () => {
+      const b = await board(0);
+      await b.render();
+      for (const section of ["stats", "project progress", "people"]) await b.arrange([{ op: "hide", section }]);
+      await lands(b, (plan) => [...cardsIn(plan), { component: "date_chase", props: { item_ids: [] }, why: "Several things have no date" }, the(plan, "hero_next_up")]);
+      const cards = b.cardsOf(await b.keys());
+      expect((await b.keys()).filter((k) => !isCardKey(k))).toEqual(["date_chase", "hero_next_up"]);
+      expect(await pin(b.id, cards[1], true)).toBe(true);
+      const before = await b.keys();
+      expect((await b.arrange([{ op: "hide", section: "needs a date" }])).result).toMatchObject({ applied: true });
+      const after = await b.keys();
+      expect(after).toEqual(["hero_next_up", ...before.filter(isCardKey)]);
+      expect(after[after.indexOf(cards[1]) - 1]).toBe(cards[0]);
+      expect(await b.keys()).toEqual(after);
+    });
+  });
+
+  it.each([false, true])("each section of the usual board hidden and shown, on a plain board with a card he placed among the cards: the board is exactly the one he had (calm mode: %s)", async (calm) => {
+    // The round trip, from no rule: two boards compared. Needs a date came back onto the LIST directly under the
+    // strip, above the cards; the count put the cards right on the board, but his places had been read off the
+    // list, and the card he had placed among the cards moved down one. On the plainest board there is.
+    const b = await board(0);
+    await b.render();
+    const cards = b.cardsOf(await b.keys());
+    const nameOf = (key: string) => Object.entries(b.ids).find(([, id]) => key === `project_card:${id}`)![0];
+    expect((await b.arrange([{ op: "move_down", section: nameOf(cards[1]) }])).result).toMatchObject({ applied: true });
+    if (calm) await db.update(user).set({ calmMode: true }).where(eq(user.id, b.id));
+    const before = await b.keys();
+    expect(before.slice(0, 6)).toEqual(["hero_next_up", "stat_row", "timeline", cards[0], cards[2], cards[1]]);
+    for (const [key, said] of [["date_chase", "needs a date"], ["people_index", "people"], ["timeline", "project progress"], ["stat_row", "stats"], ["hero_next_up", "next up"]]) {
+      // Hidden, then shown; hidden and shown in one request; pinned, then let go; banned, then the ban lifted.
+      expect((await b.arrange([{ op: "hide", section: said }])).result, key).toMatchObject({ applied: true });
+      expect((await b.keys()).filter((k) => k !== key), `${key} hidden`).toEqual(before.filter((k) => k !== key));
+      expect((await b.arrange([{ op: "show", section: said }])).result, key).toMatchObject({ applied: true });
+      expect(await b.keys(), `${key} hidden, shown`).toEqual(before);
+      expect((await b.arrange([{ op: "hide", section: said }, { op: "show", section: said }])).result, key).toMatchObject({ applied: true });
+      expect(await b.keys(), `${key} hidden and shown in one request`).toEqual(before);
+      expect(await pin(b.id, key, true)).toBe(true);
+      expect(await pin(b.id, key, false)).toBe(true);
+      expect(await b.keys(), `${key} pinned, let go`).toEqual(before);
+      expect((await requestBoard(b.id, { ban: key })).ok).toBe(true);
+      const [ban] = await db.select().from(layoutPreferences).where(and(eq(layoutPreferences.userId, b.id), eq(layoutPreferences.kind, "ban_component")));
+      expect((await requestBoard(b.id, { liftPreference: ban.id })).ok).toBe(true);
+      expect(await b.keys(), `${key} banned, the ban lifted`).toEqual(before);
+    }
+    expect((await b.head()).pinned).toEqual([cards[1]]);
+  });
+
+  it.each([false, true])("the strip hidden and shown with nothing of the system's above it (next up hidden, the tiles his) comes back in front of the cards, and nothing else moves (calm mode: %s)", async (calm) => {
+    // Found by the burn-in (seed 29979245, walks 58 and 76). The strip came back directly above Needs a date,
+    // under the cards. In calm mode the board is the default's, which has the strip above the cards: the list his
+    // places were read off and the board that was drawn disagreed, and a card he had placed moved up one.
+    const b = await board(0);
+    await b.render();
+    await b.arrange([{ op: "hide", section: "next up" }]);
+    await b.arrange([{ op: "move_to_bottom", section: "stats" }]);
+    const cards = b.cardsOf(await b.keys());
+    const numbered = (await b.readPlan()).sections;
+    await b.chatEdit([{ op: "move", section: cards[2], to: numbered.find((x) => x.key === cards[4])!.position }]);
+    if (calm) await db.update(user).set({ calmMode: true }).where(eq(user.id, b.id));
+    const before = await b.keys();
+    expect(before[0]).toBe("timeline");
+    expect(before.at(-1)).toBe("stat_row");
+    for (const operations of [
+      [{ op: "hide", section: "project progress" }, { op: "show", section: "project progress" }],
+      [{ op: "hide", section: "project progress" }],
+      [{ op: "show", section: "project progress" }],
+    ]) {
+      expect((await b.arrange(operations)).result).toMatchObject({ applied: true });
+      const shown = await b.keys();
+      expect(shown.filter((k) => k !== "timeline")).toEqual(before.filter((k) => k !== "timeline"));
+      if (operations.at(-1)!.op === "show") expect(shown).toEqual(before);
+    }
+    // Pinned and let go: the same.
+    expect(await pin(b.id, "timeline", true)).toBe(true);
+    expect(await pin(b.id, "timeline", false)).toBe(true);
+    expect(await b.keys()).toEqual(before);
+  });
+
+  it("a card that comes back does not give a section he placed among the cards new neighbours", async () => {
+    // The card is not put onto the list he saw: the composition draws it in the run by the data, and Needs a date,
+    // placed under the fourth card, is stood under the neighbour it had. (With a count read off the list alone it
+    // would keep its number on a list one shorter, and stand a card higher. Only the long walk caught that until it
+    // had an example.)
+    const b = await board(0);
+    const first = await b.render();
+    const cards = b.cardsOf(first.plan.sections.map(sectionKey));
+    const numbered = (await b.readPlan()).sections;
+    await b.chatEdit([{ op: "move", section: "date_chase", to: numbered.find((x) => x.key === cards[4])!.position }]);
+    const neighbours = async () => {
+      const shown = await b.keys();
+      return [shown[shown.indexOf("date_chase") - 1], shown[shown.indexOf("date_chase") + 1]];
+    };
+    expect(await neighbours()).toEqual([cards[3], cards[4]]);
+    const nameOf = (key: string) => Object.entries(b.ids).find(([, id]) => key === `project_card:${id}`)![0];
+    // A quiet card above it goes and comes back: by voice, by the chat tool, and pinned then let go.
+    expect((await b.arrange([{ op: "hide", section: nameOf(cards[1]) }])).result).toMatchObject({ applied: true });
+    expect(await neighbours()).toEqual([cards[3], cards[4]]);
+    expect((await b.arrange([{ op: "show", section: nameOf(cards[1]) }])).result).toMatchObject({ applied: true });
+    expect(await neighbours()).toEqual([cards[3], cards[4]]);
+    expect(await pin(b.id, cards[2], true)).toBe(true);
+    expect(await pin(b.id, cards[2], false)).toBe(true);
+    expect(await neighbours()).toEqual([cards[3], cards[4]]);
+    expect((await b.head()).pinned).toEqual(["date_chase"]);
+  });
+
+  it("a card that comes back is nobody's neighbour: what he placed above the first card stays under the strip, and what he sent to the bottom stays last", async () => {
+    // No guess of where the card goes on the list: it is drawn in the run by the data, and what he placed keeps the
+    // neighbour it had. (Until the request stopped guessing, the first card came back between the strip and his.)
+    const b = await board(-1);
+    await b.render();
+    for (const section of ["needs a date", "people"]) await b.arrange([{ op: "hide", section }]);
+    const cards = b.cardsOf(await b.keys());
+    const nameOf = (key: string) => Object.entries(b.ids).find(([, id]) => key === `project_card:${id}`)![0];
+    await b.arrange([{ op: "move_to_bottom", section: "stats" }]);
+    const numbered = (await b.readPlan()).sections;
+    await b.chatEdit([{ op: "move", section: cards.at(-1)!, to: numbered.find((x) => x.key === cards[0])!.position }]);
+    const had = await b.keys();
+    expect(had).toEqual(["hero_next_up", "timeline", cards.at(-1), ...cards.slice(0, -1), "stat_row"]);
+    // The first card of the run, then the last, goes and comes back.
+    for (const card of [cards[0], cards.at(-2)!]) {
+      expect((await b.arrange([{ op: "hide", section: nameOf(card) }])).result).toMatchObject({ applied: true });
+      expect(await b.keys()).toEqual(had.filter((k) => k !== card));
+      expect((await b.arrange([{ op: "show", section: nameOf(card) }])).result).toMatchObject({ applied: true });
+      expect(await b.keys()).toEqual(had);
+    }
+    expect((await b.head()).pinned.toSorted()).toEqual([cards.at(-1), "stat_row"].toSorted());
+  });
+
+  it("a card he lets go keeps the size it had: back among the system's cards by the data, looking as it did", async () => {
+    const b = await board(5);
+    await b.render();
+    const grove = b.card("Grove");
+    expect((await b.chatEdit([{ op: "set_props", section: grove, props: { variant: "compact" } }])).result).toMatchObject({ applied: true });
+    const variant = async () => (await b.render()).plan.sections.find((s) => sectionKey(s) === grove)?.props?.variant;
+    expect(await variant()).toBe("compact");
+    expect(await pin(b.id, grove, true)).toBe(true);
+    expect(await variant()).toBe("compact");
+    const byData = await b.byData();
+    expect(await pin(b.id, grove, false)).toBe(true);
+    expect((await b.head()).pinned).toEqual([]);
+    expect(await variant()).toBe("compact");
+    expect(b.cardsOf(await b.keys())).toEqual(byData);
+  });
+
   it("a ban works like a hide, nothing brings the section back while it stands, and lifting it brings back a section he had added, at the end", async () => {
     const b = await board(3);
     await b.render();
@@ -1143,7 +1519,7 @@ describe("the request function, case by case", { timeout: 30_000 }, () => {
     expect((await b.keys()).indexOf(key)).toBe(at + 1); // the list went in above it; everything else as he saw it
   });
 
-  it("a section that comes back goes where today's system order has it: with the strip sent up by a rule, the tiles come back under the strip", async () => {
+  it("a section that comes back does not get the rules plan refused: with the strip sent up by a rule and next up his, the tiles come back above the strip, and the strip goes up again by itself", async () => {
     const b = await board(3);
     await b.render();
     await b.nextDay();
@@ -1155,12 +1531,24 @@ describe("the request function, case by case", { timeout: 30_000 }, () => {
     expect(await pin(b.id, "hero_next_up", true)).toBe(true); // next up is his: it is not a neighbour the tiles can follow
     await b.arrange([{ op: "hide", section: "stats" }]);
     expect((await b.arrange([{ op: "show", section: "stats" }])).result).toMatchObject({ applied: true });
+    // With the tiles off and next up his, the system's sections were the strip, Needs a date, People: a list that
+    // shows no move, against which the usual order is accepted. It stays accepted with the tiles in: above the
+    // strip. (Until v1.02 r5's last rule the tiles came back under the strip; had the talk then stopped before
+    // his data changed, the board would have been held by his own hide and show.) A board he did not have before;
+    // it mends itself at the next change in his data, below.
     const shown = await b.keys();
-    expect(shown.indexOf("stat_row")).toBe(shown.indexOf("timeline") + 1);
-    // And the board he was told is one the rules plan is not refused against (round 4 held the plan here).
-    const signals = await computeSignals(b.id);
-    const head = await b.head();
-    expect((await planWithFallback(signals, { previousPlan: head.spec as LayoutPlan, preferences: [], pinnedSections: head.pinned, llmEnabled: false })).source).toBe("rules");
+    expect(shown.indexOf("stat_row")).toBeLessThan(shown.indexOf("timeline"));
+    // The board he was told is one the rules plan is not refused against (round 4 held the plan here).
+    const source = async () => {
+      const head = await b.head();
+      return (await planWithFallback(await computeSignals(b.id), { previousPlan: head.spec as LayoutPlan, preferences: [], pinnedSections: head.pinned, llmEnabled: false })).source;
+    };
+    expect(await source()).toBe("rules");
+    // Something changes in his data: the strip goes up again by the rule's own doing, with its reason.
+    await b.newTask("Atlas");
+    const later = (await b.render()).plan.sections;
+    expect(later.map(sectionKey).filter((k) => k !== "hero_next_up" && !k.startsWith("project_card:")).slice(0, 2)).toEqual(["timeline", "stat_row"]);
+    expect(later.find((s) => s.component === "timeline")).toMatchObject({ props: { span_days: 14, expanded: true }, why: expect.stringContaining("talking dates") });
   });
 
   it("Put it back puts what he had placed at the place the earlier board wrote, on today's data", async () => {

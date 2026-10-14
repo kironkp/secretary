@@ -210,6 +210,64 @@ describe("what one change costs in planner calls", { timeout: 30_000 }, () => {
   });
 });
 
+describe("a planner's answer that leaves a default section out", () => {
+  /** The planner raises Needs a date above the strip, and says why. */
+  const raised = { component: "date_chase", props: { item_ids: [] }, why: "Several things have no date" };
+  const raises: Answer = (signals) => {
+    const plan = defaultPlan(signals);
+    const rest = plan.sections.filter((s) => s.component !== "date_chase");
+    const strip = rest.findIndex((s) => s.component === "timeline");
+    return { ...plan, plan_id: "p", reason_summary: "Dates are missing", sections: [...rest.slice(0, strip), raised, ...rest.slice(strip)] };
+  };
+  /** The same board again, without one of the default sections. */
+  const without = (left: string): Answer => (signals, rendered) => ({ ...raises(signals, rendered), reason_summary: "A second look", sections: raises(signals, rendered).sections.filter((s) => s.component !== left) });
+  /** Whether the second answer is the stored board (a held board keeps the reason line it had). */
+  const landed = async (b: Awaited<ReturnType<typeof board>>) => ((await getPlanHead(b.id))!.spec as LayoutPlan).reason_summary === "A second look";
+  const systems = (keys: string[]) => keys.filter((k) => !k.startsWith("project_card:"));
+
+  // The limit (SPEC §2): the section goes by an order the rules can produce, which need not be where a board an
+  // earlier planner's answer changed had it. The strip stood under the raised Needs a date; the rules have the strip
+  // above it, so the answer is refused for moving the strip without a reason. What it costs: that one call, and
+  // none after it.
+  it.each(["timeline"])("on a board an earlier answer changed, an answer that leaves out %s, which stood under the moved section: refused, the one call thrown away, and the planner is left alone after it", async (left) => {
+    const b = await settled();
+    await b.newTask("Birch");
+    await b.open(raises);
+    expect(systems(await b.keys())).toEqual(["hero_next_up", "stat_row", "date_chase", "timeline", "people_index"]);
+    await b.nextDay();
+    await b.newTask("Cedar");
+    const before = b.calls();
+    await b.open(without(left));
+    expect(b.calls() - before).toBe(1);
+    expect(await landed(b)).toBe(false);
+    expect(systems(await b.keys())).toEqual(["hero_next_up", "stat_row", "date_chase", "timeline", "people_index"]); // held as it was, the section on it
+    // Five more opens, a new process each time, nothing changing: no call.
+    for (let n = 0; n < 5; n++) {
+      clearPlanCache();
+      await b.open(without(left));
+    }
+    expect(b.calls() - before).toBe(1);
+  });
+
+  it.each(["hero_next_up", "stat_row", "people_index"])("on that board, an answer that leaves out %s: the section goes back where the board had it, the answer lands, and no call follows", async (left) => {
+    const b = await settled();
+    await b.newTask("Birch");
+    await b.open(raises);
+    await b.nextDay();
+    await b.newTask("Cedar");
+    const before = b.calls();
+    await b.open(without(left));
+    expect(b.calls() - before).toBe(1);
+    expect(await landed(b)).toBe(true);
+    expect(systems(await b.keys())).toEqual(["hero_next_up", "stat_row", "date_chase", "timeline", "people_index"]);
+    for (let n = 0; n < 5; n++) {
+      clearPlanCache();
+      await b.open(without(left));
+    }
+    expect(b.calls() - before).toBe(1);
+  });
+});
+
 describe("the layout clock reads the day, not the newest ten rows", () => {
   const spec = (order: string[], why: string): LayoutPlan => ({ plan_id: "x", reason_summary: null, sections: order.map((component) => ({ component, ...(component === "stat_row" ? { why } : {}) })) });
   it("a change of layout today is still today's after ten more rows are stored the same day", async () => {
@@ -236,6 +294,47 @@ describe("the layout clock reads the day, not the newest ten rows", () => {
     // by anything: the rules and the hash ask only whether it is one or more).
     await db.update(layoutSpecs).set({ createdAt: sql`${layoutSpecs.createdAt} - interval '49 hours'` }).where(eq(layoutSpecs.userId, id));
     expect(await clock()).toBeGreaterThanOrEqual(1);
+  });
+
+  it("more rows in a day than the clock reads (150), the change of layout among the ones it does not read: still today, never \"never\"", async () => {
+    // The clock reads at most 150 rows. A change of layout this morning with 151 more rows stored after it the same
+    // day is out of sight. Read as "the layout has never changed", the system would be free to reorder again today;
+    // it is counted from the oldest row read instead. (A mutant of the Reviewer's that took this out passed every test.)
+    const id = `test-clock-${crypto.randomUUID()}`;
+    users.push(id);
+    await db.insert(user).values({ id, name: "Clock", email: `${id}@v102.test`, timezone: TZ });
+    const usual = ["hero_next_up", "stat_row", "timeline", "date_chase", "people_index"];
+    const stripUp = ["timeline", "hero_next_up", "stat_row", "date_chase", "people_index"];
+    const row = (version: number, plan: LayoutPlan, ageHours: number) => ({ userId: id, version, spec: plan, pinned: [], kind: "plan" as const, signalsHash: "h", outcome: "accepted" as const, createdAt: new Date(Date.now() - ageHours * 3_600_000) });
+    await db.insert(layoutSpecs).values([row(1, spec(usual, "a"), 80), row(2, spec(stripUp, "a"), 5), ...Array.from({ length: 151 }, (_, n) => row(3 + n, spec(stripUp, `mentioned ${n} times`), 4 - n / 100))]);
+    const clock = async () => (await computeSignals(id)).context.days_since_layout_change;
+    expect(await clock()).toBe(0);
+    // A day on it has turned over, as it does when the change is in sight.
+    await db.update(layoutSpecs).set({ createdAt: sql`${layoutSpecs.createdAt} - interval '49 hours'` }).where(eq(layoutSpecs.userId, id));
+    expect(await clock()).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("what the system put on the board today", () => {
+  it("a banner first seen three days ago is not new today because a row was written today: the rules plan, which has none, is served", async () => {
+    // "New today" is read from the row a section FIRST appears on, back from the newest. Read from the newest row's
+    // age, a banner three days old would count as new whenever any row is written today, the rules plan would be
+    // refused for taking it off, and the board held. (The third of the Reviewer's mutants that passed every test.)
+    const id = `test-clock-${crypto.randomUUID()}`;
+    users.push(id);
+    await db.insert(user).values({ id, name: "Clock", email: `${id}@v102.test`, timezone: TZ });
+    const usual = ["hero_next_up", "stat_row", "timeline", "date_chase", "people_index"];
+    const board = (banner: boolean, why: string): LayoutPlan => ({ plan_id: "x", reason_summary: null, sections: [...(banner ? [{ component: "focus_banner", props: { text: "Two things are late", tone: "serious" } }] : []), ...usual.map((component) => ({ component, ...(component === "stat_row" ? { why } : {}) }))] });
+    const row = (version: number, plan: LayoutPlan, ageHours: number) => ({ userId: id, version, spec: plan, pinned: [], kind: "plan" as const, signalsHash: "h", outcome: "accepted" as const, createdAt: new Date(Date.now() - ageHours * 3_600_000) });
+    await db.insert(layoutSpecs).values([row(1, board(false, "a"), 100), row(2, board(true, "a"), 75), row(3, board(true, "b"), 1)]);
+    expect((await computeSignals(id)).context.sections_new_today).toEqual([]);
+    const bundle = await computeCurrentPlan(id);
+    expect(bundle.plan.sections.map(sectionKey)).toEqual(usual);
+    // And one first seen today is new today, and stays: the same rows, the banner on the newest only.
+    await db.delete(layoutSpecs).where(eq(layoutSpecs.userId, id));
+    await db.insert(layoutSpecs).values([row(1, board(false, "a"), 100), row(2, board(false, "a"), 75), row(3, board(true, "b"), 1)]);
+    expect((await computeSignals(id)).context.sections_new_today).toEqual(["focus_banner"]);
+    expect((await computeCurrentPlan(id)).plan.sections[0].component).toBe("focus_banner");
   });
 });
 

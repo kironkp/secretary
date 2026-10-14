@@ -28,9 +28,12 @@ import {
   type Place,
   type PlanSection,
 } from "./plan";
+import { inStep } from "./in-step";
+import { ordersTheRulesCanProduce, planFromRules, RULES_CAN_MOVE } from "./plan-from-rules";
 import { RETIRED_COMPONENTS } from "./registry";
 import type { Signals } from "./signals";
-import type { LayoutPreference } from "./validator";
+// (The validator reads places through this file, and this file asks the validator one question: both are calls, none at load.)
+import { movementReasons, type LayoutPreference } from "./validator";
 
 const BANNER = "focus_banner";
 const isCard = (s: PlanSection) => s.component === "project_card";
@@ -176,20 +179,136 @@ export function bannerFirst(sections: PlanSection[]): PlanSection[] {
   return [banner, ...sections.filter((s) => s !== banner)];
 }
 
+/** Today's system order of the sections that are not cards: the rules plan's, the default's in calm mode. */
+export function todaysOrder(signals: Signals): string[] {
+  const plan = signals.context.calm_mode ? defaultPlan(signals) : planFromRules(signals);
+  return plan.sections.filter((s) => !isCard(s) && s.component !== BANNER).map(sectionKey);
+}
+
 /**
- * A section's default place on a board that lacks it: just under the nearest
- * section the default board has above it that is on this board. "Where the
- * system has it" for a section shown again, unpinned, or left out.
+ * Where a section of the system's goes on a list that lacks it: the index to
+ * put it at, by `order`. The ONE place this is decided (SPEC §2), for a board
+ * being composed that lacks a section of the default board (hidden or banned
+ * when it was stored and not now; left out by a planner; let go and not
+ * composed since) and for a request that brings a section back (shown, added
+ * back, let go, a hide or a ban lifted).
+ *
+ * Where a plan in that order would KEEP it. Of the system's sections on the
+ * list (not the cards, not the banner, not what he placed), those in step
+ * with the order are the ones such a plan would not itself move against
+ * this list: the validator's own reading (in-step.ts), so a place given here
+ * is never one that plan is then refused for.
+ *
+ * And the run of the system's cards counts as a section of the order,
+ * between the strip and Needs a date (`upper`: next up, the tiles and the
+ * strip have the cards below them; Needs a date and People have them
+ * above). The cards are never asked which sections are in step (asked,
+ * with the strip under the cards, they put Needs a date above the strip),
+ * and they are never read as moved. The section goes under everything that
+ * precedes it: the sections in step before it in the order, and the cards
+ * if they come before it. With nothing before it, above everything that
+ * follows it: the sections in step after it, and the cards if they come
+ * after it. Where "next to its section in step" and its side of the cards
+ * cannot both hold, the side of the cards wins, both ways: next up, the
+ * tiles and the strip never go below the first card of the run (even when
+ * their section in step stands under the cards), Needs a date and People
+ * never above its last. So a section that comes back stands on its own side
+ * of the cards, and the count that follows (runPlace) has nothing to put
+ * right: it moves no card for it.
+ *
+ * `held`: no order the rules can produce is accepted against the list (a
+ * planner has moved something, and it stays), so the order is today's and
+ * the validator's reading decides nothing. If two readings of what is out
+ * of step are then equally long, a section that carries a reason on the
+ * list is the one read as moved, or else one the rules can move. (A
+ * planner's raised Needs a date against next up: read the other way, the
+ * tiles came back above Needs a date, on top of the board.) If both
+ * sections of the tie are of the kind, or neither is, the validator's
+ * reading stands.
+ *
+ * The cards are never asked: where they go is counted afterwards (runPlace),
+ * on the list with the section in it.
  */
-export function defaultPlaceFor(sections: PlanSection[], section: PlanSection, defaults: PlanSection[]): number {
-  const order = defaults.map((s) => sectionKey(s));
-  const here = order.indexOf(sectionKey(section));
-  if (here === -1) return sections.length;
-  for (let i = here - 1; i >= 0; i--) {
-    const at = sections.findIndex((s) => sectionKey(s) === order[i]);
-    if (at !== -1) return at + 1;
+export function systemsPlace(list: PlanSection[], key: string, placed: Set<string>, order: string[], held = false, upper = true): number {
+  const own = (s: PlanSection) => s.component !== BANNER && !placed.has(sectionKey(s));
+  const at = (k: string) => list.findIndex((s) => sectionKey(s) === k);
+  // (The key is always in the order: what is put in is a section of the default board, and every order is one of those.)
+  const here = order.indexOf(key);
+  const on = list.filter((s) => own(s) && !isCard(s)).map(sectionKey).filter((k) => k !== key && order.includes(k));
+  const run = (keys: string[]) => inStep(keys, order.filter((k) => keys.includes(k)));
+  let kept = run(on);
+  if (held) {
+    // A section could be read as the one out of step when a run as long stands without it. First those that carry
+    // a reason on the list, then those the rules can move: if a run as long stands without all of them, that run
+    // is the one in step. If it does not (both sections of the tie are of that kind), the validator's reading stands.
+    const reasoned = list.filter((s) => s.why).map(sectionKey);
+    for (const likely of [reasoned, RULES_CAN_MOVE]) {
+      const could = on.filter((k) => likely.includes(k) && run(on.filter((o) => o !== k)).size === kept.size);
+      if (!could.length) continue;
+      const still = run(on.filter((k) => !could.includes(k)));
+      if (still.size === kept.size) kept = still;
+      break;
+    }
   }
-  return sections[0]?.component === BANNER ? 1 : 0;
+  const cards = list.flatMap((s, i) => (own(s) && isCard(s) ? [i] : []));
+  const before = order.slice(0, here).filter((k) => kept.has(k)).map((k) => at(k) + 1);
+  if (!upper && cards.length) before.push(cards.at(-1)! + 1);
+  if (before.length) return upper && cards.length ? Math.min(Math.max(...before), cards[0]) : Math.max(...before);
+  // Nothing in step precedes it, so everything in step follows it. (And only what has the cards below it gets this
+  // far with cards on the list: the rest have them among `before`.)
+  const after = [...kept].map(at);
+  if (cards.length) after.push(cards[0]);
+  if (after.length) return Math.min(...after);
+  // Nothing of the system's that the order knows, and no cards: in front of whatever else is the system's.
+  const first = list.findIndex(own);
+  return first !== -1 ? first : list[0]?.component === BANNER ? 1 : 0;
+}
+
+/** A plan's order of the sections that are not cards. */
+const orderOf = (plan: LayoutPlan): string[] => plan.sections.filter((s) => !isCard(s) && s.component !== BANNER).map(sectionKey);
+
+/**
+ * The orders the rules can produce that are accepted against a board as it
+ * stands (each as its order of the sections that are not cards), the one
+ * that moves the least first. Judged a day on: the layout clock past its
+ * day and nothing new today, which is every day the rules can produce the
+ * order on. The validator's own verdict (movementReasons). In calm mode no
+ * plan is asked for and the board is the default's.
+ */
+export function acceptedOrders(board: LayoutPlan | null, pinned: string[], preferences: LayoutPreference[], signals: Signals): string[][] {
+  if (signals.context.calm_mode) return [orderOf(defaultPlan(signals))];
+  const later = { ...signals, context: { ...signals.context, days_since_layout_change: Math.max(1, signals.context.days_since_layout_change), sections_new_today: [] } };
+  const accepted = (plan: LayoutPlan) => movementReasons(plan, { signals: later, previousPlan: board, preferences, pinnedSections: pinned, defaultPlan: defaultPlan(signals) }).length === 0;
+  return ordersTheRulesCanProduce(signals).filter(accepted).map(orderOf);
+}
+
+/**
+ * `list` with each of `missing` put in where the system has it: its place
+ * in the first order the rules can produce that is accepted against the
+ * list as it stands (the usual order first, then the strip sent up), so
+ * every such order is still accepted with the section in. If none is
+ * accepted, by today's order, with a tie read against the likelier section
+ * (systemsPlace, `held`). "The list as it stands" is the system's own
+ * sections on it, before anything is put in: what he placed, hid or banned
+ * is not the system's and is not judged. (Several sections may be put in,
+ * one after the other; the order they are put in does not change where any
+ * of them goes, which a test shows for every case.)
+ *
+ * So a section the rules are about to move is no guide for the others while
+ * it waits, and when it is the one that comes back it comes back to its
+ * usual place: his "show" does not perform the system's move. The move
+ * lands by itself, with its reason, at the next new situation.
+ */
+export function withSystems(list: PlanSection[], missing: PlanSection[], placed: Set<string>, signals: Signals): PlanSection[] {
+  if (!missing.length) return list;
+  // (A banner on the list is neither here nor there: an order is judged a day on, when it may go.)
+  const systems = list.filter((s) => !placed.has(sectionKey(s)));
+  const accepted = acceptedOrders({ plan_id: "list", reason_summary: null, sections: systems }, [], [], signals);
+  const [order, held] = accepted.length ? [accepted[0], false] : [todaysOrder(signals), true];
+  const above = upperSections(signals);
+  const next = [...list];
+  for (const s of missing) next.splice(systemsPlace(next, sectionKey(s), placed, order, held, above.has(sectionKey(s))), 0, s);
+  return next;
 }
 
 export type CompositionContext = {
@@ -230,25 +349,26 @@ export function composePlan(given: LayoutPlan, ctx: CompositionContext): LayoutP
   // The system's own sections that are not cards, in the system's order, with
   // the card run where its first own card sits. A section that still carries
   // a place and is no longer his is not where the system has it: it is left
-  // out here and, if it belongs, drawn at its default place below.
+  // out here and, if it belongs, put in below like any other the list lacks.
   // Where the cards go is worked out on the sections that will be DRAWN:
   // not one he hid or banned. The stored board does not have those, and it
   // has to compose to itself; counted, a hidden Needs a date kept the cards
   // on one side of a planner's sunk tiles at this render and let them
   // cross at the next.
-  const own = ownSections(system.sections, placed).filter((s) => isCard(s) || (!gone(s) && s.place === undefined));
+  // Everything that belongs is drawn: a section of the default board that the
+  // system's plan (or the stored board) lacks goes in among the system's
+  // sections where the rules would keep it (withSystems). BEFORE
+  // the place for the cards is worked out, so the count and the cut are on
+  // one list and nothing of the system's is added after: put in afterwards
+  // (472c2a7), a section that came back onto a crossed board could land on
+  // the wrong side of the cards, and the board that was stored then composed
+  // to a different one at the next open.
+  const drawn = ownSections(system.sections, placed).filter((s) => isCard(s) || (!gone(s) && s.place === undefined));
+  const lacks = (d: PlanSection) => !isCard(d) && d.component !== BANNER && !gone(d) && !placed.has(sectionKey(d)) && !drawn.some((s) => sectionKey(s) === sectionKey(d));
+  const own = withSystems(drawn, defaultPlan(ctx.signals).sections.filter(lacks).map(bare), placed, ctx.signals);
   const at = runPlace(own);
   const others = own.filter((s) => !isCard(s)).map(bare);
   const flow: PlanSection[] = [...others.slice(0, at), ...[...cards].filter(([key]) => !placed.has(key)).map(([, card]) => card), ...others.slice(at)];
-
-  // Everything that belongs is drawn: a section of the default board that the
-  // system's plan (or the stored board) lacks goes in at its default place.
-  const defaults = defaultPlan(ctx.signals).sections;
-  for (const d of defaults) {
-    const key = sectionKey(d);
-    if (isCard(d) || d.component === BANNER || gone(d) || placed.has(key) || flow.some((s) => sectionKey(s) === key)) continue;
-    flow.splice(defaultPlaceFor(flow, d, defaults), 0, bare(d));
-  }
 
   // What he placed, each at its place. A place is a position only: a card's
   // emphasis is today's, a section the system also has takes today's props,
