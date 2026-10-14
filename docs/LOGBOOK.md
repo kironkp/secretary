@@ -12,8 +12,8 @@ commits it covers so `git show <hash>` always reaches the real diff.
 `8ecf219`, `a1b70a6`, `b2577e2` (the spec, docs/projects/SPEC.md, new, with
 the approved screen beside it; docs/adaptive-ui/SPEC.md), `bed4cf3`,
 `8f05c09`, `3d08996` (the tests, first and red), `f504a9c`, `0e4b4ef` (the
-walker), `a22b59f`, `c801213` (the code), `8657e36` (1.09 r2 merged in), this
-commit.
+walker), `a22b59f`, `c801213` (the code), `8657e36` (1.09 r2 merged in),
+`cad60bd` (this entry first), `9774eb2` (1.09 r3 merged in), this commit.
 
 Kiron, 2026-10-13, after comparing one project in Secretary and in Notion: he
 wants to drag a project to the top, or say "move that project to the top", and
