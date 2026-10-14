@@ -156,8 +156,9 @@
 // and pin marked.
 process.env.TZ = "UTC";
 
-import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, desc, eq, inArray, like, sql, type SQL } from "drizzle-orm";
+import { parse as parseConnectionString } from "pg-connection-string";
 
 const session = vi.hoisted(() => {
   process.env.ADAPTIVE_V2 = "true"; // the layout route reads it when it is loaded
@@ -252,19 +253,39 @@ function rng(seed: number) {
  */
 const walkStart = (seed: number, index: number, scripted: boolean) =>
   new Date(Date.UTC(2026, 4, 1, 19) + ((seed + index * 7919 + (scripted ? 4337 : 0)) % 61) * 86_400_000);
-/** The walker writes into the database it runs on, a trigger included: a local or CI test database only. */
-const dbHost = (() => {
+/**
+ * The walker writes into the database it runs on, a trigger included: a local or CI test database only.
+ * The host is the one pg will use, read the way pg reads it (pg-connection-string): a `host` in the query
+ * string wins over the one before the path, so "…@localhost:5434/x?host=example.invalid" goes to
+ * example.invalid. A host or hostaddr parameter is refused outright, local or not, and so is no host at
+ * all (pg would fall back to PGHOST). Null when the walker must not run.
+ */
+function localDbHost(url: string | undefined): string | null {
+  if (!url) return null;
   try {
-    return new URL(process.env.DATABASE_URL ?? "").hostname;
+    const params = new URL(url).searchParams;
+    if (params.has("host") || params.has("hostaddr")) return null;
+    const host = parseConnectionString(url).host ?? "";
+    return ["localhost", "127.0.0.1", "::1", "[::1]"].includes(host) ? host : null;
   } catch {
-    return "";
+    return null;
   }
-})();
-const LOCAL_DB = ["localhost", "127.0.0.1", "::1", "[::1]"].includes(dbHost);
+}
+/** Before the walker's first query, and before each test in this file that writes to the database. */
+const refuseUnlessLocal = () => {
+  if (localDbHost(process.env.DATABASE_URL) !== null) return;
+  let seen = "not set";
+  try {
+    seen = parseConnectionString(process.env.DATABASE_URL ?? "").host || "no host";
+  } catch {
+    // not a URL pg reads
+  }
+  throw new Error(`The walker runs only on a local or CI test database: it puts a trigger in the database it runs on, so the host pg will use must be localhost, 127.0.0.1 or ::1, with no host or hostaddr parameter (it is "${seen}").`);
+};
 let clockReady: Promise<void> | null = null;
 const installClock = () =>
   (clockReady ??= (async () => {
-    if (!LOCAL_DB) throw new Error(`The walker runs only on a local or CI test database: it puts a trigger in the database it runs on, so DATABASE_URL's host must be localhost or 127.0.0.1 (it is "${dbHost || "not set"}").`);
+    refuseUnlessLocal();
     // Several processes may make it at the same moment: a statement that meets another's is tried again.
     const run = async (statement: SQL) => {
       for (let i = 0; ; i++) {
@@ -1702,7 +1723,36 @@ describe("the walker's own clock (a test of the walker, not of the product)", { 
   });
 });
 
+// The guard judges the host pg will use, not the one a URL parser shows: parsing only, nothing is reached.
+describe("the walker's guard (a test of the walker, parsing only)", () => {
+  it("pg itself takes the host from the query string, which is why the guard reads it the same way", () => {
+    expect(new URL("postgresql://postgres:postgres@localhost:5434/x?host=example.invalid").hostname).toBe("localhost");
+    expect(parseConnectionString("postgresql://postgres:postgres@localhost:5434/x?host=example.invalid").host).toBe("example.invalid");
+  });
+
+  it.each([
+    ["a host in the query string (pg goes there)", "postgresql://postgres:postgres@localhost:5434/x?host=example.invalid"],
+    ["a host in the query string that is local all the same", "postgresql://postgres:postgres@localhost:5434/x?host=localhost"],
+    ["a hostaddr in the query string", "postgresql://postgres:postgres@localhost:5434/x?hostaddr=10.0.0.1"],
+    ["a remote host", "postgresql://postgres:postgres@db.example.invalid:5432/x"],
+    ["no host (pg would fall back to PGHOST)", "postgresql:///x"],
+    ["not set", ""],
+  ])("refused: %s", (_what, url) => {
+    expect(localDbHost(url)).toBeNull();
+  });
+
+  it.each([
+    ["CI's service container", "postgresql://postgres:postgres@localhost:5432/secretary", "localhost"],
+    ["127.0.0.1", "postgresql://postgres:postgres@127.0.0.1:5457/secretary", "127.0.0.1"],
+    ["::1", "postgresql://postgres:postgres@[::1]:5457/secretary", "[::1]"],
+  ])("allowed: %s", (_what, url, host) => {
+    expect(localDbHost(url)).toBe(host);
+  });
+});
+
 describe("the chip under a deadline says what the date beside it says", { timeout: 60_000 }, () => {
+  // Behind the walker's guard too: these write to the database the file runs on.
+  beforeEach(() => refuseUnlessLocal());
   afterEach(() => vi.useRealTimers());
   // In November Los Angeles is eight hours behind UTC: 17:00 there is 01:00 UTC the next day.
   const TIMES = [
