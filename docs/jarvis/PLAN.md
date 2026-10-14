@@ -281,7 +281,16 @@ beside me in a workshop."*
     to the top, and "move that project to the top" by voice or chat: one
     operation, one stored order, no model call for the drag. 1.02 r5
     gives the spoken move of a card on the Overview; the handle, and the
-    same order on the Projects tab, are not built.
+    same order on the Projects tab, are not built. With it, from 1.02
+    r5's list of reads without an ORDER BY (the board's order never
+    depends on them): where row order still reaches what he reads (a
+    section's "why" when two wishes name one component, plan-store.ts:129;
+    the "it has: …" and "could be A or B" lists, arrange.ts:62 and :71),
+    the signals hash (two events at one instant, signals.ts:126, where a
+    flip would mean a paid planner call for nothing) or a model's prompt
+    (the planner's, get_current_plan), it gets a fixed order. Test: rows
+    shuffled give the same text, the same hash and the same prompt. Not
+    put in r5, because any product change there restarts the burn-in.
   - **1.12** — merge two projects. He asked for one project to replace
     and absorb another; it made a new one and left the old one. There is
     no merge tool. Wanted: the tasks, notes and the rest move into the
