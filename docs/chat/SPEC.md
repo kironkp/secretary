@@ -37,32 +37,57 @@ A request that does not ask for a stream gets the plain JSON answer as before:
 a page opened before this release, and the tests that read the answer whole.
 It is the same turn underneath, written once; only the wrapping differs.
 
-**Compression.** `next start` gzips responses. Whether it holds a stream back
-is measured on the built app (the LOGBOOK entry gives the numbers); if it
-does, the stream is sent with `Cache-Control: no-transform`, which the
-compression step obeys, for this route only.
+**Compression.** `next start` gzips responses. Whether it, or anything else
+between the route and the page, holds a stream back is measured on the built
+app, asking for gzip as a browser does: the first line must arrive while the
+model is still working, long before the last (the LOGBOOK entry gives the
+numbers). If it is held back, the stream is sent with
+`Cache-Control: no-transform`, which the compression step obeys, for this
+route only.
 
 ## 2. A turn runs once
 
 The page names each turn it sends with an id of its own (random, made in the
 browser, kept with the message's retry payload). The server keeps one row per
-turn in `chat_turns`, keyed by the user and that id. A turn from another user
-with the same id is a different turn.
+turn in `chat_turns`, keyed by the user and that id: its conversation, his
+message, and, once it is done, the id of the saved reply (the reply's text is
+the message row; it is not copied) with the toasts and UI actions it gave, or,
+if it failed, the sentence that says why. A turn from another user with the
+same id is a different turn.
 
-When a request names a turn that already has a row:
+A turn says it is alive on a timer of its own, every 12 seconds, for as long
+as it runs: while it waits on a model, on a tool or on the database, whether
+or not anyone is listening and whatever the model sends. A turn not heard
+from for 60 seconds is taken to be gone (the process that ran it ended). So
+one model call that takes longer than a minute does not make the turn look
+gone, and is not run a second time.
 
-| The turn is | The request gets | A model is asked | Rows written |
+There are three kinds of ask: a send (a new turn), his tap on "tap to
+retry", and the page's own asks after a drop, which say they are only
+resuming (`resume`). When an ask names a turn that already has a row:
+
+| The turn is | A send or his tap gets | A resume gets | A model is asked |
 |---|---|---|---|
-| done | the saved answer | no | none |
-| running, and heard from in the last 60 seconds | the same answer when it comes (pings while it waits) | no | none |
-| running, and silent for 60 seconds (the process that ran it is gone) | runs it, taking it over | yes | the answer; not his message again |
-| failed | runs it again | yes | the answer; not his message again |
+| done | the saved answer | the saved answer | no |
+| running, heard from in the last 60 s | the same answer when it comes (pings while it waits) | the same | no |
+| running, silent for 60 s | runs it, taking it over | "Not delivered" | only for the send or tap |
+| failed | runs it again | the failure | only for the send or tap |
+| not there at all | (a send makes it) | "Not delivered" | no |
+
+An ask waiting on a running turn that then goes silent is treated, at that
+moment, as if it had just arrived: his tap takes it over, a resume answers
+"Not delivered".
+
+Taking a turn over, or running a failed one again, is one conditional update
+of its row: the ask that changes it from silent (or failed) to running is the
+one that runs it, and an ask arriving at the same moment finds it running and
+waits. So two asks can never both run it.
 
 So a retry never runs or pays for a turn that finished or is still running,
-and never stores his message twice. A turn that failed (no model could
-answer) left no answer, so asking again is a new attempt at the same turn, on
-the same stored message. The running turn writes the time it was last heard
-from at every ping.
+never stores his message twice, and the page's own asks never start a paid
+run. A turn that failed (no model could answer) left no answer, so his tap is
+a new attempt at the same turn, on the same stored message. A turn whose
+process is gone is run again only when he taps.
 
 A request with no turn id (an old page) is a turn of its own, as before.
 
@@ -74,22 +99,26 @@ when the page waits for it.
 
 The page treats any of these as a drop: the stream ends before its last line,
 the request fails on the network, or the answer is not the stream at all (the
-router's own 503 page). It then asks again, with the same turn id, at once,
-after 2 seconds and after 5 seconds. Each ask returns the saved answer, or
-waits on the turn still running. Only when all three fail does the message
-say "Not delivered — tap to retry", and the tap asks with the same turn id
-again. Reloading the page shows the saved answer too, as before.
+router's own 503 page). It then asks again, with the same turn id and marked
+`resume`, at once, after 2 seconds and after 5 seconds. Each of these only
+fetches or waits (§2): it returns the saved answer, waits on the turn still
+running, or brings back the failure. When the answer is a failure, or all
+three asks fail, the message says "Not delivered — tap to retry" (or the
+sentence the failure gave), and only the tap asks without `resume`, with the
+same turn id.
 
 An answer that says why it failed (the provider has no credit, there is no
 key) is not a drop: the page shows that sentence, and the tap runs the turn
-again (§2, failed).
+again (§2, failed). Reloading the page shows the saved answer too, as before.
 
 ## 4. Money
 
-Claude rounds spent before the turn falls back to OpenAI are counted
-(docs/spend/SPEC.md §1.2): the rounds that answered as they reported, and a
-round that was sent and never answered at the estimate, unless Claude
-refused it before doing any work.
+Rounds spent on a turn that did not end in an answer from that provider are
+counted (docs/spend/SPEC.md §1.2): Claude's rounds before the turn falls back
+to OpenAI, and OpenAI's rounds before it fails part way. The rounds that
+answered are counted as they reported; a round that was sent and never
+answered at the estimate, unless the provider refused it before doing any
+work.
 
 ## 5. What a turn may not do yet: merge projects
 
@@ -108,7 +137,8 @@ same tool, so the same holds there.
   answer, not the pieces.
 - When Claude fails part way, the turn runs again on OpenAI from the start,
   and the tools Claude already ran run again (as before v1.09; some tools
-  find their own earlier result, some do not).
+  find their own earlier result, some do not). That is a duplicate write (a
+  task made twice), not only a cost. Placed in 1.08.
 - A page opened before this release posts without a turn id and reads JSON,
   so it keeps the 30-second limit until it is reloaded.
 - Turn rows are kept (one small row per message); nothing deletes them yet.
