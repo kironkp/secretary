@@ -30,6 +30,7 @@ import {
 import type { BriefingCard } from "@/lib/secretary/briefing";
 import { INLINE_MIME } from "@/lib/attachments";
 import { requestCanvasRefresh } from "@/lib/canvas/refresh";
+import { createFollow } from "@/lib/chat/follow";
 import { newTurnId, sendTurn } from "@/lib/chat/turn-client";
 import { unlockRemoteAudio } from "@/lib/realtime/remote-audio";
 import { AttachSheet } from "./attach-sheet";
@@ -66,6 +67,9 @@ type PendingAttachment = {
 };
 
 const MAX_ATTACHMENTS = 4;
+
+// Keys that scroll the thread when no field has focus: his hands, as a wheel is (docs/chat/SPEC.md §1).
+const SCROLL_KEYS = new Set(["PageUp", "ArrowUp", "Home", " ", "PageDown", "ArrowDown", "End"]);
 
 // The card's motion is the app's (nav-tabs.tsx): 340ms on the leading curve.
 const MOVE_MS = 340;
@@ -266,7 +270,6 @@ export function ChatThread({
   // saved answer will stand; a later round starts it over.
   const [liveAnswer, setLiveAnswer] = useState<{ round: number; text: string } | null>(null);
   const [error, setError] = useState("");
-  const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const localKey = useRef(0);
   const [pending, setPending] = useState<PendingAttachment[]>([]);
@@ -397,69 +400,98 @@ export function ChatThread({
     void addFiles(picked);
   };
 
+  // The thread follows what is being written, and only his hands stop it
+  // (docs/chat/SPEC.md §1, v1.09 r4). The rule is lib/chat/follow.ts; here it
+  // is fed his input on the thread (a wheel, a touch, a mouse on it or on its
+  // scrollbar, the scroll keys), the thread's scroll events, and every change
+  // in size of the thread or of what it holds.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [follow] = useState(() =>
+    createFollow({
+      read: () => {
+        const el = scrollRef.current;
+        return el ? { top: el.scrollTop, height: el.scrollHeight, view: el.clientHeight } : { top: 0, height: 0, view: 0 };
+      },
+      write: (top) => {
+        if (scrollRef.current) scrollRef.current.scrollTop = top;
+      },
+    })
+  );
+  useEffect(() => {
+    const el = scrollRef.current;
+    const content = contentRef.current;
+    if (!el || !content) return;
+    const down = () => follow.down();
+    const up = () => follow.up();
+    const nudge = () => follow.nudge();
+    // A mouse or a pen; a finger is the touch events' (its pointer is cancelled once the browser scrolls).
+    const pointerDown = (e: PointerEvent) => e.pointerType !== "touch" && follow.down();
+    const pointerUp = (e: PointerEvent) => e.pointerType !== "touch" && follow.up();
+    const key = (e: KeyboardEvent) => {
+      if (!SCROLL_KEYS.has(e.key)) return;
+      const f = document.activeElement;
+      if (f instanceof HTMLElement && (f.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(f.tagName))) return;
+      follow.nudge();
+    };
+    const scrolled = () => follow.scrolled();
+    const ended = () => follow.scrollEnded();
+    const sized = new ResizeObserver(() => follow.keep());
+    // Not passive: the browser runs these before it scrolls, so following has paused before his scroll moves anything.
+    el.addEventListener("wheel", nudge, { passive: false });
+    el.addEventListener("touchstart", down, { passive: false });
+    el.addEventListener("touchend", up);
+    el.addEventListener("touchcancel", up);
+    el.addEventListener("pointerdown", pointerDown);
+    window.addEventListener("pointerup", pointerUp);
+    window.addEventListener("pointercancel", pointerUp);
+    window.addEventListener("keydown", key);
+    el.addEventListener("scroll", scrolled, { passive: true });
+    el.addEventListener("scrollend", ended);
+    sized.observe(el);
+    sized.observe(content);
+    return () => {
+      el.removeEventListener("wheel", nudge);
+      el.removeEventListener("touchstart", down);
+      el.removeEventListener("touchend", up);
+      el.removeEventListener("touchcancel", up);
+      el.removeEventListener("pointerdown", pointerDown);
+      window.removeEventListener("pointerup", pointerUp);
+      window.removeEventListener("pointercancel", pointerUp);
+      window.removeEventListener("keydown", key);
+      el.removeEventListener("scroll", scrolled);
+      el.removeEventListener("scrollend", ended);
+      sized.disconnect();
+      follow.dispose();
+    };
+  }, [follow]);
+
+  // Each piece, and each round that starts over, before it is painted.
+  useLayoutEffect(() => {
+    if (liveAnswer?.text) follow.keep();
+  }, [liveAnswer?.text, liveAnswer?.round, follow]);
+
+  // Opened on a message found by search: there, not following. Otherwise at the newest.
   useEffect(() => {
     if (anchorMessageId) {
       const el = document.getElementById(`m-${anchorMessageId}`);
       if (el) {
+        follow.leave();
         el.scrollIntoView({ block: "center" });
         el.classList.add("anchor-highlight");
         return;
       }
     }
-    bottomRef.current?.scrollIntoView();
-  }, [anchorMessageId]);
+    follow.toBottom();
+  }, [anchorMessageId, follow]);
 
-  // The thread follows what is being written while he reads at the bottom
-  // (docs/chat/SPEC.md §1): each piece of a streamed answer keeps its last line
-  // in view at once, not smoothly, because a smooth scroll falls behind the
-  // text. If he scrolls up he is left there; back at the bottom, it follows
-  // again. A streamed answer that lands is already where he reads it, so its
-  // landing moves nothing.
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const follow = useRef(true);
-  /** Where the thread was last put by the following, and how tall its content was then, to tell his own scroll up from it. */
-  const followedTo = useRef<number | null>(null);
-  const followedHeight = useRef(0);
-  /** This turn's answer came in pieces: when it is saved, nothing scrolls. */
-  const streamed = useRef(false);
-  const landing = useRef(false);
-  /** Back at the bottom, the thread follows again. (Whether he left it is decided where it follows, below.) */
-  const onThreadScroll = () => {
-    const el = scrollRef.current;
-    if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 32) follow.current = true;
-  };
-  useLayoutEffect(() => {
-    const el = scrollRef.current;
-    if (!liveAnswer?.text || !el) return;
-    // Decided here, not in the scroll event: that event comes a frame or more
-    // after his scroll, and a piece arriving in between would otherwise pull
-    // him back to the bottom (v1.09 r3). The text growing below never moves
-    // scrollTop; the panel growing taller can (the browser pulls scrollTop
-    // down to what the content still allows), so the thread counts as moved
-    // only when it is above where it was put AND above what that clamp leaves.
-    if (followedTo.current !== null) {
-      const unmoved = Math.min(followedTo.current, followedHeight.current - el.clientHeight);
-      if (el.scrollTop < unmoved - 4) follow.current = false;
-    }
-    if (!follow.current) return;
-    el.scrollTop = el.scrollHeight;
-    followedTo.current = el.scrollTop;
-    followedHeight.current = el.scrollHeight;
-  }, [liveAnswer?.text]);
-
+  // Opening the panel (bar → full) lands at the newest message, following.
+  const shownAs = useRef(dockState);
   useEffect(() => {
-    if (landing.current) {
-      landing.current = false;
-      return;
-    }
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [msgs.length, liveLines.length]);
-
-  // Opening the panel (bar → peek/full) must land at the newest message —
-  // instant, because the panel itself is already animating its height.
-  useEffect(() => {
-    if (dockState !== "bar") bottomRef.current?.scrollIntoView();
-  }, [dockState]);
+    const was = shownAs.current;
+    shownAs.current = dockState;
+    if (dockState === "full" && was !== "full") follow.toBottom();
+  }, [dockState, follow]);
 
   // Payloads for undelivered messages, keyed by their local id — a failed
   // bubble can be re-sent verbatim (text + already-uploaded attachment ids),
@@ -472,9 +504,7 @@ export function ChatThread({
     if (!payload || sending) return;
     setSending(true);
     setLiveAnswer(null);
-    streamed.current = false;
-    follow.current = true;
-    followedTo.current = null;
+    follow.toBottom();
     setMsgs((m) => m.map((msg) => (msg.id === tempId ? { ...msg, failed: undefined } : msg)));
     try {
       const out = await sendTurn({
@@ -484,7 +514,6 @@ export function ChatThread({
           // His message is stored: what he sends next belongs to the same conversation, whatever happens to this answer.
           if (line.type === "accepted") setConversationId(line.conversationId);
           if (line.type === "text") {
-            streamed.current = true;
             setLiveAnswer((live) =>
               live && live.round === line.round ? { round: line.round, text: live.text + line.text } : { round: line.round, text: line.text }
             );
@@ -497,8 +526,6 @@ export function ChatThread({
       }
       const body = out.answer;
       retryPayloads.current.delete(tempId);
-      // Drawn where the pieces stood: its landing moves nothing.
-      landing.current = streamed.current;
       setConversationId(body.conversationId);
       setMsgs((m) => [
         ...m.map((msg) => (msg.id === tempId ? { ...msg, id: body.userMessageId } : msg)),
@@ -768,11 +795,10 @@ export function ChatThread({
             </div>
             <div
               ref={scrollRef}
-              onScroll={onThreadScroll}
               data-thread-scroll=""
               className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-3 [-webkit-overflow-scrolling:touch]"
             >
-              <div className="mx-auto w-full max-w-2xl space-y-4 px-4">
+              <div ref={contentRef} className="mx-auto w-full max-w-2xl space-y-4 px-4">
           {hasBriefing && (
             <div className="rounded-2xl bg-surface-2/70 p-5">
               <p className="mb-2.5 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-muted">
@@ -929,17 +955,20 @@ export function ChatThread({
                 </div>
               ))}
           {sending && liveAnswer?.text.trim() ? (
-            // Drawn as the saved answer will be, so its arrival changes nothing on screen but the text.
-            <div data-live-answer="" className="max-w-[94%] rounded-[18px] text-[16px] leading-[1.45]">
-              <span className="whitespace-pre-wrap">{liveAnswer.text}</span>
-              <span className="animate-pulse text-faint">…</span>
+            // Drawn as the saved answer will be, with the room of its Copy and Read aloud row kept below it, so
+            // its arrival changes nothing on screen but the text.
+            <div>
+              <div data-live-answer="" className="max-w-[94%] rounded-[18px] text-[16px] leading-[1.45]">
+                <span className="whitespace-pre-wrap">{liveAnswer.text}</span>
+                <span className="animate-pulse text-faint">…</span>
+              </div>
+              <div aria-hidden className="mt-0.5 h-8" />
             </div>
           ) : sending ? (
             <div className="text-[16px] text-faint">
               <span className="animate-pulse">…</span>
             </div>
           ) : null}
-          <div ref={bottomRef} />
               </div>
             </div>
           </div>
