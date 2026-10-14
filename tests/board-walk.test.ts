@@ -45,6 +45,12 @@
 // did not place are one run in data order). It keeps its own history, one entry per stored version, and
 // after "Put it back" expects the entry before.
 //
+// HIS PROJECT ORDER (v1.11, docs/projects/SPEC.md). A step of his data moves a project in his order with
+// move_project (top, bottom, up, down, above or below another). The walker works out where it should land in
+// his active projects itself, from the order before, and asks that it did; that the signals hash did not change;
+// and that the opens after it ask no planner. At every open, the projects he placed in his order (read off the
+// database) come first among the cards he did not place on the board, in that order (3b).
+//
 // Everything goes through the real paths: both tools and the preference tool
 // through the tool executor, an open as compute-then-store, the pin button,
 // Put it back, calm mode and the Settings route that lifts a preference
@@ -179,7 +185,9 @@ import { defaultPlan, isUrgent, sectionKey, type LayoutPlan, type PlanSection } 
 import { clearPlanCache, lastPlannerUsage, planWithFallback } from "@/lib/layout/plan-from-llm";
 import { planFromRules } from "@/lib/layout/plan-from-rules";
 import { computeCurrentPlan, getPlanHead, getPreferences, persistPlan } from "@/lib/layout/plan-store";
-import type { Signals } from "@/lib/layout/signals";
+import { computeSignals, signalsHash, type Signals } from "@/lib/layout/signals";
+import { REGISTRY_VERSION } from "@/lib/layout/registry";
+import { listProjects } from "@/lib/projects/list";
 import { executeTool, liveTurnContext } from "@/lib/secretary/tools";
 import { POST as layoutRoute } from "@/app/api/layout/route";
 
@@ -719,6 +727,13 @@ async function walk(index: number, scripted = false, opts: WalkOptions = {}) {
     const free = (list: string[]) => list.filter((k) => isCard(k) && !placedKeys.includes(k));
     const byData = free(keysOf(defaultPlan(signals))).filter((k) => board.includes(k));
     if (free(board).join() !== byData.join()) complain("3 cards by the data", `${why}: ${row(free(board))} | by the data: ${row(byData)}`);
+    // 3b. His project order (v1.11), read off the database and not off the product's order: of the cards he did not
+    // place on the board, the projects he placed in his order come first among the projects, in that order.
+    const position = new Map((await db.select({ id: projects.id, position: projects.position }).from(projects).where(eq(projects.userId, id))).map((p) => [`project_card:${p.id}`, p.position]));
+    const lists = new Set(signals.projects.filter((p) => p.kind === "list").map((p) => `project_card:${p.id}`));
+    const freeProjects = free(board).filter((k) => !lists.has(k));
+    const his = freeProjects.filter((k) => typeof position.get(k) === "number").toSorted((a, b) => position.get(a)! - position.get(b)!);
+    if (freeProjects.slice(0, his.length).join() !== his.join()) complain("3b his project order first", `${why}: ${row(freeProjects)} | his order: ${row(his)}`);
     // 4. The right way up, in the spec's words: without the banner and what he placed, the cards are one run, and the
     // run stands where the fewest of the system's sections are on the wrong side of it (next up and the tiles belong
     // above the cards, Needs a date and People below; the strip is neither). Counted here on the board he sees.
@@ -1401,8 +1416,43 @@ async function walk(index: number, scripted = false, opts: WalkOptions = {}) {
     } else {
       // His data.
       const names = [...ids.keys()];
-      const kind = r.pick(["a task", "a task", "every date of a project", "a task finished", "a task deleted", "archive", "back from the archive", "a new project", "a committed deadline"] as const);
+      const kind = r.pick(["a task", "a task", "every date of a project", "a task finished", "a task deleted", "archive", "back from the archive", "a new project", "a committed deadline", "his project order", "his project order"] as const);
       count(`data: ${kind}`);
+      if (kind === "his project order" && names.filter((n) => n !== "Shopping").length > 1) {
+        // v1.11 (docs/projects/SPEC.md §2-3): a project to a place among his active projects, by the tool the chat
+        // and a call use. It lands where he asked; it is not a new situation (the signals hash stays); no planner is
+        // asked after it. (A list among lists is the unit tests'; the walk has one list.)
+        const name = r.pick(names.filter((n) => n !== "Shopping"));
+        const groupNow = async () => (await listProjects(id, TZ)).filter((p) => p.kind === "project" && p.status === "active").map((p) => p.name);
+        const before = await groupNow();
+        const others = before.filter((n) => n !== name);
+        const how = r.pick(["top", "bottom", "up", "down", "above", "below"] as const);
+        const other = how === "above" || how === "below" ? r.pick(others) : null;
+        const at = before.indexOf(name);
+        const to =
+          how === "top" ? 0 : how === "bottom" ? before.length - 1 : how === "up" ? Math.max(0, at - 1) : how === "down" ? Math.min(before.length - 1, at + 1) : others.indexOf(other!) + (how === "below" ? 1 : 0);
+        const asked = [...others];
+        asked.splice(to, 0, name);
+        moves.push(`data: his project order: ${name} ${how}${other ? ` ${other}` : ""}`);
+        const hashBefore = signalsHash(await computeSignals(id), REGISTRY_VERSION);
+        const res = (await executeTool(ctx, "move_project", other ? { project: name, [how]: other } : { project: name, to: how })).result as { place?: number; error?: string };
+        if (res.error || typeof res.place !== "number") complain("his project order: the move is made", `${name} ${how}: ${res.error ?? "no place in the answer"}`);
+        else {
+          const after = await groupNow();
+          if (after.join() !== asked.join()) complain("his project order: where he asked", `${name} ${how}${other ? ` ${other}` : ""}: ${after.join(", ")} | asked: ${asked.join(", ")}`);
+          if (signalsHash(await computeSignals(id), REGISTRY_VERSION) !== hashBefore) complain("his project order: not a new situation", `${name} ${how}: the signals hash changed`);
+        }
+        let plannerAsked = 0;
+        await openTwice("his project order", {
+          firstMayStore: true,
+          planner: (s) => {
+            plannerAsked++;
+            return JSON.stringify(defaultPlan(s));
+          },
+        });
+        if (plannerAsked) complain("his project order: no planner call", `${name} ${how}: the planner was asked ${plannerAsked} time(s)`);
+        continue;
+      }
       if (kind === "a task" && names.length) {
         const name = r.pick(names);
         const due = r.pick([-6, -1, 2, 20, null]);
