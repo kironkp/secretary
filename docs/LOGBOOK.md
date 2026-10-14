@@ -28,7 +28,14 @@ board and the Reviewer's probe of rows main wrote, the day it lands:
 `2781997`, `c347032`, `a9fe5bb`, `c18801f`, `ad28acb` (the walker, each
 before the code it holds, red first), `49aa0f9`, `ef8e067`, `88f2d12`,
 `045b5ce` (the spec), `3d50c77`, `8519048`, `a9e3a11`, `68d2ab8`,
-`bcd9f54`, `e1045fe` (the code and its tests), this commit. `132b183`, `1d7d798`
+`bcd9f54`, `e1045fe` (the code and its tests), `472c2a7` (offered again).
+Then, after three fresh seeds of the Reviewer's, their probe that steps
+time for real, a burn-in and their model of the rule: `bba6e45`, `5626a09`,
+`7f0801b`, `366d8ea`, `55fc659`, `5b6b66b`, `f2c89d0`, `2655f6a`, `e4f107a`,
+`16194f3`, `36b22f1`, `68e654c`, `da252f9`, `1effede`, `53bd287` (the
+walker, before the code it holds, red first), `1097a6b` (the spec),
+`9e6784a` (the code and its tests), `0b4f04e` (the walker's own clock,
+after a regression walk ran across his midnight), this commit. `132b183`, `1d7d798`
 and `ccd57ef` are an earlier round-3 rule that composition replaced;
 `f23e56c` merges main with v1.03 and `b3aa8fe` with v1.04, so the package
 version is 1.0.4.
@@ -109,8 +116,8 @@ understand all the whats". sec rev's round 2 (SEC-A007).
   number, the tie was broken by the stored order, and on a board that had
   grown short the two turned over at every open. That rule is gone.
 - Show, add back and unpin put a section where the system has it: a card by
-  the data, another section where today's rules have it, with everything
-  else in the order he saw. A section he added himself is always placed
+  the data, another section where the rules would keep it (the rule is
+  further down), with everything else in the order he saw. A section he added himself is always placed
   (unpin says so; hidden and shown again it comes back at the end). A ban
   works like a hide, and lifting it brings back a section he had added.
   A place goes with its section: archived, banned or hidden, the pin is
@@ -176,6 +183,82 @@ understand all the whats". sec rev's round 2 (SEC-A007).
   has been archived or deleted could not be lifted in Settings and stayed
   there for good; it is simply removed, as on main. "Hide kanban, show
   kanban" in one voice request was refused for a section he had added.
+- **A place said in two places** (found after the second offer of round
+  5: three fresh seeds of the Reviewer's, their probe that steps time for
+  real beside a control board, a burn-in on fresh seeds, a round trip
+  written from no rule, and the Reviewer's model of the rule). Six defects,
+  one family. A section of the system's that a list lacks needs a place,
+  and two pieces of code each made one up; and a place of his is a number,
+  read off a list that was not always the board.
+  The composition put a missing section in after the place for the cards
+  had been worked out: Put it back onto a board from when the section was
+  hidden could store one board and show another at the next open. A
+  request put a returning section under the nearest section above it,
+  cards counted: with the strip under the cards that is above the strip,
+  and the rules plan was refused from then on. On his own board the day
+  this lands, a hide of People made on main and lifted in the first days
+  would have been enough: main's banner would have stayed for good, the
+  strip last. A place could be right that day and wrong a step later: a
+  section hidden and shown on the day the strip rose froze the system's
+  plan from the next day on (the Reviewer counted 45 such holds in 260
+  futures on the tip offered before this one). And where the count moved
+  the cards after a request, a card he had pinned among them was left
+  behind under another neighbour: with Needs a date above next up and the
+  cards on top, hiding Needs a date sent the cards under next up and left
+  his card on top. The tip offered before this one already did that.
+  Now one rule, in one place (lib/layout/compose.ts): the section takes
+  its place in the first order the rules can produce that is accepted
+  against the board as it stands (the usual order, then the strip sent
+  up); if none is, because a planner has moved something, it goes by
+  today's order, and a tie is read against the section that carries a
+  reason, or else one the rules can move. The run of cards counts as a
+  section of that order, and where a section's place in the order and its
+  side of the cards cannot both hold, the side of the cards wins: next up,
+  the tiles and the strip never come back under the cards, Needs a date
+  and People never above them. So a section that comes back moves no
+  card. It goes in before the cards are counted.
+  And one step in a request (lib/layout/request.ts): the system's sections
+  and the cards are settled first, then each thing he placed is stood next
+  to the neighbour it had, and its place is read off that board. What he
+  sent to the top stays first, what he sent to the bottom stays last.
+  Before it writes, a request asks what a new open would be served today
+  and whether each order of the rules is still accepted; with the rules as
+  they are that check never fires, and it is tested with a made rule. His
+  "show" does not perform the system's move: the strip hidden and shown
+  while a rule's move waits comes back where it stood, and the move lands
+  by itself at the next change in his data.
+  What he may notice, each named in the spec. With the strip sent up and
+  only one of next up and the tiles on the board as the system's (the
+  other hidden, or pinned by him), hiding and showing that one brings it
+  back above the strip, until his data next changes and the rule sends the
+  strip up again. Where a planner moved one section and he hides and shows
+  another so that the list left is in an order the rules can produce, the
+  planner's move is stepped over. Where a planner has the cards above the
+  strip, the strip hidden and shown comes back in front of the cards; and
+  where a planner has next up under the cards, the tiles come back in
+  front of the cards, above next up. A card he hides and shows, or lets
+  go, comes back with the cards by its data and is nobody's neighbour:
+  something of his that stood just above it stays where it stood.
+  Something he placed right beside a section he hides and shows may be on
+  the other side of it afterwards.
+  Between his requests a place is still a count: when a rule sends the
+  strip up or the data re-sorts the cards, a card he pinned in the middle
+  can get new neighbours (the split, 1.07). A planner's answer that leaves
+  the strip out, on a board an earlier answer changed, is thrown away:
+  that one call, and none after it.
+  Checked by mutation twice (the second time all 164 mutants of the code
+  were caught without the walk; code a mutant showed dead was taken out,
+  not tested alive) and by 22 seeds neither of us had used, 120 walks of
+  30 steps and 120 scripted walks each: no complaint.
+  The walker no longer reads the wall clock. A regression walk ran across
+  his midnight: his due dates moved a day between an edit and its open, and
+  the open rightly stored a board the walk had not asked for. Each walk now
+  starts at noon in his zone on a day its seed picks, and its time moves
+  only by its own steps and the seconds it takes; the rows the database
+  stamps for the walker take the same clock (a trigger in the test
+  database, which the walker refuses to put anywhere but on localhost).
+  His midnight between a request and its open is not a step of the walk:
+  it belongs with the day count of 1.06.
 - **The gate is a walker, not examples** (tests/board-walk.test.ts). Three
   rounds were offered on examples and failed on a state no example had. The
   walker makes boards of 0 to 9 projects and takes seeded random steps
