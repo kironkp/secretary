@@ -39,14 +39,18 @@ stood, and the layout moves that too (the panel opening, a round that
 starts over shorter, the keyboard). Now:
 
 1. **His hands pause it.** A touch or a pointer down on the thread (its
-   scrollbar included), a wheel, or a scroll key (PageUp, ArrowUp, Home, or
-   Space when no field has focus) pauses following at once. While his hands
-   are on the thread, and until it settles, nothing writes its scroll
-   position: it never fights a finger or stops a momentum scroll.
+   scrollbar included), a wheel, or a scroll key when no field has focus
+   (PageUp, ArrowUp, Home, Space, and the keys that scroll down: PageDown,
+   ArrowDown, End) pauses following at once. While his hands are on the
+   thread, and until it settles, nothing writes its scroll position: it
+   never fights a finger or stops a momentum scroll.
 2. **Settled, it decides once.** When no scroll event has come for 150 ms
    after his last input (or the browser says the scroll has ended), it
-   decides once, by position only: within 32 px of the bottom, following
-   is on; otherwise it is off. Nothing is decided per scroll event.
+   decides once, by position only: where his own scroll left him, within 32
+   px of the bottom, following is on; otherwise it is off. Nothing is
+   decided per scroll event, and what is written below him while it settles
+   is not his scroll: a wheel back to the bottom while pieces keep coming
+   still turns it on.
 3. **While following, the bottom stays in view.** Every piece, every round
    that starts over, and every change in the size of the thread or of what
    it holds puts the bottom in view, at once. The layout never decides
