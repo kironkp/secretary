@@ -4,7 +4,7 @@
 import { z } from "zod";
 import { isRegistryComponent, type RegistryComponent } from "./registry";
 import type { ProjectSignal, Signals } from "./signals";
-import { byUrgency, type Urgency } from "@/lib/project-order";
+import { byOrder, type Ordered, type Urgency } from "@/lib/project-order";
 
 export const planSectionSchema = z
   .object({
@@ -86,6 +86,9 @@ const urgencyOf = (p: ProjectSignal): Urgency => ({
   deadline: p.deadline_days !== undefined ? p.deadline_days : p.days_left,
 });
 
+/** What the one order reads of a project's signals (docs/projects/SPEC.md §1): its urgency, and his place for it. */
+export const orderedOf = (p: ProjectSignal): Ordered => ({ ...urgencyOf(p), urgent: isUrgent(p), position: p.position ?? null });
+
 /**
  * SPEC §3 invariant 4: a project is urgent when it has late open work, or its
  * date is within the week. A list is never urgent: it is not work to chase.
@@ -102,13 +105,12 @@ export function urgencyLabel(p: ProjectSignal): string {
 }
 
 /**
- * The order of the cards the user did not place (SPEC §2): urgent projects
- * first, then the rest, each in the one urgency order. Lists come last
- * without a term of their own: a list is never urgent, and the urgency
- * order (lib/project-order.ts) puts lists after projects.
+ * The order of the cards the user did not place on the board (SPEC §2): the
+ * one order (lib/project-order.ts, docs/projects/SPEC.md §1): projects before
+ * lists; the ones he placed in his project order first, in that order; then
+ * urgent projects; then the urgency order.
  */
-export const cardOrder = (a: ProjectSignal, b: ProjectSignal): number =>
-  Number(isUrgent(b)) - Number(isUrgent(a)) || byUrgency(urgencyOf(a), urgencyOf(b));
+export const cardOrder = (a: ProjectSignal, b: ProjectSignal): number => byOrder(orderedOf(a), orderedOf(b));
 
 /**
  * Calendar days, in the user's zone, to the date that makes a project

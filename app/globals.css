@@ -25,6 +25,9 @@
   --bubble: #e8edfd;
   --sep: rgba(60, 60, 67, 0.22);
   --bar: rgba(249, 249, 249, 0.94);
+  /* The new look (docs/projects/SPEC.md §5, from the approved screens): accent TEXT and icons at 4.5:1 on white, and the hairline between rows. */
+  --accent-ink: #3a5bd0;
+  --hairline: rgba(60, 60, 67, 0.18);
 }
 
 [data-theme="dark"] {
@@ -45,6 +48,8 @@
   --bubble: #1d2540;
   --sep: rgba(84, 84, 88, 0.6);
   --bar: rgba(22, 22, 24, 0.94);
+  --accent-ink: #7a9bff;
+  --hairline: rgba(84, 84, 88, 0.6);
 }
 
 @theme inline {
@@ -63,6 +68,8 @@
   --color-grape: var(--grape);
   --color-bubble: var(--bubble);
   --color-sep: var(--sep);
+  --color-accent-ink: var(--accent-ink);
+  --color-hairline: var(--hairline);
   --color-bar: var(--bar);
   /* The system face: SF on Apple devices, which is where this app is used. */
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", Helvetica, Arial, sans-serif;

@@ -4,7 +4,7 @@
 // to due) or single dates; one-off events as bars; the days are his calendar
 // days (lib/due.ts). The shell owns all geometry: nothing here calls a model.
 import { localDay } from "@/lib/due";
-import { byUrgency } from "@/lib/project-order";
+import { byOrder } from "@/lib/project-order";
 import { parseInTz, wallTimeInTz } from "@/lib/time";
 
 export type Zoom = "week" | "month" | "quarter";
@@ -40,7 +40,15 @@ export type TlEvent = {
   recurrence: string[];
   reminders: string[];
 };
-export type TlProject = { id: string; name: string; color: string | null; deadline: string | null; deadlineKind: string | null };
+export type TlProject = {
+  id: string;
+  name: string;
+  color: string | null;
+  deadline: string | null;
+  deadlineKind: string | null;
+  /** His place for it in his project order (docs/projects/SPEC.md): the lanes follow it. */
+  position?: number | null;
+};
 
 const OPEN = new Set(["inbox", "todo", "in_progress", "blocked"]);
 const isOpen = (t: TlTask) => OPEN.has(t.status);
@@ -78,6 +86,8 @@ export type Lane = {
   /** Its earliest open due day, late or not, whatever the filter shows: the order key. */
   soonest: number | null;
   deadline: { day: number; committed: boolean } | null;
+  /** His place for the project in his order, empty when he has not placed it. */
+  position: number | null;
 };
 
 export type Filters = { project: string | "all"; status: "open" | "late" | "done" | "all"; events: boolean };
@@ -153,6 +163,7 @@ export function buildLanes(
         to: null,
         soonest: null,
         deadline: p?.deadline ? { day: localDay(new Date(p.deadline), tz), committed: p.deadlineKind === "committed" } : null,
+        position: p?.position ?? null,
       };
       lanes.set(key, lane);
     }
@@ -182,16 +193,18 @@ export function buildLanes(
     if (lane.deadline) lane.to = lane.to === null ? lane.deadline.day : Math.max(lane.to, lane.deadline.day);
     lane.items.sort((a, b) => a.from - b.from || a.to - b.to || a.title.localeCompare(b.title));
   }
-  // The order the Overview's cards use too (lib/project-order.ts): late
-  // first by how late, then the nearest date or deadline, then undated.
-  const urgency = (l: Lane) => ({
+  // The one order (lib/project-order.ts): the projects he placed first, in
+  // his order; then late first by how late, then the nearest date or
+  // deadline, then undated.
+  const ordered = (l: Lane) => ({
     name: l.name,
     soonest: l.soonest === null ? null : l.soonest - today,
     deadline: l.deadline ? l.deadline.day - today : null,
+    position: l.position,
   });
   return [...lanes.values()]
     .filter((l) => (filters.project === "all" ? l.total > 0 || l.items.length > 0 : l.id === filters.project))
-    .sort((a, b) => byUrgency(urgency(a), urgency(b)));
+    .sort((a, b) => byOrder(ordered(a), ordered(b)));
 }
 
 /** Open tasks with no date: the No date tray (filtered by project like the lanes). */

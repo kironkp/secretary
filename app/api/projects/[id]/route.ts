@@ -7,6 +7,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { documents, events, projects, tasks } from "@/lib/db/schema";
 import { isErrorResponse, parseBody, requireSession } from "@/lib/api";
+import { groupOf } from "@/lib/projects/list";
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const user = await requireSession();
@@ -48,7 +49,16 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const updates: Partial<typeof projects.$inferInsert> = {};
   if (parsed.name !== undefined) updates.name = parsed.name;
   if (parsed.color !== undefined) updates.color = parsed.color;
-  if (parsed.status !== undefined) updates.status = parsed.status;
+  if (parsed.status !== undefined) {
+    updates.status = parsed.status;
+    // A project that changes group (set aside, or made active again) arrives in
+    // the new one unplaced, at its urgency place (docs/projects/SPEC.md §2).
+    const [was] = await db
+      .select({ kind: projects.kind, status: projects.status })
+      .from(projects)
+      .where(and(eq(projects.id, id), eq(projects.userId, user.id)));
+    if (was && groupOf(was) !== groupOf({ kind: was.kind, status: parsed.status })) updates.position = null;
+  }
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
   }

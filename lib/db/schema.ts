@@ -319,6 +319,10 @@ export const projects = pgTable("projects", {
   deadlineKind: text("deadline_kind").$type<"committed" | null>(),
   // Subprojects (SPEC §4/§5 rule 4): a project may nest under a parent.
   parentId: text("parent_id"),
+  // His order (docs/projects/SPEC.md, v1.11): where he put it in its group,
+  // 0 at the top. Empty until he moves something; an empty one stands after
+  // the placed ones, in urgency order. Cleared when the project changes group.
+  position: integer("position"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

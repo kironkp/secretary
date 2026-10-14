@@ -32,6 +32,11 @@ export type ProjectSignal = {
   soonest_days?: number | null;
   /** Calendar days to the project's own stored deadline, committed or not. */
   deadline_days?: number | null;
+  /**
+   * His place for it in his project order (docs/projects/SPEC.md, v1.11), for
+   * the composition. Not in the signals hash: a move is not a new situation.
+   */
+  position?: number | null;
 };
 
 /** SPEC §4: the id vocabulary for painted surfaces — every task id the Canvas
@@ -109,7 +114,8 @@ export async function computeSignals(userId: string, now = new Date()): Promise<
 
   const [projectRows, taskRows, eventRows, userMessages24h, dailyCounts, [userRow], headRows] =
     await Promise.all([
-      db.select().from(projects).where(eq(projects.userId, userId)).orderBy(projects.createdAt),
+      // The order they were made in, the id breaking a tie (rows made in one go share a stamp): the hash walks it.
+      db.select().from(projects).where(eq(projects.userId, userId)).orderBy(projects.createdAt, projects.id),
       db
         .select({
           id: tasks.id,
@@ -120,18 +126,24 @@ export async function computeSignals(userId: string, now = new Date()): Promise<
           source: tasks.source,
         })
         .from(tasks)
-        .where(eq(tasks.userId, userId)),
+        .where(eq(tasks.userId, userId))
+        // An order of their own (v1.11): the lists made from them reach the planner's prompt and the cap of 50.
+        .orderBy(tasks.createdAt, tasks.id),
       db
         .select({ id: events.id, projectId: events.projectId, startsAt: events.startsAt })
         .from(events)
-        .where(and(eq(events.userId, userId), gte(events.startsAt, now))),
+        .where(and(eq(events.userId, userId), gte(events.startsAt, now)))
+        // Two at one instant: the id decides which is the next commitment, which the hash carries (v1.11).
+        .orderBy(events.startsAt, events.id),
       db
         .select({ content: messages.content, createdAt: messages.createdAt })
         .from(messages)
         .where(
           // The user's own words: not forwarded mail an intake thread stores as theirs (SEC-A005b).
           and(eq(messages.userId, userId), eq(messages.role, "user"), notIntakeMail(), gte(messages.createdAt, ago24h))
-        ),
+        )
+        // In the order he said them (v1.11): the questions reach the planner's prompt, the last mention its read.
+        .orderBy(messages.createdAt, messages.id),
       // Daily user-message counts for the trailing 14 days (baseline denominator).
       db
         .select({
@@ -303,6 +315,7 @@ export async function computeSignals(userId: string, now = new Date()): Promise<
           days_left: deadline ? dayDiff(deadline, now) : null,
           open_count: openByProject.get(p.id) ?? 0,
           done_count: doneByProject.get(p.id) ?? 0,
+          position: p.position ?? null,
           subprojects: subs.map((s) => ({
             id: s.id,
             name: s.name,

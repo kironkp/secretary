@@ -69,7 +69,9 @@ export async function openPriorityWishes(userId: string) {
         eq(wishlist.priority, true),
         sql`${wishlist.status} IN ('open', 'building', 'proposed')`
       )
-    );
+    )
+    // Oldest first (v1.11): when two name the same section, the newer need is its "why", whatever the rows' order.
+    .orderBy(wishlist.createdAt, wishlist.id);
 }
 
 /** Current registry version: base + approved dynamic components. */

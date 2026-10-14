@@ -19,6 +19,7 @@ import { nextClarification, openClarificationCount } from "./entities";
 import { isQuietHours } from "./persona";
 import { refreshProcrastinationScores } from "./procrastination";
 import { getPendingSuggestions } from "./suggestions";
+import { listProjects } from "@/lib/projects/list";
 
 const OPEN_STATUSES = ["inbox", "todo", "in_progress", "blocked"] as const;
 const MAX_NUDGES = 3;
@@ -254,6 +255,9 @@ export async function buildBriefing(
     .select()
     .from(projects)
     .where(and(eq(projects.userId, userId), ne(projects.status, "archived")));
+  // In his order, the one the Projects tab shows (docs/projects/SPEC.md §1).
+  const projectOrder = new Map((await listProjects(userId, timezone)).map((p, i) => [p.id, i]));
+  projectRows.sort((a, b) => (projectOrder.get(a.id) ?? 0) - (projectOrder.get(b.id) ?? 0));
   const openCounts = await db
     .select({ projectId: tasks.projectId, n: count() })
     .from(tasks)

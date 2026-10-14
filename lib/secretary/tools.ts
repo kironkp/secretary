@@ -58,6 +58,8 @@ import { REGISTRY_COMPONENTS, REGISTRY_VERSION } from "@/lib/layout/registry";
 import { computeSignals } from "@/lib/layout/signals";
 import { setAsideInWords } from "@/components/today/copy";
 import { QUESTION_KINDS } from "@/lib/understanding/types";
+import { listProjects } from "@/lib/projects/list";
+import { moveProject } from "@/lib/projects/order";
 import type { UndoTicket } from "@/lib/timeline-undo";
 import { findDuplicate, findDuplicateEvent } from "./dedupe";
 import { clearExpectationsFor } from "./expectations";
@@ -883,6 +885,9 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
       .select({ projectId: tasks.projectId, status: tasks.status })
       .from(tasks)
       .where(eq(tasks.userId, ctx.userId));
+    // In his order, the one the Projects tab shows (docs/projects/SPEC.md §1).
+    const order = new Map((await listProjects(ctx.userId, ctx.timezone)).map((p, i) => [p.id, i]));
+    rows.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
     return {
       result: rows.map((p) => ({
         name: p.name,
@@ -891,6 +896,19 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         ).length,
         done: taskRows.filter((t) => t.projectId === p.id && t.status === "done").length,
       })),
+    };
+  },
+
+  async move_project(ctx, args) {
+    const a = toolSchemas.move_project.parse(args);
+    // One move, whatever made it (docs/projects/SPEC.md §2): the drag on the Projects tab is the same.
+    const where = a.above ? { above: a.above } : a.below ? { below: a.below } : a.to;
+    if (!where) return { result: { error: "Say where: the top, the bottom, up, down, or above or below another project" } };
+    const moved = await moveProject(ctx.userId, a.project, where);
+    if (!moved.ok) return { result: { error: moved.error } };
+    return {
+      result: { project: moved.name, place: moved.place, of: moved.of, says: moved.says },
+      toast: { icon: "↕", text: moved.says },
     };
   },
 

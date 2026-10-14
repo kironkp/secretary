@@ -94,8 +94,10 @@ Reference: `2-projects.png` beside this file (made-up content), drawn at 390
 wide and approved by Kiron on 2026-10-14; the values below are its inline
 styles.
 
-- Ground `#f2f2f7`. Title "Projects", 34/40 bold, 16 px gutter; a "New
-  project" button (44 × 44, a 24 px accent plus) at its right.
+- Ground `#f2f2f7`. Title "Projects", 34/40 bold, 16 px gutter. The
+  approved screen has a "New project" button (44 × 44, a 24 px accent plus)
+  at its right; it is not in v1.11 (nothing on this screen makes a project
+  yet, and a button that does nothing is clutter): named below.
 - Each group is one white card, radius 12, the cards 10 px apart. A group
   other than Active has a heading above its card, 20/26 bold.
 - A row: at least 56 px, 16 px in from the left, 4 px from the right; a
@@ -131,3 +133,5 @@ styles.
 - A project that changes group starts unplaced in the new one (§2): set
   aside and brought back, it does not return to its old place.
 - The filter chips and the task editor's picker keep their own orders (§1).
+- No "New project" button yet (§5): a project is made by saying so, as
+  before.

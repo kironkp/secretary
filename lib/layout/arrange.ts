@@ -60,7 +60,8 @@ export async function arrangeDashboard(userId: string, ops: ArrangeOp[]): Promis
     db
       .select({ id: projects.id, name: projects.name, kind: projects.kind })
       .from(projects)
-      .where(and(eq(projects.userId, userId), ne(projects.status, "archived"))),
+      .where(and(eq(projects.userId, userId), ne(projects.status, "archived")))
+      .orderBy(projects.createdAt, projects.id),
   ]);
   const byId = new Map<string, NamedProject>(projectRows.map((p) => [p.id, p]));
   const named = (s: PlanSection): Named => ({ key: sectionKey(s), names: namesOf(s, byId), section: s });

@@ -39,7 +39,9 @@ export async function getPreferences(userId: string): Promise<LayoutPreference[]
   const rows = await db
     .select({ kind: layoutPreferences.kind, value: layoutPreferences.value })
     .from(layoutPreferences)
-    .where(eq(layoutPreferences.userId, userId));
+    .where(eq(layoutPreferences.userId, userId))
+    // In the order he set them (v1.11): the list reaches the planner's prompt and get_current_plan.
+    .orderBy(layoutPreferences.createdAt, layoutPreferences.id);
   return rows;
 }
 

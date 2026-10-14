@@ -48,6 +48,7 @@ export async function DashboardPanel({
         deadline: projectsTable.deadline,
         deadlineKind: projectsTable.deadlineKind,
         status: projectsTable.status,
+        position: projectsTable.position,
       })
       .from(projectsTable)
       .where(eq(projectsTable.userId, userId)) as Promise<PlanProject[]>,

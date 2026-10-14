@@ -215,6 +215,12 @@ export const toolSchemas = {
   list_items: z.object({
     list: z.string().max(80).optional().describe("The list's name; shopping when omitted"),
   }),
+  move_project: z.object({
+    project: z.string().min(1).describe("The project (or list) to move, in his words; fuzzy-matched"),
+    to: z.enum(["top", "bottom", "up", "down"]).optional().describe("To the top or bottom of its group, or one place up or down"),
+    above: z.string().optional().describe("Put it right above this other project instead"),
+    below: z.string().optional().describe("Put it right below this other project instead"),
+  }),
   arrange_dashboard: z.object({
     operations: z
       .array(
@@ -691,8 +697,10 @@ const toolDescriptions: Record<ToolName, string> = {
   add_to_list:
     "Add items to one of the user's lists: shopping by default, or a list they name ('packing list'). 'Add lotion to my shopping list for the boat' is items ['lotion'], note 'for the boat', on the shopping list. Never a task called 'buy lotion', never a new project. Say back read_back.",
   list_items: "What is on one of the user's lists right now (shopping by default), to read back when asked.",
+  move_project:
+    "Move a project in his own project order: the order of the Projects tab, which the Overview's project cards and the Timeline follow too ('move Garden shed to the top', 'put the kitchen above the tax paperwork', 'the bike one down'). Among projects of its own group (an active project among active ones, a list among lists). Applies at once and stays; asks nothing else. Then say back `says` as returned. For a project, this is the tool, not arrange_dashboard.",
   arrange_dashboard:
-    "Rearrange the user's dashboard the moment they ask: move a section to the top or bottom, up or down a place, hide it, or show it again ('put the shopping list at the top', 'hide the timeline'). Name sections in the user's words; the server finds them. Applies at once and stays put. If it returns an error, say that error; don't say you moved anything before this returns.",
+    "Rearrange the user's dashboard the moment they ask: move a section to the top or bottom, up or down a place, hide it, or show it again ('put the shopping list at the top', 'hide the timeline'). Name sections in the user's words; the server finds them. Applies at once and stays put. If it returns an error, say that error; don't say you moved anything before this returns. To move a PROJECT in his project order ('move Garden shed to the top'), use move_project instead: this tool places a section on the Overview itself, where he says.",
   add_event_to_google:
     "Put an event that is still only in Secretary onto the user's Google Calendar. Only after the user says yes to adding it (create_event asks when the request came with an attachment), or after they reconnect Google.",
   create_document:
@@ -867,6 +875,8 @@ export const VOICE_TOOL_NAMES = [
   "add_to_list",
   "list_items",
   "arrange_dashboard",
+  // His project order (docs/projects/SPEC.md §2): "move that project to the top" on a call too.
+  "move_project",
   // Gmail by voice (SEC-A005): "what's new in my email?", find one, read it,
   // draft a reply; and the yes that a conversation which read mail needs.
   "email_summary",
