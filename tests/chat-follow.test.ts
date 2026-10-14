@@ -127,6 +127,40 @@ describe("following", () => {
     expect(t.box.top, "and the bottom is put in view at once").toBe(t.end());
   });
 
+  it("a wheel to the bottom that the browser applies after a piece has landed (Chromium, logged): it follows again", () => {
+    // Logged in Chromium: the wheel came at height 1083 with him at 84; a piece took it to 1129; the scroll landed
+    // at 566, the bottom as it was when the wheel came, so 46 px above the bottom as it is now.
+    const t = thread({ top: 84, height: 1083, view: 517 });
+    t.f.leave();
+    t.f.nudge();
+    t.box.height = 1129;
+    t.box.top = 566;
+    t.f.scrolled();
+    t.tick(150);
+    expect(t.f.following()).toBe(true);
+    expect(t.box.top).toBe(t.end());
+  });
+
+  it("the scrollend of the page's own write, arriving after his wheel, does not settle it (Chromium, logged)", () => {
+    // Logged in Chromium: the page followed a piece to 334; his wheel came; then the scroll and scrollend events of
+    // that write arrived; the next piece came before his wheel's scroll applied.
+    const t = thread({ top: 0, height: 851, view: 517 });
+    t.f.keep(); // the page writes 334
+    t.f.nudge(); // his wheel, up 120
+    t.f.scrolled(); // the event of the page's write
+    t.f.scrollEnded(); // and its scrollend
+    expect(t.f.following(), "still his, unsettled").toBe(false);
+    const writes = t.writes.length;
+    t.piece(46); // a piece: not followed
+    expect(t.writes.length).toBe(writes);
+    t.box.top = 334 - 120; // his wheel's scroll applies
+    t.f.scrolled();
+    t.f.scrollEnded();
+    expect(t.f.following()).toBe(false);
+    t.piece(46);
+    expect(t.box.top, "left where his wheel put him").toBe(214);
+  });
+
   it("the scrollbar dragged with a mouse: paused while the button is down, decided when it is let go and settled", () => {
     const t = thread({ top: 500, height: 1000, view: 500 });
     t.f.keep();
