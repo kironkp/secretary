@@ -132,7 +132,11 @@ styles.
   name semibold; the rows around it do not move for its extra height. The
   rows it passes make room for it. Held near the top or the bottom edge of
   the screen, the list scrolls under it, faster the nearer the edge, so in
-  a long list a project goes from the bottom to the top in one drag. Let go, it stays there at
+  a long list a project goes from the bottom to the top in one drag. The
+  bottom edge is the 64 px above the tab bar and the voice button, where the
+  rows can still be seen; held lower, over them, the list scrolls at full
+  speed. The scroll stops at the list's end, and the row stays under the
+  finger wherever the list stands (v1.11 r3). Let go, it stays there at
   once, before the server has answered, and the order is stored; if the
   store fails it goes back, and a plain line says so ("Couldn't move Garden
   shed. It's back where it was."). Two drags in quick succession are stored
