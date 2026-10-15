@@ -229,6 +229,20 @@ blue buttons are 1.15's. The whole chat spec ran 10 times in each browser,
 every test passing (Safari's engine 170, Chrome 220, four of them calls), and
 no frame showed the answer out of view while following.
 
+**r7** (`7a0c42c` the rule; `5045f58`, `411de4d`, `195c433`, `089d093`,
+`e7c1a93`, `a849d36` the tests; `7d16f5c` the code; this commit). On main, r6's
+browser tests failed in the one place they run as an iPhone, GitHub's WebKit,
+which none of us had run them in; nothing was released. That WebKit draws six
+or seven frames a second, and three tests failed on how many frames they had
+seen, while every reading of whether the answer was in view passed. They now
+count the frames that drew new words, with the same numbers and answers long
+enough for them, and check what he sees first. Then the logs found a real
+fault: with his hand on the thread the page stopped following, but that
+browser's scroll anchoring kept the thread at the bottom as the answer grew,
+so he was pulled down anyway, with no pill. The page alone sets the thread's
+position now; anchoring is off on it. Safari on a newer iPhone could do the
+same to a finger scroll.
+
 ## v1.02 — A clear Overview (2026-10-13)
 
 `b980803` (the round as one commit: written 2026-10-06 as v0.34 and parked,
