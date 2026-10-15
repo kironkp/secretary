@@ -40,7 +40,7 @@ vi.mock("@/lib/openai", async (importOriginal) => {
 });
 
 import { db } from "@/lib/db";
-import { projects, tasks, user } from "@/lib/db/schema";
+import { events, projects, tasks, user } from "@/lib/db/schema";
 import { byOrder, byUrgency } from "@/lib/project-order";
 import { moveProject } from "@/lib/projects/order";
 import { GROUPS, listProjects } from "@/lib/projects/list";
@@ -174,6 +174,19 @@ describe("the order's last word (v1.11 r2)", () => {
       const listed = (await executeTool(h.ctx, "list_projects", {})).result as { name: string; open: number }[];
       expect(listed.filter((p) => p.name === "Twin").map((p) => p.open)).toEqual([1, 0]);
     }
+  });
+});
+
+describe("urgent first, among what he did not place", () => {
+  it("a project whose only date is an event this week is urgent: it stands before the undated ones (the Reviewer's M3)", async () => {
+    // Its event makes a deadline within the week (signals.ts infers one from events too), so it is urgent; its
+    // urgency key sees no open dated task and no stored deadline. Without "urgent first" it would sort by name among
+    // the undated ones, last.
+    const h = await his();
+    const [z] = await db.insert(projects).values({ userId: h.id, name: "Zinnia", status: "active" }).returning();
+    await db.insert(tasks).values({ userId: h.id, projectId: z.id, title: "Zinnia: a task", status: "todo", source: "spoken" });
+    await db.insert(events).values({ userId: h.id, projectId: z.id, title: "Zinnia: the visit", startsAt: day(3) });
+    expect((await h.tab()).active).toEqual(["Birch", "Atlas", "Cedar", "Zinnia", "Dune", "Ember", "Fjord"]);
   });
 });
 
