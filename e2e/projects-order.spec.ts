@@ -160,7 +160,9 @@ for (const theme of ["light", "dark"] as const) {
   });
 }
 
-test("a drag by the handle moves the project at once, and the order stays after a reload", async ({ page }) => {
+test("a drag by the handle moves the project at once, and the order stays after a reload", async ({ page, request }, testInfo) => {
+  // Run again (--repeat-each), mine are put back in their first order: the run before moved them.
+  if (testInfo.repeatEachIndex > 0) for (const name of [...MINE].reverse()) await tool(request, "move_project", { project: name, to: "top" });
   await page.goto("/projects");
   expect(await order(page)).toEqual(MINE);
   // Held halfway: the row is lifted (at least 60 px tall, the rows it has not passed where they were), the handle
@@ -224,7 +226,9 @@ test("the handle's arrow keys move the project one place", async ({ page }) => {
   expect(await order(page)).toEqual(moved);
 });
 
-test("New project: a row at the top of Active, the name field focused; Enter makes it, an empty name makes nothing", async ({ page }) => {
+test("New project: a row at the top of Active, the name field focused; Enter makes it, an empty name makes nothing", async ({ page }, testInfo) => {
+  // A name of its own on each run: a name that is there already makes nothing new.
+  const made = testInfo.repeatEachIndex > 0 ? `Bike tune-up ${testInfo.repeatEachIndex + 1}` : "Bike tune-up";
   await page.goto("/projects");
   const count = await page.locator("[data-project-group='active'] [data-project-row]").count();
   await page.getByRole("button", { name: "New project" }).click();
@@ -236,9 +240,9 @@ test("New project: a row at the top of Active, the name field focused; Enter mak
   await expect(field).toHaveCount(0);
   expect(await page.locator("[data-project-group='active'] [data-project-row]").count()).toBe(count);
   await page.getByRole("button", { name: "New project" }).click();
-  await page.getByRole("textbox", { name: "New project name" }).fill("Bike tune-up");
+  await page.getByRole("textbox", { name: "New project name" }).fill(made);
   await page.keyboard.press("Enter");
-  await expect(row(page, "Bike tune-up")).toBeVisible();
+  await expect(row(page, made)).toBeVisible();
   expect(await page.locator("[data-project-group='active'] [data-project-row]").count()).toBe(count + 1);
 });
 
