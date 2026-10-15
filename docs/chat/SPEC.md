@@ -51,7 +51,10 @@ starts over shorter, the keyboard). Now:
    decided per scroll event, and what is written below him after his input
    began is not his scroll: a browser takes a wheel to the bottom as it was
    when the wheel came, though a piece may land before the scroll does, and
-   a wheel back to the bottom while pieces keep coming still turns it on.
+   a wheel back to the bottom while pieces keep coming still turns it on. A
+   scroll down that stopped exactly at an end the thread had a moment ago is
+   at the bottom too: a browser stops a scroll at the end it last drew,
+   which can be a piece behind the page (a scroll up never counts this way).
    The end of a scroll the page made itself is not the end of his.
 3. **While following, the bottom stays in view.** Every piece, every round
    that starts over, and every change in the size of the thread or of what
