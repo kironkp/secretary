@@ -147,6 +147,23 @@ lands where it is let go. The edge zone is checked at 390 and 1280 wide. The
 Projects spec can run again now (mine put back in their first order, a new
 project's own name), so it ran ten times in each browser.
 
+**r4** (`2944c2b` the tests, first and red; `797caec` the rule; `549b413` the
+code; this commit). The Reviewer passed r3 and named a cost; the Planner held
+it for three small things:
+
+- The 20 s limit gave up on consult_brain and search_web after they had paid,
+  when before r3 they answered as long as they finished under Heroku's 30 s
+  cut, and the output's "check before doing it again" could mean asking, and
+  paying, again. The limit is 28 s now (Heroku's router already ends any
+  request that reaches it at 30, so it matters only for one that never
+  arrives). A paid lookup given up on is told it took too long and not to ask
+  again unless he asks; a call that changes things is still told it may have
+  been done and to check first.
+- The test that two projects with one name keep their places gave them random
+  ids, so a version that forgot when each was made passed it whenever the ids
+  happened to fall in the made order (4 runs in 8 here). Their ids go against
+  it now: that version fails it 8 runs in 8. Tests only.
+
 ## v1.09 — A chat answer reaches him, once (2026-10-14)
 
 `8c68ef7`, `e44cc51` (the spec, docs/chat/SPEC.md, new, and docs/spend/SPEC.md
