@@ -438,6 +438,14 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
   };
   const earlier = (n: number): Answer[] => Array.from({ length: n }, (_, i) => ({ rounds: [[`E2E: an earlier answer ${i + 1}, `, "two sentences long. ", "And a third to fill the thread."]], delayMs: 0 }));
 
+  test("the page alone sets the thread's position: the browser's scroll anchoring is off on it", async ({ page }) => {
+    await open(page);
+    const a = await thread(page).evaluate((el) => ({ supported: CSS.supports("overflow-anchor", "none"), computed: getComputedStyle(el).overflowAnchor }));
+    console.log(`[anchoring] ${test.info().project.name}: overflow-anchor supported ${a.supported}; the thread's "${a.computed ?? ""}"`);
+    test.skip(!a.supported, "this browser has no scroll anchoring (CSS.supports('overflow-anchor', 'none') is false)");
+    expect(a.computed, "the thread's overflow-anchor").toBe("none");
+  });
+
   test("a long answer (input: none): every frame's last line above the composer; it lands without moving", async ({ page }) => {
     // 56 pieces, 120 ms apart (6.7 s): enough for new words in more than 20 frames in a browser that draws four frames
     // a second.
@@ -511,33 +519,6 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
     expect(f.out, inViewMessage(f)).toBe(0);
     expect(grew(after), "frames that drew new words between his wheel and the pill").toBeGreaterThan(5);
     expect(f.grew, "frames that drew new words after the tap").toBeGreaterThan(5);
-  });
-
-  // DIAGNOSTIC, to be removed before the round is offered: on CI's WebKit a wheel step at the bottom turned following
-  // off (the page wrote nothing after it) and the thread still kept to the bottom as the answer grew. Whether that is
-  // the browser's scroll anchoring: three tries as the page is, three with anchoring turned off on the thread by the
-  // test. It logs; it fails nothing.
-  test("DIAGNOSTIC: a wheel step at the bottom, with and without the browser's scroll anchoring", async ({ page }) => {
-    test.setTimeout(240_000);
-    await page.close();
-    for (const anchoring of ["as the page is", "off on the thread"]) {
-      for (let k = 1; k <= 3; k++) {
-        const p = await page.context().newPage();
-        await streamAnswers(p, [{ rounds: [Array.from({ length: 10 }, () => LONG).flat()], delayMs: 40 }]);
-        await open(p);
-        if (anchoring !== "as the page is") await thread(p).evaluate((el) => (el.style.overflowAnchor = "none"));
-        await send(p, "E2E: a long plan please");
-        await followedDown(p, 200);
-        const before = await thread(p).evaluate((el) => ({ top: Math.round(el.scrollTop), anchor: getComputedStyle(el).overflowAnchor || "(none)", supports: CSS.supports("overflow-anchor", "none") }));
-        await wheel(p, -120);
-        await p.waitForTimeout(1_500);
-        const after = await thread(p).evaluate((el) => ({ top: Math.round(el.scrollTop), gap: Math.round(el.scrollHeight - el.scrollTop - el.clientHeight) }));
-        const shown = (await pill(p).count()) > 0;
-        console.log(`[anchor-diag] ${anchoring}, try ${k}: overflow-anchor supported ${before.supports}, computed "${before.anchor}"; at the wheel top ${before.top}; 1.5 s later top ${after.top}, ${after.gap} px above the bottom, pill ${shown ? "shown" : "not shown"}`);
-        await landed(p, 1);
-        await p.close();
-      }
-    }
   });
 
   test("a wheel up while the panel opens (input: wheel): off, never pulled back, the pill shows", async ({ page }) => {
