@@ -10,8 +10,8 @@ commits it covers so `git show <hash>` always reaches the real diff.
 ## v1.17 — A model write never loses his notes (2026-10-15)
 
 `5930c5e` (the rule, docs/tasks/SPEC.md §1, new), `a34d8aa`, `0cf87ae` (the
-tests, first and red), `db01d53` (the code), this commit (this entry and the
-version).
+tests, first and red), `db01d53` (the code), `7a27098` (this entry and the
+version), `24186e8` (two existing tests, below), this commit.
 
 The Reviewer's probe for 1.10 found it: every model write of a note replaced
 the whole note. A note he had typed went the moment the model added one
@@ -52,6 +52,10 @@ already on a list. A repeated note now costs nothing. The cut changes no hash.
 
 Tested against main first: 49 of the 51 new unit tests failed there, every
 seed of the walk failed, and so did each browser test, in both browsers.
+GitHub's first run failed three existing unit tests I had not run here: an
+item already on a list was said back with a new sentence when it already had
+the note (now only an added note is said), and extraction's summary has two
+new counts that its test compares exactly.
 
 ## v1.11 — His project order (2026-10-14)
 
