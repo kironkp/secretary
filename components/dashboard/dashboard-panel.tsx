@@ -49,9 +49,11 @@ export async function DashboardPanel({
         deadlineKind: projectsTable.deadlineKind,
         status: projectsTable.status,
         position: projectsTable.position,
+        createdAt: projectsTable.createdAt,
       })
       .from(projectsTable)
-      .where(eq(projectsTable.userId, userId)) as Promise<PlanProject[]>,
+      .where(eq(projectsTable.userId, userId))
+      .orderBy(projectsTable.createdAt, projectsTable.id) as Promise<PlanProject[]>,
   ]);
 
   // Approved dynamic components (SPEC v1.3): interpolate + sanitize on the

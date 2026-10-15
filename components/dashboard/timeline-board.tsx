@@ -146,7 +146,7 @@ export function TimelineBoard({
 }: {
   tasks: TaskRow[];
   events: EventRow[];
-  projects: { id: string; name: string; color: string | null; deadline?: string | null; deadlineKind?: string | null; position?: number | null }[];
+  projects: { id: string; name: string; color: string | null; deadline?: string | null; deadlineKind?: string | null; position?: number | null; createdAt?: Date | string | null }[];
   timezone: string;
 }) {
   const router = useRouter();
@@ -171,7 +171,7 @@ export function TimelineBoard({
     [tasks]
   );
   const tlProjects: TlProject[] = useMemo(
-    () => projects.map((p) => ({ id: p.id, name: p.name, color: p.color, deadline: p.deadline ?? null, deadlineKind: p.deadlineKind ?? null, position: p.position ?? null })),
+    () => projects.map((p) => ({ id: p.id, name: p.name, color: p.color, deadline: p.deadline ?? null, deadlineKind: p.deadlineKind ?? null, position: p.position ?? null, createdAt: p.createdAt ?? null })),
     [projects]
   );
   const tlEvents = useMemo(

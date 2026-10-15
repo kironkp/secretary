@@ -3,7 +3,7 @@
 // this object; only computeSignals touches the database.
 import { and, desc, eq, gte, lt, or, sql } from "drizzle-orm";
 import { daysFromToday, isOpenWork } from "@/lib/due";
-import { db } from "@/lib/db";
+import { db, type Reader } from "@/lib/db";
 import { events, layoutSpecs, messages, projects, tasks, user } from "@/lib/db/schema";
 import { notIntakeMail } from "@/lib/secretary/proposals";
 
@@ -37,6 +37,8 @@ export type ProjectSignal = {
    * the composition. Not in the signals hash: a move is not a new situation.
    */
   position?: number | null;
+  /** When it was made (ISO): the one order's last word but the id. Not in the signals hash. */
+  created_at?: string;
 };
 
 /** SPEC §4: the id vocabulary for painted surfaces — every task id the Canvas
@@ -104,7 +106,8 @@ export function isStrongScheduleTalk(c: Signals["conversation"]) {
 const dayDiff = (later: Date, earlier: Date) =>
   Math.floor((later.getTime() - earlier.getTime()) / 86400000);
 
-export async function computeSignals(userId: string, now = new Date()): Promise<Signals> {
+/** `reader`: the pool, or a transaction the caller is in (a project move reads through its own: docs/projects/SPEC.md §2). */
+export async function computeSignals(userId: string, now = new Date(), reader: Reader = db): Promise<Signals> {
   const ago24h = new Date(now.getTime() - 86400000);
   const twoDaysAgo = new Date(now.getTime() - 2 * 86400000);
   const ago14d = new Date(now.getTime() - 14 * 86400000);
@@ -115,8 +118,8 @@ export async function computeSignals(userId: string, now = new Date()): Promise<
   const [projectRows, taskRows, eventRows, userMessages24h, dailyCounts, [userRow], headRows] =
     await Promise.all([
       // The order they were made in, the id breaking a tie (rows made in one go share a stamp): the hash walks it.
-      db.select().from(projects).where(eq(projects.userId, userId)).orderBy(projects.createdAt, projects.id),
-      db
+      reader.select().from(projects).where(eq(projects.userId, userId)).orderBy(projects.createdAt, projects.id),
+      reader
         .select({
           id: tasks.id,
           projectId: tasks.projectId,
@@ -129,13 +132,13 @@ export async function computeSignals(userId: string, now = new Date()): Promise<
         .where(eq(tasks.userId, userId))
         // An order of their own (v1.11): the lists made from them reach the planner's prompt and the cap of 50.
         .orderBy(tasks.createdAt, tasks.id),
-      db
+      reader
         .select({ id: events.id, projectId: events.projectId, startsAt: events.startsAt })
         .from(events)
         .where(and(eq(events.userId, userId), gte(events.startsAt, now)))
         // Two at one instant: the id decides which is the next commitment, which the hash carries (v1.11).
         .orderBy(events.startsAt, events.id),
-      db
+      reader
         .select({ content: messages.content, createdAt: messages.createdAt })
         .from(messages)
         .where(
@@ -145,7 +148,7 @@ export async function computeSignals(userId: string, now = new Date()): Promise<
         // In the order he said them (v1.11): the questions reach the planner's prompt, the last mention its read.
         .orderBy(messages.createdAt, messages.id),
       // Daily user-message counts for the trailing 14 days (baseline denominator).
-      db
+      reader
         .select({
           day: sql<string>`date_trunc('day', ${messages.createdAt})::date::text`,
           content: messages.content,
@@ -160,8 +163,8 @@ export async function computeSignals(userId: string, now = new Date()): Promise<
             lt(messages.createdAt, ago24h)
           )
         ),
-      db.select({ calmMode: user.calmMode, timezone: user.timezone }).from(user).where(eq(user.id, userId)),
-      db
+      reader.select({ calmMode: user.calmMode, timezone: user.timezone }).from(user).where(eq(user.id, userId)),
+      reader
         .select({
           spec: layoutSpecs.spec,
           pinned: layoutSpecs.pinned,
@@ -316,6 +319,7 @@ export async function computeSignals(userId: string, now = new Date()): Promise<
           open_count: openByProject.get(p.id) ?? 0,
           done_count: doneByProject.get(p.id) ?? 0,
           position: p.position ?? null,
+          created_at: p.createdAt.toISOString(),
           subprojects: subs.map((s) => ({
             id: s.id,
             name: s.name,

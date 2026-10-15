@@ -39,6 +39,8 @@ export type PlanProject = {
   status?: string;
   /** His place for it in his project order (docs/projects/SPEC.md): the strip's lanes follow it. */
   position?: number | null;
+  /** When it was made: the one order's last word but the id. */
+  createdAt?: Date | string | null;
 };
 
 /** A list (Shopping) on the board: its open items, each tickable, with what it is for. */
@@ -378,7 +380,7 @@ export function PlanView({
     const work = projects.filter((p) => p.kind !== "list" && (p.status ?? "active") === "active");
     const ids = new Set(work.map((p) => p.id));
     return buildLanes(
-      work.map((p) => ({ id: p.id, name: p.name, color: p.color, deadline: p.deadline ?? null, deadlineKind: p.deadlineKind ?? null, position: p.position ?? null })),
+      work.map((p) => ({ id: p.id, name: p.name, color: p.color, deadline: p.deadline ?? null, deadlineKind: p.deadlineKind ?? null, position: p.position ?? null, createdAt: p.createdAt ?? null })),
       tasks
         .filter((t) => t.projectId === null || ids.has(t.projectId))
         .map((t) => ({ id: t.id, title: t.title, status: t.status, dueAt: t.dueAt, startAt: t.startAt, projectId: t.projectId, reminders: t.reminders })),

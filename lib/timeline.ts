@@ -48,6 +48,8 @@ export type TlProject = {
   deadlineKind: string | null;
   /** His place for it in his project order (docs/projects/SPEC.md): the lanes follow it. */
   position?: number | null;
+  /** When it was made: two lanes with one name keep their places (the order's last word but the id). */
+  createdAt?: Date | string | null;
 };
 
 const OPEN = new Set(["inbox", "todo", "in_progress", "blocked"]);
@@ -88,6 +90,7 @@ export type Lane = {
   deadline: { day: number; committed: boolean } | null;
   /** His place for the project in his order, empty when he has not placed it. */
   position: number | null;
+  createdAt: Date | string | null;
 };
 
 export type Filters = { project: string | "all"; status: "open" | "late" | "done" | "all"; events: boolean };
@@ -164,6 +167,7 @@ export function buildLanes(
         soonest: null,
         deadline: p?.deadline ? { day: localDay(new Date(p.deadline), tz), committed: p.deadlineKind === "committed" } : null,
         position: p?.position ?? null,
+        createdAt: p?.createdAt ?? null,
       };
       lanes.set(key, lane);
     }
@@ -200,6 +204,8 @@ export function buildLanes(
     name: l.name,
     soonest: l.soonest === null ? null : l.soonest - today,
     deadline: l.deadline ? l.deadline.day - today : null,
+    createdAt: l.createdAt,
+    id: l.id,
     position: l.position,
   });
   return [...lanes.values()]

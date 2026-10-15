@@ -5,7 +5,8 @@
 // project goes to that place and stays. The row moves at once; the moves are
 // stored one after the other (lib/projects/move-queue.ts); a failed store puts
 // it back with a plain line. A drag starts only at the handle: the rest of the
-// row scrolls the page and opens the project on a tap.
+// row scrolls the page and opens the project on a tap. Held near the top or the
+// bottom edge of the list's view, the list scrolls under the row.
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { createMoveQueue, type MoveQueueState } from "@/lib/projects/move-queue";
@@ -16,6 +17,11 @@ export type ProjectRowView = { id: string; name: string; color: string | null; c
 const MOVE_MS = 340;
 const MOVE_EASE = "cubic-bezier(0.22, 0.9, 0.32, 1)";
 const REDUCED = "(prefers-reduced-motion: reduce)";
+/** The lifted row's height (the approved screen); the rows around it do not move for the extra. */
+const LIFTED_PX = 60;
+/** Held this close to an edge of the list's view, the list scrolls; faster the nearer, up to EDGE_SPEED px a frame. */
+const EDGE_PX = 64;
+const EDGE_SPEED = 18;
 const useReducedMotion = () =>
   useSyncExternalStore(
     (onChange) => {
@@ -41,7 +47,20 @@ function Dots() {
   );
 }
 
-type Drag = { index: number; pointerId: number; startY: number; dy: number; target: number; centers: number[]; height: number };
+/**
+ * A drag: where it started (the rows' centres, measured when it was picked up), how far the pointer has moved,
+ * and how far the list has scrolled under it since.
+ */
+type Drag = { index: number; pointerId: number; startY: number; dy: number; scrolled: number; target: number; centers: number[]; height: number };
+
+/** The element that scrolls the list: the nearest ancestor that scrolls, or the page. */
+function scrollerOf(el: Element | null): HTMLElement {
+  for (let e = el?.parentElement ?? null; e; e = e.parentElement) {
+    const y = getComputedStyle(e).overflowY;
+    if ((y === "auto" || y === "scroll") && e.scrollHeight > e.clientHeight) return e;
+  }
+  return document.scrollingElement as HTMLElement;
+}
 
 export function ProjectList({ group, rows, leading = null }: { group: string; rows: ProjectRowView[]; leading?: React.ReactNode }) {
   const reduced = useReducedMotion();
@@ -67,9 +86,51 @@ export function ProjectList({ group, rows, leading = null }: { group: string; ro
     []
   );
   useEffect(() => queue.reset(rows), [queue, rows]);
-  const [drag, setDrag] = useState<Drag | null>(null);
+  const [drag, setDragState] = useState<Drag | null>(null);
+  // The same drag for the edge-scroll loop, which runs between renders.
+  const dragRef = useRef<Drag | null>(null);
+  const setDrag = (d: Drag | null) => {
+    dragRef.current = d;
+    setDragState(d);
+  };
+  const scroller = useRef<HTMLElement | null>(null);
+  const startScroll = useRef(0);
+  const pointerY = useRef(0);
   const rowRefs = useRef(new Map<string, HTMLLIElement>());
   const shown = state.shown;
+  const dragging = drag !== null;
+
+  /** Where the held row stands: under the pointer, plus however far the list has scrolled under it. */
+  const place = (d: Drag, clientY: number, scrolled: number): Drag => {
+    const dy = clientY - d.startY;
+    const held = d.centers[d.index] + dy + scrolled;
+    // Its new place: how many of the other rows stand above where it is held.
+    const target = d.centers.filter((c, i) => i !== d.index && c < held).length;
+    return { ...d, dy, scrolled, target };
+  };
+
+  // Held near an edge of the list's view, the list scrolls under it, every frame, until it is let go or moved away.
+  useEffect(() => {
+    if (!dragging) return;
+    let frame = 0;
+    const step = () => {
+      const d = dragRef.current;
+      const el = scroller.current;
+      if (!d || !el) return;
+      const view = el === document.scrollingElement ? { top: 0, bottom: window.innerHeight } : el.getBoundingClientRect();
+      const y = pointerY.current;
+      const near = (depth: number) => Math.ceil(EDGE_SPEED * Math.min(1, depth / EDGE_PX));
+      const speed = y < view.top + EDGE_PX ? -near(view.top + EDGE_PX - y) : y > view.bottom - EDGE_PX ? near(y - (view.bottom - EDGE_PX)) : 0;
+      if (speed) {
+        const before = el.scrollTop;
+        el.scrollTop = before + speed;
+        if (el.scrollTop !== before) setDrag(place(d, y, el.scrollTop - startScroll.current));
+      }
+      frame = requestAnimationFrame(step);
+    };
+    frame = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frame);
+  }, [dragging]);
 
   const moveTo = (from: number, to: number) => {
     if (to === from || to < 0 || to >= shown.length) return;
@@ -84,15 +145,15 @@ export function ProjectList({ group, rows, leading = null }: { group: string; ro
     e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
     const rects = shown.map((r) => rowRefs.current.get(r.id)!.getBoundingClientRect());
-    setDrag({ index, pointerId: e.pointerId, startY: e.clientY, dy: 0, target: index, centers: rects.map((r) => r.top + r.height / 2), height: rects[index].height });
+    scroller.current = scrollerOf(e.currentTarget);
+    startScroll.current = scroller.current.scrollTop;
+    pointerY.current = e.clientY;
+    setDrag({ index, pointerId: e.pointerId, startY: e.clientY, dy: 0, scrolled: 0, target: index, centers: rects.map((r) => r.top + r.height / 2), height: rects[index].height });
   };
   const onPointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
     if (!drag || e.pointerId !== drag.pointerId) return;
-    const dy = e.clientY - drag.startY;
-    const center = drag.centers[drag.index] + dy;
-    // Its new place: how many of the other rows stand above where it is held.
-    const target = drag.centers.filter((c, i) => i !== drag.index && c < center).length;
-    setDrag({ ...drag, dy, target });
+    pointerY.current = e.clientY;
+    setDrag(place(drag, e.clientY, drag.scrolled));
   };
   const onPointerUp = (e: React.PointerEvent<HTMLButtonElement>) => {
     if (!drag || e.pointerId !== drag.pointerId) return;
@@ -123,16 +184,22 @@ export function ProjectList({ group, rows, leading = null }: { group: string; ro
               data-project-row=""
               data-project-name={p.name}
               data-lifted={lifted ? "true" : undefined}
-              className={`relative flex min-h-14 items-center gap-3 pl-4 pr-1 ${i > 0 || leading ? "border-t border-hairline" : ""} ${
+              className={`relative flex min-h-14 items-center pl-4 pr-1 ${i > 0 || leading ? "border-t border-hairline" : ""} ${
                 lifted ? "z-10 -mx-1.5 select-none rounded-[12px] border-transparent bg-card pl-[22px]" : "bg-card first:rounded-t-[12px] last:rounded-b-[12px]"
               }`}
               style={{
-                transform: lifted ? `translateY(${drag!.dy}px)` : `translateY(${shiftOf(i)}px)`,
+                // Under the pointer: it moved, and the list scrolled under it.
+                transform: lifted ? `translateY(${drag!.dy + drag!.scrolled}px)` : `translateY(${shiftOf(i)}px)`,
                 transition: lifted || reduced ? "none" : `transform ${MOVE_MS}ms ${MOVE_EASE}`,
                 boxShadow: lifted ? "0 10px 28px rgba(0, 0, 0, 0.18)" : undefined,
+                // Lifted, it is 60 tall, and gives the extra back above and below so no other row moves.
+                ...(lifted && drag!.height < LIFTED_PX
+                  ? { minHeight: LIFTED_PX, marginTop: -(LIFTED_PX - drag!.height) / 2, marginBottom: -(LIFTED_PX - drag!.height) / 2 }
+                  : {}),
               }}
             >
-              <Link href={`/projects/${p.id}`} className="flex min-h-14 min-w-0 flex-1 items-center gap-3">
+              {/* The link takes the row up to the handle, the 12 px before it included: a tap there opens the project. */}
+              <Link href={`/projects/${p.id}`} className="flex min-h-14 min-w-0 flex-1 items-center gap-3 self-stretch pr-3">
                 <span data-project-dot="" aria-hidden className="h-3 w-3 flex-none rounded-full" style={{ background: p.color ?? "var(--color-accent)" }} />
                 <span data-project-name-text="" className={`min-w-0 flex-1 truncate text-[17px] text-ink ${lifted ? "font-semibold" : "font-normal"}`}>
                   {p.name}

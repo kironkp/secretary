@@ -85,7 +85,15 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
   private lastActivityAt = 0;
   private warned = false;
   private endingAt: number | null = null;
-  private toolsInFlight = 0;
+  /**
+   * A reply's function calls run one after the other, in the order the model
+   * gave them, and the reply goes on once, after the last has answered
+   * (docs/projects/SPEC.md §2). Sent the moment each arrived, "put these eight
+   * in this order" was eight requests at once, and each answer asked the reply
+   * to go on, which the Realtime API refuses while one is under way.
+   */
+  private toolChain: Promise<void> = Promise.resolve();
+  private toolsQueued = 0;
   private limitTimer: ReturnType<typeof setInterval> | null = null;
 
   /** Everything the debug overlay / beacon wants, in one object. */
@@ -485,7 +493,7 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
         startedAt: this.startedAt,
         lastActivityAt: this.lastActivityAt,
         warned: this.warned,
-        busy: this.assistantResponding || this.toolsInFlight > 0,
+        busy: this.assistantResponding || this.toolsQueued > 0,
         endingAt: this.endingAt,
         now: Date.now(),
       });
@@ -608,7 +616,6 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
       /* leave empty */
     }
     this.emit("toolStarted", name);
-    this.toolsInFlight += 1;
     // Whatever happens, the model gets an output and the UI a toolResult: a
     // thrown fetch used to leave the call waiting on an answer that never came.
     let body: { result?: unknown; toast?: unknown; uiAction?: unknown } = {
@@ -638,8 +645,6 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
         output: JSON.stringify(body.result ?? {}),
       },
     });
-    this.toolsInFlight -= 1;
-    this.send({ type: "response.create" });
     this.emit(
       "toolResult",
       name,
@@ -772,12 +777,18 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
       return;
     }
     if (t === "response.function_call_arguments.done") {
-      this.handleToolCall(
-        String(event.call_id),
-        String(event.name),
-        String(event.arguments ?? "{}"),
-        event.item_id
-      );
+      const [callId, name, args, itemId] = [String(event.call_id), String(event.name), String(event.arguments ?? "{}"), event.item_id];
+      this.toolsQueued += 1;
+      this.toolChain = this.toolChain.then(async () => {
+        try {
+          await this.handleToolCall(callId, name, args, itemId);
+        } catch (e) {
+          console.warn("[realtime] tool call failed:", e);
+        } finally {
+          this.toolsQueued -= 1;
+          if (this.toolsQueued === 0) this.send({ type: "response.create" });
+        }
+      });
       return;
     }
   }

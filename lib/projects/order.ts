@@ -4,7 +4,9 @@
 // project goes to a place in its group and stays there: it, and every project
 // above it in that group, are placed, in the order they now stand; the
 // unplaced ones below keep the urgency order. It asks no model: the order is
-// not in the signals the planner is asked about (§3).
+// not in the signals the planner is asked about (§3). His moves are applied
+// one at a time, in the order they arrived; a move waiting its turn holds no
+// database connection, and a move reads only through its own transaction.
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { projects, user } from "@/lib/db/schema";
@@ -43,14 +45,40 @@ function find(rows: ProjectListRow[], ref: string): ProjectListRow | null {
   return hit ? rows[hit.index] : null;
 }
 
-export async function moveProject(userId: string, project: string, to: MoveTo): Promise<MoveResult> {
+/**
+ * His moves in this process, one at a time, in the order they arrived (§2). A move waits here, holding nothing,
+ * until the one before it has finished; on 2b212e5 each waited at the row lock holding a connection, and with six
+ * waiting (eight function calls of one reply on a call) the one holding the lock never got a connection to read
+ * with, and nothing answered again.
+ */
+const turns = new Map<string, Promise<void>>();
+function inTurn<T>(userId: string, run: () => Promise<T>): Promise<T> {
+  const before = turns.get(userId) ?? Promise.resolve();
+  const mine = before.then(run);
+  const done = mine.then(
+    () => {},
+    () => {}
+  );
+  turns.set(userId, done);
+  void done.then(() => {
+    if (turns.get(userId) === done) turns.delete(userId);
+  });
+  return mine;
+}
+
+export function moveProject(userId: string, project: string, to: MoveTo): Promise<MoveResult> {
+  return inTurn(userId, () => applyMove(userId, project, to));
+}
+
+async function applyMove(userId: string, project: string, to: MoveTo): Promise<MoveResult> {
   const [who] = await db.select({ timezone: user.timezone }).from(user).where(eq(user.id, userId));
   const timezone = who?.timezone ?? "UTC";
   const result = await db.transaction(async (tx) => {
-    // One move at a time for him: his rows are locked before the order is read, so two moves cannot interleave
-    // into an order neither asked for (§2). The read below comes after the lock and sees the last move's write.
+    // His rows are locked before the order is read, so a move from another process cannot interleave with this
+    // one into an order neither asked for (§2). The read comes after the lock, through this transaction (no second
+    // connection), and sees the last move's write.
     await tx.execute(sql`select id from ${projects} where ${projects.userId} = ${userId} for update`);
-    const rows = await listProjects(userId, timezone);
+    const rows = await listProjects(userId, timezone, new Date(), tx);
     const mine = find(rows, project);
     if (!mine) return { ok: false as const, error: `No project matching "${project}"` };
     const members = rows.filter((r) => r.group === mine.group);

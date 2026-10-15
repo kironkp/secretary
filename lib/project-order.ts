@@ -4,7 +4,8 @@
 // the ones he placed, in his order; then urgent first; then the urgency
 // order: late first, the most overdue at the top; then the nearest upcoming
 // date (an open task's due date or the project's own deadline); then projects
-// with no date; then by name. Days are the user's calendar days from today
+// with no date; then by name; last, when it was made, then its id, so two
+// projects with one name never trade places. Days are the user's calendar days from today
 // (lib/due.ts), negative when late. Pure: the server's plan and the client's
 // lanes sort with the same code, so they cannot disagree.
 
@@ -24,6 +25,10 @@ export type Ordered = Urgency & {
   urgent?: boolean;
   /** Where he put it in its group, 0 at the top; empty when he has not placed it. */
   position?: number | null;
+  /** When it was made (the row's own stamp, or its ISO text): the order's last word but one. */
+  createdAt?: Date | string | null;
+  /** Its id: the last word. */
+  id?: string;
 };
 
 const NONE = Number.MAX_SAFE_INTEGER;
@@ -40,13 +45,25 @@ export function byUrgency(a: Urgency, b: Urgency): number {
 
 const placed = (o: Ordered) => typeof o.position === "number";
 
-/** The one order: lists after projects; his placed ones first, by place; then urgent first; then by urgency. */
+const madeAt = (o: Ordered): number =>
+  o.createdAt instanceof Date ? o.createdAt.getTime() : typeof o.createdAt === "string" ? Date.parse(o.createdAt) || 0 : 0;
+const byId = (a: Ordered, b: Ordered): number => {
+  const [x, y] = [a.id ?? "", b.id ?? ""];
+  return x < y ? -1 : x > y ? 1 : 0;
+};
+
+/**
+ * The one order: lists after projects; his placed ones first, by place; then urgent first; then by urgency; last,
+ * when it was made, then its id (docs/projects/SPEC.md §1.4).
+ */
 export function byOrder(a: Ordered, b: Ordered): number {
   return (
     Number(!!a.list) - Number(!!b.list) ||
     Number(placed(b)) - Number(placed(a)) ||
     (placed(a) && placed(b) ? a.position! - b.position! : 0) ||
     Number(!!b.urgent) - Number(!!a.urgent) ||
-    byUrgency(a, b)
+    byUrgency(a, b) ||
+    madeAt(a) - madeAt(b) ||
+    byId(a, b)
   );
 }

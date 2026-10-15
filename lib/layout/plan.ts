@@ -87,7 +87,7 @@ const urgencyOf = (p: ProjectSignal): Urgency => ({
 });
 
 /** What the one order reads of a project's signals (docs/projects/SPEC.md §1): its urgency, and his place for it. */
-export const orderedOf = (p: ProjectSignal): Ordered => ({ ...urgencyOf(p), urgent: isUrgent(p), position: p.position ?? null });
+export const orderedOf = (p: ProjectSignal): Ordered => ({ ...urgencyOf(p), urgent: isUrgent(p), position: p.position ?? null, createdAt: p.created_at ?? null, id: p.id });
 
 /**
  * SPEC §3 invariant 4: a project is urgent when it has late open work, or its

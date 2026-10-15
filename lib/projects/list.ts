@@ -5,7 +5,7 @@
 // Overview's cards use, read off the same signals for the projects those
 // carry, so the two screens cannot disagree.
 import { and, eq, inArray } from "drizzle-orm";
-import { db } from "@/lib/db";
+import { db, type Reader } from "@/lib/db";
 import { projects, tasks } from "@/lib/db/schema";
 import { daysFromToday, dueLabel, isOpenWork, isPastDue, OPEN_STATUSES } from "@/lib/due";
 import { orderedOf } from "@/lib/layout/plan";
@@ -33,17 +33,19 @@ export type ProjectListRow = {
   next: string;
 };
 
-export async function listProjects(userId: string, timezone: string, now: Date = new Date()): Promise<ProjectListRow[]> {
+/** `reader`: a move reads through its own transaction (docs/projects/SPEC.md §2), never a second connection. */
+export async function listProjects(userId: string, timezone: string, now: Date = new Date(), reader: Reader = db): Promise<ProjectListRow[]> {
   const [rows, open, signals] = await Promise.all([
-    db
-      .select({ id: projects.id, name: projects.name, color: projects.color, status: projects.status, kind: projects.kind, position: projects.position, deadline: projects.deadline })
+    reader
+      .select({ id: projects.id, name: projects.name, color: projects.color, status: projects.status, kind: projects.kind, position: projects.position, deadline: projects.deadline, createdAt: projects.createdAt })
       .from(projects)
-      .where(eq(projects.userId, userId)),
-    db
+      .where(eq(projects.userId, userId))
+      .orderBy(projects.createdAt, projects.id),
+    reader
       .select({ projectId: tasks.projectId, status: tasks.status, source: tasks.source, dueAt: tasks.dueAt })
       .from(tasks)
       .where(and(eq(tasks.userId, userId), inArray(tasks.status, [...OPEN_STATUSES]))),
-    computeSignals(userId),
+    computeSignals(userId, now, reader),
   ]);
   const work = open.filter((t) => t.projectId && isOpenWork(t));
   // The Overview's own reading for every project its cards stand for; the same
@@ -66,6 +68,8 @@ export async function listProjects(userId: string, timezone: string, now: Date =
             soonest: soonest?.dueAt ? daysFromToday(soonest.dueAt, timezone, now) : null,
             deadline: p.deadline ? daysFromToday(p.deadline, timezone, now) : null,
             position: p.position,
+            createdAt: p.createdAt,
+            id: p.id,
           }
     );
     return {
