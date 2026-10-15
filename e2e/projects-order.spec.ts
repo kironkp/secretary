@@ -227,8 +227,8 @@ test("the handle's arrow keys move the project one place", async ({ page }) => {
 });
 
 test("New project: a row at the top of Active, the name field focused; Enter makes it, an empty name makes nothing", async ({ page }, testInfo) => {
-  // A name of its own on each run: a name that is there already makes nothing new.
-  const made = testInfo.repeatEachIndex > 0 ? `Bike tune-up ${testInfo.repeatEachIndex + 1}` : "Bike tune-up";
+  // A name of its own on each run, near no other (a name close to one that is there already makes nothing new).
+  const made = ["Bike tune-up", "Porch light", "Gutter clean", "Window seals", "Fence stain", "Bird feeder", "Hall closet", "Desk lamp", "Pantry shelves", "Front step"][testInfo.repeatEachIndex % 10];
   await page.goto("/projects");
   const count = await page.locator("[data-project-group='active'] [data-project-row]").count();
   await page.getByRole("button", { name: "New project" }).click();
