@@ -6,6 +6,7 @@ import { checkins, projects, tasks } from "@/lib/db/schema";
 import { isErrorResponse, parseBody, requireSession } from "@/lib/api";
 import { clearExpectationsFor } from "@/lib/secretary/expectations";
 import { spawnNextOccurrence } from "@/lib/secretary/recurrence";
+import { mergeNotes } from "@/lib/secretary/notes";
 
 /** Full detail for the task dialog: every tool-writable field + history. */
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -40,6 +41,9 @@ const bodySchema = z.object({
   status: z.enum(["inbox", "todo", "in_progress", "blocked", "done", "dropped"]).optional(),
   title: z.string().min(1).optional(),
   notes: z.string().nullable().optional(),
+  // The note as it was when he opened it (docs/tasks/SPEC.md §1.6): what was added since is kept after his text.
+  // A page from before v1.17 sends none.
+  notesBase: z.string().nullable().optional(),
   dueAt: z.string().datetime({ offset: true }).nullable().optional(),
   priority: z.number().int().min(0).max(3).optional(),
   stages: z.array(z.object({ name: z.string().min(1), done: z.boolean() })).optional(),
@@ -74,7 +78,6 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     if (parsed.status === "in_progress" && !existing.startedAt) updates.startedAt = new Date();
   }
   if (parsed.title) updates.title = parsed.title;
-  if (parsed.notes !== undefined) updates.notes = parsed.notes;
   if (parsed.priority !== undefined) updates.priority = parsed.priority;
   if (parsed.stages !== undefined) updates.stages = parsed.stages;
   if (parsed.dueAt !== undefined) {
@@ -100,11 +103,23 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     updates.projectId = parsed.projectId;
   }
 
-  const [updated] = await db
-    .update(tasks)
-    .set(updates)
-    .where(and(eq(tasks.id, id), eq(tasks.userId, user.id)))
-    .returning();
+  // His note, with what a model added while he typed kept after it: read and written under the row's lock, so a
+  // write that lands meanwhile waits and is not lost (docs/tasks/SPEC.md §1.6).
+  const [updated] = await db.transaction(async (tx) => {
+    if (parsed.notes !== undefined) {
+      const [locked] = await tx
+        .select({ notes: tasks.notes })
+        .from(tasks)
+        .where(and(eq(tasks.id, id), eq(tasks.userId, user.id)))
+        .for("update");
+      updates.notes = mergeNotes(parsed.notesBase, parsed.notes, locked?.notes ?? null);
+    }
+    return tx
+      .update(tasks)
+      .set(updates)
+      .where(and(eq(tasks.id, id), eq(tasks.userId, user.id)))
+      .returning();
+  });
 
   if (parsed.status === "done") {
     await db.insert(checkins).values({

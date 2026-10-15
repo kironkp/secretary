@@ -278,6 +278,16 @@ const DAY_MS = 86_400_000;
 const cut = (text: string, max: number): string =>
   text.length <= max ? text : `${text.slice(0, max).trimEnd()} (cut)`;
 
+/**
+ * A note over the limit: its head and its tail, the same characters in all, so the newest line (a note grows at
+ * its end, docs/tasks/SPEC.md §1.8) is not the first one lost.
+ */
+const cutNote = (text: string, max: number): string => {
+  if (text.length <= max) return text;
+  const head = Math.ceil(max / 2);
+  return `${text.slice(0, head).trimEnd()} … ${text.slice(text.length - (max - head)).trimStart()}`;
+};
+
 /** One line, however the source row was typed. */
 const oneLine = (text: string): string => text.replace(/\s+/g, " ").trim();
 
@@ -385,7 +395,7 @@ export function renderBundle(bundle: Bundle, opts: { mode?: RunMode } = {}): str
         `[task:${t.id}] ${t.status} | ${sourceLabel(t.source)} | ${dueLabel(t.dueAt, bundle.clock)} | ` +
         `created ${date(t.createdAt)} | updated ${date(t.updatedAt)} | ${oneLine(t.title)}`;
       const rest: string[] = [];
-      if (t.notes) rest.push(`  notes: ${cut(oneLine(t.notes), NOTE_CHARS)}`);
+      if (t.notes) rest.push(`  notes: ${cutNote(oneLine(t.notes), NOTE_CHARS)}`);
       if (t.stages.length) {
         rest.push(`  stages: ${t.stages.map((s) => `${s.done ? "✓" : "○"} ${s.name}`).join(" → ")}`);
       }
@@ -401,7 +411,7 @@ export function renderBundle(bundle: Bundle, opts: { mode?: RunMode } = {}): str
     "FINISHED IN THE LAST 60 DAYS",
     bundle.tasksDone.map((t) => {
       const when = t.completedAt ?? t.updatedAt;
-      const notes = t.notes ? ` | notes: ${cut(oneLine(t.notes), NOTE_CHARS)}` : "";
+      const notes = t.notes ? ` | notes: ${cutNote(oneLine(t.notes), NOTE_CHARS)}` : "";
       return `[task:${t.id}] ${t.status} ${date(when)} | ${oneLine(t.title)}${notes}`;
     }),
     "tasksDone"

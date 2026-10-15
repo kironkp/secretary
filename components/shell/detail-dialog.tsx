@@ -30,6 +30,7 @@ type TaskDetail = {
     title: string;
     status: string;
     notes: string | null;
+    blockedReason: string | null;
     dueAt: string | null;
     priority: number;
     reminders: string[];
@@ -98,6 +99,9 @@ export function DetailDialog() {
   const [editing, setEditing] = useState(false);
   const [dueDraft, setDueDraft] = useState<string | null>(null); // datetime-local value
   const [notesDraft, setNotesDraft] = useState<string | null>(null); // null = not editing
+  // The note as it was when he started typing: sent with his text, so what a model adds meanwhile is kept
+  // after it (docs/tasks/SPEC.md §1.6).
+  const [notesBase, setNotesBase] = useState<string | null>(null);
   const [patchError, setPatchError] = useState(false);
 
   const patchTask = useCallback(
@@ -292,6 +296,10 @@ export function DetailDialog() {
                   </span>
                 )}
               </Row>
+              {/* What a blocked task waits on is kept here, not in his note (docs/tasks/SPEC.md §1.5). */}
+              {detail.task.status === "blocked" && detail.task.blockedReason && (
+                <Row label="Waiting on">{detail.task.blockedReason}</Row>
+              )}
               <Row label="Due">
                 {/* Native picker in place: draft locally, PATCH once on close —
                     iOS fires change per wheel-tick, and each later-than-before
@@ -389,6 +397,7 @@ export function DetailDialog() {
                         onClick={() =>
                           void patchTask(detail.task.id, {
                             notes: notesDraft.trim() || null,
+                            notesBase,
                           }).then((ok) => ok && setNotesDraft(null))
                         }
                         className="rounded-full bg-accent px-3 py-1 text-xs font-bold text-bg"
@@ -405,7 +414,10 @@ export function DetailDialog() {
                   </span>
                 ) : (
                   <button
-                    onClick={() => setNotesDraft(detail.task.notes ?? "")}
+                    onClick={() => {
+                      setNotesBase(detail.task.notes ?? null);
+                      setNotesDraft(detail.task.notes ?? "");
+                    }}
                     title="Edit notes"
                     className="block w-full text-left"
                   >

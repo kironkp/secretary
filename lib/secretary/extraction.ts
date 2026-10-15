@@ -25,6 +25,7 @@ import {
 import type Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { findDuplicate, findDuplicateEvent, titleSimilarity } from "./dedupe";
+import { addedLines, noteLines, sameTitle, withLines } from "./notes";
 import { parseInTz } from "@/lib/time";
 import { recordUsage } from "@/lib/usage";
 import { untrustedSince } from "./proposals";
@@ -281,7 +282,15 @@ export async function applyExtraction(
   userId: string,
   conversationId: string,
   raw: ExtractionResult
-): Promise<{ createdTasks: number; createdEvents: number; updatedTasks: number; savedFacts: number }> {
+): Promise<{
+  createdTasks: number;
+  createdEvents: number;
+  updatedTasks: number;
+  savedFacts: number;
+  /** Notes added to an open task of the same title, and notes not saved anywhere (docs/tasks/SPEC.md §1.3). */
+  notesAdded: number;
+  notesNotSaved: number;
+}> {
   const result: ExtractionResult = {
     tasks: raw.tasks.slice(0, APPLY_CAPS.tasks),
     events: raw.events.slice(0, APPLY_CAPS.events),
@@ -314,6 +323,8 @@ export async function applyExtraction(
   let createdEvents = 0;
   let updatedTasks = 0;
   let savedFacts = 0;
+  let notesAdded = 0;
+  let notesNotSaved = 0;
 
   // File into EXISTING projects only — an extraction guess never creates one.
   const { resolveProject } = await import("./tools");
@@ -327,7 +338,24 @@ export async function applyExtraction(
     const dueAt = parseIso(t.due_at, tz);
     // dedupe against every recent task (done ones included — "book flights"
     // finished yesterday must not come back as a new inferred to-do)
-    if (findDuplicate({ title: t.title, dueAt }, allRecent)) continue;
+    const twin = findDuplicate({ title: t.title, dueAt }, allRecent);
+    if (twin) {
+      // Its note goes on an open task of the same title, added to his (docs/tasks/SPEC.md §1.3); anywhere else
+      // it is not saved, and counted.
+      const lines = noteLines(t.notes);
+      if (!lines.length) continue;
+      if (sameTitle(twin.title, t.title) && (OPEN_STATUSES as readonly string[]).includes(twin.status)) {
+        const [hit] = await db
+          .update(tasks)
+          .set({ notes: withLines(tasks.notes, lines), updatedAt: new Date() })
+          .where(and(eq(tasks.userId, userId), eq(tasks.id, twin.id), sql`${addedLines(tasks.notes, lines)} is not null`))
+          .returning({ id: tasks.id });
+        if (hit) notesAdded++;
+      } else {
+        notesNotSaved++;
+      }
+      continue;
+    }
     await db.insert(tasks).values({
       userId,
       title: t.title,
@@ -432,7 +460,7 @@ export async function applyExtraction(
     });
   }
 
-  return { createdTasks, createdEvents, updatedTasks, savedFacts };
+  return { createdTasks, createdEvents, updatedTasks, savedFacts, notesAdded, notesNotSaved };
 }
 
 /**

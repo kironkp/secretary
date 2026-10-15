@@ -59,7 +59,11 @@ export const toolSchemas = {
       .optional()
       .describe('New planned start, ISO 8601 ("start the album cover on the 12th"); "none" clears it. Never after the due date.'),
     title: z.string().optional(),
-    notes: z.string().optional(),
+    notes: z
+      .string()
+      .optional()
+      .describe("Added to the task's note as new lines; lines already in it are not added again. It never replaces the note"),
+    replace_notes: z.boolean().optional().describe("Only when the user asks to change or clear the note: replaces the whole note with this text (\"\" clears it), and the result gives back what it replaced. Otherwise leave it out: the text is added to the note."),
     priority: z.number().int().min(0).max(3).optional(),
     project: z
       .string()
@@ -157,7 +161,11 @@ export const toolSchemas = {
     starts_at: z.string().optional().describe("New start, ISO 8601"),
     ends_at: z.string().optional(),
     location: z.string().optional(),
-    notes: z.string().optional(),
+    notes: z
+      .string()
+      .optional()
+      .describe("Added to the event's note as new lines; lines already in it are not added again. It never replaces the note"),
+    replace_notes: z.boolean().optional().describe("Only when the user asks to change or clear the note: replaces the whole note with this text (\"\" clears it), and the result gives back what it replaced. Otherwise leave it out: the text is added to the note."),
     project: z
       .string()
       .optional()
@@ -338,7 +346,7 @@ export const toolSchemas = {
       .string()
       .optional()
       .describe(
-        "What the user said, briefly. On signal blocked this is THE REASON — what it's stuck on and what would clear it (\"waiting on Teresa's signature\") — stored on the task so later sessions can explain the block instead of reciting the word.",
+        "What the user said, briefly; added to the task's note. On signal blocked this is THE REASON — what it's stuck on and what would clear it (\"waiting on Tamsin's signature\") — stored as what the task is waiting on (not in its note) so later sessions can explain the block instead of reciting the word.",
       ),
   }),
   create_commitment: z.object({
@@ -362,7 +370,8 @@ export const toolSchemas = {
         'File it under this project (fuzzy-matched against existing names, created if new). The literal value "none" removes it from its project.'
       ),
     title: z.string().optional().describe("New title, if the user renamed it"),
-    note: z.string().optional().describe("Detail worth keeping on the task, briefly"),
+    note: z.string().optional().describe("Detail worth keeping on the task, briefly. Added to its note; never replaces it"),
+    replace_note: z.boolean().optional().describe("Only when the user asks to change or clear the note: replaces the whole note with this text (\"\" clears it), and the result gives back what it replaced. Otherwise leave it out: the text is added to the note."),
     start_at: z
       .string()
       .optional()

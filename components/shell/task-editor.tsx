@@ -64,6 +64,9 @@ export function TaskEditor({
   const [project, setProject] = useState<string>(projectId ?? "");
   const [due, setDue] = useState(isoToLocalInput(task.dueAt));
   const [notes, setNotes] = useState(task.notes ?? "");
+  // The note as it was when the editor opened: sent with his text, so what a model adds while it is open is kept
+  // after it (docs/tasks/SPEC.md §1.6).
+  const [notesBase] = useState(task.notes);
   const [reminders, setReminders] = useState<string[]>(task.reminders ?? []);
   const [newReminder, setNewReminder] = useState("");
   const [projects, setProjects] = useState<{ id: string; name: string }[] | null>(null);
@@ -104,6 +107,7 @@ export function TaskEditor({
         projectId: project || null,
         dueAt: localInputToIso(due),
         notes: notes.trim() || null,
+        notesBase,
         reminders,
       }),
     }).catch(() => null);
