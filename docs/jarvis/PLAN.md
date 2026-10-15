@@ -9,8 +9,8 @@ beside me in a workshop."*
 
 - **Cycle counter: 109.** 1.00, 1.02, 1.03, 1.04 and 1.09 are accepted
   (1.09 live 2026-10-15, `5d4d98e`); 1.01 is open; 1.11 is being built (on
-  `jarvis-1.11-project-order`, merging `5d4d98e`; r2 `3b3c1a9` FAILED,
-  r3 being made); then 1.16 (the names on public main), then 1.10, 1.13, 1.12, 1.14, 1.15 (Kiron's feedback,
+  `jarvis-1.11-project-order`, merging `5d4d98e`; r3 `2dfd895` PASSED,
+  a small r4 before it goes to main); then 1.16 (the names on public main), then 1.10, 1.13, 1.12, 1.14, 1.15 (Kiron's feedback,
   his mockup approved 2026-10-14, and the whole site in its look), then
   1.08, 1.05, 1.06, 1.07. Each pushed to Heroku as it passes (Kiron:
   "Push to heroku for each update"). See §9.
@@ -351,7 +351,14 @@ beside me in a workshop."*
     migration all held. r3 carries the edge, the edge zone moved above
     the tab bar, reads in sequence inside a transaction (a pg 9
     deprecation), a time limit on a voice tool call, and a raised fill
-    for the lifted row in dark. A third FAIL stops the loop (§4).
+    for the lifted row in dark. A third FAIL stops the loop (§4). r3
+    (`2dfd895`) PASSED, no defect; held from main for a small r4: the
+    20 s limit gave up on paid voice lookups (consult_brain, search_web)
+    that answered before, after paying, and could invite a second paid
+    ask. r4: 28 s (Heroku cuts at 30), a lookup's timeout says not to ask
+    again, and a same-name test that caught its mutant 5 runs in 8.
+    Accepted: if two of his projects share an exact creation time, the
+    planner runs once after the deploy.
   - **1.12** — merge two projects. He asked for one project to replace
     and absorb another; it made a new one and left the old one. There is
     no merge tool. Wanted: the tasks, notes and the rest move into the
