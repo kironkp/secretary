@@ -8,6 +8,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExter
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
+  ArrowDown,
   ArrowUp,
   Calendar,
   Clock,
@@ -68,7 +69,7 @@ type PendingAttachment = {
 
 const MAX_ATTACHMENTS = 4;
 
-// Keys that scroll the thread when no field has focus: his hands, as a wheel is (docs/chat/SPEC.md §1).
+// Keys that scroll the thread when no field has focus: his hand, as a wheel is (docs/chat/SPEC.md §1).
 const SCROLL_KEYS = new Set(["PageUp", "ArrowUp", "Home", " ", "PageDown", "ArrowDown", "End"]);
 
 // The card's motion is the app's (nav-tabs.tsx): 340ms on the leading curve.
@@ -400,13 +401,16 @@ export function ChatThread({
     void addFiles(picked);
   };
 
-  // The thread follows what is being written, and only his hands stop it
-  // (docs/chat/SPEC.md §1, v1.09 r4). The rule is lib/chat/follow.ts; here it
-  // is fed his input on the thread (a wheel, a touch, a mouse on it or on its
-  // scrollbar, the scroll keys), the thread's scroll events, and every change
-  // in size of the thread or of what it holds.
+  // The thread follows what is being written until his hand is on it
+  // (docs/chat/SPEC.md §1, v1.09 r5): on at his send and when the panel opens;
+  // off for the rest of the turn at his first touch, wheel, mouse or pen down
+  // on the thread or its scrollbar, or scroll key; back on by the "New reply
+  // below" pill. The rule is lib/chat/follow.ts; here it is fed that input,
+  // the thread's scroll events, and every change in size of the thread or of
+  // what it holds.
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const [newBelow, setNewBelow] = useState(false);
   const [follow] = useState(() =>
     createFollow({
       read: () => {
@@ -416,53 +420,37 @@ export function ChatThread({
       write: (top) => {
         if (scrollRef.current) scrollRef.current.scrollTop = top;
       },
+      onChange: (s) => setNewBelow(s.pill),
     })
   );
   useEffect(() => {
     const el = scrollRef.current;
     const content = contentRef.current;
     if (!el || !content) return;
-    const down = () => follow.down();
-    const up = () => follow.up();
-    const nudge = () => follow.nudge();
-    // A mouse or a pen; a finger is the touch events' (its pointer is cancelled once the browser scrolls).
-    const pointerDown = (e: PointerEvent) => e.pointerType !== "touch" && follow.down();
-    const pointerUp = (e: PointerEvent) => e.pointerType !== "touch" && follow.up();
+    const hands = () => follow.hands();
     const key = (e: KeyboardEvent) => {
       if (!SCROLL_KEYS.has(e.key)) return;
       const f = document.activeElement;
       if (f instanceof HTMLElement && (f.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(f.tagName))) return;
-      follow.nudge();
+      follow.hands();
     };
     const scrolled = () => follow.scrolled();
-    const ended = () => follow.scrollEnded();
     const sized = new ResizeObserver(() => follow.keep());
-    // Not passive: the browser runs these before it scrolls, so following has paused before his scroll moves anything.
-    el.addEventListener("wheel", nudge, { passive: false });
-    el.addEventListener("touchstart", down, { passive: false });
-    el.addEventListener("touchend", up);
-    el.addEventListener("touchcancel", up);
-    el.addEventListener("pointerdown", pointerDown);
-    window.addEventListener("pointerup", pointerUp);
-    window.addEventListener("pointercancel", pointerUp);
+    // Not passive: the browser runs these before it scrolls, so following is off before his scroll moves anything.
+    el.addEventListener("wheel", hands, { passive: false });
+    el.addEventListener("touchstart", hands, { passive: false });
+    el.addEventListener("pointerdown", hands);
     window.addEventListener("keydown", key);
     el.addEventListener("scroll", scrolled, { passive: true });
-    el.addEventListener("scrollend", ended);
     sized.observe(el);
     sized.observe(content);
     return () => {
-      el.removeEventListener("wheel", nudge);
-      el.removeEventListener("touchstart", down);
-      el.removeEventListener("touchend", up);
-      el.removeEventListener("touchcancel", up);
-      el.removeEventListener("pointerdown", pointerDown);
-      window.removeEventListener("pointerup", pointerUp);
-      window.removeEventListener("pointercancel", pointerUp);
+      el.removeEventListener("wheel", hands);
+      el.removeEventListener("touchstart", hands);
+      el.removeEventListener("pointerdown", hands);
       window.removeEventListener("keydown", key);
       el.removeEventListener("scroll", scrolled);
-      el.removeEventListener("scrollend", ended);
       sized.disconnect();
-      follow.dispose();
     };
   }, [follow]);
 
@@ -771,7 +759,7 @@ export function ChatThread({
           className="flex min-h-0 flex-col overflow-hidden"
           style={dock ? { height: panelH, transition: dragH === null ? settle : "none" } : { flex: 1 }}
         >
-          <div className="flex min-h-0 flex-1 flex-col" style={{ opacity: dock ? contentOpacity : 1 }}>
+          <div className="relative flex min-h-0 flex-1 flex-col" style={{ opacity: dock ? contentOpacity : 1 }}>
             {/* The header drags too, and its x closes the chat. */}
             <div
               onPointerDown={onHandleDown}
@@ -971,6 +959,19 @@ export function ChatThread({
           ) : null}
               </div>
             </div>
+            {/* Following stopped at his hand and something was written below (docs/chat/SPEC.md §1): one tap
+                follows again. Over the thread, clear of the composer, at least 44 px tall. */}
+            {newBelow && (
+              <button
+                type="button"
+                data-new-reply-pill=""
+                onClick={() => follow.toBottom()}
+                className="absolute bottom-3 left-1/2 flex min-h-11 -translate-x-1/2 items-center gap-1.5 rounded-full bg-accent px-4 text-[15px] font-semibold text-white shadow-lg"
+              >
+                <ArrowDown size={16} strokeWidth={2.25} aria-hidden />
+                New reply below
+              </button>
+            )}
           </div>
         </div>
 
