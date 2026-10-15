@@ -287,6 +287,13 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
   };
   /** How far the thread stands above its bottom. */
   const gap = (page: import("@playwright/test").Page) => thread(page).evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight);
+  /** The same, as the next frame is drawn: a read between a change and its frame sees the content grown and its size
+   *  change not yet handled, which is never painted. (The second requestAnimationFrame runs after the first frame's
+   *  ResizeObserver callbacks.) */
+  const gapDrawn = async (page: import("@playwright/test").Page) => {
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(null)))));
+    return gap(page);
+  };
   async function open(page: import("@playwright/test").Page) {
     await page.goto("/today");
     await page.getByTestId("chat-launcher").click();
@@ -804,7 +811,7 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
       // The second: his spoken question is a send.
       const { lineAt, heardAt } = await exchange(page, s, 2);
       await expect(pill(page)).toHaveCount(0);
-      expect(await gap(page), "the second answer ends in view").toBeLessThanOrEqual(1);
+      expect(await gapDrawn(page), "the second answer ends in view").toBeLessThanOrEqual(1);
       const seen = await frames(page);
       const before = await sinceHand(page, seen, lineAt);
       expect(before.said, "frames said between his wheel and his next question").toBeGreaterThan(5);
@@ -832,7 +839,7 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
         // written under the composer until then (named in the spec), and followed from then on.
         const { lineAt, heardAt } = await exchange(page, s, 2, { lineAfter: 4 });
         await expect(pill(page)).toHaveCount(0);
-        expect(await gap(page), "the second answer ends in view").toBeLessThanOrEqual(1);
+        expect(await gapDrawn(page), "the second answer ends in view").toBeLessThanOrEqual(1);
         const seen = await frames(page);
         expect((await sinceHand(page, seen, lineAt)).pulled, "moved back down before his line was heard").toBeLessThanOrEqual(2);
         const f = await followed(page, seen, seen[heardAt].t);
@@ -846,7 +853,7 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
       await startCall(page);
       const s = stream(page);
       await exchange(page, s, 1);
-      expect(await gap(page), "the first exchange followed").toBeLessThanOrEqual(1);
+      expect(await gapDrawn(page), "the first exchange followed").toBeLessThanOrEqual(1);
       // His turn is committed; the answer begins and is followed; his wheel after its sixth piece; his words heard
       // after its eighth.
       await exchange(page, s, 2, { wheelAfter: 5, lineAfter: 8 });
