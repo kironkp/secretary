@@ -158,11 +158,16 @@ describe("the order's last word (v1.11 r2)", () => {
 
   it("two projects with one name keep their places on the Projects tab and in list_projects when one is recoloured", async () => {
     const h = await his();
-    const made = [
-      ...(await db.insert(projects).values({ userId: h.id, name: "Twin", status: "active" }).returning()),
-      ...(await db.insert(projects).values({ userId: h.id, name: "Twin", status: "active" }).returning()),
-    ];
-    const expected = made.toSorted((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || (a.id < b.id ? -1 : 1)).map((r) => r.id);
+    // Their ids go against the order they were made in, so only when each was made puts them right: with random
+    // ids, a version that forgot it passed whenever the ids happened to fall in the made order (v1.11 r4).
+    const [low, high] = [crypto.randomUUID(), crypto.randomUUID()].sort();
+    const madeAt = new Date(Date.now() - 60_000);
+    const [first] = await db.insert(projects).values({ id: high, userId: h.id, name: "Twin", status: "active", createdAt: madeAt }).returning();
+    const [second] = await db
+      .insert(projects)
+      .values({ id: low, userId: h.id, name: "Twin", status: "active", createdAt: new Date(madeAt.getTime() + 1_000) })
+      .returning();
+    const expected = [first.id, second.id];
     const twins = async () => (await listProjects(h.id, TZ)).filter((r) => r.name === "Twin").map((r) => r.id);
     expect(await twins()).toEqual(expected);
     // A model tells the two apart only by what they hold: the one made first has a task.
