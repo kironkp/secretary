@@ -7,10 +7,11 @@ beside me in a workshop."*
 
 ## Now
 
-- **Cycle counter: 109.** 1.00, 1.02, 1.03, 1.04 and 1.09 are accepted
-  (1.09 live 2026-10-15, `5d4d98e`); 1.01 is open; 1.11 is being built (on
-  `jarvis-1.11-project-order`, merging `5d4d98e`; r3 `2dfd895` PASSED,
-  a small r4 before it goes to main); then 1.16 (the names on public main), then 1.10, 1.13, 1.12, 1.14, 1.15 (Kiron's feedback,
+- **Cycle counter: 111.** 1.00, 1.02, 1.03, 1.04, 1.09 and 1.11 are
+  accepted (1.09 live 2026-10-15 at `5d4d98e`; 1.11 live the same day at
+  `282c7e0`); 1.01 is open; 1.16 (the names on public main) is built and
+  waits on Kiron to allow its push; 1.10's rules are with the Reviewer;
+  then 1.13, 1.12, 1.14, 1.15 (Kiron's feedback,
   his mockup approved 2026-10-14, and the whole site in its look), then
   1.08, 1.05, 1.06, 1.07. Each pushed to Heroku as it passes (Kiron:
   "Push to heroku for each update"). See §9.
@@ -361,7 +362,9 @@ beside me in a workshop."*
     planner runs once after the deploy.
     **r4 PASSED 2026-10-15 at `282c7e0`** (the Reviewer: stuck, late and
     slow calls at 28 s; each timeout's words by kind; GitHub `test` 3 of
-    3) and pushed to main.
+    3). **Live**: main CI run 38818392735 success, Heroku's deploy of
+    `282c7e0` succeeded 22:48 UTC (GitHub deployment 7106243000; the
+    release number was not read, the Heroku CLI's login had expired).
   - **1.12** — merge two projects. He asked for one project to replace
     and absorb another; it made a new one and left the old one. There is
     no merge tool. Wanted: the tasks, notes and the rest move into the
