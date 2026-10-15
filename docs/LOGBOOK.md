@@ -7,6 +7,39 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 ---
 
+## v1.16 — Made-up names in the public repo (2026-10-15)
+
+`a7718b1` (the words replaced, two records moved out), this commit.
+
+The Planner, 2026-10-15: words from his real data had been on the public main
+since August, in test fixtures, the Today and interview copy, prompts and docs.
+Every current file now carries made-up ones instead. History is as it was;
+rewriting it is Kiron's call.
+
+- Replaced: the name of the agency he works with, the people around it (two
+  with surnames, in code comments and tests), his project names, his purchase
+  numbers and the items they buy, and a bank and a fiscal year from one task.
+- No code matched or acted on any of them. Every place was a comment, a prompt
+  or tool description, the Today strip's preview line, sample text on the
+  voice test page, a spec, or test data. Nothing behaves differently.
+- Where a test reads a name's shape, the made-up one keeps it: two names a
+  letter or two apart stay that close (the near-miss check), project names
+  keep their first letter (alphabetical order), a plural keeps its ending.
+- The replayed production scenario (tests/fixtures/understanding.ts, and the
+  gather test that mirrors it): every name, number and item replaced; his
+  spoken lines and the second project's task and memory rewritten. The task
+  titles keep their shape, since the tests read their terms. The dates stay.
+- The 2026-08-18 voice-session record and its trace are moved out of the repo
+  and kept privately. The three places that cited them say so in one line.
+- Cost: none. The understanding hash and the layout plan key read data only
+  (gather.ts hashBundle; REGISTRY_VERSION and the signals hash), so no project
+  is read again. The new prompt text is a new cached prefix once, on the first
+  chat after the deploy.
+- Kept: a generic purchase-order acronym, public form numbers and a public
+  card program's name.
+
+---
+
 ## v1.09 — A chat answer reaches him, once (2026-10-14)
 
 `8c68ef7`, `e44cc51` (the spec, docs/chat/SPEC.md, new, and docs/spend/SPEC.md
