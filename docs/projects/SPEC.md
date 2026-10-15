@@ -24,6 +24,11 @@ comparator (`lib/project-order.ts`):
    deadline, no date, and by name. Urgency still shows on each card as a
    chip ("2 days late", "Due tomorrow"); it no longer moves a project above
    one he placed.
+4. **Last, when it was made, then its id.** Two projects with one name keep
+   their places against each other on every screen, whatever else about
+   them changes (v1.11 r2: they traded places on the Projects tab whenever
+   one was recoloured, because the rows came back in no fixed order and the
+   order ended on the name).
 
 Until he moves something, nothing is placed, and the Overview and the
 Timeline stand exactly as before. The Projects tab does change: it was in
@@ -64,7 +69,18 @@ arrow keys, or says "move Garden shed to the top" in the chat or on a call:
   (see §4).
 - One move is one transaction: the group's rows are read and written
   together, so two moves at once cannot interleave into an order neither
-  asked for.
+  asked for. Everything a move reads, it reads inside its own transaction.
+- His moves are applied one at a time, in the order they arrived. A move
+  waiting its turn holds no database connection, so however many arrive at
+  once (a call can send several in one breath: "put these eight in this
+  order"), each one finishes, and nothing else he does waits behind them.
+  No request waits for a database connection for more than 10 seconds: past
+  that it fails with an error rather than hanging (v1.11 r2: eight moves at
+  once held every connection and the whole app stopped answering until a
+  restart).
+- On a call, the function calls of one reply run one after the other, in
+  the order the model gave them, and the reply goes on once, after the last
+  of them has answered.
 
 **A project that changes group** (set aside, made active again, made a list
 or a project) arrives in its new group unplaced, at its urgency place, and
@@ -105,14 +121,18 @@ styles.
   other than Active has a heading above its card, 20/26 bold.
 - A row: at least 56 px, 16 px in from the left, 4 px from the right; a
   12 px dot in the project's colour; the name, 17 regular, taking the room;
-  "N open", 15 muted (`#6e6e73`); the grab handle. Rows inside a card are
-  divided by a full-width hairline (`rgba(60,60,67,0.18)`). A tap on the row
-  (not the handle) opens the project.
+  "N open", 15 muted (`#6e6e73`); the grab handle, 12 px after the count.
+  Rows inside a card are divided by a full-width hairline
+  (`rgba(60,60,67,0.18)`). A tap anywhere on the row but the handle opens
+  the project, the strip between the count and the handle included.
 - The grab handle: a six-dot glyph, 20 px, `#8e8e93` on the white card, in
   a 44 × 44 button named "Reorder <project>". While held it is accent
-  (`#3a5bd0`) and the row is lifted: its own white card, shadow
-  `0 10px 28px rgba(0,0,0,0.18)`, 6 px wider on each side, the name
-  semibold. The rows it passes make room for it. Let go, it stays there at
+  (`#3a5bd0`) and the row is lifted: its own white card, at least 60 px
+  tall, shadow `0 10px 28px rgba(0,0,0,0.18)`, 6 px wider on each side, the
+  name semibold; the rows around it do not move for its extra height. The
+  rows it passes make room for it. Held near the top or the bottom edge of
+  the screen, the list scrolls under it, faster the nearer the edge, so in
+  a long list a project goes from the bottom to the top in one drag. Let go, it stays there at
   once, before the server has answered, and the order is stored; if the
   store fails it goes back, and a plain line says so ("Couldn't move Garden
   shed. It's back where it was."). Two drags in quick succession are stored
@@ -125,7 +145,9 @@ styles.
   the keyboard, the handle's arrow keys move the project one place.
 - Motion: 340 ms on the app's own curve for the rows making room; none
   with reduced motion.
-- Dark: the same roles on the app's dark tokens, text at 4.5:1.
+- Dark: the same roles on the app's dark tokens, text at 4.5:1. The app is
+  dark when he chose it (the theme setting, kept in a cookie), not by the
+  system's preference.
 - Nothing else on the row: no chevron, no second line. The project screen
   has the rest.
 
