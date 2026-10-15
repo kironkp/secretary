@@ -803,10 +803,12 @@ export function ChatThread({
                 </button>
               )}
             </div>
+            {/* The page alone sets the thread's position (docs/chat/SPEC.md §1): the browser's scroll anchoring is
+                off, or a WebKit that has it holds the thread at the bottom after his hand. */}
             <div
               ref={scrollRef}
               data-thread-scroll=""
-              className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-3 [-webkit-overflow-scrolling:touch]"
+              className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-3 [-webkit-overflow-scrolling:touch] [overflow-anchor:none]"
             >
               <div ref={contentRef} className="mx-auto w-full max-w-2xl space-y-4 px-4">
           {hasBriefing && (
