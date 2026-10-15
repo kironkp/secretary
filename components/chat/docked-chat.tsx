@@ -166,7 +166,10 @@ export function DockedChat() {
   return (
     // The wrapper lets taps through; only the card, the launcher and the tab
     // bar take them, so the strip beside the launcher never blocks the page.
+    // data-covers-bottom (here and on the launcher): what covers the bottom of
+    // the page, so a drag's edge zone sits above it (project-list.tsx).
     <div
+      data-covers-bottom=""
       className="pointer-events-none fixed inset-x-0 bottom-0 z-30"
     >
       <DockHeight />
@@ -273,6 +276,7 @@ export function DockedChat() {
           type="button"
           data-theme="dark"
           data-testid="chat-launcher"
+          data-covers-bottom=""
           onClick={open}
           title="Ask your secretary"
           aria-label="Ask your secretary"

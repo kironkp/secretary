@@ -53,6 +53,19 @@ function Dots() {
  */
 type Drag = { index: number; pointerId: number; startY: number; dy: number; scrolled: number; target: number; centers: number[]; height: number };
 
+/**
+ * The top of what covers the bottom of the screen (the tab bar, the voice button above it: [data-covers-bottom] in
+ * the shell), or `bottom` if nothing does. The bottom edge zone sits above it, where a finger can see the rows.
+ */
+function coveredFrom(bottom: number): number {
+  let top = bottom;
+  for (const el of document.querySelectorAll("[data-covers-bottom]")) {
+    const r = el.getBoundingClientRect();
+    if (r.height > 0 && getComputedStyle(el).opacity !== "0") top = Math.min(top, r.top);
+  }
+  return top;
+}
+
 /** The element that scrolls the list: the nearest ancestor that scrolls, or the page. */
 function scrollerOf(el: Element | null): HTMLElement {
   for (let e = el?.parentElement ?? null; e; e = e.parentElement) {
@@ -95,6 +108,9 @@ export function ProjectList({ group, rows, leading = null }: { group: string; ro
   };
   const scroller = useRef<HTMLElement | null>(null);
   const startScroll = useRef(0);
+  // The list's end, measured at the pickup, before the held row's transform can add to the scroller's overflow
+  // (Chromium counts it): the edge scroll never goes past it.
+  const endScroll = useRef(0);
   const pointerY = useRef(0);
   const rowRefs = useRef(new Map<string, HTMLLIElement>());
   const shown = state.shown;
@@ -110,6 +126,7 @@ export function ProjectList({ group, rows, leading = null }: { group: string; ro
   };
 
   // Held near an edge of the list's view, the list scrolls under it, every frame, until it is let go or moved away.
+  // The bottom edge is above whatever covers the bottom of the screen; below it (over the tab bar) is full speed.
   useEffect(() => {
     if (!dragging) return;
     let frame = 0;
@@ -118,14 +135,17 @@ export function ProjectList({ group, rows, leading = null }: { group: string; ro
       const el = scroller.current;
       if (!d || !el) return;
       const view = el === document.scrollingElement ? { top: 0, bottom: window.innerHeight } : el.getBoundingClientRect();
+      const bottom = coveredFrom(view.bottom);
       const y = pointerY.current;
       const near = (depth: number) => Math.ceil(EDGE_SPEED * Math.min(1, depth / EDGE_PX));
-      const speed = y < view.top + EDGE_PX ? -near(view.top + EDGE_PX - y) : y > view.bottom - EDGE_PX ? near(y - (view.bottom - EDGE_PX)) : 0;
+      const speed = y < view.top + EDGE_PX ? -near(view.top + EDGE_PX - y) : y > bottom - EDGE_PX ? near(y - (bottom - EDGE_PX)) : 0;
       if (speed) {
-        const before = el.scrollTop;
-        el.scrollTop = before + speed;
-        if (el.scrollTop !== before) setDrag(place(d, y, el.scrollTop - startScroll.current));
+        const to = Math.max(0, Math.min(endScroll.current, el.scrollTop + speed));
+        if (to !== el.scrollTop) el.scrollTop = to;
       }
+      // The row follows the list wherever its scroll stands, a clamp by the browser included.
+      const scrolled = el.scrollTop - startScroll.current;
+      if (scrolled !== d.scrolled) setDrag(place(d, y, scrolled));
       frame = requestAnimationFrame(step);
     };
     frame = requestAnimationFrame(step);
@@ -147,13 +167,15 @@ export function ProjectList({ group, rows, leading = null }: { group: string; ro
     const rects = shown.map((r) => rowRefs.current.get(r.id)!.getBoundingClientRect());
     scroller.current = scrollerOf(e.currentTarget);
     startScroll.current = scroller.current.scrollTop;
+    endScroll.current = Math.max(scroller.current.scrollTop, scroller.current.scrollHeight - scroller.current.clientHeight);
     pointerY.current = e.clientY;
     setDrag({ index, pointerId: e.pointerId, startY: e.clientY, dy: 0, scrolled: 0, target: index, centers: rects.map((r) => r.top + r.height / 2), height: rects[index].height });
   };
   const onPointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
     if (!drag || e.pointerId !== drag.pointerId) return;
     pointerY.current = e.clientY;
-    setDrag(place(drag, e.clientY, drag.scrolled));
+    // How far the list has scrolled, read now: a value kept from before a clamp would leave the row off the finger.
+    setDrag(place(drag, e.clientY, (scroller.current?.scrollTop ?? startScroll.current) - startScroll.current));
   };
   const onPointerUp = (e: React.PointerEvent<HTMLButtonElement>) => {
     if (!drag || e.pointerId !== drag.pointerId) return;
