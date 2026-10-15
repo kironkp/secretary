@@ -5,8 +5,9 @@
 // test.ts): the thread is read and written through two functions. No timers:
 // nothing waits for his finger to lift or decides from where he stopped.
 //
-// 1. toBottom(): his send, his retry, the panel opening, the pill: on, and the
-//    bottom in view.
+// 1. sent(): his send, typed, retried, or a new line of his on a call (heard()
+//    finds those): on, and the bottom in view. toBottom() is the same for the
+//    page's own reasons: the panel opening, the pill, the end of a call.
 // 2. hands(): a touch, a wheel, a mouse or pen down, a scroll key: off.
 // 3. pill(): off, the bottom out of view, and something written below since
 //    following stopped.
@@ -31,6 +32,8 @@ export function createFollow(opts: { read: () => ThreadBox; write: (top: number)
   let written: ThreadBox | null = null;
   /** How tall the content was when following stopped: anything below that is new to him. */
   let seenHeight = 0;
+  /** How many lines of his a call's transcript held at the last look (null: not looked at yet). */
+  let spoken: number | null = null;
   let told: FollowState = { following: true, pill: false };
 
   const gapOf = (b: ThreadBox) => Math.max(0, b.height - b.top - b.view);
@@ -55,6 +58,13 @@ export function createFollow(opts: { read: () => ThreadBox; write: (top: number)
   /** Rule 4: moved, not by the page, and left above the bottom as it stood at the page's last write (or as it stands, if shorter). */
   const movedByNoInput = (b: ThreadBox) =>
     !ours(b) && Math.max(0, Math.min(written?.height ?? b.height, b.height) - b.top - b.view) > NEAR_PX;
+  const toBottom = () => {
+    follow = true;
+    put();
+    tell();
+  };
+  /** His send: typed, his tap to retry, or a new line of his on a call. The one path for all three. */
+  const sent = () => toBottom();
 
   return {
     following: () => follow,
@@ -84,11 +94,17 @@ export function createFollow(opts: { read: () => ThreadBox; write: (top: number)
       }
       tell();
     },
-    /** His send, his retry, the panel opening, the pill: following on, the bottom in view. */
-    toBottom() {
-      follow = true;
-      put();
-      tell();
+    /** The panel opening, the pill, the end of a call: following on, the bottom in view. */
+    toBottom,
+    sent,
+    /** A call's transcript as it stands: a new line of his is a send. The secretary's lines, and his line growing
+     *  as it is heard, are not. The first look only counts (a thread opened during a call is not moved by lines
+     *  already said); a call that ends, or a new one, starts the count again from none. */
+    heard(lines: readonly { role: string; text: string }[]) {
+      const his = lines.filter((l) => l.role === "user" && l.text.trim()).length;
+      const more = spoken !== null && his > spoken;
+      spoken = his;
+      if (more) sent();
     },
     /** The page took him elsewhere on purpose (a message found by search): not following. */
     leave() {

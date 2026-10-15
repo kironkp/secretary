@@ -41,6 +41,7 @@ import { CALL_GLOW, CALL_GLOW_SMALL } from "./call-look";
 import { MessageActions } from "./message-actions";
 import { setCallSlot } from "./call-slot";
 import { useVoiceCall } from "./voice-call-provider";
+import type { TranscriptLine } from "./use-voice-session";
 
 export type DockState = "closed" | "bar" | "full";
 
@@ -71,6 +72,9 @@ const MAX_ATTACHMENTS = 4;
 
 // Keys that scroll the thread when no field has focus: his hand, as a wheel is (docs/chat/SPEC.md §1).
 const SCROLL_KEYS = new Set(["PageUp", "ArrowUp", "Home", " ", "PageDown", "ArrowDown", "End"]);
+
+// No call: no lines (one array, so the transcript's look runs only when it changes).
+const NO_LINES: readonly TranscriptLine[] = [];
 
 // The card's motion is the app's (nav-tabs.tsx): 340ms on the leading curve.
 const MOVE_MS = 340;
@@ -265,7 +269,7 @@ export function ChatThread({
   // The call is GLOBAL (VoiceCallProvider in the app shell) — this thread just
   // reads its live transcript so voice lines render as messages while talking.
   const call = useVoiceCall();
-  const liveLines = call.active ? call.session.transcript : [];
+  const liveLines = call.active ? call.session.transcript : NO_LINES;
   const [sending, setSending] = useState(false);
   // The answer as Claude writes it (docs/chat/SPEC.md §1), drawn where the
   // saved answer will stand; a later round starts it over.
@@ -402,7 +406,8 @@ export function ChatThread({
   };
 
   // The thread follows what is being written until his hand is on it
-  // (docs/chat/SPEC.md §1, v1.09 r5): on at his send and when the panel opens;
+  // (docs/chat/SPEC.md §1, v1.09 r5): on at his send (typed, or a new line of
+  // his on a call), when the panel opens, and when a call ends;
   // off for the rest of the turn at his first touch, wheel, mouse or pen down
   // on the thread or its scrollbar, or scroll key; back on by the "New reply
   // below" pill. The rule is lib/chat/follow.ts; here it is fed that input,
@@ -459,6 +464,11 @@ export function ChatThread({
     if (liveAnswer?.text) follow.keep();
   }, [liveAnswer?.text, liveAnswer?.round, follow]);
 
+  // On a call, a new line of his is a send, as a typed one is (v1.09 r6): before it is painted.
+  useLayoutEffect(() => {
+    follow.heard(liveLines);
+  }, [liveLines, follow]);
+
   // Opened on a message found by search: there, not following. Otherwise at the newest.
   useEffect(() => {
     if (anchorMessageId) {
@@ -492,7 +502,7 @@ export function ChatThread({
     if (!payload || sending) return;
     setSending(true);
     setLiveAnswer(null);
-    follow.toBottom();
+    follow.sent();
     setMsgs((m) => m.map((msg) => (msg.id === tempId ? { ...msg, failed: undefined } : msg)));
     try {
       const out = await sendTurn({
@@ -569,8 +579,9 @@ export function ChatThread({
   };
 
   // When a call ends (wherever the user was), swap the live stream for the
-  // persisted voice messages.
+  // persisted voice messages, and land at the newest of them, following.
   const endedSeq = useRef(0);
+  const [callSaved, setCallSaved] = useState(0);
   useEffect(() => {
     if (!call.ended || call.ended.seq === endedSeq.current) return;
     endedSeq.current = call.ended.seq;
@@ -579,10 +590,17 @@ export function ChatThread({
     setConversationId(voiceConversationId);
     void (async () => {
       const res = await fetch(`/api/conversations/${voiceConversationId}/messages`);
-      if (res.ok) setMsgs(((await res.json()) as { messages: Message[] }).messages);
+      if (res.ok) {
+        setMsgs(((await res.json()) as { messages: Message[] }).messages);
+        setCallSaved((n) => n + 1);
+      }
       router.refresh();
     })();
   }, [call.ended, router]);
+  // Once the saved messages are drawn, before they are painted.
+  useLayoutEffect(() => {
+    if (callSaved) follow.toBottom();
+  }, [callSaved, follow]);
 
   const hasBriefing = briefing.hasContent;
 
@@ -928,6 +946,8 @@ export function ChatThread({
               .map((l) => (
                 <div
                   key={l.id}
+                  data-call-line={l.role}
+                  data-call-final={String(l.final)}
                   className={`rounded-[18px] text-[16px] leading-[1.45] ${
                     l.role === "user" ? "ml-auto max-w-[85%] bg-surface-2 px-4 py-2.5 text-ink" : "max-w-[94%]"
                   } ${l.final ? "" : "opacity-80"}`}
@@ -966,7 +986,7 @@ export function ChatThread({
                 type="button"
                 data-new-reply-pill=""
                 onClick={() => follow.toBottom()}
-                className="absolute bottom-3 left-1/2 flex min-h-11 -translate-x-1/2 items-center gap-1.5 rounded-full bg-accent px-4 text-[15px] font-semibold text-white shadow-lg"
+                className="absolute bottom-3 left-1/2 flex min-h-11 -translate-x-1/2 items-center gap-1.5 rounded-full bg-pill px-4 text-[15px] font-semibold text-pill-ink shadow-lg"
               >
                 <ArrowDown size={16} strokeWidth={2.25} aria-hidden />
                 New reply below
