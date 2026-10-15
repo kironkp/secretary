@@ -321,6 +321,23 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
     expect
       .poll(() => thread(page).evaluate((el) => el.scrollTop), { timeout: 15_000, intervals: [50] })
       .toBeGreaterThanOrEqual(px);
+  /** Until the panel has risen and stopped: open, and its height no longer moving. A send raises it from the bar over
+   *  340 ms, and the bar's own thread is followed down at once, so followedDown can pass before it has risen; a wheel
+   *  point taken then can land on the panel's edge, not the thread. Read every 50 ms, like followedDown. */
+  const panelOpen = (page: import("@playwright/test").Page) =>
+    expect
+      .poll(
+        () =>
+          page.getByTestId("chat-card").evaluate(
+            (card) =>
+              card.getAttribute("data-dock") === "full" &&
+              !card
+                .getAnimations({ subtree: true })
+                .some((a) => a.playState === "running" && (a as CSSTransition).transitionProperty === "height")
+          ),
+        { timeout: 15_000, intervals: [50] }
+      )
+      .toBe(true);
   const fillThread = async (page: import("@playwright/test").Page, n: number) => {
     for (let i = 0; i < n; i++) {
       await send(page, `E2E: earlier question ${i + 1}`);
@@ -562,6 +579,7 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
     await streamAnswers(page, [{ rounds: [[...LONG, ...LONG]], delayMs: 250 }]);
     await open(page);
     await send(page, "E2E: a long plan please");
+    await panelOpen(page);
     await followedDown(page, 150);
     await watch(page);
     await expect(pill(page), "following: no pill").toHaveCount(0);
@@ -596,6 +614,7 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
     await open(page);
     expect(await page.evaluate(() => document.documentElement.dataset.theme), "the page is dark").toBe("dark");
     await send(page, "E2E: a long plan please");
+    await panelOpen(page);
     await followedDown(page, 150);
     await wheel(page, -150);
     await expect(pill(page)).toBeVisible();
