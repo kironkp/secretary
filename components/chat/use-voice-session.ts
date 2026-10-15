@@ -5,7 +5,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { OpenAIRealtimeVoice } from "@/lib/realtime/openai-webrtc";
 import type { ToolToast, VoiceErrorKind, VoiceFlavor, VoiceStatus } from "@/lib/realtime/types";
 
-export type TranscriptLine = { id: string; role: "user" | "assistant"; text: string; final: boolean };
+/** id: the line's key (role and item); itemId: the server's item id alone. */
+export type TranscriptLine = { id: string; itemId: string; role: "user" | "assistant"; text: string; final: boolean };
 export type ActiveToast = ToolToast & { key: number };
 
 export function useVoiceSession() {
@@ -24,6 +25,13 @@ export function useVoiceSession() {
   // the secretary thinking, and the interview orb shows it.
   const [toolsInFlight, setToolsInFlight] = useState(0);
   const toastKey = useRef(0);
+  // Who is told the moment his turn begins (the chat thread): called as the event arrives, not after a render, so
+  // nothing he does in between is missed.
+  const turnListeners = useRef(new Set<(itemId: string) => void>());
+  const onTurn = useCallback((listener: (itemId: string) => void) => {
+    turnListeners.current.add(listener);
+    return () => void turnListeners.current.delete(listener);
+  }, []);
 
   // Lines are keyed by the server's item id: barge-in interleaves user and
   // assistant streams, and "append to the last line of my role" fragments
@@ -36,7 +44,7 @@ export function useVoiceSession() {
         const idx = prev.findIndex((l) => l.id === key);
         if (idx === -1) {
           if (!text.trim() && !final) return prev;
-          return [...prev, { id: key, role, text, final }];
+          return [...prev, { id: key, itemId: id, role, text, final }];
         }
         const line = prev[idx];
         if (line.final) return prev; // duplicate final (GA + beta event names)
@@ -71,6 +79,7 @@ export function useVoiceSession() {
         }
       });
       provider.on("userTranscript", appendTranscript("user"));
+      provider.on("userTurn", (id) => turnListeners.current.forEach((l) => l(id)));
       provider.on("assistantTranscript", appendTranscript("assistant"));
       provider.on("assistantSpeaking", setAssistantSpeaking);
       provider.on("modelChanged", setModel);
@@ -145,6 +154,8 @@ export function useVoiceSession() {
     muted,
     assistantSpeaking,
     model,
+    /** Be told each time his turn begins (his speech committed as an item); returns the unsubscribe. */
+    onTurn,
     start,
     end,
     switchModel,

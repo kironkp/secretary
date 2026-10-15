@@ -426,6 +426,7 @@ export function ChatThread({
         if (scrollRef.current) scrollRef.current.scrollTop = top;
       },
       onChange: (s) => setNewBelow(s.pill),
+      note: (line) => console.warn(line),
     })
   );
   useEffect(() => {
@@ -464,7 +465,10 @@ export function ChatThread({
     if (liveAnswer?.text) follow.keep();
   }, [liveAnswer?.text, liveAnswer?.round, follow]);
 
-  // On a call, a new line of his is a send, as a typed one is (v1.09 r6): before it is painted.
+  // On a call, a new line of his is a send, as a typed one is (v1.09 r6), judged from when his turn began: marked as
+  // that event arrives, and the line looked at before it is painted.
+  const onTurn = call.session.onTurn;
+  useEffect(() => onTurn((itemId) => follow.began(itemId)), [onTurn, follow]);
   useLayoutEffect(() => {
     follow.heard(liveLines);
   }, [liveLines, follow]);

@@ -672,6 +672,13 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
     // GA name conversation.item.added, beta conversation.item.created.
     if (t === "conversation.item.added" || t === "conversation.item.created") {
       this.itemOrder.add(event);
+      const item = event.item as { id?: unknown; role?: unknown } | undefined;
+      if (item?.role === "user" && typeof item.id === "string") this.emit("userTurn", item.id);
+      return;
+    }
+    // His speech, committed as an item: his turn began (its transcript comes whenever it is ready).
+    if (t === "input_audio_buffer.committed") {
+      if (typeof event.item_id === "string") this.emit("userTurn", event.item_id);
       return;
     }
     if (t === "input_audio_buffer.speech_started") {

@@ -34,6 +34,9 @@ export type VoiceEvents = {
   // id = the server's item/response id: transcript lines are keyed by it so
   // interleaved streams (barge-in) can never fragment or double.
   userTranscript: (id: string, text: string, final: boolean) => void;
+  /** His turn began: his speech was committed as an item (id = that item's). Nothing is shown; the chat thread marks
+   *  the moment, so his line's transcript, which may come after the answer has begun, is judged from here. */
+  userTurn: (id: string) => void;
   assistantTranscript: (id: string, text: string, final: boolean) => void;
   assistantSpeaking: (speaking: boolean) => void;
   /** A tool call left for the server: the model is waiting on it (the pause). */
