@@ -141,6 +141,44 @@ describe("following", () => {
     expect(t.box.top).toBe(t.end());
   });
 
+  it("a wheel to the bottom that the browser stops at the end it last drew, a piece behind (Chromium, logged): it follows again", () => {
+    // Logged in Chromium at a twofold CPU slowdown: a piece took the thread from 1083 to 1129, his wheel came 2 ms
+    // later at 84, and the scroll stopped at 566: the end of the frame before (566 + 517 = 1083).
+    const t = thread({ top: 84, height: 1037, view: 517 });
+    t.f.leave();
+    t.piece(46); // 1083, seen by the page
+    t.piece(46); // 1129
+    t.f.nudge();
+    t.box.top = 566;
+    t.f.scrolled();
+    t.tick(150);
+    expect(t.f.following()).toBe(true);
+    expect(t.box.top).toBe(t.end());
+  });
+
+  it("a scroll down that stops short of every end the thread has had is not at the bottom", () => {
+    const t = thread({ top: 84, height: 1037, view: 517 });
+    t.f.leave();
+    t.piece(46);
+    t.piece(46);
+    t.f.nudge();
+    t.box.top = 500; // 500 + 517 = 1017: no end it had
+    t.f.scrolled();
+    t.tick(150);
+    expect(t.f.following()).toBe(false);
+  });
+
+  it("a step up that happens to stop at an end the thread once had is still up: only a scroll down can reach an end", () => {
+    const t = thread({ top: 0, height: 1037, view: 517 });
+    t.piece(46); // followed: 1083, at 566
+    t.piece(46); // followed: 1129, at 612
+    t.f.nudge();
+    t.box.top = 566; // up 46: 566 + 517 = 1083, the end it had a piece ago
+    t.f.scrolled();
+    t.tick(150);
+    expect(t.f.following()).toBe(false);
+  });
+
   it("the scrollend of the page's own write, arriving after his wheel, does not settle it (Chromium, logged)", () => {
     // Logged in Chromium: the page followed a piece to 334; his wheel came; then the scroll and scrollend events of
     // that write arrived; the next piece came before his wheel's scroll applied.
