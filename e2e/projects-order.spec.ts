@@ -116,6 +116,50 @@ test("dark: the same roles on the dark tokens, text at 4.5:1", async ({ page, ba
   await page.screenshot({ path: `${DIR}/projects-390-dark.png` });
 });
 
+// v1.11 r3: in dark the lifted row was the card's own colour, and its shadow does not show on black.
+for (const theme of ["light", "dark"] as const) {
+  test(`the lifted row in ${theme}: ${theme === "light" ? "white" : "the raised #2c2c2e, not the card's colour"}, its text at 4.5:1`, async ({ page, baseURL }) => {
+    if (theme === "dark") await page.context().addCookies([{ name: "theme", value: "dark", url: baseURL! }]);
+    await page.goto("/projects");
+    expect(await page.evaluate(() => document.documentElement.dataset.theme ?? "light")).toBe(theme);
+    const name = MINE.at(-1)!;
+    const from = (await handle(page, name).boundingBox())!;
+    await page.mouse.move(from.x + 22, from.y + 22);
+    await page.mouse.down();
+    await page.mouse.move(from.x + 22, from.y - 40, { steps: 4 });
+    await expect(row(page, name)).toHaveAttribute("data-lifted", "true");
+    const seen = await row(page, name).evaluate((li) => {
+      const rgb = (s: string) => (s.match(/\d+(\.\d+)?/g) ?? []).slice(0, 3).map(Number);
+      const lum = ([r, g, b]: number[]) => {
+        const f = (c: number) => ((c /= 255) <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+        return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+      };
+      const ratio = (fg: string, bg: string) => {
+        const [a, b] = [lum(rgb(fg)), lum(rgb(bg))].sort((x, y) => y - x);
+        return (a + 0.05) / (b + 0.05);
+      };
+      const fill = getComputedStyle(li).backgroundColor;
+      return {
+        fill,
+        card: getComputedStyle(li.closest("[data-project-group]")!).backgroundColor,
+        name: ratio(getComputedStyle(li.querySelector("[data-project-name-text]")!).color, fill),
+        count: ratio(getComputedStyle(li.querySelector("[data-project-count]")!).color, fill),
+      };
+    });
+    await page.screenshot({ path: `${DIR}/projects-390-dragging-${theme}.png` });
+    // Back where it started before letting go: no move.
+    await page.mouse.move(from.x + 22, from.y + 22, { steps: 4 });
+    await page.mouse.up();
+    if (theme === "light") expect(seen.fill).toBe("rgb(255, 255, 255)");
+    else {
+      expect(seen.fill).toBe("rgb(44, 44, 46)");
+      expect(seen.fill, "not the card's own colour").not.toBe(seen.card);
+    }
+    expect(seen.name, "its name").toBeGreaterThanOrEqual(4.5);
+    expect(seen.count, "its count").toBeGreaterThanOrEqual(4.5);
+  });
+}
+
 test("a drag by the handle moves the project at once, and the order stays after a reload", async ({ page }) => {
   await page.goto("/projects");
   expect(await order(page)).toEqual(MINE);

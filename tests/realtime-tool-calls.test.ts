@@ -7,7 +7,7 @@
 // The client is driven through its event handler: the data channel and the
 // tool route are fakes.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { OpenAIRealtimeVoice } from "@/lib/realtime/openai-webrtc";
+import { OpenAIRealtimeVoice, TOOL_CALL_LIMIT_MS } from "@/lib/realtime/openai-webrtc";
 
 type Sent = { type: string; item?: { type: string; call_id: string; output: string } };
 
@@ -20,10 +20,14 @@ function client() {
   const asked: { name: string; project: string; answer: () => void }[] = [];
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (url: string, init?: { body?: string }) => {
+    vi.fn(async (url: string, init?: { body?: string; signal?: AbortSignal }) => {
       if (url !== "/api/secretary/tools") return new Response("{}");
       const body = JSON.parse(String(init?.body)) as { name: string; args: { project: string } };
-      await new Promise<void>((resolve) => asked.push({ name: body.name, project: body.args.project, answer: resolve }));
+      // Given up on (the signal), it fails the way fetch does.
+      await new Promise<void>((resolve, reject) => {
+        asked.push({ name: body.name, project: body.args.project, answer: resolve });
+        init?.signal?.addEventListener("abort", () => reject(new DOMException("The operation was aborted.", "AbortError")));
+      });
       return new Response(JSON.stringify({ result: { project: body.args.project, place: 1 } }));
     })
   );
@@ -71,6 +75,30 @@ describe("a reply's function calls, on a call", () => {
       "output c3",
       "response.create",
     ]);
+  });
+
+  it("a call held past the limit gets an error output, the calls after it run, and the reply goes on once (v1.11 r3)", async () => {
+    expect(TOOL_CALL_LIMIT_MS, "under Heroku's 30 s router limit").toBeLessThan(30_000);
+    vi.useFakeTimers();
+    try {
+      const flush = () => vi.advanceTimersByTimeAsync(0);
+      const c = client();
+      c.call("c1", "Atlas");
+      c.call("c2", "Birch");
+      await flush();
+      expect(c.asked.map((a) => a.project), "the first is asked; it never answers").toEqual(["Atlas"]);
+      await vi.advanceTimersByTimeAsync(TOOL_CALL_LIMIT_MS - 1);
+      expect(c.sent, "not yet given up on").toEqual([]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(c.asked.map((a) => a.project), "the next is asked once the first is given up on").toEqual(["Atlas", "Birch"]);
+      c.asked[1].answer();
+      await flush();
+      expect(c.sent.map((e) => (e.type === "conversation.item.create" ? `output ${e.item!.call_id}` : e.type))).toEqual(["output c1", "output c2", "response.create"]);
+      expect(JSON.parse(c.sent[0].item!.output)).toEqual({ error: "No answer within 20 seconds. It may still have been done: check before doing it again." });
+      expect(JSON.parse(c.sent[1].item!.output)).toEqual({ project: "Birch", place: 1 });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("a single call is answered and the reply goes on, as before", async () => {
