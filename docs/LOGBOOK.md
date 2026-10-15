@@ -7,6 +7,52 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 ---
 
+## v1.17 — A model write never loses his notes (2026-10-15)
+
+`5930c5e` (the rule, docs/tasks/SPEC.md §1, new), `a34d8aa`, `0cf87ae` (the
+tests, first and red), `db01d53` (the code), this commit (this entry and the
+version).
+
+The Reviewer's probe for 1.10 found it: every model write of a note replaced
+the whole note. A note he had typed went the moment the model added one
+through update_task, amend_task or log_status; his own save from the editor
+wiped what the model had added while it was open; a done note was dropped; a
+blocked reason overwrote the note. That is his data on the live app, so it
+came before 1.10.
+
+- A model's note is added a line at a time: the lines the note lacks, after
+  it, in their order, each once (trailing spaces don't count). It is done in
+  the UPDATE itself, reading the row's own note, so two writes at once both
+  land. If every line is there already, nothing is written and the result
+  says so. Every path: update_task, amend_task, log_status, create_task and
+  extraction on an open task of the same title, add_to_list on an item
+  already there, update_event.
+- Replacing takes a flag the tool text keeps for when he asks to change or
+  clear the note, and the result gives back what it replaced.
+- On a task only similar to the one asked for, create_task says the note was
+  not saved, and extraction counts it.
+- Done with a note: added in the same UPDATE; a recurring task's next one
+  copies the note from before it. Blocked: the reason goes only where the
+  task view now shows it ("Waiting on"), not in the note.
+- His editor and the view send the note as he opened it. What a model added
+  while he typed is kept after his text; what he deleted stays deleted. A
+  page from before this version sends nothing: his text, then whatever else
+  was there, so nothing is lost.
+- Google never sends a note back, so events add the same way, and Google is
+  sent the whole note.
+- The understanding model now reads a long note's head and tail, so the
+  newest line is not the first one cut.
+- The browser tests start a stand-in for Claude's API beside the app
+  (e2e/model-standin.mjs), so a chat turn can reach the real chat route and
+  its tools with no model and no key.
+
+Cost: a note write that changes a note is a re-read at the next sweep, as
+before. New ones: a note on an open task of the same title, and on an item
+already on a list. A repeated note now costs nothing. The cut changes no hash.
+
+Tested against main first: 49 of the 51 new unit tests failed there, every
+seed of the walk failed, and so did each browser test, in both browsers.
+
 ## v1.11 — His project order (2026-10-14)
 
 `8ecf219`, `a1b70a6`, `b2577e2` (the spec, docs/projects/SPEC.md, new, with
