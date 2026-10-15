@@ -11,9 +11,12 @@
 // 3. pill(): off, the bottom out of view, and something written below since
 //    following stopped.
 // 4. A scroll with no input turns it off when it is not the position the page
-//    last wrote and leaves him more than NEAR_PX above the bottom (a clamp
-//    leaves him at the bottom, so it never counts). keep() checks the same
-//    before it writes: that scroll's event can come after the next piece.
+//    last wrote and leaves him more than NEAR_PX above the bottom as it stood
+//    when the page last wrote (what was written since is not his scroll: the
+//    panel growing pulls the position down to the old bottom in the same read
+//    as a new piece). A clamp leaves him at the bottom, so it never counts.
+//    keep() checks the same before it writes: that scroll's event can come
+//    after the next piece.
 // 5. keep(): while on, every piece, round restart and size change puts the
 //    bottom in view.
 
@@ -49,8 +52,9 @@ export function createFollow(opts: { read: () => ThreadBox; write: (top: number)
     follow = false;
     seenHeight = seen;
   };
-  /** Rule 4: moved, not by the page, and left above the bottom. */
-  const movedByNoInput = (b: ThreadBox) => !ours(b) && gapOf(b) > NEAR_PX;
+  /** Rule 4: moved, not by the page, and left above the bottom as it stood at the page's last write (or as it stands, if shorter). */
+  const movedByNoInput = (b: ThreadBox) =>
+    !ours(b) && Math.max(0, Math.min(written?.height ?? b.height, b.height) - b.top - b.view) > NEAR_PX;
 
   return {
     following: () => follow,
