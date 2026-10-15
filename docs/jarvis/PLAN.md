@@ -246,8 +246,17 @@ beside me in a workshop."*
   bottom; tests sample every frame in the page, in Chromium and in local
   WebKit, 20 runs each. r4 failed on a lost touch lift, r5 on a spoken line
   of his not counting as a send; r6 (`cd712f9`, 2026-10-15) counts that
-  line as a send only if no hand came since his turn began, and is with
-  the Reviewer.
+  line as a send only if no hand came since his turn began. **PASSed
+  2026-10-15 at `cd712f9`** (Reviewer: CI-exact, 10 runs per engine plus 5
+  throttled with exit 0, 0 out of view at paint, 11 of 12 voice mutants
+  killed and the 12th equivalent, a rule-free fake call) and pushed to main.
+  Main's CI then failed (run 38732670478) in the iPhone browser job, the
+  Linux WebKit run only GitHub has, on three tests' frame-count minimums;
+  Heroku stayed on v66. A test-only fix is being made, and from now on
+  every offer carries a green GitHub run on `test` for its exact SHA.
+  Test nit for a later round: "the pill in dark" can take its wheel point
+  before the panel has risen (1 run of 26 under load); wait for the panel
+  first.
 - **1.08** — after 1.09, ahead of 1.05: an understanding
   call that was sent and not answered is counted, and a provider failure
   backs off. Today: up to 3 attempts a sweep per project, every 10 minutes,
@@ -627,7 +636,9 @@ Small defects the baseline found, each a short task of its own:
   Writes no product code.
 - **Executor:** all code, tests and measurements, one worktree per task under
   `~/code/secretary-extras/worktrees/`. Ends with a RESULT: SHAs, what changed,
-  the evidence, how to check it.
+  the evidence, how to check it. The evidence includes a green GitHub run on
+  the `test` branch for the exact SHA offered: GitHub's iPhone browser job
+  (Linux WebKit) runs nowhere else (since 2026-10-15).
 - **The repository is public.** Committed files carry counts and code
   references only. Anything holding Kiron's own content (project and list
   names, task titles, people, screenshots, query output) stays in
