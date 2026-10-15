@@ -360,7 +360,13 @@ beside me in a workshop."*
     weights, spacing and cards change. Screen by screen, smallest risk
     first, shared tokens and pieces, no per-screen copies; the Overview
     keeps its behaviour. A screen that needs a new layout rather than a
-    restyle is drawn for Kiron first.
+    restyle is drawn for Kiron first. Also, from 1.09 (the browser's scroll
+    anchoring held the chat thread at the bottom after his hand, in the
+    WebKit GitHub runs; fixed there with overflow-anchor: none): check the
+    other scrollers whose position the page writes itself, i.e. the tab
+    bar (`nav-tabs.tsx:64`) and the Timeline's zoom and "today" scrolls
+    (`timeline-board.tsx:469`, `:473`), and turn anchoring off where it
+    moves them.
 - **1.05** — "asked means asked", the rest of what 1.03 began, built on main
   after 1.04: clarifications, understanding questions and nudges marked only
   after the hand-over; voice settles when the call really ran, not when the
