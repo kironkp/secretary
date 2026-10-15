@@ -110,8 +110,10 @@ and the row; New project. What did not:
 
 The Projects screen's browser tests all passed in both browsers.
 
-**r3** (`c285eb1` the tests, first and red; `f4d7a7e` the rule; `4c5eb6b` the
-code; this commit). The Reviewer found the bottom edge broken in Chrome:
+**r3** (`c285eb1`, `44ef59c`, `5ae0136`, `977c9bc` the tests, first and red; `f4d7a7e`,
+`e0841c5` the rule; `4c5eb6b`, `c37c43a` the code; `9a052a4` this entry's
+first lines; this commit). The Reviewer failed r2 on one thing, the bottom
+edge in Chrome, and named four more to put right in r3:
 
 - Held at the bottom, the list scrolled past its end, the screen went blank,
   and the row landed last: the held row is moved by a transform, Chrome counts
@@ -125,9 +127,25 @@ code; this commit). The Reviewer found the bottom edge broken in Chrome:
   the 64 px above the tab bar and the voice button now; held lower, over
   them, the list scrolls at full speed.
 
+- A move's nine reads went to its one database connection all at once. pg 8
+  queues them and warns (three times in the tests); pg 9 will refuse them.
+  In a transaction they now go one after another; on their own, still at once.
+- On a call, the function calls of a reply run one after the other since r2,
+  so one that never answered held every call after it, and the reply. Each
+  now has 20 seconds (Heroku cuts a request at 30); past that the model is
+  told it got no answer and that it may still have been done, the next call
+  runs, and the reply goes on once.
+- In dark, the lifted row was the card's own colour, and a shadow does not
+  show on black. It is the raised #2c2c2e now; white in light as before.
+- Two things the queue already did right are tested now: a move that is
+  refused, or fails, does not stop the moves after it, and someone else's
+  move does not wait behind his. Each test fails on a version that breaks it.
+
 Tested by mouse and by touch, held 0.4 and 1.5 seconds and moved back to the
 middle: the list stops at its end, the row stays under the finger, and it
-lands where it is let go. The edge zone is checked at 390 and 1280 wide.
+lands where it is let go. The edge zone is checked at 390 and 1280 wide. The
+Projects spec can run again now (mine put back in their first order, a new
+project's own name), so it ran ten times in each browser.
 
 ## v1.09 — A chat answer reaches him, once (2026-10-14)
 
