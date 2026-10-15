@@ -12,6 +12,9 @@
 //    stood when his input began, on; otherwise off. What is written below him
 //    after that is not his scroll (a browser takes a wheel to the bottom as it
 //    was when the wheel came, though a piece lands before the scroll does).
+//    And a scroll down that stopped exactly at an end the thread had a moment
+//    ago is at the bottom: a browser stops a scroll at the end it last drew,
+//    which can be a piece behind the page.
 // 3. While following, keep() puts the bottom in view, at once.
 // 4. A scroll with no input counts as his (following off) only when it leaves
 //    him above the bottom, is not what the page last wrote, and neither height
@@ -24,6 +27,7 @@ export type ThreadBox = { top: number; height: number; view: number };
 
 const SETTLE_MS = 150;
 const NEAR_PX = 32;
+const RECENT_HEIGHTS = 4;
 
 export function createFollow(opts: {
   read: () => ThreadBox;
@@ -43,6 +47,15 @@ export function createFollow(opts: {
   let startHeight = 0;
   /** A scroll event since his input began that was not the page's own write. */
   let moved = false;
+  /** Where the thread stood when his input began. */
+  let startTop = 0;
+  /** The last few content heights the thread has had. */
+  const heights: number[] = [];
+  const saw = (b: ThreadBox) => {
+    if (heights[heights.length - 1] === b.height) return;
+    heights.push(b.height);
+    if (heights.length > RECENT_HEIGHTS) heights.shift();
+  };
   /** Where the page last put the thread, and its sizes then. */
   let written: ThreadBox | null = null;
 
@@ -70,7 +83,9 @@ export function createFollow(opts: {
     timer = null;
     settling = false;
     if (handsDown) return;
-    follow = hisGap(opts.read()) <= NEAR_PX;
+    const b = opts.read();
+    const atAnEnd = b.top > startTop + 1 && heights.some((h) => Math.abs(b.top + b.view - h) <= 1);
+    follow = hisGap(b) <= NEAR_PX || atAnEnd;
     if (follow) put();
   };
   const settleLater = () => {
@@ -80,7 +95,10 @@ export function createFollow(opts: {
   /** His input: the start of a gesture, unless one is still settling. */
   const begin = () => {
     if (!settling) {
-      startHeight = opts.read().height;
+      const b = opts.read();
+      saw(b);
+      startHeight = b.height;
+      startTop = b.top;
       moved = false;
     }
     settling = true;
@@ -109,6 +127,7 @@ export function createFollow(opts: {
     /** A scroll event. */
     scrolled() {
       const b = opts.read();
+      saw(b);
       if (handsDown || settling) {
         // His scroll, or its momentum: not settled yet. (The event of a write the page made before his input can
         // come after it: that one has not moved anything of his.)
@@ -126,8 +145,10 @@ export function createFollow(opts: {
     },
     /** A piece came, a round started over, or a size changed: while following, the bottom in view. */
     keep() {
+      const b = opts.read();
+      saw(b);
       if (!follow || handsDown || settling) return;
-      if (movedByNoInput(opts.read())) {
+      if (movedByNoInput(b)) {
         follow = false;
         return;
       }
