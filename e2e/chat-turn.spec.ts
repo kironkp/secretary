@@ -749,11 +749,12 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
     }
     /** One exchange: his turn committed; his line's words before the answer begins (lineAfter 0) or after that many of
      *  its pieces; the answer in 24 pieces 70 ms apart; his wheel up after the piece `wheelAfter`. Returns the frame
-     *  count just after his line was heard. */
+     *  counts just before his line's event was handed to the page and just after. */
     async function exchange(page: import("@playwright/test").Page, s: ReturnType<typeof stream>, k: number, o: { lineAfter?: number; wheelAfter?: number } = {}) {
+      let lineAt = -1;
       let heardAt = -1;
-      // Marked once the line's event has been handed to the page: the frames from then on.
       const hear = async () => {
+        lineAt = await framesSoFar(page);
         await s.line(k);
         heardAt = await framesSoFar(page);
       };
@@ -768,7 +769,7 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
       }
       await s.done(k);
       await expect(page.getByText(/Point 24 of the plan/)).toHaveCount(k);
-      return heardAt;
+      return { lineAt, heardAt };
     }
     async function startCall(page: import("@playwright/test").Page) {
       await standIn(page);
@@ -801,11 +802,11 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
       await exchange(page, s, 1, { wheelAfter: 8 });
       await expect(pill(page), "off, and the answer went on below him").toBeVisible();
       // The second: his spoken question is a send.
-      const heardAt = await exchange(page, s, 2);
+      const { lineAt, heardAt } = await exchange(page, s, 2);
       await expect(pill(page)).toHaveCount(0);
       expect(await gap(page), "the second answer ends in view").toBeLessThanOrEqual(1);
       const seen = await frames(page);
-      const before = await sinceHand(page, seen, heardAt);
+      const before = await sinceHand(page, seen, lineAt);
       expect(before.said, "frames said between his wheel and his next question").toBeGreaterThan(5);
       expect(before.pulled, "moved back down between two frames before his next question").toBeLessThanOrEqual(2);
       const f = await followed(page, seen, seen[heardAt].t);
@@ -829,11 +830,11 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
         await exchange(page, s, 1, { wheelAfter: 8 });
         // His turn is committed, the answer begins, and his words are heard only after its fourth piece: the head is
         // written under the composer until then (named in the spec), and followed from then on.
-        const heardAt = await exchange(page, s, 2, { lineAfter: 4 });
+        const { lineAt, heardAt } = await exchange(page, s, 2, { lineAfter: 4 });
         await expect(pill(page)).toHaveCount(0);
         expect(await gap(page), "the second answer ends in view").toBeLessThanOrEqual(1);
         const seen = await frames(page);
-        expect((await sinceHand(page, seen, heardAt)).pulled, "moved back down before his line was heard").toBeLessThanOrEqual(2);
+        expect((await sinceHand(page, seen, lineAt)).pulled, "moved back down before his line was heard").toBeLessThanOrEqual(2);
         const f = await followed(page, seen, seen[heardAt].t);
         expect(f.live, "frames said after his line was heard").toBeGreaterThan(15);
         expect(f.out, inViewMessage(f)).toBe(0);
