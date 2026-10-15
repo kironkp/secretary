@@ -228,9 +228,8 @@ test("held near the top edge, a long list scrolls under the row: a project goes 
   const t0 = Date.now();
   await expect.poll(() => scroller.evaluate((el) => el.scrollTop), { timeout: 10_000 }).toBe(0);
   console.log(`[edge scroll] ${startScroll} px to the top in ${Date.now() - t0} ms, held 6 px from the edge`);
-  // Then onto the first row, and let go.
-  const first = (await row(page, before[0]).boundingBox())!;
-  await page.mouse.move(from.x + 22, first.y + 4, { steps: 4 });
+  // Let go there: held above the first row, it is first (the rows have made room below it).
+  await expect(row(page, before[0])).toBeInViewport();
   const saved = stored(page);
   await page.mouse.up();
   await saved;
