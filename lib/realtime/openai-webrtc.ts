@@ -19,8 +19,13 @@ import type {
 
 const OPENAI_CALLS_URL = "https://api.openai.com/v1/realtime/calls";
 const MAX_RECONNECTS = 5;
-/** How long a function call on a call may take before it is given up on: under Heroku's 30 s router limit. */
-export const TOOL_CALL_LIMIT_MS = 20_000;
+/**
+ * How long a function call on a call may take before it is given up on: under Heroku's 30 s router limit, which
+ * already ends any request that reaches it, so this matters only for one that never arrives.
+ */
+export const TOOL_CALL_LIMIT_MS = 28_000;
+/** The lookups that pay a model or the web for each answer: given up on, asking again would pay again. */
+const PAID_LOOKUPS = new Set(["consult_brain", "search_web"]);
 
 /** Direction attribute of the first audio m-line section of an SDP. */
 function sdpAudioDirection(sdp: string): string | null {
@@ -644,7 +649,14 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
       if (res.ok) body = await res.json();
     } catch {
       if (stop.signal.aborted) {
-        body = { result: { error: `No answer within ${TOOL_CALL_LIMIT_MS / 1000} seconds. It may still have been done: check before doing it again.` } };
+        const late = `No answer within ${TOOL_CALL_LIMIT_MS / 1000} seconds`;
+        body = {
+          result: {
+            error: PAID_LOOKUPS.has(name)
+              ? `${late}: it took too long. Do not ask again unless the user asks.`
+              : `${late}. It may still have been done: check before doing it again.`,
+          },
+        };
       }
       /* otherwise the default above */
     } finally {
