@@ -513,6 +513,33 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
     expect(f.grew, "frames that drew new words after the tap").toBeGreaterThan(5);
   });
 
+  // DIAGNOSTIC, to be removed before the round is offered: on CI's WebKit a wheel step at the bottom turned following
+  // off (the page wrote nothing after it) and the thread still kept to the bottom as the answer grew. Whether that is
+  // the browser's scroll anchoring: three tries as the page is, three with anchoring turned off on the thread by the
+  // test. It logs; it fails nothing.
+  test("DIAGNOSTIC: a wheel step at the bottom, with and without the browser's scroll anchoring", async ({ page }) => {
+    test.setTimeout(240_000);
+    await page.close();
+    for (const anchoring of ["as the page is", "off on the thread"]) {
+      for (let k = 1; k <= 3; k++) {
+        const p = await page.context().newPage();
+        await streamAnswers(p, [{ rounds: [Array.from({ length: 10 }, () => LONG).flat()], delayMs: 40 }]);
+        await open(p);
+        if (anchoring !== "as the page is") await thread(p).evaluate((el) => (el.style.overflowAnchor = "none"));
+        await send(p, "E2E: a long plan please");
+        await followedDown(p, 200);
+        const before = await thread(p).evaluate((el) => ({ top: Math.round(el.scrollTop), anchor: getComputedStyle(el).overflowAnchor || "(none)", supports: CSS.supports("overflow-anchor", "none") }));
+        await wheel(p, -120);
+        await p.waitForTimeout(1_500);
+        const after = await thread(p).evaluate((el) => ({ top: Math.round(el.scrollTop), gap: Math.round(el.scrollHeight - el.scrollTop - el.clientHeight) }));
+        const shown = (await pill(p).count()) > 0;
+        console.log(`[anchor-diag] ${anchoring}, try ${k}: overflow-anchor supported ${before.supports}, computed "${before.anchor}"; at the wheel top ${before.top}; 1.5 s later top ${after.top}, ${after.gap} px above the bottom, pill ${shown ? "shown" : "not shown"}`);
+        await landed(p, 1);
+        await p.close();
+      }
+    }
+  });
+
   test("a wheel up while the panel opens (input: wheel): off, never pulled back, the pill shows", async ({ page }) => {
     // 70 pieces, 60 ms apart (4.2 s): enough for new words in more than 10 frames after his wheel, in a browser that
     // draws four frames a second.
