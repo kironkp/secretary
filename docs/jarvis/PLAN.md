@@ -359,6 +359,9 @@ beside me in a workshop."*
     again, and a same-name test that caught its mutant 5 runs in 8.
     Accepted: if two of his projects share an exact creation time, the
     planner runs once after the deploy.
+    **r4 PASSED 2026-10-15 at `282c7e0`** (the Reviewer: stuck, late and
+    slow calls at 28 s; each timeout's words by kind; GitHub `test` 3 of
+    3) and pushed to main.
   - **1.12** — merge two projects. He asked for one project to replace
     and absorb another; it made a new one and left the old one. There is
     no merge tool. Wanted: the tasks, notes and the rest move into the
@@ -418,7 +421,10 @@ beside me in a workshop."*
   loses the promise); three tests the Reviewer's mutants showed missing.
   Also, from 1.09 r6: on a call his line is shown when it arrives, so a
   late line of his sits below the start of its answer; order call lines by
-  their place in the conversation.
+  their place in the conversation. And from 1.11 r4: a reply whose calls all time
+  out (five or more at 28 s) can meet the 2-minute idle check in the gap
+  before the reply starts and end the call; count a call's output, or the
+  chain's reply request, as activity.
 - **1.06** — one day count on the Overview (calendar days in his zone;
   `days_left` today is whole 24-hour periods, so in the evening a task due
   tomorrow at 17:00 counts as 0 days), and a size he sets on one card
