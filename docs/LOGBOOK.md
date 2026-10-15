@@ -63,6 +63,42 @@ moves in his order (until 1.07); a project that changes group does not return
 to its old place; the filter chips and the task editor's picker keep their own
 orders.
 
+**r2** (`31f9d2e` the rule; `aba4b27`, `3b6d2b7`, `9376f9b`, `de3503d` the
+tests; `db14c26` the code; this commit; 1.09 r4 merged in as `15eba81`, 1.09
+r5 as `3e3b735`, 1.09 r6 as `2595700`). The Reviewer
+failed the first round. Most of it held: 139 moves against their own model of
+the order, none wrong; no model call; the screen at 390; touch on the handle
+and the row; New project. What did not:
+
+- Eight moves at once hung the whole app. A move locked his projects in a
+  transaction, then read through the shared connections; with six of them
+  waiting their turn at the lock, the one holding it never got a connection
+  to read with, and nothing answered again until a restart. A call can do
+  this ("put these eight in this order" is eight function calls at once). Now
+  his moves wait their turn in the app holding nothing, one at a time in the
+  order they came; a move reads only through its own transaction; and no
+  request waits more than ten seconds for a connection. On a call, a reply's
+  function calls now run one after the other, and the reply goes on once,
+  after the last (it went on after each). Tested: ten moves at once all finish,
+  in order, and an unrelated read answers while they run.
+- Two projects with one name traded places on the Projects tab whenever one
+  was recoloured. The order now ends on when a project was made, then its id,
+  everywhere.
+- The dark test measured the light page (dark is his theme setting, a cookie,
+  not the system's). It sets the cookie now and checks the page is dark.
+- The lifted row is 60 px, as drawn, and the rows around it do not move.
+- The strip between the count and the handle opens the project.
+- Held near the top or bottom edge, a long list scrolls under the row, so a
+  project goes from the bottom of sixteen to the top in one drag: 372 px of
+  list in under half a second in Safari's engine, about a second in Chrome on
+  a loaded machine, the row under his finger all the way.
+- Six of the Reviewer's broken versions passed every test; each now fails one
+  (a move down, the groups' order, a fresh load during a move, the Timeline's
+  lanes, the briefing's order, and a project whose only date is an event this
+  week, which is urgent). The seventh changes nothing anyone sees.
+
+The Projects screen's browser tests all passed in both browsers.
+
 ## v1.09 — A chat answer reaches him, once (2026-10-14)
 
 `8c68ef7`, `e44cc51` (the spec, docs/chat/SPEC.md, new, and docs/spend/SPEC.md
