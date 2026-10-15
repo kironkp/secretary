@@ -200,6 +200,44 @@ there was anything to scroll). On the tip: the chat spec 20 times, 140 of 140,
 and 5 times with the processor slowed fourfold, 35 of 35, a test with pieces
 every 40 ms among them.
 
+**r4** (`33ef75d`, `6ea0b90`, `9dd5a7d`, `c66e765` the rule; `84d3a60`,
+`e68d2dc`, `fc209ef`, `2f55833`, `175a4ed`, `c4049ad`, `df632bd` the tests;
+`beb817c`, `c117c0f`, `994c5b6` the code; this commit). The Reviewer failed `43ee5b9`, the third time on the same
+screen, and the approach changed. Every version until now guessed whether he
+had scrolled up from where the thread stood, and the layout moves that too:
+the panel opening, a round of the answer starting over shorter (in Safari's
+engine that lowered the position, it was read as his scroll up, and the
+thread stopped following for good), the keyboard. Now only his hands stop it.
+A wheel, a touch, a mouse on the thread or its scrollbar, or a scroll key
+pauses following at once, and nothing moves the thread under his hand. When
+his scroll has been still for 150 ms it decides once, by where he left it:
+within 32 px of the bottom it follows again, otherwise it stays where he put
+it. While it follows, every piece, every round that starts over and every
+change of size keeps the bottom in view. Each send of his turns it back on.
+The rule is a small module of its own, tested on made-up event sequences: a
+finger held for two seconds, the momentum after it lifts, a clamp while it
+settles. In the browser, Safari's engine now runs on this Mac beside Chrome's.
+The first 20-run set passed in Safari's engine and failed 8 times in 260 in
+Chrome's, for two reasons found by logging every event. Chrome takes a wheel
+to the bottom as it was when the wheel came, so a piece landing first left
+him just above the new bottom and following stayed off. And the end of the
+page's own last scroll, arriving just after his wheel, was taken for the end
+of his, so one more piece was followed before his scroll applied. Now his
+gesture is measured from the bottom as it stood when it began, and only the
+end of his own scroll settles it. The second set failed once in 260, caught
+again with the processor slowed: a piece landed a few milliseconds before
+his wheel, and Chrome stopped the scroll at the end of the frame before, one
+piece short. A scroll down that stops exactly at an end the thread had a
+moment ago now counts as the bottom (a scroll up never does). On the tip, the
+chat spec 20 times in each engine: 260 of 260 in Chrome's, 260 of 260 in
+Safari's, and the two tests that found the last causes 40 times each with the
+processor at half speed, 80 of 80. Measuring changed too: a read inside
+a frame's first callback comes before the follow has corrected that frame,
+so it saw, while the panel shrank, states the screen never shows. Whether the
+answer being written is in view is now judged at paint. Named, seen only on
+a device: a real finger, its momentum, VoiceOver, and dragging the iOS scroll
+indicator.
+
 ## v1.02 — A clear Overview (2026-10-13)
 
 `b980803` (the round as one commit: written 2026-10-06 as v0.34 and parked,
