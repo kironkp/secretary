@@ -43,7 +43,15 @@ scroll and its event). The rule now needs nothing but his first touch:
    opens. On a call, each new line of his is a send (v1.09 r6): it turns
    following on through the same path as a typed one, so a hand on the thread
    during one spoken answer does not leave the next exchange written under
-   the composer. A spoken move and a touched move are the same.
+   the composer. A spoken move and a touched move are the same. His line's
+   words can come after the answer has begun, so it is judged from when his
+   turn began (his speech committed as an item, marked then; nothing moves
+   at the mark): a send only if no hand of his, and no scroll with no input
+   that stopped following, has come since. A line with no words (an empty or
+   noise transcript) is never a send. A line whose turn was never marked is a
+   send (a real stream always marks first; the page logs it once a call, so
+   a renamed event shows); the lines already there when the thread is opened
+   during a call are not.
 2. **Off for the rest of the turn** at his first hand on the thread: a
    touch, a wheel, a mouse or pen down on the thread or its scrollbar, or a
    scroll key (PageUp, PageDown, ArrowUp, ArrowDown, Home, End, Space) when
@@ -212,6 +220,10 @@ same tool, so the same holds there.
   px (the panel opening, the keyboard closing) counts only when it leaves him
   more than g + 32 px above the bottom. Device-only: no browser test makes a
   scroll with no input in that moment.
+- On a call, the first words of an answer can come before his own line is
+  heard; they are followed from when it is. (After a hand in the turn
+  before, the head of the answer can be written under the composer for its
+  first few pieces.)
 - A turn's usage is one row, written when the model has answered. A process
   killed part way through a turn (a restart in the middle of its rounds)
   loses the rounds it had answered so far: they are in memory until then.
