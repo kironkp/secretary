@@ -110,6 +110,25 @@ and the row; New project. What did not:
 
 The Projects screen's browser tests all passed in both browsers.
 
+**r3** (`c285eb1` the tests, first and red; `f4d7a7e` the rule; `4c5eb6b` the
+code; this commit). The Reviewer found the bottom edge broken in Chrome:
+
+- Held at the bottom, the list scrolled past its end, the screen went blank,
+  and the row landed last: the held row is moved by a transform, Chrome counts
+  that in how far the page can scroll, so each frame made room for the next,
+  and nothing stopped it. Now the end is measured when the row is picked up,
+  and the scroll never goes past it.
+- Moved back up after that, the row was a few rows' height below his finger:
+  how far the list had scrolled was kept from before the browser pulled it
+  back. It is read from the list itself now, at every move and every frame.
+- The bottom edge lay under the tab bar, where he cannot see the rows. It is
+  the 64 px above the tab bar and the voice button now; held lower, over
+  them, the list scrolls at full speed.
+
+Tested by mouse and by touch, held 0.4 and 1.5 seconds and moved back to the
+middle: the list stops at its end, the row stays under the finger, and it
+lands where it is let go. The edge zone is checked at 390 and 1280 wide.
+
 ## v1.09 — A chat answer reaches him, once (2026-10-14)
 
 `8c68ef7`, `e44cc51` (the spec, docs/chat/SPEC.md, new, and docs/spend/SPEC.md
