@@ -338,7 +338,7 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
         { timeout: 15_000, intervals: [50] }
       )
       .toBe(true);
-  const fillThread =async (page: import("@playwright/test").Page, n: number) => {
+  const fillThread = async (page: import("@playwright/test").Page, n: number) => {
     for (let i = 0; i < n; i++) {
       await send(page, `E2E: earlier question ${i + 1}`);
       await expect(page.getByText(`E2E: an earlier answer ${i + 1},`)).toBeVisible();
