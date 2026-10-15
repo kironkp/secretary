@@ -7,10 +7,10 @@ beside me in a workshop."*
 
 ## Now
 
-- **Cycle counter: 108.** 1.00, 1.02, 1.03 and 1.04 are accepted; 1.01 is
-  open; 1.09 is being built (on `jarvis-1.09-chat-stream`, from `bdf56fc`,
-  with the Reviewer's two r5 follow-ups, test and walker only); then 1.11,
-  then the names on public main (below), then 1.10, 1.13, 1.12, 1.14, 1.15 (Kiron's feedback,
+- **Cycle counter: 109.** 1.00, 1.02, 1.03, 1.04 and 1.09 are accepted
+  (1.09 live 2026-10-15, `5d4d98e`); 1.01 is open; 1.11 is being built (on
+  `jarvis-1.11-project-order`, merging `5d4d98e`); then the names on public
+  main (below), then 1.10, 1.13, 1.12, 1.14, 1.15 (Kiron's feedback,
   his mockup approved 2026-10-14, and the whole site in its look), then
   1.08, 1.05, 1.06, 1.07. Each pushed to Heroku as it passes (Kiron:
   "Push to heroku for each update"). See §9.
@@ -260,7 +260,10 @@ beside me in a workshop."*
   turns anchoring off on the thread and makes the frame minimums count
   frames that drew new words. **PASSed 2026-10-15 at `5d4d98e`** (GitHub
   `test` 3 of 3, CI-exact, 10 runs per local engine plus 5 throttled with
-  exit 0, the cause agreed from the logs) and pushed to main.
+  exit 0, the cause agreed from the logs). **Live**: main CI run
+  38764336225 success, Heroku's deploy of `5d4d98e` succeeded 16:02 UTC
+  (GitHub deployment 7097664228; the release number was not read, the
+  Heroku CLI's login had expired).
   Test nit for a later round: "the pill in dark" can take its wheel point
   before the panel has risen (1 run of 26 under load); wait for the panel
   first.
