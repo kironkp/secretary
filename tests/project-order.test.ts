@@ -43,7 +43,8 @@ import { db } from "@/lib/db";
 import { projects, tasks, user } from "@/lib/db/schema";
 import { byOrder, byUrgency } from "@/lib/project-order";
 import { moveProject } from "@/lib/projects/order";
-import { listProjects } from "@/lib/projects/list";
+import { GROUPS, listProjects } from "@/lib/projects/list";
+import { buildBriefing } from "@/lib/secretary/briefing";
 import { sectionKey } from "@/lib/layout/plan";
 import { clearPlanCache, lastPlannerUsage } from "@/lib/layout/plan-from-llm";
 import { computeCurrentPlan, persistPlan } from "@/lib/layout/plan-store";
@@ -105,6 +106,14 @@ async function his() {
   return { id, ids, ctx, tab, overview, positions, move: (project: string, to: Parameters<typeof moveProject>[2]) => moveProject(id, project, to) };
 }
 
+/** The names in the briefing's PROJECTS section, in the order it gives them. */
+const briefingProjects = (text: string) => {
+  const from = text.indexOf("PROJECTS (");
+  expect(from, "the briefing has a PROJECTS section").toBeGreaterThan(-1);
+  const section = text.slice(from).split("\n\n")[0];
+  return [...section.matchAll(/^- "([^"]+)" \(/gm)].map((m) => m[1]);
+};
+
 beforeEach(() => {
   clearPlanCache();
   models.calls = 0;
@@ -135,7 +144,48 @@ describe("one comparator", () => {
   });
 });
 
+describe("the order's last word (v1.11 r2)", () => {
+  it("ends on when it was made, then its id: two projects with one name keep their places against each other", () => {
+    const twin = (createdAt: string, id: string) => ({ name: "Twin", soonest: null, createdAt, id });
+    const older = twin("2026-01-01T00:00:00.000Z", "b");
+    const newer = twin("2026-02-01T00:00:00.000Z", "a");
+    expect([newer, older].sort(byOrder)).toEqual([older, newer]);
+    expect([older, newer].sort(byOrder)).toEqual([older, newer]);
+    const one = twin("2026-01-01T00:00:00.000Z", "a");
+    const two = twin("2026-01-01T00:00:00.000Z", "b");
+    expect([two, one].sort(byOrder)).toEqual([one, two]);
+  });
+
+  it("two projects with one name keep their places on the Projects tab and in list_projects when one is recoloured", async () => {
+    const h = await his();
+    const made = [
+      ...(await db.insert(projects).values({ userId: h.id, name: "Twin", status: "active" }).returning()),
+      ...(await db.insert(projects).values({ userId: h.id, name: "Twin", status: "active" }).returning()),
+    ];
+    const expected = made.toSorted((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || (a.id < b.id ? -1 : 1)).map((r) => r.id);
+    const twins = async () => (await listProjects(h.id, TZ)).filter((r) => r.name === "Twin").map((r) => r.id);
+    expect(await twins()).toEqual(expected);
+    // A model tells the two apart only by what they hold: the one made first has a task.
+    await db.insert(tasks).values({ userId: h.id, projectId: expected[0], title: "Twin: a task", status: "todo", source: "spoken" });
+    // The one made first is recoloured: Postgres writes a new copy of its row, which then comes back last.
+    for (const color of ["#ff3b30", "#34c759", "#007aff"]) {
+      await db.update(projects).set({ color }).where(eq(projects.id, expected[0]));
+      expect(await twins(), `after recolouring to ${color}`).toEqual(expected);
+      const listed = (await executeTool(h.ctx, "list_projects", {})).result as { name: string; open: number }[];
+      expect(listed.filter((p) => p.name === "Twin").map((p) => p.open)).toEqual([1, 0]);
+    }
+  });
+});
+
 describe("a move: a project to a place in its group, it and everything above it placed", () => {
+  it("down one is a move: the project goes one place down", async () => {
+    const h = await his();
+    expect(await h.move("Birch", "down")).toMatchObject({ ok: true, place: 2 });
+    expect((await h.tab()).active).toEqual(["Atlas", "Birch", "Cedar", "Dune", "Ember", "Fjord"]);
+    expect(await h.move("Birch", "down")).toMatchObject({ ok: true, place: 3 });
+    expect((await h.tab()).active).toEqual(["Atlas", "Cedar", "Birch", "Dune", "Ember", "Fjord"]);
+  });
+
   it("before any move the Projects tab is in the one order within each group (it was alphabetical)", async () => {
     const h = await his();
     expect(await h.tab()).toEqual({ active: ["Birch", "Atlas", "Cedar", "Dune", "Ember", "Fjord"], lists: ["Packing", "Shopping"], setAside: ["Grove"] });
@@ -326,6 +376,29 @@ describe("New project, on the Projects tab", () => {
 });
 
 describe("what a model is handed", () => {
+  it("the groups keep their order whatever he placed: active, then lists, then set aside (the tab's rows, list_projects, the briefing)", async () => {
+    const h = await his();
+    // Placed first in its own group: by the one order alone it would stand before every active project.
+    await h.move("Grove", "top");
+    const rows = await listProjects(h.id, TZ);
+    const groups = rows.map((r) => r.group);
+    expect(groups).toEqual(groups.toSorted((a, b) => GROUPS.indexOf(a) - GROUPS.indexOf(b)));
+    expect(rows.at(-1)!.name).toBe("Grove");
+    const active = ["Atlas", "Birch", "Cedar", "Dune", "Ember", "Fjord"];
+    const listed = ((await executeTool(h.ctx, "list_projects", {})).result as { name: string }[]).map((p) => p.name);
+    expect(listed.indexOf("Grove")).toBeGreaterThan(Math.max(...active.map((n) => listed.indexOf(n))));
+    const briefed = briefingProjects((await buildBriefing(h.id, TZ)).text);
+    expect(briefed.indexOf("Grove")).toBeGreaterThan(Math.max(...active.map((n) => briefed.indexOf(n))));
+  });
+
+  it("the briefing's PROJECTS are in his order", async () => {
+    const h = await his();
+    await h.move("Fjord", "top");
+    await h.move("Dune", { index: 1 });
+    const briefed = briefingProjects((await buildBriefing(h.id, TZ)).text);
+    expect(briefed.filter((n) => ["Atlas", "Birch", "Cedar", "Dune", "Ember", "Fjord"].includes(n))).toEqual(["Fjord", "Dune", "Birch", "Atlas", "Cedar", "Ember"]);
+  });
+
   it("list_projects gives his projects in the one order", async () => {
     const h = await his();
     await h.move("Fjord", "top");

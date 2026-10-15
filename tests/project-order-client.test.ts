@@ -70,6 +70,20 @@ describe("the drag on the page", () => {
     expect(q.state()).toMatchObject({ shown: ["Tax paperwork", "Garden shed", "Kitchen repaint"], line: "Couldn't move Garden shed. It's back where it was." });
   });
 
+  it("a fresh load of the page while a move is being stored does not undo it; once stored, the next load is taken", async () => {
+    const first = gate();
+    const q = createMoveQueue<List>(["Garden shed", "Kitchen repaint", "Tax paperwork"], () => first.p);
+    q.move({ projectId: "tax", name: "Tax paperwork", to: 0 }, ["Tax paperwork", "Garden shed", "Kitchen repaint"]);
+    // The page is loaded again (a refresh after another change) and hands over the order it read before the move.
+    q.reset(["Garden shed", "Kitchen repaint", "Tax paperwork"]);
+    expect(q.state().shown).toEqual(["Tax paperwork", "Garden shed", "Kitchen repaint"]);
+    first.open({ ok: true });
+    await settle();
+    await settle();
+    q.reset(["Tax paperwork", "Garden shed", "Kitchen repaint", "New one"]);
+    expect(q.state().shown).toEqual(["Tax paperwork", "Garden shed", "Kitchen repaint", "New one"]);
+  });
+
   it("when the server says the card on the Overview stays where he put it, the page says so", async () => {
     const q = createMoveQueue<List>(["Garden shed", "Kitchen repaint"], () => Promise.resolve({ ok: true, says: "Kitchen repaint is at the top of your projects. On the Overview, its card stays where you put it." }));
     q.move({ projectId: "kitchen", name: "Kitchen repaint", to: 0 }, ["Kitchen repaint", "Garden shed"]);

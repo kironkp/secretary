@@ -1,0 +1,84 @@
+// v1.11 r2 (docs/projects/SPEC.md §2): on a call, the function calls of one
+// reply run one after the other, in the order the model gave them, and the
+// reply goes on once, after the last has answered. On 2b212e5 each call was
+// sent the moment it arrived, so "put these eight in this order" was eight
+// requests at once, and each answer asked the model to go on (eight
+// response.create, which the Realtime API refuses while a reply is under way).
+// The client is driven through its event handler: the data channel and the
+// tool route are fakes.
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { OpenAIRealtimeVoice } from "@/lib/realtime/openai-webrtc";
+
+type Sent = { type: string; item?: { type: string; call_id: string; output: string } };
+
+function client() {
+  const voice = new OpenAIRealtimeVoice();
+  const sent: Sent[] = [];
+  const internals = voice as unknown as { dc: unknown; handleEvent: (e: Record<string, unknown>) => void };
+  internals.dc = { readyState: "open", send: (s: string) => sent.push(JSON.parse(s) as Sent) };
+  /** The tool route: each request waits until the test answers it. */
+  const asked: { name: string; project: string; answer: () => void }[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init?: { body?: string }) => {
+      if (url !== "/api/secretary/tools") return new Response("{}");
+      const body = JSON.parse(String(init?.body)) as { name: string; args: { project: string } };
+      await new Promise<void>((resolve) => asked.push({ name: body.name, project: body.args.project, answer: resolve }));
+      return new Response(JSON.stringify({ result: { project: body.args.project, place: 1 } }));
+    })
+  );
+  const call = (id: string, project: string) =>
+    internals.handleEvent({ type: "response.function_call_arguments.done", call_id: id, name: "move_project", arguments: JSON.stringify({ project, to: "top" }) });
+  return { sent, asked, call };
+}
+const settle = async () => {
+  for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0));
+};
+
+afterEach(() => vi.unstubAllGlobals());
+
+describe("a reply's function calls, on a call", () => {
+  it("run one after the other, in the order the model gave them", async () => {
+    const c = client();
+    c.call("c1", "Atlas");
+    c.call("c2", "Birch");
+    c.call("c3", "Cedar");
+    await settle();
+    expect(c.asked.map((a) => a.project), "only the first is asked before it answers").toEqual(["Atlas"]);
+    c.asked[0].answer();
+    await settle();
+    expect(c.asked.map((a) => a.project)).toEqual(["Atlas", "Birch"]);
+    c.asked[1].answer();
+    await settle();
+    c.asked[2].answer();
+    await settle();
+    expect(c.asked.map((a) => a.project)).toEqual(["Atlas", "Birch", "Cedar"]);
+  });
+
+  it("each gets its answer, and the reply goes on once, after the last", async () => {
+    const c = client();
+    c.call("c1", "Atlas");
+    c.call("c2", "Birch");
+    c.call("c3", "Cedar");
+    for (let i = 0; i < 3; i++) {
+      await settle();
+      c.asked[i]?.answer();
+    }
+    await settle();
+    expect(c.sent.map((e) => (e.type === "conversation.item.create" ? `output ${e.item!.call_id}` : e.type))).toEqual([
+      "output c1",
+      "output c2",
+      "output c3",
+      "response.create",
+    ]);
+  });
+
+  it("a single call is answered and the reply goes on, as before", async () => {
+    const c = client();
+    c.call("c1", "Atlas");
+    await settle();
+    c.asked[0].answer();
+    await settle();
+    expect(c.sent.map((e) => (e.type === "conversation.item.create" ? `output ${e.item!.call_id}` : e.type))).toEqual(["output c1", "response.create"]);
+  });
+});

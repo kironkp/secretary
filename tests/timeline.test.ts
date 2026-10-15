@@ -233,6 +233,31 @@ describe("lanes in the one urgency order (SEC-A007, lib/project-order.ts)", () =
     expect(lanes.find((l) => l.name === "Alpha")?.soonest).toBe(TODAY + 5);
   });
 
+  it("the lanes follow his project order first (v1.11): the ones he placed by place, then the urgency order", () => {
+    const lanes = buildLanes(
+      [{ ...P("alpha", "Alpha"), position: 1 }, { ...P("beta", "Beta"), position: 0 }, P("gamma", "Gamma")],
+      [
+        task({ projectId: "alpha", dueAt: "2026-10-16T19:00:00Z" }), // in 10 days
+        task({ projectId: "beta" }),
+        task({ projectId: "gamma", dueAt: "2026-10-03T19:00:00Z" }), // 3 days late: first, had he placed nothing
+      ],
+      [],
+      TZ,
+      NOW,
+      DEFAULT_FILTERS
+    );
+    expect(lanes.map((l) => l.name)).toEqual(["Beta", "Alpha", "Gamma"]);
+  });
+
+  it("two lanes with one name keep their places: when the project was made, then its id (v1.11 r2)", () => {
+    const older = { ...P("b", "Twin"), createdAt: "2026-01-01T00:00:00.000Z" };
+    const newer = { ...P("a", "Twin"), createdAt: "2026-02-01T00:00:00.000Z" };
+    const tasks = [task({ projectId: "a" }), task({ projectId: "b" })];
+    for (const projects of [[older, newer], [newer, older]]) {
+      expect(buildLanes(projects, tasks, [], TZ, NOW, DEFAULT_FILTERS).map((l) => l.id)).toEqual(["b", "a"]);
+    }
+  });
+
   it("the order is the same whatever the status filter shows", () => {
     const projects = [P("alpha", "Alpha"), P("zeta", "Zeta")];
     const tasks = [

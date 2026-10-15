@@ -21,6 +21,7 @@ import { computeCurrentPlan, getPreferences } from "@/lib/layout/plan-store";
 import { REGISTRY_VERSION } from "@/lib/layout/registry";
 import { computeSignals, signalsHash } from "@/lib/layout/signals";
 import { listDynamicComponents } from "@/lib/layout/slow-loop";
+import { listProjects } from "@/lib/projects/list";
 import { executeTool, liveTurnContext } from "@/lib/secretary/tools";
 
 const TZ = "America/Los_Angeles";
@@ -32,7 +33,7 @@ const tomorrowAtTen = () => {
 };
 
 /** Every table read in no order before v1.11, with two or more rows of his in it that the order would show. */
-const TABLES = { wishlist: "wishlist", layout_preferences: "layout_preferences", events: "events", tasks: "tasks", messages: "messages" } as const;
+const TABLES = { wishlist: "wishlist", layout_preferences: "layout_preferences", events: "events", tasks: "tasks", messages: "messages", projects: "projects" } as const;
 const rawOrder = async (table: string, userId: string) =>
   ((await db.execute(sql`select id from ${sql.identifier(table)} where user_id = ${userId}`)).rows as { id: string }[]).map((r) => r.id);
 /** Each row updated to itself, newest first: new copies, so the read order turns over. */
@@ -50,6 +51,8 @@ async function his() {
   await db.insert(user).values({ id, name: "Rows", email: `${id}@v111.test`, timezone: TZ });
   const [shed] = await db.insert(projects).values({ userId: id, name: "Garden shed", status: "active" }).returning();
   const [kitchen] = await db.insert(projects).values({ userId: id, name: "Kitchen repaint", status: "active" }).returning();
+  // Two projects with one name (v1.11 r2): which stands first was the order the rows came back in.
+  for (let i = 0; i < 2; i++) await db.insert(projects).values({ userId: id, name: "Spare room", status: "active" });
   // Three tasks with no date (the planner is handed them as a list).
   for (const title of ["Buy timber", "Pour the base", "Pick a colour"]) {
     await db.insert(tasks).values({ userId: id, projectId: title === "Pick a colour" ? kitchen.id : shed.id, title, status: "todo", source: "spoken" });
@@ -99,6 +102,7 @@ async function reading(userId: string, ctx: ReturnType<typeof liveTurnContext>) 
     next: signals.calendar.next_hard_commitment,
     prompt,
     currentPlan: JSON.stringify((await executeTool(ctx, "get_current_plan", {})).result),
+    tab: (await listProjects(userId, TZ)).map((r) => r.id).join(),
   };
 }
 
@@ -129,12 +133,13 @@ describe("the same rows read in another order", () => {
     const orders = Object.fromEntries(await Promise.all(Object.values(TABLES).map(async (t) => [t, await rawOrder(t, h.id)])));
     await shuffle(h.id);
     // The shuffle must have turned the read order over, or this test proves nothing. It always can for the three
-    // whose order reached the why, the hash and the prompts on 51d4828 (wishes, preferences, events). Tasks and
-    // messages Postgres may read through an index in an order of its own, which no update moves (it did on one
-    // test database and not on another): those are reported, not required.
+    // whose order reached the why, the hash and the prompts on 51d4828 (wishes, preferences, events), and for the
+    // projects, whose order reached the Projects tab on 2b212e5 (two with one name). Tasks and messages Postgres
+    // may read through an index in an order of its own, which no update moves (it did on one test database and not
+    // on another): those are reported, not required.
     const turned: string[] = [];
     for (const t of Object.values(TABLES)) if ((await rawOrder(t, h.id)).join() !== orders[t].join()) turned.push(t);
-    for (const t of ["wishlist", "layout_preferences", "events"]) expect(turned, `turned over: ${turned.join(", ")}`).toContain(t);
+    for (const t of ["wishlist", "layout_preferences", "events", "projects"]) expect(turned, `turned over: ${turned.join(", ")}`).toContain(t);
     console.log(`unordered-reads: the shuffle turned over ${turned.join(", ")}`);
     const after = await reading(h.id, h.ctx);
     expect(after.why).toBe(before.why);
@@ -142,6 +147,7 @@ describe("the same rows read in another order", () => {
     expect(after.hash).toBe(before.hash);
     expect(after.prompt === before.prompt, `the prompts first differ at: ${firstDifference(before.prompt, after.prompt)}`).toBe(true);
     expect(after.currentPlan === before.currentPlan, `get_current_plan first differs at: ${firstDifference(before.currentPlan, after.currentPlan)}`).toBe(true);
+    expect(after.tab, "the Projects tab's order").toBe(before.tab);
   });
 
   it("the fixed orders are the ones the spec names: wishes oldest first (the newer need stands), events at one instant by id", async () => {
