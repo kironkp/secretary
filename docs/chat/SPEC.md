@@ -33,47 +33,47 @@ JSON object per line, in this order:
 A request refused before any work (not signed in, nothing said and nothing
 attached) keeps its HTTP status and its JSON body, as before.
 
-**On the page: the thread follows the answer, and only his hands stop it
-(v1.09 r4).** Three versions guessed his intent from where the thread
-stood, and the layout moves that too (the panel opening, a round that
-starts over shorter, the keyboard). Now:
+**On the page: the thread follows the answer until his hand is on it
+(v1.09 r5).** Four versions tried to tell from his scroll whether he still
+wanted to follow, and each was beaten by a race (the layout moving the
+thread, a lift sent to a node that had gone, a piece landing between a
+scroll and its event). The rule now needs nothing but his first touch:
 
-1. **His hands pause it.** A touch or a pointer down on the thread (its
-   scrollbar included), a wheel, or a scroll key when no field has focus
-   (PageUp, ArrowUp, Home, Space, and the keys that scroll down: PageDown,
-   ArrowDown, End) pauses following at once. While his hands are on the
-   thread, and until it settles, nothing writes its scroll position: it
-   never fights a finger or stops a momentum scroll.
-2. **Settled, it decides once.** When no scroll event has come for 150 ms
-   after his last input (or the browser says his scroll has ended), it
-   decides once, by position only: within 32 px of the bottom as it stood
-   when his input began, following is on; otherwise it is off. Nothing is
-   decided per scroll event, and what is written below him after his input
-   began is not his scroll: a browser takes a wheel to the bottom as it was
-   when the wheel came, though a piece may land before the scroll does, and
-   a wheel back to the bottom while pieces keep coming still turns it on. A
-   scroll down that stopped exactly at an end the thread had a moment ago is
-   at the bottom too: a browser stops a scroll at the end it last drew,
-   which can be a piece behind the page (a scroll up never counts this way).
-   The end of a scroll the page made itself is not the end of his.
-3. **While following, the bottom stays in view.** Every piece, every round
-   that starts over, and every change in the size of the thread or of what
-   it holds puts the bottom in view, at once. The layout never decides
-   anything.
-4. **A scroll with no input** (an indicator dragged, VoiceOver, an overlay
-   scrollbar, find in page) counts as his, and turns following off, only
-   when all of these hold: it leaves him more than 32 px above the bottom;
-   it is not the position the page last wrote; and neither the content's
-   height nor the view's has changed since the page last followed. A clamp
-   always changes one of those heights, so it never counts.
-5. **Each send of his turns following on.**
+1. **On** at each send of his (and his tap to retry), and when the panel
+   opens.
+2. **Off for the rest of the turn** at his first hand on the thread: a
+   touch, a wheel, a mouse or pen down on the thread or its scrollbar, or a
+   scroll key (PageUp, PageDown, ArrowUp, ArrowDown, Home, End, Space) when
+   no field has focus. Off is one way: nothing he does with the thread turns
+   it back on, so nothing waits for his finger to lift, and nothing decides
+   from where he stopped.
+3. **A "New reply below" pill** turns it back on and puts the bottom in view.
+   It is at least 44 px tall, stands clear of the composer, and shows only
+   while following is off, the bottom is out of view, and something has been
+   written below since following stopped. His next send turns it on too.
+4. **A scroll with no input** (VoiceOver, the iOS scroll indicator, find in
+   page) turns following off when it is not the position the page last
+   wrote and leaves him more than 32 px above the bottom. A clamp (the
+   panel growing taller, a round that starts over shorter) leaves him at the
+   bottom, so it never counts. The page checks this before every write too:
+   such a scroll's event can come after the next piece.
+5. **While on**, every piece, every round that starts over, and every change
+   in the size of the thread or of what it holds puts the bottom in view, at
+   once.
 
-The thread's own scrolls all go through this rule: his send and the panel
-opening put the bottom in view; a jump to a message found by search turns
-following off. While an answer is written, the space for the row that will
-hold its Copy and Read aloud buttons is kept below it, so when it lands
-nothing moves. "Not delivered — tap to retry" is a 44 px tall target: it is
-the only way he runs a turn again.
+The cost, named: a tap anywhere on the thread while he reads at the bottom
+(on Copy, say) stops following for that turn, until he taps the pill.
+
+The thread's own moves go through the same rule: his send and the panel
+opening turn following on; a jump to a message found by search turns it off.
+While an answer is written, the room of the row that will hold its Copy and
+Read aloud buttons is kept below it, so when it lands nothing moves. "Not
+delivered — tap to retry" is a 44 px tall target: it is the only way he runs a
+turn again.
+
+A request that does not ask for a stream gets the plain JSON answer as before:
+a page opened before this release, and the tests that read the answer whole.
+It is the same turn underneath, written once; only the wrapping differs.
 
 **Compression.** `next start` gzips responses. Whether it, or anything else
 between the route and the page, holds a stream back is measured on the built
@@ -189,11 +189,13 @@ same tool, so the same holds there.
 - A page opened before this release posts without a turn id and reads JSON,
   so it keeps the 30-second limit until it is reloaded.
 - Turn rows are kept (one small row per message); nothing deletes them yet.
-- Seen only on a device, not in the browser tests: a real touch scroll, its
-  momentum after the finger lifts, VoiceOver, and dragging the iOS scroll
-  indicator. The rule above is written for them (a momentum tail keeps the
-  thread unsettled while its scroll events come; a scroll with no input
-  counts by rule 4); the browser tests drive the thread with a mouse wheel.
+- Seen only on a device, not in the browser tests: iOS momentum, VoiceOver,
+  and dragging the iOS scroll indicator. The rule does not depend on them
+  (any touch turns following off; a scroll with no input counts by rule 4).
+  The browser tests drive the thread with a mouse wheel in Chromium and
+  WebKit, a mouse button, a key, and real touches in Chromium (Playwright
+  sends Chromium touch input through the DevTools protocol; it has none for
+  WebKit).
 - A turn's usage is one row, written when the model has answered. A process
   killed part way through a turn (a restart in the middle of its rounds)
   loses the rounds it had answered so far: they are in memory until then.
