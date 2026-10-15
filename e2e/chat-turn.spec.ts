@@ -112,8 +112,11 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
   const LONG = Array.from({ length: 14 }, (_, i) => `Line ${i + 1} of the plan says what to do next and why it matters this week. `);
   const SHORT = ["E2E: three short lines. ", "The shed roof first. ", "Then the tax papers."];
 
-  /** One answer: its rounds (each starts the live text over), each round's pieces, and the wait before each piece. */
-  type Answer = { rounds: string[][]; delayMs: number };
+  /** One answer: its rounds (each starts the live text over), each round's pieces, and the wait before each piece.
+   *  `drawnBeforeDone`: the end comes only once the page has drawn the whole answer and two frames more, for a test
+   *  that judges the landing (else, in a browser that draws a frame every 180 ms, the last piece and the landing can
+   *  be drawn in one frame, and the last piece's lines read as a move). */
+  type Answer = { rounds: string[][]; delayMs: number; drawnBeforeDone?: boolean };
   async function streamAnswers(page: import("@playwright/test").Page, answers: Answer[]) {
     await page.addInitScript((script: Answer[]) => {
       let n = 0;
@@ -137,6 +140,13 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
               }
             }
             await wait(a.delayMs);
+            if (a.drawnBeforeDone) {
+              const words = (s: string) => s.replace(/\s+/g, " ").trim().length;
+              const whole = words(a.rounds.at(-1)!.join(""));
+              const t0 = performance.now();
+              while (words(document.querySelector("[data-live-answer]")?.textContent ?? "") < whole && performance.now() - t0 < 5_000) await wait(10);
+              await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+            }
             c.enqueue(line({ type: "done", conversationId: "e2e-conv", userMessageId: `e2e-his-${n}`, assistantMessage: { id: `e2e-reply-${n}`, role: "assistant", content: a.rounds.at(-1)!.join(""), createdAt: new Date().toISOString() }, toasts: [], uiActions: [] }));
             c.close();
           },
@@ -449,7 +459,7 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
   test("a long answer (input: none): every frame's last line above the composer; it lands without moving", async ({ page }) => {
     // 56 pieces, 120 ms apart (6.7 s): enough for new words in more than 20 frames in a browser that draws four frames
     // a second.
-    await streamAnswers(page, [{ rounds: [[...LONG, ...LONG, ...LONG, ...LONG]], delayMs: 120 }]);
+    await streamAnswers(page, [{ rounds: [[...LONG, ...LONG, ...LONG, ...LONG]], delayMs: 120, drawnBeforeDone: true }]);
     await open(page);
     await watch(page);
     await send(page, "E2E: a long plan please");
@@ -458,6 +468,7 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
     const f = await followed(page, seen);
     expect(f.out, inViewMessage(f)).toBe(0);
     const last = seen.filter((x) => x.top !== null).at(-1)!;
+    expect(last.chars, "its last frame held the whole answer (so what follows judges the landing alone)").toBeGreaterThanOrEqual([...LONG, ...LONG, ...LONG, ...LONG].join("").length);
     expect(Math.abs((await topOf(page, "e2e-reply-1")) - last.top!), "landed where it was last drawn").toBeLessThanOrEqual(1);
     expect(f.grew, "frames that drew new words of it").toBeGreaterThan(20);
     mkdirSync("screenshots", { recursive: true });
@@ -465,7 +476,7 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
   });
 
   test("three lines in a thread that scrolls (input: none): followed, and it lands where it was written", async ({ page }) => {
-    await streamAnswers(page, [...earlier(6), { rounds: [SHORT], delayMs: 200 }]);
+    await streamAnswers(page, [...earlier(6), { rounds: [SHORT], delayMs: 200, drawnBeforeDone: true }]);
     await open(page);
     await fillThread(page, 6);
     await watch(page);
@@ -475,7 +486,8 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
     const f = await followed(page, seen);
     expect(f.out, inViewMessage(f)).toBe(0);
     const last = seen.filter((x) => x.top !== null).at(-1)!;
-    expect(Math.abs((await topOf(page, "e2e-reply-7")) - last.top!)).toBeLessThanOrEqual(1);
+    expect(last.chars, "its last frame held the whole answer (so what follows judges the landing alone)").toBeGreaterThanOrEqual(SHORT.join("").length);
+    expect(Math.abs((await topOf(page, "e2e-reply-7")) - last.top!), "landed where it was last drawn").toBeLessThanOrEqual(1);
   });
 
   test("two rounds, the second shorter (input: none): the round that starts over is followed too", async ({ page }) => {
