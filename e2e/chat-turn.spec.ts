@@ -261,7 +261,8 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
   const topOf = (page: import("@playwright/test").Page, id: string) => page.evaluate((id) => document.getElementById(id)!.getBoundingClientRect().top, `m-${id}`);
   const thread = (page: import("@playwright/test").Page) => page.locator("[data-thread-scroll]");
   const pill = (page: import("@playwright/test").Page) => page.locator("[data-new-reply-pill]");
-  /** The pill's words against the pill, as WCAG measures it. */
+  /** The pill's words against the pill, as WCAG measures it. (The chat card is drawn dark whatever his theme, so the
+   *  pill shows its dark pairing on both pages.) */
   const pillContrast = async (page: import("@playwright/test").Page) => {
     const m = await pill(page).evaluate((el) => {
       const lum = (css: string) => {
@@ -273,9 +274,15 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
       };
       const s = getComputedStyle(el);
       const [hi, lo] = [lum(s.color), lum(s.backgroundColor)].sort((a, b) => b - a);
-      return { theme: document.documentElement.dataset.theme ?? "light", color: s.color, background: s.backgroundColor, ratio: (hi + 0.05) / (lo + 0.05) };
+      return {
+        page: document.documentElement.dataset.theme ?? "light",
+        card: el.closest("[data-theme]")?.getAttribute("data-theme") ?? "light",
+        color: s.color,
+        background: s.backgroundColor,
+        ratio: (hi + 0.05) / (lo + 0.05),
+      };
     });
-    console.log(`[pill] ${m.theme}: ${m.color} on ${m.background}, ${m.ratio.toFixed(2)}:1`);
+    console.log(`[pill] page ${m.page}, chat card ${m.card}: ${m.color} on ${m.background}, ${m.ratio.toFixed(2)}:1`);
     return m.ratio;
   };
   /** How far the thread stands above its bottom. */
@@ -559,7 +566,7 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
     expect(p.height, "its height").toBeGreaterThanOrEqual(44);
     expect(p.y + p.height, "clear of the composer").toBeLessThanOrEqual(composer.y - 4);
     expect(Math.abs(p.x + p.width / 2 - (t.x + t.width / 2)), "centred over the thread").toBeLessThanOrEqual(1);
-    expect(await pillContrast(page), "its words against it (light)").toBeGreaterThanOrEqual(4.5);
+    expect(await pillContrast(page), "its words against it (his theme light)").toBeGreaterThanOrEqual(4.5);
     mkdirSync("screenshots", { recursive: true });
     await page.screenshot({ path: "screenshots/chat-new-reply-pill.png" });
     // He scrolls to the bottom himself: in view, so no pill (still off: the next piece is written below him again).
@@ -585,7 +592,7 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
     await followedDown(page, 150);
     await wheel(page, -150);
     await expect(pill(page)).toBeVisible();
-    expect(await pillContrast(page), "its words against it (dark)").toBeGreaterThanOrEqual(4.5);
+    expect(await pillContrast(page), "its words against it (his theme dark)").toBeGreaterThanOrEqual(4.5);
     mkdirSync("screenshots", { recursive: true });
     await page.screenshot({ path: "screenshots/chat-new-reply-pill-dark.png" });
   });
@@ -742,12 +749,13 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
     }
     /** One exchange: his turn committed; his line's words before the answer begins (lineAfter 0) or after that many of
      *  its pieces; the answer in 24 pieces 70 ms apart; his wheel up after the piece `wheelAfter`. Returns the frame
-     *  count when his line was heard. */
+     *  count just after his line was heard. */
     async function exchange(page: import("@playwright/test").Page, s: ReturnType<typeof stream>, k: number, o: { lineAfter?: number; wheelAfter?: number } = {}) {
       let heardAt = -1;
+      // Marked once the line's event has been handed to the page: the frames from then on.
       const hear = async () => {
-        heardAt = await framesSoFar(page);
         await s.line(k);
+        heardAt = await framesSoFar(page);
       };
       await s.commit(k);
       if (!o.lineAfter) await hear();

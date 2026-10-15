@@ -65,6 +65,8 @@ scroll and its event). The rule now needs nothing but his first touch:
    words are at 4.5:1 or better in both themes: white on #3a5bd0 in light
    (5.85:1), #1c1c1e on #7a9bff in dark (6.45:1). Its own two colours, so
    the app's other accent buttons are untouched (their contrast is 1.15's).
+   The chat card is drawn dark whatever his theme, so the dark pairing is the
+   one he sees.
 4. **A scroll with no input** (VoiceOver, the iOS scroll indicator, find in
    page) turns following off when it is not the position the page last wrote
    and leaves him more than 32 px above the bottom as it stood when the page
