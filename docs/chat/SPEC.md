@@ -40,7 +40,10 @@ thread, a lift sent to a node that had gone, a piece landing between a
 scroll and its event). The rule now needs nothing but his first touch:
 
 1. **On** at each send of his (and his tap to retry), and when the panel
-   opens.
+   opens. On a call, each new line of his is a send (v1.09 r6): it turns
+   following on through the same path as a typed one, so a hand on the thread
+   during one spoken answer does not leave the next exchange written under
+   the composer. A spoken move and a touched move are the same.
 2. **Off for the rest of the turn** at his first hand on the thread: a
    touch, a wheel, a mouse or pen down on the thread or its scrollbar, or a
    scroll key (PageUp, PageDown, ArrowUp, ArrowDown, Home, End, Space) when
@@ -50,7 +53,10 @@ scroll and its event). The rule now needs nothing but his first touch:
 3. **A "New reply below" pill** turns it back on and puts the bottom in view.
    It is at least 44 px tall, stands clear of the composer, and shows only
    while following is off, the bottom is out of view, and something has been
-   written below since following stopped. His next send turns it on too.
+   written below since following stopped. His next send turns it on too. Its
+   words are at 4.5:1 or better in both themes: white on #3a5bd0 in light
+   (5.85:1), #1c1c1e on #7a9bff in dark (6.45:1). Its own two colours, so
+   the app's other accent buttons are untouched (their contrast is 1.15's).
 4. **A scroll with no input** (VoiceOver, the iOS scroll indicator, find in
    page) turns following off when it is not the position the page last wrote
    and leaves him more than 32 px above the bottom as it stood when the page
@@ -68,7 +74,9 @@ The cost, named: a tap anywhere on the thread while he reads at the bottom
 (on Copy, say) stops following for that turn, until he taps the pill.
 
 The thread's own moves go through the same rule: his send and the panel
-opening turn following on; a jump to a message found by search turns it off.
+opening turn following on; so does the end of a call, when the saved messages
+take the place of the spoken lines and the thread lands at the newest; a jump
+to a message found by search turns it off.
 While an answer is written, the room of the row that will hold its Copy and
 Read aloud buttons is kept below it, so when it lands nothing moves. "Not
 delivered — tap to retry" is a 44 px tall target: it is the only way he runs a
@@ -199,6 +207,11 @@ same tool, so the same holds there.
   WebKit, a mouse button, a key, and real touches in Chromium (Playwright
   sends Chromium touch input through the DevTools protocol; it has none for
   WebKit).
+- Rule 4 measures from the bottom as it stood at the page's last write, so a
+  scroll with no input that lands in the same moment as the view growing by g
+  px (the panel opening, the keyboard closing) counts only when it leaves him
+  more than g + 32 px above the bottom. Device-only: no browser test makes a
+  scroll with no input in that moment.
 - A turn's usage is one row, written when the model has answered. A process
   killed part way through a turn (a restart in the middle of its rounds)
   loses the rounds it had answered so far: they are in memory until then.
