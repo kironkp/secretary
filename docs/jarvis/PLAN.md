@@ -669,8 +669,9 @@ Small defects the baseline found, each a short task of its own:
   Writes no product code.
 - **Executor:** all code, tests and measurements, one worktree per task under
   `~/code/secretary-extras/worktrees/`. Ends with a RESULT: SHAs, what changed,
-  the evidence, how to check it. The evidence includes a green GitHub run on
-  the `test` branch for the exact SHA offered: GitHub's iPhone browser job
+  the evidence, how to check it. The evidence includes a green GitHub run
+  for the exact SHA offered, on `test` when it is a fast-forward there and
+  otherwise on a `ci/<task>` branch (from 1.16): GitHub's iPhone browser job
   (Linux WebKit) runs nowhere else (since 2026-10-15).
 - **The repository is public.** Committed files carry counts and code
   references only. Anything holding Kiron's own content (project and list
