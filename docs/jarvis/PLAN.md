@@ -9,8 +9,8 @@ beside me in a workshop."*
 
 - **Cycle counter: 109.** 1.00, 1.02, 1.03, 1.04 and 1.09 are accepted
   (1.09 live 2026-10-15, `5d4d98e`); 1.01 is open; 1.11 is being built (on
-  `jarvis-1.11-project-order`, merging `5d4d98e`); then the names on public
-  main (below), then 1.10, 1.13, 1.12, 1.14, 1.15 (Kiron's feedback,
+  `jarvis-1.11-project-order`, merging `5d4d98e`; r2 `3b3c1a9` with the
+  Reviewer); then 1.16 (the names on public main), then 1.10, 1.13, 1.12, 1.14, 1.15 (Kiron's feedback,
   his mockup approved 2026-10-14, and the whole site in its look), then
   1.08, 1.05, 1.06, 1.07. Each pushed to Heroku as it passes (Kiron:
   "Push to heroku for each update"). See §9.
@@ -267,7 +267,7 @@ beside me in a workshop."*
   Test nit for a later round: "the pill in dark" can take its wheel point
   before the panel has risen (1 run of 26 under load); wait for the panel
   first.
-- **Names on public main** — after 1.11 (the Reviewer, 2026-10-15): words
+- **1.16** — names on public main, after 1.11 (the Reviewer, 2026-10-15): words
   from his real data (a client's name and a person's first name) have
   been on public main since 2026-08-07, in test fixtures, Today and
   interview copy, and docs/adaptive-ui/, about a dozen files. Replace
@@ -898,6 +898,6 @@ Still open:
    `heroku config:set UNDERSTANDING_DAILY_CAP_USD=2.5 -a secretary-kiron`.
 7. **Names in the public history.** Words from his real data have been on
    public main since 2026-08-07 (the Reviewer, 2026-10-15). The current files
-   are cleaned in a task after 1.11; the history keeps them. Rewriting the
+   are cleaned in 1.16; the history keeps them. Rewriting the
    history or making the repository private is his call; neither is done
    without him.
