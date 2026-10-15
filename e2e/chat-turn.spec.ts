@@ -706,22 +706,63 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
     }
     const fire = (page: import("@playwright/test").Page, ev: Record<string, unknown>) =>
       page.evaluate((ev) => (window as unknown as { __fire: (e: unknown) => void }).__fire(ev), ev);
-    /** He asks (his line, heard), and the secretary answers in 24 pieces 70 ms apart; his wheel after the given piece. */
-    async function exchange(page: import("@playwright/test").Page, k: number, wheelAfter: number | null) {
-      await fire(page, { type: "conversation.item.input_audio_transcription.completed", item_id: `u${k}`, transcript: QUESTIONS[k - 1] });
-      for (const [i, delta] of SAID.entries()) {
-        await fire(page, { type: "response.output_audio_transcript.delta", item_id: `a${k}`, delta });
-        await page.waitForTimeout(70);
-        if (i === wheelAfter) await wheel(page, -200);
-      }
-      // The final transcript replaces the line: it carries the whole of it.
-      await fire(page, { type: "response.output_audio_transcript.done", item_id: `a${k}`, transcript: SAID.join("") });
-      await expect(page.getByText(/Point 24 of the plan/)).toHaveCount(k);
-    }
     const framesSoFar = (page: import("@playwright/test").Page) => page.evaluate(() => (window as unknown as { __frames: unknown[] }).__frames.length);
-
-    test("a wheel during one spoken answer: his next spoken question and its answer are followed; the call's end lands at the newest (input: wheel)", async ({ page, browserName }) => {
-      test.skip(browserName !== "chromium", "the stand-in call does not connect in this Mac's WebKit");
+    /** The realtime events in the order a real stream sends them (the Reviewer's REAL shapes). `created`: the beta
+     *  name for an item added. */
+    function stream(page: import("@playwright/test").Page, created = false) {
+      let prev: string | null = null;
+      const added = async (id: string, role: "user" | "assistant") => {
+        await fire(page, {
+          type: created ? "conversation.item.created" : "conversation.item.added",
+          previous_item_id: prev,
+          item: role === "user" ? { id, type: "message", role, status: "completed", content: [{ type: "input_audio", transcript: null }] } : { id, type: "message", role, status: "in_progress", content: [] },
+        });
+        prev = id;
+      };
+      return {
+        /** His turn begins: his speech started, stopped, and committed as an item. Nothing on screen yet. */
+        async commit(k: number) {
+          const id = `u${k}`;
+          await fire(page, { type: "input_audio_buffer.speech_started", item_id: id, audio_start_ms: 0 });
+          await fire(page, { type: "input_audio_buffer.speech_stopped", item_id: id, audio_end_ms: 900 });
+          await fire(page, { type: "input_audio_buffer.committed", item_id: id, previous_item_id: prev });
+          await added(id, "user");
+        },
+        /** His line's words, heard (they come whenever the transcription is ready). */
+        line: (k: number) => fire(page, { type: "conversation.item.input_audio_transcription.completed", item_id: `u${k}`, transcript: QUESTIONS[k - 1] }),
+        /** The answer begins. */
+        async head(k: number) {
+          await fire(page, { type: "response.created", response: { id: `r-a${k}`, status: "in_progress" } });
+          await added(`a${k}`, "assistant");
+        },
+        piece: (k: number, i: number) => fire(page, { type: "response.output_audio_transcript.delta", item_id: `a${k}`, delta: SAID[i] }),
+        // The final transcript replaces the line: it carries the whole of it.
+        done: (k: number) => fire(page, { type: "response.output_audio_transcript.done", item_id: `a${k}`, transcript: SAID.join("") }),
+      };
+    }
+    /** One exchange: his turn committed; his line's words before the answer begins (lineAfter 0) or after that many of
+     *  its pieces; the answer in 24 pieces 70 ms apart; his wheel up after the piece `wheelAfter`. Returns the frame
+     *  count when his line was heard. */
+    async function exchange(page: import("@playwright/test").Page, s: ReturnType<typeof stream>, k: number, o: { lineAfter?: number; wheelAfter?: number } = {}) {
+      let heardAt = -1;
+      const hear = async () => {
+        heardAt = await framesSoFar(page);
+        await s.line(k);
+      };
+      await s.commit(k);
+      if (!o.lineAfter) await hear();
+      await s.head(k);
+      for (let i = 0; i < SAID.length; i++) {
+        await s.piece(k, i);
+        await page.waitForTimeout(70);
+        if (i === o.wheelAfter) await wheel(page, -200);
+        if (i + 1 === o.lineAfter) await hear();
+      }
+      await s.done(k);
+      await expect(page.getByText(/Point 24 of the plan/)).toHaveCount(k);
+      return heardAt;
+    }
+    async function startCall(page: import("@playwright/test").Page) {
       await standIn(page);
       await open(page);
       await page.getByRole("button", { name: "Start a live voice conversation" }).click();
@@ -732,23 +773,34 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
       await page.getByRole("button", { name: "Drag up to show the conversation" }).click();
       await page.waitForTimeout(700);
       await watch(page);
+    }
+    /** From his first hand on the page to the given frame (or the end): frames said, and how far the thread was moved
+     *  back down between two of them. */
+    async function sinceHand(page: import("@playwright/test").Page, seen: Frame[], to = seen.length) {
+      const handAt = await page.evaluate(() => (window as unknown as { __handAt: number | null }).__handAt);
+      expect(handAt, "his wheel reached the page").not.toBeNull();
+      const span = seen.slice(handAt!, to);
+      let pulled = 0;
+      for (let i = 1; i < span.length; i++) pulled = Math.max(pulled, span[i].scroll - span[i - 1].scroll);
+      return { said: span.filter((f) => f.bottom !== null).length, pulled };
+    }
+
+    test("a wheel during one spoken answer: his next spoken question and its answer are followed; the call's end lands at the newest (input: wheel)", async ({ page, browserName }) => {
+      test.skip(browserName !== "chromium", "the stand-in call does not connect in this Mac's WebKit");
+      await startCall(page);
+      const s = stream(page);
       // The first exchange, his wheel up a third of the way into the answer: off, never pulled back, the pill.
-      await exchange(page, 1, 8);
+      await exchange(page, s, 1, { wheelAfter: 8 });
       await expect(pill(page), "off, and the answer went on below him").toBeVisible();
-      const secondAt = await framesSoFar(page);
       // The second: his spoken question is a send.
-      await exchange(page, 2, null);
+      const heardAt = await exchange(page, s, 2);
       await expect(pill(page)).toHaveCount(0);
       expect(await gap(page), "the second answer ends in view").toBeLessThanOrEqual(1);
-      const handAt = await page.evaluate(() => (window as unknown as { __handAt: number | null }).__handAt);
       const seen = await frames(page);
-      expect(handAt, "his wheel reached the page").not.toBeNull();
-      const before = seen.slice(handAt!, secondAt);
-      let pulled = 0;
-      for (let i = 1; i < before.length; i++) pulled = Math.max(pulled, before[i].scroll - before[i - 1].scroll);
-      expect(before.filter((f) => f.bottom !== null).length, "frames said between his wheel and his next question").toBeGreaterThan(5);
-      expect(pulled, "moved back down between two frames before his next question").toBeLessThanOrEqual(2);
-      const f = await followed(page, seen, seen[secondAt].t);
+      const before = await sinceHand(page, seen, heardAt);
+      expect(before.said, "frames said between his wheel and his next question").toBeGreaterThan(5);
+      expect(before.pulled, "moved back down between two frames before his next question").toBeLessThanOrEqual(2);
+      const f = await followed(page, seen, seen[heardAt].t);
       expect(f.live, "frames said after his second question").toBeGreaterThan(20);
       expect(f.out, inViewMessage(f)).toBe(0);
       // He scrolls up again and ends the call: the saved messages take the spoken lines' place, and the thread lands at
@@ -759,6 +811,41 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
       await expect(page.locator("#m-e2e-call-4")).toBeAttached({ timeout: 10_000 });
       await expect.poll(() => gap(page), { timeout: 2_000 }).toBeLessThanOrEqual(1);
       await expect(pill(page)).toHaveCount(0);
+    });
+
+    for (const created of [false, true]) {
+      test(`his line heard after the answer's first pieces, no hand since his turn began: followed from when it is heard (${created ? "beta: conversation.item.created" : "conversation.item.added"}; input: wheel in the turn before)`, async ({ page, browserName }) => {
+        test.skip(browserName !== "chromium", "the stand-in call does not connect in this Mac's WebKit");
+        await startCall(page);
+        const s = stream(page, created);
+        await exchange(page, s, 1, { wheelAfter: 8 });
+        // His turn is committed, the answer begins, and his words are heard only after its fourth piece: the head is
+        // written under the composer until then (named in the spec), and followed from then on.
+        const heardAt = await exchange(page, s, 2, { lineAfter: 4 });
+        await expect(pill(page)).toHaveCount(0);
+        expect(await gap(page), "the second answer ends in view").toBeLessThanOrEqual(1);
+        const seen = await frames(page);
+        expect((await sinceHand(page, seen, heardAt)).pulled, "moved back down before his line was heard").toBeLessThanOrEqual(2);
+        const f = await followed(page, seen, seen[heardAt].t);
+        expect(f.live, "frames said after his line was heard").toBeGreaterThan(15);
+        expect(f.out, inViewMessage(f)).toBe(0);
+      });
+    }
+
+    test("his line heard after his hand in the same turn: off, and never moved (input: wheel after his turn began)", async ({ page, browserName }) => {
+      test.skip(browserName !== "chromium", "the stand-in call does not connect in this Mac's WebKit");
+      await startCall(page);
+      const s = stream(page);
+      await exchange(page, s, 1);
+      expect(await gap(page), "the first exchange followed").toBeLessThanOrEqual(1);
+      // His turn is committed; the answer begins and is followed; his wheel after its sixth piece; his words heard
+      // after its eighth.
+      await exchange(page, s, 2, { wheelAfter: 5, lineAfter: 8 });
+      await expect(pill(page), "off, and the answer went on below him").toBeVisible();
+      const seen = await frames(page);
+      const after = await sinceHand(page, seen);
+      expect(after.said, "frames said after his wheel").toBeGreaterThan(10);
+      expect(after.pulled, "moved back down after his wheel, his line heard or not").toBeLessThanOrEqual(2);
     });
   });
 });
