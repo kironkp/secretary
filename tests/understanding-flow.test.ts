@@ -1,4 +1,4 @@
-// The Caltrans pair end to end, through the public functions — what
+// The Canterly pair end to end, through the public functions — what
 // docs/understanding/SPEC.md §5, §6 and §8 promise together: answering a
 // question persists the decision, sets aside the questions whose premise it
 // changed, keeps them from returning without new evidence, lets them back
@@ -42,8 +42,8 @@ const task = (id: string): Source => ({ type: "task", id });
 /** Q1 as the goal words it; the why quotes the open copy's title so the validator accepts it. */
 const q1Draft = (): QuestionDraft => ({
   kind: "doesnt_add_up",
-  question: "CPO 2073 is on your list twice. Close the old one?",
-  why: `"Process CPO 2073 / Production monitor as an FY 2027 transaction this month" is still open, but the finished copy says the new number is 0394.`,
+  question: "CPO 4513 is on your list twice. Close the old one?",
+  why: `"Process CPO 4513 / Projection screen as an FY 2031 transaction this month" is still open, but the finished copy says the new number is 0581.`,
   evidence: [task(ids.doneCpo), task(ids.blockedCpo), task(ids.checkCpo)],
   answers: [
     {
@@ -62,8 +62,8 @@ const q1Draft = (): QuestionDraft => ({
 /** Q2, resting on the rows Q1's answer changes. */
 const q2Draft = (): QuestionDraft => ({
   kind: "need_to_know",
-  question: "What is blocking CPO 2073?",
-  why: `"Check what is blocking CPO 2073 and report back" is still open, and you said "Nothing is blocked right now on the CPO side".`,
+  question: "What is blocking CPO 4513?",
+  why: `"Check what is blocking CPO 4513 and report back" is still open, and you said "Nothing on the CPO side is blocked at the moment".`,
   evidence: [task(ids.blockedCpo), task(ids.checkCpo), { type: "message", id: ids.msgNothingBlocked }],
   answers: [
     {
@@ -78,8 +78,8 @@ const q2Draft = (): QuestionDraft => ({
 /** The issue back with a message the ruling never saw. */
 const walterDraft = (messageId: string): QuestionDraft => ({
   kind: "need_to_know",
-  question: "Is Walter holding CPO 2073?",
-  why: `You said "Walter still has CPO 2073 on his desk" after "Check what is blocking CPO 2073 and report back" was closed.`,
+  question: "Is Warren holding CPO 4513?",
+  why: `You said "Warren still has CPO 4513 on his desk" after "Check what is blocking CPO 4513 and report back" was closed.`,
   evidence: [task(ids.blockedCpo), task(ids.checkCpo), { type: "message", id: messageId }],
   answers: [
     { id: "yes", label: "Yes, he has it", writes: [{ op: "resolve" }] },
@@ -87,12 +87,12 @@ const walterDraft = (messageId: string): QuestionDraft => ({
   ],
 });
 
-/** The Caltrans record as the fixture has it, with these questions in place of its own. */
+/** The Canterly record as the fixture has it, with these questions in place of its own. */
 const withQuestions = (drafts: QuestionDraft[]) =>
   fakeModel((bundle) => ({ ...validOutputFor(bundle, ids), questions: drafts }));
 
 const run = (model: ModelCall) =>
-  runProject(U.id, ids.caltrans, { timezone: TZ, now: NOW, model, force: true });
+  runProject(U.id, ids.canterly, { timezone: TZ, now: NOW, model, force: true });
 
 const rowOf = async (id: string) => {
   const [row] = await db
@@ -130,7 +130,7 @@ const latestRunId = async () => {
     .where(
       and(
         eq(understandingRuns.userId, U.id),
-        eq(understandingRuns.projectId, ids.caltrans),
+        eq(understandingRuns.projectId, ids.canterly),
         eq(understandingRuns.status, "ok")
       )
     )
@@ -150,10 +150,10 @@ afterAll(async () => {
   await db.delete(user).where(eq(user.id, U.id));
 });
 
-describe("the Caltrans pair, end to end", () => {
+describe("the Canterly pair, end to end", () => {
   let q1 = "";
   let q2 = "";
-  let walter = "";
+  let warren = "";
   /** Q2's identity back as a new row, from step (7). */
   let q2Again = "";
   let firstRunId = "";
@@ -195,7 +195,7 @@ describe("the Caltrans pair, end to end", () => {
     const result = await answerQuestion(U.id, TZ, q1, "close", undefined, "today");
     expect(result.status).toBe("resolved");
     if (result.status !== "resolved") return;
-    expect(result.projectId).toBe(ids.caltrans);
+    expect(result.projectId).toBe(ids.canterly);
     expect(result.applied).toEqual([
       { op: "complete_task", id: ids.blockedCpo },
       { op: "complete_task", id: ids.checkCpo },
@@ -235,8 +235,8 @@ describe("the Caltrans pair, end to end", () => {
   it("(5) a re-run that re-emits Q2, or the same issue in new words on the same rows, creates nothing", async () => {
     const reworded: QuestionDraft = {
       ...q2Draft(),
-      question: "Is anything still blocking CPO 2073?",
-      why: `"Check what is blocking CPO 2073 and report back" is closed now.`,
+      question: "Is anything still blocking CPO 4513?",
+      why: `"Check what is blocking CPO 4513 and report back" is closed now.`,
       evidence: [task(ids.blockedCpo), task(ids.checkCpo)],
     };
     expect(questionIdentity(reworded)).not.toBe(questionIdentity(q2Draft()));
@@ -266,7 +266,7 @@ describe("the Caltrans pair, end to end", () => {
         conversationId: ids.conversation,
         role: "user",
         mode: "voice",
-        content: "Walter still has CPO 2073 on his desk",
+        content: "Warren still has CPO 4513 on his desk",
         createdAt: new Date(NOW.getTime() + 60_000),
       })
       .returning({ id: messages.id });
@@ -280,13 +280,13 @@ describe("the Caltrans pair, end to end", () => {
     expect(result.questions.created).toHaveLength(1);
     expect(result.questions.skippedSettled).toEqual([]);
     expect(result.questions.reopened).toEqual([]);
-    walter = result.questions.created[0];
+    warren = result.questions.created[0];
 
-    const row = await rowOf(walter);
+    const row = await rowOf(warren);
     expect(row.status).toBe("open");
     expect(row.createdByRun).toBe(await latestRunId());
     expect(row.createdByRun).not.toBe(firstRunId);
-    expect((await shownToday()).ids).toEqual([walter]);
+    expect((await shownToday()).ids).toEqual([warren]);
   });
 
   it("(7) a row edited after the ruling is new evidence: Q2's identity reopens as a new row", async () => {
@@ -303,7 +303,7 @@ describe("the Caltrans pair, end to end", () => {
     expect(result.questions.reopened).toHaveLength(1);
     expect(result.questions).toMatchObject({
       created: [],
-      updated: [walter],
+      updated: [warren],
       dismissed: [],
       skippedDuplicates: [],
       skippedSettled: [],
@@ -321,7 +321,7 @@ describe("the Caltrans pair, end to end", () => {
       createdByRun: await latestRunId(),
     });
     expect((await rowOf(q2)).status).toBe("superseded");
-    expect((await shownToday()).ids.sort()).toEqual([walter, reopened].sort());
+    expect((await shownToday()).ids.sort()).toEqual([warren, reopened].sort());
   });
 
   it("(8) answering Q1 again is refused and changes nothing", async () => {
@@ -418,7 +418,7 @@ describe("the Caltrans pair, end to end", () => {
       .insert(clarifications)
       .values([
         twin("flow-twin-a", t0, [task(ids.albumOverdue)]),
-        twin("flow-twin-b", new Date(t0.getTime() + 1000), [{ type: "event", id: ids.eventDentist }]),
+        twin("flow-twin-b", new Date(t0.getTime() + 1000), [{ type: "event", id: ids.eventHaircut }]),
       ])
       .returning({ id: clarifications.id });
 
@@ -434,7 +434,7 @@ describe("the Caltrans pair, end to end", () => {
     // (none under vitest) still cleans a doubled row.
     const [third] = await db
       .insert(clarifications)
-      .values(twin("flow-twin-c", new Date(t0.getTime() + 2000), [task(ids.albumOverdue), { type: "event", id: ids.eventDentist }]))
+      .values(twin("flow-twin-c", new Date(t0.getTime() + 2000), [task(ids.albumOverdue), { type: "event", id: ids.eventHaircut }]))
       .returning({ id: clarifications.id });
     const swept = await sweepUnderstanding({ now: NOW, userIds: [U.id] });
     // The same sweep also puts back the history: the questions answered in
@@ -454,8 +454,8 @@ describe("the Caltrans pair, end to end", () => {
     // dismissed for being forgotten.
     const doneYet: QuestionDraft = {
       kind: "done_yet",
-      question: "Did you check what is blocking CPO 2073?",
-      why: `"Check what is blocking CPO 2073 and report back" was closed with the old copy.`,
+      question: "Did you check what is blocking CPO 4513?",
+      why: `"Check what is blocking CPO 4513 and report back" was closed with the old copy.`,
       evidence: [task(ids.checkCpo)],
       answers: [
         { id: "yes", label: "Yes", writes: [{ op: "resolve" }] },
@@ -465,7 +465,7 @@ describe("the Caltrans pair, end to end", () => {
     const sameKind: QuestionDraft = {
       ...doneYet,
       kind: "need_to_know",
-      question: "Is anything still holding CPO 2073 up?",
+      question: "Is anything still holding CPO 4513 up?",
     };
     const model = withQuestions([q2Draft(), walterDraft(newMessageId), doneYet, sameKind]);
     const result = await run(model);
@@ -478,7 +478,7 @@ describe("the Caltrans pair, end to end", () => {
       skippedSettled: [sameKind.question],
       reopened: [],
     });
-    expect(result.questions.updated.sort()).toEqual([walter, q2Again].sort());
+    expect(result.questions.updated.sort()).toEqual([warren, q2Again].sort());
     const asked = await rowOf(result.questions.created[0]);
     expect(asked).toMatchObject({ kind: "done_yet", status: "open", createdByRun: await latestRunId() });
     expect((await shownToday()).ids).toContain(asked.id);
@@ -492,7 +492,7 @@ describe("the Caltrans pair, end to end", () => {
       .insert(clarifications)
       .values({
         userId: U.id,
-        projectId: ids.caltrans,
+        projectId: ids.canterly,
         kind: "done_yet",
         question: "Did the statement actually go through?",
         context: "The statement task is still open.",
@@ -539,13 +539,13 @@ describe("the Caltrans pair, end to end", () => {
       .insert(clarifications)
       .values({
         userId: U.id,
-        projectId: ids.caltrans,
+        projectId: ids.canterly,
         kind: "done_yet",
         question: "Is the album track finished?",
         context: "It has been open a while.",
         evidence: [task(ids.statement)],
         answers: [
-          // albumOverdue belongs to the Album project, not Caltrans.
+          // albumOverdue belongs to the Album project, not Canterly.
           { id: "yes", label: "Yes", writes: [{ op: "complete_task", taskId: ids.albumOverdue }] },
           { id: "no", label: "Not yet", writes: [{ op: "resolve" }] },
         ],
@@ -566,22 +566,22 @@ describe("the Caltrans pair, end to end", () => {
   });
 
   it("(13) an answer given while a run is thinking survives the run storing its record", async () => {
-    // The bug behind "it's asked me about CPO 2110 like 10 times": a run read
+    // The bug behind "it's asked me about CPO 4562 like 10 times": a run read
     // the asked list before calling the model and wrote it back minutes
     // later, erasing every answer given in between — and answering is what
     // starts a run, so answering twice in a row erased the first answer.
     const before = await db
       .select({ body: records.body })
       .from(records)
-      .where(and(eq(records.userId, U.id), eq(records.projectId, ids.caltrans)));
+      .where(and(eq(records.userId, U.id), eq(records.projectId, ids.canterly)));
     const had = (before[0]?.body.asked ?? []).length;
 
     const mid: ModelCall = async (input) => {
       // The user answers while the model is thinking.
-      await upsertAsked(U.id, ids.caltrans, [
+      await upsertAsked(U.id, ids.canterly, [
         {
           questionId: "answered-mid-run",
-          question: "Is CPO 2110 converted yet?",
+          question: "Is CPO 4562 converted yet?",
           evidence: ["task:x"],
           askedAt: NOW.toISOString(),
           answer: "No, it is still on my list",
@@ -595,7 +595,7 @@ describe("the Caltrans pair, end to end", () => {
         outputTokens: 5,
       };
     };
-    const result = await runProject(U.id, ids.caltrans, {
+    const result = await runProject(U.id, ids.canterly, {
       timezone: TZ,
       now: NOW,
       model: mid,
@@ -606,7 +606,7 @@ describe("the Caltrans pair, end to end", () => {
     const [after] = await db
       .select({ body: records.body })
       .from(records)
-      .where(and(eq(records.userId, U.id), eq(records.projectId, ids.caltrans)));
+      .where(and(eq(records.userId, U.id), eq(records.projectId, ids.canterly)));
     const asked = after.body.asked ?? [];
     expect(asked).toHaveLength(had + 1);
     const kept = asked.find((a) => a.questionId === "answered-mid-run");
@@ -619,9 +619,9 @@ describe("the Caltrans pair, end to end", () => {
       .insert(clarifications)
       .values({
         userId: U.id,
-        projectId: ids.caltrans,
+        projectId: ids.canterly,
         kind: "doesnt_add_up",
-        question: "Is CPO 2110 on your list twice?",
+        question: "Is CPO 4562 on your list twice?",
         context: "Two rows look like one job.",
         evidence: [task(ids.doneCpo)],
         answers: [{ id: "keep", label: "Keep them", writes: [{ op: "resolve" }] }],
@@ -632,18 +632,18 @@ describe("the Caltrans pair, end to end", () => {
       })
       .returning({ id: clarifications.id });
 
-    const restored = await backfillAsked(U.id, ids.caltrans);
+    const restored = await backfillAsked(U.id, ids.canterly);
     expect(restored).toBeGreaterThanOrEqual(1);
     const [after] = await db
       .select({ body: records.body })
       .from(records)
-      .where(and(eq(records.userId, U.id), eq(records.projectId, ids.caltrans)));
+      .where(and(eq(records.userId, U.id), eq(records.projectId, ids.canterly)));
     const entry = (after.body.asked ?? []).find((a) => a.questionId === lost.id);
-    expect(entry?.question).toBe("Is CPO 2110 on your list twice?");
+    expect(entry?.question).toBe("Is CPO 4562 on your list twice?");
     expect(entry?.answer).toBe("Keep them");
     expect(entry?.answeredAt).toBe(NOW.toISOString());
     // Idempotent: nothing left to restore.
-    expect(await backfillAsked(U.id, ids.caltrans)).toBe(0);
+    expect(await backfillAsked(U.id, ids.canterly)).toBe(0);
   });
 
   it("(15) an entry that is an id with no question text is completed, keeping when it was asked", async () => {
@@ -653,32 +653,32 @@ describe("the Caltrans pair, end to end", () => {
       .insert(clarifications)
       .values({
         userId: U.id,
-        projectId: ids.caltrans,
+        projectId: ids.canterly,
         kind: "need_to_know",
         question: "Which remaining CPO is the September payment?",
         context: "One a month, none chosen.",
         evidence: [task(ids.statement)],
-        answers: [{ id: "lenses", label: "Lenses (2110)", writes: [{ op: "resolve" }] }],
+        answers: [{ id: "benches", label: "Benches (4562)", writes: [{ op: "resolve" }] }],
         identity: "blank-entry",
         status: "resolved",
-        resolution: "Lenses (2110)",
+        resolution: "Benches (4562)",
         resolvedAt: NOW,
       })
       .returning({ id: clarifications.id });
     const askedLongAgo = new Date(NOW.getTime() - 86_400_000).toISOString();
-    await upsertAsked(U.id, ids.caltrans, [{ questionId: old.id, askedAt: askedLongAgo }]);
+    await upsertAsked(U.id, ids.canterly, [{ questionId: old.id, askedAt: askedLongAgo }]);
 
-    expect(await backfillAsked(U.id, ids.caltrans)).toBe(1);
+    expect(await backfillAsked(U.id, ids.canterly)).toBe(1);
     const [after] = await db
       .select({ body: records.body })
       .from(records)
-      .where(and(eq(records.userId, U.id), eq(records.projectId, ids.caltrans)));
+      .where(and(eq(records.userId, U.id), eq(records.projectId, ids.canterly)));
     const entry = (after.body.asked ?? []).find((a) => a.questionId === old.id);
     expect(entry?.question).toBe("Which remaining CPO is the September payment?");
-    expect(entry?.answer).toBe("Lenses (2110)");
+    expect(entry?.answer).toBe("Benches (4562)");
     expect(entry?.evidence).toEqual([`task:${ids.statement}`]);
     // The moment it was put to the user is the record's, not the row's.
     expect(entry?.askedAt).toBe(askedLongAgo);
-    expect(await backfillAsked(U.id, ids.caltrans)).toBe(0);
+    expect(await backfillAsked(U.id, ids.canterly)).toBe(0);
   });
 });

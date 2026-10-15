@@ -133,7 +133,7 @@ describe("a ticked checkbox survives everything", () => {
     await db.insert(user).values({ id: u, name: "Dup Tester", email: `${u}@test.local` });
     const [proj] = await db
       .insert(projects)
-      .values({ userId: u, name: "Caltrans" })
+      .values({ userId: u, name: "Canterly" })
       .returning();
     const [a, b] = await db
       .insert(tasks)

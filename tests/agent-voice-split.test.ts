@@ -94,7 +94,7 @@ describe("fast/slow split: the mouth is thin", () => {
 
   it("create_commitment writes the same store as text (with stakes)", async () => {
     const { result } = await executeTool(ctx, "create_commitment", {
-      title: "Update CPO 2073",
+      title: "Update CPO 4513",
       due_at: new Date(Date.now() + 86400000).toISOString(),
       stakes: "miss reconcile → strike from HQ",
     });
@@ -105,15 +105,15 @@ describe("fast/slow split: the mouth is thin", () => {
 
   it("schedule_checkin creates a real expectation; log_status clears it silently", async () => {
     await executeTool(ctx, "schedule_checkin", {
-      commitment: "CPO 2073 updated and Teresa has seen it",
+      commitment: "CPO 4513 updated and Tamsin has seen it",
       expected_update_by: new Date(Date.now() + 3600000).toISOString(),
-      task: "CPO 2073",
+      task: "CPO 4513",
     });
     let [e] = await db.select().from(expectations).where(eq(expectations.userId, U.id));
     expect(e.status).toBe("open");
     expect(e.taskId).toBeTruthy();
 
-    await executeTool(ctx, "log_status", { task: "CPO 2073", signal: "started" });
+    await executeTool(ctx, "log_status", { task: "CPO 4513", signal: "started" });
     [e] = await db.select().from(expectations).where(eq(expectations.userId, U.id));
     expect(e.status).toBe("cleared");
     const [t] = await db.select().from(tasks).where(eq(tasks.userId, U.id));
@@ -121,7 +121,7 @@ describe("fast/slow split: the mouth is thin", () => {
   });
 
   it("log_status done completes the task", async () => {
-    await executeTool(ctx, "log_status", { task: "CPO 2073", signal: "done" });
+    await executeTool(ctx, "log_status", { task: "CPO 4513", signal: "done" });
     const [t] = await db.select().from(tasks).where(eq(tasks.userId, U.id));
     expect(t.status).toBe("done");
   });
@@ -183,18 +183,18 @@ describe("dropped signal: the mouth removes a task the user disowns", () => {
   });
 
   it("log_status dropped removes the task, writes the audit row, and toasts '✕ Dropped'", async () => {
-    await executeTool(ctx, "create_commitment", { title: "Check Caltrans road conditions" });
+    await executeTool(ctx, "create_commitment", { title: "Check Canterly road conditions" });
     const { result, toast } = await executeTool(ctx, "log_status", {
-      task: "Caltrans",
+      task: "Canterly",
       signal: "dropped",
       note: "Not the user's responsibility anymore",
     });
     expect((result as { status?: string }).status).toBe("dropped");
-    expect(toast).toEqual({ icon: "✕", text: "Dropped: Check Caltrans road conditions" });
+    expect(toast).toEqual({ icon: "✕", text: "Dropped: Check Canterly road conditions" });
     const [t] = await db
       .select()
       .from(tasks)
-      .where(and(eq(tasks.userId, U.id), ilike(tasks.title, "%Caltrans%")));
+      .where(and(eq(tasks.userId, U.id), ilike(tasks.title, "%Canterly%")));
     expect(t.status).toBe("dropped");
     const audits = await db
       .select()
@@ -206,7 +206,7 @@ describe("dropped signal: the mouth removes a task the user disowns", () => {
   it("drop-then-remember: one memory, and the extractor neither double-writes nor resurrects", async () => {
     // the mouth pairs the drop with the stated rule, live, in the same turn
     await executeTool(ctx, "remember_fact", {
-      fact: "Caltrans road checks are not the user's responsibility anymore",
+      fact: "Canterly road checks are not the user's responsibility anymore",
     });
     const before = await db.select().from(memories).where(eq(memories.userId, U.id));
 
@@ -216,12 +216,12 @@ describe("dropped signal: the mouth removes a task the user disowns", () => {
       .values({ userId: U.id, mode: "voice" })
       .returning();
     const summary = await applyExtraction(U.id, conv.id, {
-      tasks: [{ title: "Check Caltrans road conditions", notes: null, due_at: null, project: null }],
+      tasks: [{ title: "Check Canterly road conditions", notes: null, due_at: null, project: null }],
       events: [],
       status_updates: [
-        { task: "Check Caltrans road conditions", signal: "dropped", new_due_at: null, reason: null },
+        { task: "Check Canterly road conditions", signal: "dropped", new_due_at: null, reason: null },
       ],
-      facts: ["The user's Caltrans road checks aren't their responsibility anymore"],
+      facts: ["The user's Canterly road checks aren't their responsibility anymore"],
       mentions: [],
       ambiguities: [],
     });
@@ -232,18 +232,18 @@ describe("dropped signal: the mouth removes a task the user disowns", () => {
     const rows = await db
       .select()
       .from(tasks)
-      .where(and(eq(tasks.userId, U.id), ilike(tasks.title, "%Caltrans%")));
+      .where(and(eq(tasks.userId, U.id), ilike(tasks.title, "%Canterly%")));
     expect(rows).toHaveLength(1);
     expect(rows[0].status).toBe("dropped");
   });
 
   it("a dropped task can be reinstated just by asking", async () => {
-    const { result } = await executeTool(ctx, "update_task", { task: "Caltrans", status: "todo" });
+    const { result } = await executeTool(ctx, "update_task", { task: "Canterly", status: "todo" });
     expect((result as { status?: string }).status).toBe("todo");
     const [t] = await db
       .select()
       .from(tasks)
-      .where(and(eq(tasks.userId, U.id), ilike(tasks.title, "%Caltrans%")));
+      .where(and(eq(tasks.userId, U.id), ilike(tasks.title, "%Canterly%")));
     expect(t.status).toBe("todo");
   });
 });
@@ -282,7 +282,7 @@ describe("voice modality rule", () => {
     expect(VOICE_MODALITY_RULES).toContain("cannot fail on someone else's permission");
   });
 
-  // The recital failure: "CPO 2073, blocked." A status word is a database row
+  // The recital failure: "CPO 4513, blocked." A status word is a database row
   // read aloud — the voice names the blocker and what clears it, and asks when
   // it doesn't know. (SPEC §11 voice modality rule.)
   it("outlaws the bare status word and licenses the ONE in-flow question", () => {

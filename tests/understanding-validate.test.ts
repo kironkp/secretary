@@ -25,7 +25,7 @@ function makeBundle(): Bundle {
   const at = "2026-09-22T17:00:00.000Z";
   return {
     userId: "u1",
-    project: { id: "p1", name: "Caltrans", status: "active" },
+    project: { id: "p1", name: "Canterly", status: "active" },
     clock: {
       nowIso: at,
       timezone: "America/Los_Angeles",
@@ -35,7 +35,7 @@ function makeBundle(): Bundle {
     tasksOpen: [
       {
         id: T_BLOCKED,
-        title: "Process CPO 2073 / Production monitor as an FY 2027 transaction this month",
+        title: "Process CPO 4513 / Projection screen as an FY 2031 transaction this month",
         notes: null,
         status: "blocked",
         stages: [],
@@ -50,7 +50,7 @@ function makeBundle(): Bundle {
       },
       {
         id: T_CHECK,
-        title: "Check what is blocking CPO 2073 and report back",
+        title: "Check what is blocking CPO 4513 and report back",
         notes: null,
         status: "todo",
         stages: [],
@@ -68,8 +68,8 @@ function makeBundle(): Bundle {
       {
         id: T_DONE,
         title:
-          "CPO 2073 — Production monitor: convert to FY2027, create new CPO, obtain Marissa signature, send to Walter Myala",
-        notes: "new number is 0394",
+          "CPO 4513 — Projection screen: convert to FY2031, create new CPO, obtain Melissa signature, send to Warren Meala",
+        notes: "new number is 0581",
         status: "done",
         stages: [],
         blockedReason: null,
@@ -85,8 +85,8 @@ function makeBundle(): Bundle {
     memories: [
       {
         id: M_STATEMENT,
-        fact: "The US Bank statement is part of the user's CPO reconciliation process.",
-        tags: ["Caltrans"],
+        fact: "The NW Bank statement is part of the user's CPO reconciliation process.",
+        tags: ["Canterly"],
         createdAt: at,
         updatedAt: at,
       },
@@ -94,7 +94,7 @@ function makeBundle(): Bundle {
     messages: [
       {
         id: MSG_CPO,
-        content: "I finished everything else that reconciling that CPO",
+        content: "the rest of squaring up that CPO is done",
         createdAt: at,
         mode: "voice",
       },
@@ -112,7 +112,7 @@ function makeBundle(): Bundle {
     events: [
       {
         id: EV_CALL,
-        title: "Call Walter about CPO 2073",
+        title: "Call Warren about CPO 4513",
         startsAt: at,
         endsAt: null,
         location: null,
@@ -129,15 +129,15 @@ function makeBundle(): Bundle {
         rows: [
           {
             id: T_BLOCKED,
-            title: "Process CPO 2073 / Production monitor as an FY 2027 transaction this month",
+            title: "Process CPO 4513 / Projection screen as an FY 2031 transaction this month",
           },
-          { id: T_CHECK, title: "Check what is blocking CPO 2073 and report back" },
+          { id: T_CHECK, title: "Check what is blocking CPO 4513 and report back" },
         ],
       },
     ],
-    projectNames: ["Album", "Caltrans", "Find It app"],
+    projectNames: ["Album", "Canterly", "Fetch It app"],
     dropped: [],
-    terms: ["Caltrans", "CPO", "2073"],
+    terms: ["Canterly", "CPO", "4513"],
   };
 }
 
@@ -156,9 +156,9 @@ function validOutput(): RunOutput {
       },
       things: [
         {
-          name: "Production monitor",
-          aliases: ["CPO 2073"],
-          ids: ["2073", "0394"],
+          name: "Projection screen",
+          aliases: ["CPO 4513"],
+          ids: ["4513", "0581"],
           state: {
             text: "Converted and signed; reconcile after the bank statement.",
             sources: [task(T_DONE), message(MSG_CPO)],
@@ -169,7 +169,7 @@ function validOutput(): RunOutput {
       ],
       rules: [
         {
-          text: "The US Bank statement is part of reconciling a CPO.",
+          text: "The NW Bank statement is part of reconciling a CPO.",
           sources: [memory(M_STATEMENT)],
           confidence: "high",
         },
@@ -181,7 +181,7 @@ function validOutput(): RunOutput {
       asked: [],
       contradictions: [
         {
-          text: "CPO 2073 is filed as done and also as blocked with 0 of 4 stages ticked.",
+          text: "CPO 4513 is filed as done and also as blocked with 0 of 4 stages ticked.",
           sources: [task(T_DONE), task(T_BLOCKED)],
         },
       ],
@@ -197,9 +197,9 @@ function validOutput(): RunOutput {
     questions: [
       {
         kind: "doesnt_add_up",
-        question: "CPO 2073 is on your list twice. Close the open copies?",
+        question: "CPO 4513 is on your list twice. Close the open copies?",
         // Names an evidence item by its real title (SPEC §7).
-        why: "It is done on Sep 1, and Check what is blocking CPO 2073 and report back is still open.",
+        why: "It is done on Sep 1, and Check what is blocking CPO 4513 and report back is still open.",
         evidence: [task(T_DONE), task(T_BLOCKED), task(T_CHECK)],
         answers: [
           {
@@ -219,7 +219,7 @@ function validOutput(): RunOutput {
       todayLine: "Nothing is due today. Tomorrow is the bank statement.",
       ledes: {
         overdue:
-          "Both rows are the same CPO 2073. The Production monitor copy has been blocked since August 21.",
+          "Both rows are the same CPO 4513. The Projection screen copy has been blocked since August 21.",
       },
     },
   };
@@ -234,7 +234,7 @@ describe("a sourced output passes", () => {
   it("accepts the hand-written output as-is", () => {
     const res = validateRunOutput(validOutput(), makeBundle());
     expect(res.ok, JSON.stringify(res)).toBe(true);
-    if (res.ok) expect(res.value.record.things[0].ids).toEqual(["2073", "0394"]);
+    if (res.ok) expect(res.value.record.things[0].ids).toEqual(["4513", "0581"]);
   });
 
   it("fills every omitted array with [] — a first run with little to say is still a record", () => {
@@ -259,7 +259,7 @@ describe("a sourced output passes", () => {
 
   it("a lede naming a row title passes", () => {
     const out = validOutput();
-    out.words.ledes.overdue = "The oldest is Process CPO 2073 / Production monitor. Check it first.";
+    out.words.ledes.overdue = "The oldest is Process CPO 4513 / Projection screen. Check it first.";
     expect(errorsOf(out)).toEqual([]);
   });
 
@@ -306,11 +306,11 @@ describe("step 1 and 2: sources", () => {
     const out = validOutput();
     out.record.rules[0].sources = [memory("nope-1")];
     out.questions[0].evidence = [task("nope-2")];
-    out.words.ledes.overdue = "It is waiting on the Antenna. Agenda for the week is set.";
+    out.words.ledes.overdue = "It is waiting on the Awning. Agenda for the week is set.";
     const errors = errorsOf(out);
     expect(errors.join("\n")).toContain("nope-1");
     expect(errors.join("\n")).toContain("nope-2");
-    expect(errors.join("\n")).toContain("Antenna");
+    expect(errors.join("\n")).toContain("Awning");
     expect(errors.join("\n")).toMatch(/banned word "Agenda"/);
   });
 });
@@ -363,13 +363,13 @@ describe("step 3: writes", () => {
     };
     // Exact, case-blind, punctuation-blind and contained names all land,
     // because the apply path (resolveProject) would land them the same way.
-    for (const name of ["Album", "caltrans", "find-it app", "Find It"]) {
+    for (const name of ["Album", "canterly", "fetch-it app", "Fetch It"]) {
       expect(errorsOf(withProject(name)), name).toEqual([]);
     }
     const errors = errorsOf(withProject("Nowhere Land"));
     expect(errors).toHaveLength(1);
     expect(errors[0]).toContain('no project named "Nowhere Land"');
-    expect(errors[0]).toContain("Album, Caltrans, Find It app");
+    expect(errors[0]).toContain("Album, Canterly, Fetch It app");
   });
 
   it("one answer may not carry the same (op, id) twice", () => {
@@ -401,7 +401,7 @@ describe("step 4: plain language", () => {
   it("a banned word fails", () => {
     const out = validOutput();
     out.questions[0].why =
-      "Check what is blocking CPO 2073 and report back slipped and nothing says why.";
+      "Check what is blocking CPO 4513 and report back slipped and nothing says why.";
     const errors = errorsOf(out);
     expect(errors).toHaveLength(1);
     expect(errors[0]).toContain('questions[0].why: banned word "slipped"');
@@ -427,14 +427,14 @@ describe("step 4: plain language", () => {
   it("a lede with 4 sentences fails", () => {
     const out = validOutput();
     out.words.ledes.overdue =
-      "Both are CPO 2073. One is blocked. One is a check. Neither has moved since August.";
+      "Both are CPO 4513. One is blocked. One is a check. Neither has moved since August.";
     expect(errorsOf(out)).toEqual(["words.ledes.overdue: more than 3 sentences"]);
   });
 
   it("a why with 3 sentences fails", () => {
     const out = validOutput();
     out.questions[0].why =
-      "Check what is blocking CPO 2073 and report back is open. It is also done. Nothing says which is right.";
+      "Check what is blocking CPO 4513 and report back is open. It is also done. Nothing says which is right.";
     expect(errorsOf(out)).toEqual(["questions[0].why: more than 2 sentences"]);
   });
 
@@ -458,7 +458,7 @@ describe("step 4: plain language", () => {
     expect(countSentences("")).toBe(0);
     expect(countSentences("One sentence")).toBe(1);
     expect(countSentences("One. Two. Three.")).toBe(3);
-    expect(countSentences("Lenses (2110). Antenna (2079)?")).toBe(2);
+    expect(countSentences("Benches (4562). Awning (4519)?")).toBe(2);
     expect(countSentences("The U.S. Bank statement is due.")).toBe(1);
   });
 });
@@ -470,7 +470,7 @@ describe("step 4: days as digits", () => {
     out.words.ledes.overdue = "Both wait on the fifteenth.";
     out.questions[0].question = "Was the check filed by the fifth?";
     out.questions[0].why =
-      "Check what is blocking CPO 2073 and report back is dated September second.";
+      "Check what is blocking CPO 4513 and report back is dated September second.";
     expect(errorsOf(out)).toEqual([
       'questions[0].question: days as digits, not "by the fifth"',
       'questions[0].why: days as digits, not "September second"',
@@ -488,7 +488,7 @@ describe("step 4: days as digits", () => {
   });
 
   it("ordinary ordinals are prose: first, the second copy, the third stage", () => {
-    expect(spelledDayIn("Marissa signs first, then Walter.")).toBeNull();
+    expect(spelledDayIn("Melissa signs first, then Warren.")).toBeNull();
     expect(spelledDayIn("The second copy shows 0 of 4 stages.")).toBeNull();
     expect(spelledDayIn("Check it first.")).toBeNull();
     expect(spelledDayIn("It is the third stage of four.")).toBeNull();
@@ -522,17 +522,17 @@ describe("step 4: a why names its evidence (SPEC §7)", () => {
 
   it("the full title of any evidence row satisfies it, whatever the case", () => {
     const out = validOutput();
-    out.questions[0].why = "check what is blocking cpo 2073 and report back is still open.";
+    out.questions[0].why = "check what is blocking cpo 4513 and report back is still open.";
     expect(errorsOf(out)).toEqual([]);
   });
 
   it("a quote counts only when it is really in the source it is attached to", () => {
     const out = validOutput();
     out.questions[0].evidence = [
-      { type: "task", id: T_CHECK, quote: "blocking CPO 2073" },
+      { type: "task", id: T_CHECK, quote: "blocking CPO 4513" },
       task(T_DONE),
     ];
-    out.questions[0].why = "Something is still blocking CPO 2073 after the done copy closed on Sep 1.";
+    out.questions[0].why = "Something is still blocking CPO 4513 after the done copy closed on Sep 1.";
     expect(errorsOf(out)).toEqual([]);
 
     // Words attributed to a row that never said them, in a why that names
@@ -548,13 +548,13 @@ describe("step 4: a why names its evidence (SPEC §7)", () => {
   it("a why can name a task the way a person does: its number, a name in it, or a run of its words", () => {
     const out = validOutput();
     out.questions[0].evidence = [task(T_DONE)];
-    out.questions[0].why = "The 2073 copy you finished on Sep 1 is still on the list.";
+    out.questions[0].why = "The 4513 copy you finished on Sep 1 is still on the list.";
     expect(errorsOf(out)).toEqual([]);
 
-    out.questions[0].why = "It still needs a signature from Marissa according to the finished copy.";
+    out.questions[0].why = "It still needs a signature from Melissa according to the finished copy.";
     expect(errorsOf(out)).toEqual([]);
 
-    out.questions[0].why = "You already did convert to FY2027, create new CPO and the rest of it.";
+    out.questions[0].why = "You already did convert to FY2031, create new CPO and the rest of it.";
     expect(errorsOf(out)).toEqual([]);
 
     // Three words in a row is not a quotation.
@@ -564,8 +564,8 @@ describe("step 4: a why names its evidence (SPEC §7)", () => {
 
   it("a message quote works the same way — the user's own words", () => {
     const out = validOutput();
-    out.questions[0].evidence = [{ type: "message", id: MSG_CPO, quote: "finished everything else" }];
-    out.questions[0].why = 'You said you "finished everything else" on Sep 1.';
+    out.questions[0].evidence = [{ type: "message", id: MSG_CPO, quote: "the rest of squaring up" }];
+    out.questions[0].why = 'You said "the rest of squaring up" was done on Sep 1.';
     expect(errorsOf(out)).toEqual([]);
   });
 
@@ -578,19 +578,19 @@ describe("step 4: a why names its evidence (SPEC §7)", () => {
 });
 
 describe("step 5: a lede names only what is in its widget", () => {
-  it("a lede naming Antenna when no row contains it fails", () => {
+  it("a lede naming Awning when no row contains it fails", () => {
     const out = validOutput();
-    out.words.ledes.overdue = "The oldest is the Antenna (2079).";
+    out.words.ledes.overdue = "The oldest is the Awning (4519).";
     const errors = errorsOf(out);
     expect(errors).toEqual([
-      'words.ledes.overdue: lede names something not in the widget: "2079"',
-      'words.ledes.overdue: lede names something not in the widget: "Antenna"',
+      'words.ledes.overdue: lede names something not in the widget: "4519"',
+      'words.ledes.overdue: lede names something not in the widget: "Awning"',
     ]);
   });
 
   it("the project name and the widget title are always allowed", () => {
     const out = validOutput();
-    out.words.ledes.overdue = "Everything Past Due here is Caltrans work on CPO 2073.";
+    out.words.ledes.overdue = "Everything Past Due here is Canterly work on CPO 4513.";
     expect(errorsOf(out)).toEqual([]);
   });
 
@@ -601,11 +601,11 @@ describe("step 5: a lede names only what is in its widget", () => {
   });
 
   it("ledeNames keeps all-caps words at the start of a sentence and exempts the rest", () => {
-    // "Lenses" opens a sentence and is exempt as prose; its number still
+    // "Benches" opens a sentence and is exempt as prose; its number still
     // names it, which is why "nickname and number together" (SPEC §7) matters.
-    expect(ledeNames("CPO 2073 is oldest. Lenses (2110) is ready.")).toEqual(["2073", "2110", "CPO"]);
-    expect(ledeNames("Three are late. Check the Antenna.")).toEqual(["Antenna"]);
-    expect(ledeNames("Antenna is late.")).toEqual([]);
+    expect(ledeNames("CPO 4513 is oldest. Benches (4562) is ready.")).toEqual(["4513", "4562", "CPO"]);
+    expect(ledeNames("Three are late. Check the Awning.")).toEqual(["Awning"]);
+    expect(ledeNames("Awning is late.")).toEqual([]);
   });
 
   it("a plural of a row-title word is the same name — 'Both CPOs' passes", () => {
@@ -616,7 +616,7 @@ describe("step 5: a lede names only what is in its widget", () => {
 
   it("and the singular of a plural in a row title passes", () => {
     const bundle = makeBundle();
-    bundle.widgets[0].rows = [{ id: T_BLOCKED, title: "Send the Lenses and the Copies" }];
+    bundle.widgets[0].rows = [{ id: T_BLOCKED, title: "Send the Benches and the Copies" }];
     const out = validOutput();
     out.words.ledes.overdue = "One Lens is in. Every Copy is in.";
     expect(errorsOf(out, bundle)).toEqual([]);
@@ -627,21 +627,21 @@ describe("step 5: a lede names only what is in its widget", () => {
     expect(inflections("cpo")).toContain("cpos");
     expect(inflections("copies")).toContain("copy");
     expect(inflections("copy")).toContain("copies");
-    expect(inflections("lenses")).toContain("lens");
-    expect(inflections("2073")).toContain("2073");
+    expect(inflections("benches")).toContain("bench");
+    expect(inflections("4513")).toContain("4513");
   });
 });
 
 describe("terms: mentions are matched the way resolveProject normalizes", () => {
   it("is case- and punctuation-blind inside a term, whole-word at its edges", () => {
-    const find = termMatcher(["Find It app", "Prod. monitor", "CPO"]);
-    expect(find("the find-it app is ready")).toBe(true);
-    expect(find("FIND IT APP")).toBe(true);
-    expect(find("the prod monitor")).toBe(true);
+    const find = termMatcher(["Fetch It app", "Proj. screen", "CPO"]);
+    expect(find("the fetch-it app is ready")).toBe(true);
+    expect(find("FETCH IT APP")).toBe(true);
+    expect(find("the proj screen")).toBe(true);
     expect(find("that CPO")).toBe(true);
     // Not glued to other letters or digits.
     expect(find("CPOs")).toBe(false);
-    expect(find("the findit app")).toBe(false);
+    expect(find("the fetchit app")).toBe(false);
     expect(termMatcher(["..."])("...")).toBe(false);
   });
 });
@@ -676,7 +676,7 @@ describe("a question is one breath and an answer is an action (SPEC §7)", () =>
   it("rejects a question longer than 14 words and names the count", () => {
     const out = validOutput();
     out.questions[0].question =
-      "Should I clean up the CPO 2073 Production monitor tasks that still say blocked even though the notes and finished task say the work is done?";
+      "Should I clean up the CPO 4513 Projection screen tasks that still say blocked even though the notes and finished task say the work is done?";
     const errors = errorsOf(out).filter((e) => e.includes(".question:"));
     expect(errors).toHaveLength(1);
     expect(errors[0]).toMatch(/\d+ words; say it in at most 14/);
@@ -684,13 +684,13 @@ describe("a question is one breath and an answer is an action (SPEC §7)", () =>
 
   it("rejects a pasted title with a slash in the question", () => {
     const out = validOutput();
-    out.questions[0].question = "Close CPO 2073 / Production monitor?";
+    out.questions[0].question = "Close CPO 4513 / Projection screen?";
     expect(errorsOf(out).some((e) => e.includes("contains a slash"))).toBe(true);
   });
 
   it("rejects an answer label that is a code or too long, and accepts an action", () => {
     const out = validOutput();
-    out.questions[0].answers[0].label = "Mark FY2027 done";
+    out.questions[0].answers[0].label = "Mark FY2031 done";
     expect(errorsOf(out).some((e) => e.includes("carries a code"))).toBe(true);
 
     out.questions[0].answers[0].label = "Close the old copy and keep the new one";
@@ -714,7 +714,7 @@ describe("a question about my own suggestions must offer to drop them (SPEC §7)
     // suggestions you can get rid of" had nothing behind it.
     const out = validOutput();
     out.questions[0].evidence = [{ type: "task", id: T_CHECK }];
-    out.questions[0].why = "Check what is blocking CPO 2073 and report back is 22 days late.";
+    out.questions[0].why = "Check what is blocking CPO 4513 and report back is 22 days late.";
     out.questions[0].answers = [
       { id: "done", label: "Yes, done", writes: [{ op: "complete_task", taskId: T_CHECK }, { op: "resolve" }] },
       { id: "later", label: "Not yet", writes: [{ op: "set_due", taskId: T_CHECK, dueAt: "2026-09-30" }] },
@@ -732,7 +732,7 @@ describe("a question about my own suggestions must offer to drop them (SPEC §7)
   it("passes once one answer drops it", () => {
     const out = validOutput();
     out.questions[0].evidence = [{ type: "task", id: T_CHECK }];
-    out.questions[0].why = "Check what is blocking CPO 2073 and report back is 22 days late.";
+    out.questions[0].why = "Check what is blocking CPO 4513 and report back is 22 days late.";
     out.questions[0].answers = [
       { id: "drop", label: "Drop it", writes: [{ op: "drop_task", taskId: T_CHECK }, { op: "resolve" }] },
       { id: "keep", label: "Keep it", writes: [{ op: "resolve" }] },
@@ -744,7 +744,7 @@ describe("a question about my own suggestions must offer to drop them (SPEC §7)
     // T_CHECK is "spoken" in the plain bundle: the user's work, not my guess.
     const out = validOutput();
     out.questions[0].evidence = [{ type: "task", id: T_CHECK }];
-    out.questions[0].why = "Check what is blocking CPO 2073 and report back is 22 days late.";
+    out.questions[0].why = "Check what is blocking CPO 4513 and report back is 22 days late.";
     out.questions[0].answers = [
       { id: "done", label: "Yes, done", writes: [{ op: "complete_task", taskId: T_CHECK }, { op: "resolve" }] },
       { id: "keep", label: "Keep it", writes: [{ op: "resolve" }] },
@@ -788,7 +788,7 @@ describe("the words never promise what the loop cannot do (SPEC §7)", () => {
     const quoted = validOutput();
     quoted.record.decisions = [
       {
-        text: `You decided: "I will pay CPO 2073 after the US Bank statement".`,
+        text: `You decided: "I will pay CPO 4513 after the NW Bank statement".`,
         sources: [{ type: "task", id: T_DONE }],
         confidence: "high",
       },

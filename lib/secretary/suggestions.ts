@@ -104,7 +104,7 @@ export async function generateSuggestions(userId: string, timezone: string): Pro
       `Today: ${fmt(now)} (${timezone})`,
       "",
       // the model can only file suggestions correctly if it can SEE which
-      // project each existing task belongs to (learned from the DTC-budget
+      // project each existing task belongs to (learned from the QTB-budget
       // suggestion landing Unfiled)
       "PROJECTS (exact names):",
       ...projectRows.map((p) => `- "${p.name}"`),

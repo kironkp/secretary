@@ -20,7 +20,7 @@ const iso = (msFromNow: number) => new Date(now + msFromNow).toISOString();
 
 const task: TaskRow = {
   id: "task-1",
-  title: "Prep questions for Ash",
+  title: "Prep questions for Avery",
   status: "todo",
   dueAt: iso(3 * DAY),
   updatedAt: iso(-1 * HOUR),
@@ -35,8 +35,8 @@ const task: TaskRow = {
     { name: "Draft", done: false },
   ],
   recurrence: null,
-  projectId: "proj-daw",
-  projectName: "DAW patent",
+  projectId: "proj-dorado",
+  projectName: "Dorado patent",
   projectColor: null,
   conversationId: "conv-1",
   messageId: null,
@@ -49,14 +49,14 @@ const task: TaskRow = {
 
 const event: EventRow = {
   id: "event-1",
-  title: "Patent meeting with Ash",
+  title: "Patent meeting with Avery",
   startsAt: iso(2 * DAY),
   endsAt: null,
-  location: "Stephens Law Group",
+  location: "Harlow Law Group",
   notes: "11:00 AM PT / 2:00 PM ET",
   reminders: [iso(2 * DAY - 10 * 60000), iso(2 * DAY - 5 * 60000), iso(2 * DAY)],
-  projectId: "proj-daw",
-  projectName: "DAW patent",
+  projectId: "proj-dorado",
+  projectName: "Dorado patent",
   source: "spoken",
   createdAt: iso(-2 * HOUR),
   startDays: 2,
@@ -69,7 +69,7 @@ describe("render completeness: open loops", () => {
     const groups = buildLoopGroups([task], [event]);
     expect(groups).toHaveLength(1);
     const g = groups[0];
-    expect(g.name).toBe("DAW patent");
+    expect(g.name).toBe("Dorado patent");
     expect(g.eventCount).toBe(1);
     expect(g.openCount).toBe(1);
     // event (2d) sorts before the task (3d)
@@ -92,16 +92,16 @@ describe("render completeness: project grid", () => {
   it("shows the project's next event and lets it drive the pressure date", () => {
     const undatedTask: TaskRow = { ...task, id: "t2", dueAt: null };
     const projects = buildProjects([undatedTask], [event]);
-    const daw = projects.find((p) => p.name === "DAW patent");
-    expect(daw?.nextEvent?.id).toBe("event-1");
-    expect(daw?.nextEvent?.reminders).toHaveLength(3);
+    const dorado = projects.find((p) => p.name === "Dorado patent");
+    expect(dorado?.nextEvent?.id).toBe("event-1");
+    expect(dorado?.nextEvent?.reminders).toHaveLength(3);
     // pressure comes from the event (2d), not "undated"
-    expect(daw?.earliestDays).toBe(2);
+    expect(dorado?.earliestDays).toBe(2);
   });
 
   it("a project with only events still gets a card", () => {
     const projects = buildProjects([], [event]);
-    expect(projects.find((p) => p.name === "DAW patent")).toBeTruthy();
+    expect(projects.find((p) => p.name === "Dorado patent")).toBeTruthy();
   });
 });
 
@@ -128,14 +128,14 @@ describe("render completeness: coming-up strip", () => {
 describe("render completeness: five-week chart", () => {
   it("puts event markers on the project's row", () => {
     const rows = timelineRows([task], [event]);
-    const daw = rows.find((r) => r.name.startsWith("DAW patent"));
-    expect(daw?.eventMarks).toHaveLength(1);
-    expect(daw?.eventMarks[0].label).toContain("Patent meeting");
+    const dorado = rows.find((r) => r.name.startsWith("Dorado patent"));
+    expect(dorado?.eventMarks).toHaveLength(1);
+    expect(dorado?.eventMarks[0].label).toContain("Patent meeting");
   });
 
   it("a project with only events still gets a row", () => {
     const rows = timelineRows([], [event]);
-    expect(rows.find((r) => r.name === "DAW patent")?.eventMarks).toHaveLength(1);
+    expect(rows.find((r) => r.name === "Dorado patent")?.eventMarks).toHaveLength(1);
   });
 });
 

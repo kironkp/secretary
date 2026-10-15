@@ -1,6 +1,6 @@
 // SPEC §11 expectations / nag engine. Transcript beat: "Go update
 // two-zero-seven-three. When you check back in, tell me plainly whether it's
-// updated and whether Teresa's seen it — I'll be asking either way."
+// updated and whether Tamsin's seen it — I'll be asking either way."
 // That promise must be a ROW that fires, clears silently, batches, and
 // respects quiet hours — never rhetoric.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -27,13 +27,13 @@ const hoursAgo = (h: number) => new Date(Date.now() - h * 3600000).toISOString()
 describe("expectations lifecycle", () => {
   it("'I'll be asking' writes a row linked to the task", async () => {
     await executeTool(ctx, "create_task", {
-      title: "Update CPO 2073 (production monitor)",
+      title: "Update CPO 4513 (projection screen)",
       stakes: "miss reconcile → strike from HQ",
     });
     const { result } = await executeTool(ctx, "create_expectation", {
-      commitment: "CPO 2073 updated and Teresa has seen it",
+      commitment: "CPO 4513 updated and Tamsin has seen it",
       expected_update_by: hoursAgo(-24), // due tomorrow
-      task: "CPO 2073",
+      task: "CPO 4513",
       on_miss: "nag",
     });
     expect((result as { expectation_id?: string }).expectation_id).toBeTruthy();
@@ -43,7 +43,7 @@ describe("expectations lifecycle", () => {
   });
 
   it("a user report clears it silently — no nag ever fires", async () => {
-    await executeTool(ctx, "update_task", { task: "CPO 2073", status: "in_progress" });
+    await executeTool(ctx, "update_task", { task: "CPO 4513", status: "in_progress" });
     const [row] = await db.select().from(expectations).where(eq(expectations.userId, U.id));
     expect(row.status).toBe("cleared");
     const briefing = await buildBriefing(U.id, ctx.timezone, { consumeNudges: true });
@@ -53,13 +53,13 @@ describe("expectations lifecycle", () => {
 
   it("misses fire at session start: batched into ONE ping, citing stakes; missed once handed over", async () => {
     await executeTool(ctx, "create_expectation", {
-      commitment: "CPO 2073 signed by Teresa",
+      commitment: "CPO 4513 signed by Tamsin",
       expected_update_by: hoursAgo(3),
-      task: "CPO 2073",
+      task: "CPO 4513",
       on_miss: "escalate",
     });
     await executeTool(ctx, "create_expectation", {
-      commitment: "CalCard payment confirmed with Walter",
+      commitment: "CalCard payment confirmed with Warren",
       expected_update_by: hoursAgo(1),
     });
     // A briefing that opens no session (a page load, the card, a consultation)
@@ -72,8 +72,8 @@ describe("expectations lifecycle", () => {
     const pingHeaders = briefing.text.match(/EXPECTATIONS MISSED/g) ?? [];
     expect(pingHeaders).toHaveLength(1); // batched — one ping, never a barrage
     expect(briefing.text).toContain("ONE combined question");
-    expect(briefing.text).toContain("CPO 2073 signed by Teresa");
-    expect(briefing.text).toContain("CalCard payment confirmed with Walter");
+    expect(briefing.text).toContain("CPO 4513 signed by Tamsin");
+    expect(briefing.text).toContain("CalCard payment confirmed with Warren");
     expect(briefing.text).toContain("STAKES: miss reconcile → strike from HQ");
     expect(briefing.text).toContain("on_miss: escalate");
 
@@ -97,13 +97,13 @@ describe("expectations lifecycle", () => {
     const { result } = await executeTool(ctx, "create_expectation", {
       commitment: "settle-after-clear probe",
       expected_update_by: hoursAgo(2),
-      task: "CPO 2073",
+      task: "CPO 4513",
     });
     const id = (result as { expectation_id: string }).expectation_id;
     const briefing = await buildBriefing(U.id, ctx.timezone, { consumeNudges: true });
     expect(briefing.followUps).toContain(id);
     // The report lands between the build and the hand-over.
-    await executeTool(ctx, "update_task", { task: "CPO 2073", status: "in_progress" });
+    await executeTool(ctx, "update_task", { task: "CPO 4513", status: "in_progress" });
     await settleFollowUps(U.id, briefing.followUps);
     const [row] = await db.select().from(expectations).where(eq(expectations.id, id));
     expect(row.status).toBe("cleared");

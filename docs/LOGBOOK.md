@@ -803,7 +803,7 @@ start dates, due dates". It was a read-only vertical list.
   with the old formula over unchanged inputs are re-stamped with no model
   call, so deploying this re-reads nothing that did not change; and a failed
   read logged under the old formula keeps its backoff (sec rev, from a
-  simulation on production's shape: Caltrans would otherwise have bought
+  simulation on production's shape: Canterly would otherwise have bought
   one paid read on deploy). A formula change buys no reads.
 - From sec rev's A006 review: Overview's "1d to your next commitment" tile
   now shows the date ("tomorrow", "Fri", "Oct 9"; SPEC §7: dates, never
@@ -873,7 +873,7 @@ doing nothing.
   now" is the old dismiss). Hide suggestions folds them to "See suggestions
   (N)" until a new one arrives.
 - Today never says "the model's answer did not check out": a failed read
-  says "I couldn't update my notes on Caltrans; I'll try again when something
+  says "I couldn't update my notes on Canterly; I'll try again when something
   changes", with Try now (that one project, the same quota and caps) when it
   is under a day old, and nothing at all after that.
 - Left alone on purpose: the 5-week chart (SEC-A007/A009 replace it).
@@ -969,9 +969,9 @@ this commit
 
 sec rev's production check after the unpause (v53):
 
-- Caltrans still failed, now on one answer label, `"Not yet, do it
+- Canterly still failed, now on one answer label, `"Not yet, do it
   Friday"` (five words where a button takes four). The $1.50 run ceiling
-  leaves no room for a second attempt, so each change to Caltrans paid
+  leaves no room for a second attempt, so each change to Canterly paid
   about $0.81 for a record that was then thrown away. A rule about how a
   piece reads now drops that piece instead: the answer option, a question
   that reads wrong or has no answer left, the Today line, a lede. Dropped,
@@ -979,8 +979,8 @@ sec rev's production check after the unpause (v53):
   doing what it does not say), never rewritten, never a second call. The
   record's own claims are never dropped, and every rule about sources,
   ids, evidence and writes still rejects as before.
-- The sweep read projects alphabetically, so the $3 day went to Caltrans,
-  DAW and Find It before Jazz or Personal. It now reads the most recently
+- The sweep read projects alphabetically, so the $3 day went to Canterly,
+  Dorado and Fetch It before Jasper or Personal. It now reads the most recently
   used first, judged only by the user's own signals: their messages about
   a project, the tasks they asked for by voice or chat, and their answers
   to its questions. What the app writes itself (extracted or suggested
@@ -1215,7 +1215,7 @@ no lists, and nothing stopped the assistant promising before it checked.
   scores its items 0, and the dashboard keeps its items off every other view
   and shows the list as one tickable checklist card.
 - arrange_dashboard (lib/layout/arrange.ts), on the call and in chat: "put the
-  shopping list at the top", "move Caltrans down", "hide the timeline", "show
+  shopping list at the top", "move Canterly down", "hide the timeline", "show
   it again". Words map to sections with no model call; the edit is
   user-initiated, saved as the head and pinned, and "hide" is a hide_section
   preference, so no planner brings the section back. The validator's pin rule
@@ -1305,7 +1305,7 @@ Kiron's Claude console showed $38 on Oct 1, $12 on Oct 2 and 3, and $6 by
 the morning of Oct 4, with the app barely used: "I am not made of money."
 Production's `usage` table (its own figures; about $28 for Oct 1 Pacific
 time): all of it `understanding` on claude-opus-5. From 09-30 17:08 to
-10-04 09:29 PDT, Caltrans was $63.12 of $67.75 (93%): 21 runs at about $3,
+10-04 09:29 PDT, Canterly was $63.12 of $67.75 (93%): 21 runs at about $3,
 all failed, none stored, and every paid run from 10-01 15:47 PDT on. The
 other $4.63 was nine ok runs of six other projects. Paused first with
 `UNDERSTANDING_DISABLED=true` (Heroku v51, 2026-10-04 11:34 PDT); zero
@@ -1324,17 +1324,17 @@ spend after it.
   flight sends no "paused" push. The spend pushes were keyed by day alone
   in a table whose key is unique across users; they now carry the user.
 - A failed run backed off six hours, and not at all after a restart (the
-  dyno cycles daily): Caltrans paid $3 on the same inputs every ~6.5 hours.
+  dyno cycles daily): Canterly paid $3 on the same inputs every ~6.5 hours.
   Now any failed run on the same inputs that the model answered, or that
   was billed, keeps the sweep off them until they change.
 - One run: 3 attempts × 32k output tokens at Opus effort high, each cut at
   max_tokens or refused. The model was told to copy back the record's
-  `asked` list, which the store then replaces: 25,073 of Caltrans's 50,113
+  `asked` list, which the store then replaces: 25,073 of Canterly's 50,113
   record characters, and one stored answer of 1,015 characters failed the
   validator (`record.asked.51.answer`) on every faithful copy. The prompt
   and schema no longer ask for it and the run drops any copy before
   validation. A run stops before any attempt whose worst case could take
-  it past its ceiling: a Caltrans-sized prompt now gets one attempt. The
+  it past its ceiling: a Canterly-sized prompt now gets one attempt. The
   OpenAI call got the same `max_output_tokens`.
 
 Not changed (Kiron's call): Opus at effort high for background reads, and
@@ -1352,7 +1352,7 @@ this commit
 
 About $40 went overnight with no one using the app. Heroku's log: the Claude
 API key hit its monthly spend limit at 08:21 UTC; the understanding run
-fell back to OpenAI gpt-5.5 at high effort for the next hour, and Caltrans
+fell back to OpenAI gpt-5.5 at high effort for the next hour, and Canterly
 failed validation on all three attempts twice (memory ids the model cut
 short or mis-dashed; a suggested task with no drop answer) — each attempt a
 full, expensive call. OpenAI then ran out of credit too. Earlier the same
@@ -1450,7 +1450,7 @@ Adobe." SPEC (understanding §6, documents per step) first.
 Checked: 5 new tests (loose names, missing list, filing, a 3-page compile,
 docs kept on re-save); the voice-schema test caught an unbounded `step`
 (now max 40). Driven locally: seeded CPO task, upload through the UI, the
-detail reads 3/5 with ADM 2029 and the US Bank statement missing, compiled
+detail reads 3/5 with ADM 2029 and the NW Bank statement missing, compiled
 PDF has 4 pages with the checklist cover. 829/829 vitest, `next build`.
 
 ---
@@ -1626,7 +1626,7 @@ note) and otherwise say so plainly, the briefing leaves out plans and
 outcomes (ABILITIES ALREADY BUILT stays), and Settings hides the section.
 Tables, worker and tools remain.
 
-Data: the CPO purchase cycle was saved and "Do the US Bank statement" put on
+Data: the CPO purchase cycle was saved and "Do the NW Bank statement" put on
 step 7 through Secretary's own chat (the tools from v0.13), not a script.
 
 Checks: tsc, eslint, 824/824 vitest, `next build`.
@@ -1646,7 +1646,7 @@ restarting the recording on every parent re-render. `DictationField` puts the
 same bar behind a mic in every answer box (Interview note, opened question,
 Write your own), and those boxes grow with the text.
 
-**Corrections are instructions.** "Do the US Bank statement makes no sense"
+**Corrections are instructions.** "Do the NW Bank statement makes no sense"
 was filed as a fact and the task stayed. The interpreter now drops or renames
 a row the user says is wrong (`rename_task`), and a rename and a step may sit
 beside another write on the same row.
@@ -1656,7 +1656,7 @@ recurring job described step by step is now a `process` on the interpreter's
 output, saved as a `pipeline_templates` row (`save_process`, each step
 blocked by the one before). `set_step` puts a task on a step (the steps
 become its stages, earlier ones done). Every run and the chat/voice briefing
-see PROCESSES; the run may ask "Which step is CPO 2110 on?". Adding processes
+see PROCESSES; the run may ask "Which step is CPO 4562 on?". Adding processes
 to the bundle hash re-reads every project once after deploy.
 
 **Memory tab.** Processes with numbered steps and every memory, newest
@@ -1941,7 +1941,7 @@ picture, start thinking of it as a board."*
 - **`ac1c559`** — shared world model (`lib/canvas/focus.ts`): one interaction
   state both voice and touch write, so tapping a card is what "make this bigger"
   means a second later. Deterministic reference resolution for "that", "the
-  other one", "the top one", "the Caltrans one". Geometry undo/redo. `?perf=1`
+  other one", "the top one", "the Canterly one". Geometry undo/redo. `?perf=1`
   instrumentation.
 
 ---

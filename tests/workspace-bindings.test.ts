@@ -32,7 +32,7 @@ describe("repeating a template", () => {
     const el = mount(LIST);
     applyBindings(el, [
       row("t1", { title: "Pay rent", due: "today" }),
-      row("t2", { title: "Call Marissa", due: "Fri" }),
+      row("t2", { title: "Call Melissa", due: "Fri" }),
     ]);
     const items = el.querySelectorAll("li");
     expect(items).toHaveLength(2);
@@ -50,7 +50,7 @@ describe("repeating a template", () => {
     // A project id in the completion attribute would send the task API an id
     // it does not recognise.
     const el = mount(LIST);
-    applyBindings(el, [row("project-1", { name: "Caltrans" })], { checkable: false });
+    applyBindings(el, [row("project-1", { name: "Canterly" })], { checkable: false });
     expect(el.querySelector("li")?.hasAttribute("data-check")).toBe(false);
   });
 

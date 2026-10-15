@@ -14,7 +14,7 @@ const ctx = { userId: U.id, timezone: "America/Los_Angeles" };
 
 beforeAll(async () => {
   await db.insert(user).values({ id: U.id, name: "Doc Test", email: U.email });
-  await db.insert(projects).values({ userId: U.id, name: "Caltrans" });
+  await db.insert(projects).values({ userId: U.id, name: "Canterly" });
 });
 
 afterAll(async () => {
@@ -72,14 +72,14 @@ describe("documents", () => {
   it("create → read (short doc returns content) → edit snapshots → revert restores", async () => {
     const created = await executeTool(ctx, "create_document", {
       title: "Duty statement",
-      project: "caltrans",
+      project: "canterly",
       sections: [
         { heading: "Position summary", content: "Original summary." },
         { heading: "Primary responsibilities", content: "Original responsibilities." },
       ],
     });
     const docId = (created.result as { document_id: string }).document_id;
-    expect((created.result as { project: string }).project).toBe("Caltrans");
+    expect((created.result as { project: string }).project).toBe("Canterly");
 
     const read = await executeTool(ctx, "read_document", { document: "duty" });
     const sections = (read.result as { sections: { heading: string; content: string }[] })
@@ -133,7 +133,7 @@ describe("suggestion filing", () => {
     const inserted = await insertSuggestions(
       U.id,
       [
-        { title: "Renew Caltrans parking permit", reason: "annual", due_at: null, project: "caltrans" },
+        { title: "Renew Canterly parking permit", reason: "annual", due_at: null, project: "canterly" },
         { title: "Standalone errand", reason: "life", due_at: null, project: "Brand New Project" },
       ],
       []
@@ -148,6 +148,6 @@ describe("suggestion filing", () => {
     const errand = rows.find((r) => r.title.includes("Standalone"));
     expect(errand?.projectId).toBeNull();
     const projectNames = await db.select({ n: projects.name }).from(projects).where(eq(projects.userId, U.id));
-    expect(projectNames.map((p) => p.n)).toEqual(["Caltrans"]);
+    expect(projectNames.map((p) => p.n)).toEqual(["Canterly"]);
   });
 });

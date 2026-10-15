@@ -2,7 +2,7 @@
 // component palette — it emits a small ordered spec, and the renderer maps it
 // onto hand-built components. Never AI-generated HTML at runtime.
 //
-// ADAPTIVE-UI PRINCIPLES (learned the hard way — the Ash-meeting incident,
+// ADAPTIVE-UI PRINCIPLES (learned the hard way — the Avery-meeting incident,
 // where times/timezones/alarms got flattened into a bare task title):
 // 1. The palette is FIXED. The model routes information into it; it never
 //    invents UI. New life-patterns (recurring bills, travel, people) earn new
@@ -14,7 +14,7 @@
 // 3. Information that fits no structured slot goes to `notes`, and notes are
 //    always viewable. Structured slots (reminders, due dates, locations) are
 //    preferred; notes are the safety net, not the default.
-// 4. RENDER COMPLETENESS (the Ash-meeting-invisible-on-Open-Loops incident):
+// 4. RENDER COMPLETENESS (the Avery-meeting-invisible-on-Open-Loops incident):
 //    every zone renders every entity type within its declared scope. A new
 //    entity or field ships only together with its appearance in ALL covering
 //    zones — "it's in the calendar" is not visibility. Current contract

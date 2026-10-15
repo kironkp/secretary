@@ -91,9 +91,9 @@ beforeAll(async () => {
       {
         ...base,
         kind: "doesnt_add_up",
-        question: "CPO 2073 is on your list twice?",
+        question: "CPO 4513 is on your list twice?",
         context: "One copy is finished; another is still open with 0 of 4 steps done.",
-        projectId: ids.caltrans,
+        projectId: ids.canterly,
         identity: "answer-close",
         evidence: [
           { type: "task", id: ids.doneCpo },
@@ -118,7 +118,7 @@ beforeAll(async () => {
         kind: "need_to_know",
         question: "Is the statement done?",
         context: "The finished copy says everything else is done.",
-        projectId: ids.caltrans,
+        projectId: ids.canterly,
         identity: "answer-outside",
         status: "asked",
         evidence: [{ type: "task", id: ids.doneCpo }],
@@ -137,7 +137,7 @@ beforeAll(async () => {
         kind: "done_yet",
         question: "Did both of these happen?",
         context: "Both look finished.",
-        projectId: ids.caltrans,
+        projectId: ids.canterly,
         identity: "answer-failing",
         evidence: [
           { type: "task", id: ghostTaskId },
@@ -158,9 +158,9 @@ beforeAll(async () => {
       {
         ...base,
         kind: "need_to_know",
-        question: "Is the US Bank statement the last step before CPO 2073 is reconciled?",
-        context: 'You said "I finished everything else that reconciling that CPO".',
-        projectId: ids.caltrans,
+        question: "Is the NW Bank statement the last step before CPO 4513 is reconciled?",
+        context: 'You said "the rest of squaring up that CPO is done".',
+        projectId: ids.canterly,
         identity: "answer-fact",
         evidence: [{ type: "memory", id: ids.memMonthly }],
         answers: [
@@ -170,8 +170,8 @@ beforeAll(async () => {
             writes: [
               {
                 op: "remember_fact",
-                fact: "The US Bank statement is the last step of reconciling CPO 2073.",
-                tags: ["Caltrans", "answered"],
+                fact: "The NW Bank statement is the last step of reconciling CPO 4513.",
+                tags: ["Canterly", "answered"],
               },
               { op: "resolve" },
             ],
@@ -183,7 +183,7 @@ beforeAll(async () => {
         kind: "done_yet",
         question: "Did you change the statement?",
         context: "You expected to say by Sep 24.",
-        projectId: ids.caltrans,
+        projectId: ids.canterly,
         identity: "answer-expectation",
         evidence: [{ type: "expectation", id: extraExpectationId }],
         answers: [
@@ -280,7 +280,7 @@ beforeAll(async () => {
     .returning({ id: clarifications.id });
   q.foreign = foreign.id;
 
-  // The Caltrans record has already asked the first question (Today showed
+  // The Canterly record has already asked the first question (Today showed
   // it); the others were never surfaced.
   const body: ProjectRecord = {
     things: [],
@@ -296,7 +296,7 @@ beforeAll(async () => {
   };
   await db.insert(records).values({
     userId: U.id,
-    projectId: ids.caltrans,
+    projectId: ids.canterly,
     body,
     inputsHash: "seed",
     words: { ledes: {} },
@@ -335,7 +335,7 @@ describe("answerQuestion", () => {
     const result = await answer(q.close, "close-both");
     expect(result).toEqual({
       status: "resolved",
-      projectId: ids.caltrans,
+      projectId: ids.canterly,
       applied: [
         { op: "complete_task", id: ids.blockedCpo },
         { op: "complete_task", id: ids.checkCpo },
@@ -372,7 +372,7 @@ describe("answerQuestion", () => {
     expect(stored.resolution).toBe("Close both");
 
     // The record's asked entry keeps when it was asked and gains the answer.
-    const record = await recordFor(ids.caltrans);
+    const record = await recordFor(ids.canterly);
     const asked = record.body.asked.find((a) => a.questionId === q.close);
     expect(asked?.askedAt).toBe(ASKED_AT);
     expect(asked?.answer).toBe("Close both");
@@ -407,7 +407,7 @@ describe("answerQuestion", () => {
     const result = await answer(q.fact, "yes-last-step");
     expect(result).toEqual({
       status: "resolved",
-      projectId: ids.caltrans,
+      projectId: ids.canterly,
       applied: [{ op: "remember_fact" }],
       failed: [],
       superseded: [],
@@ -415,11 +415,11 @@ describe("answerQuestion", () => {
     const stored = await db
       .select({ fact: memories.fact, tags: memories.tags })
       .from(memories)
-      .where(and(eq(memories.userId, U.id), eq(memories.fact, "The US Bank statement is the last step of reconciling CPO 2073.")));
+      .where(and(eq(memories.userId, U.id), eq(memories.fact, "The NW Bank statement is the last step of reconciling CPO 4513.")));
     expect(stored).toHaveLength(1);
-    expect(stored[0].tags).toEqual(["Caltrans", "answered"]);
+    expect(stored[0].tags).toEqual(["Canterly", "answered"]);
 
-    const record = await recordFor(ids.caltrans);
+    const record = await recordFor(ids.canterly);
     const asked = record.body.asked.find((a) => a.questionId === q.fact);
     expect(asked?.answer).toBe("Yes, last step");
     expect(asked?.askedAt).toBe(asked?.answeredAt);
@@ -433,7 +433,7 @@ describe("answerQuestion", () => {
     const result = await answer(q.expect, "yes-changed");
     expect(result).toEqual({
       status: "resolved",
-      projectId: ids.caltrans,
+      projectId: ids.canterly,
       applied: [{ op: "clear_expectation", id: extraExpectationId }],
       failed: [],
       superseded: [],

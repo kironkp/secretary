@@ -22,7 +22,7 @@ async function newUser(): Promise<string> {
   const id = `test-planner-${crypto.randomUUID()}`;
   users.push(id);
   await db.insert(user).values({ id, name: "Planner", email: `${id}@sec-a004.test`, timezone: "America/Los_Angeles" });
-  await db.insert(projects).values({ userId: id, name: "Caltrans" });
+  await db.insert(projects).values({ userId: id, name: "Canterly" });
   return id;
 }
 /** One render of /dashboard and its background persist, with the fake planner. */

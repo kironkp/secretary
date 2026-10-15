@@ -4,19 +4,19 @@ Copy everything below the line into Claude Code, run from the repo root.
 
 ---
 
-Three real bugs surfaced in live use. I told the secretary (by voice) that it had filed "Test Find It on iPad" into a brand-new project called "Find It" instead of my existing **"Find It app"** project. It replied "Got it… I'll adjust the task placement" and then "All set. I noted that…" — **but nothing changed**. The task is still in the duplicate project. Also, the split-screen dashboard does not update while the secretary logs things during a voice call — I have to reload the page.
+Three real bugs surfaced in live use. I told the secretary (by voice) that it had filed "Test Fetch It on iPad" into a brand-new project called "Fetch It" instead of my existing **"Fetch It app"** project. It replied "Got it… I'll adjust the task placement" and then "All set. I noted that…" — **but nothing changed**. The task is still in the duplicate project. Also, the split-screen dashboard does not update while the secretary logs things during a voice call — I have to reload the page.
 
 I've already diagnosed the root causes by reading the code. Verify each one, then fix. The voice/audio plumbing is FROZEN as before: do not modify `lib/realtime/openai-webrtc.ts`, `lib/realtime/remote-audio.ts`, or `app/api/realtime/*` (the React binding `components/chat/use-voice-session.ts` MAY be touched, but only its toolResult/event handling — nothing audio-related).
 
 ## Root cause 1 — the model is blind to existing projects, and matching is exact-only
 
-- `resolveProject()` in `lib/secretary/tools.ts` matches with `ilike(projects.name, name)` — case-insensitive **exact** match, no wildcards, no fuzziness. "Find It" ≠ "Find It app" → silently **created a duplicate project**.
+- `resolveProject()` in `lib/secretary/tools.ts` matches with `ilike(projects.name, name)` — case-insensitive **exact** match, no wildcards, no fuzziness. "Fetch It" ≠ "Fetch It app" → silently **created a duplicate project**.
 - `buildBriefing()` in `lib/secretary/briefing.ts` never tells the model what projects exist. The "ALL OPEN TASKS" list doesn't even include each task's project. The model literally cannot name the right project.
 
 **Fix:**
-1. In the briefing, add a compact `PROJECTS` section: `- "Find It app" (3 open)` for every non-archived project, with the instruction "file tasks into one of these exact names; only create a new project for a genuinely new area of life." Add the project name to each ALL OPEN TASKS line (`· project "Find It app"`).
-2. Make `resolveProject()` tolerant: exact case-insensitive match → then normalized match (lowercase, strip punctuation/whitespace) → then containment/similarity ("find it" vs "find it app" must match; simple normalized containment or trigram similarity is fine — keep it dependency-free). Only create a new project when nothing is close. When a fuzzy match is used or a project is created, say so in the tool `result` (e.g. `{ project: "Find It app", matched: "fuzzy" }` / `{ created: true }`) so the model can react.
-3. Unit-test `resolveProject`: exact, case, "Find It"→"Find It app", genuinely-new name creates, and no cross-user leakage.
+1. In the briefing, add a compact `PROJECTS` section: `- "Fetch It app" (3 open)` for every non-archived project, with the instruction "file tasks into one of these exact names; only create a new project for a genuinely new area of life." Add the project name to each ALL OPEN TASKS line (`· project "Fetch It app"`).
+2. Make `resolveProject()` tolerant: exact case-insensitive match → then normalized match (lowercase, strip punctuation/whitespace) → then containment/similarity ("fetch it" vs "fetch it app" must match; simple normalized containment or trigram similarity is fine — keep it dependency-free). Only create a new project when nothing is close. When a fuzzy match is used or a project is created, say so in the tool `result` (e.g. `{ project: "Fetch It app", matched: "fuzzy" }` / `{ created: true }`) so the model can react.
+3. Unit-test `resolveProject`: exact, case, "Fetch It"→"Fetch It app", genuinely-new name creates, and no cross-user leakage.
 
 ## Root cause 2 — it physically cannot move a task, so it faked success
 
@@ -51,11 +51,11 @@ I've already diagnosed the root causes by reading the code. Verify each one, the
 ## One-off data repair (do this too)
 
 Using the local dev DB (drizzle script or SQL, one-off, then delete the script):
-1. Move task "Test Find It on iPad" into the "Find It app" project.
-2. Delete the now-empty duplicate "Find It" project.
+1. Move task "Test Fetch It on iPad" into the "Fetch It app" project.
+2. Delete the now-empty duplicate "Fetch It" project.
 3. Show me the before/after rows.
 
 ## Verify
 
 - `npm run build`, lint, vitest green (including new resolveProject + update_task-move tests).
-- Manual script for me: start a voice call in split view → say "add a task to test the find it app on my iPhone, in the Find It app project" → row appears in the right pane within ~2s, filed under **Find It app** (no new project). Then say "actually move that to the Jazz music project" → watch it move live. Then "merge any duplicate projects" → duplicates gone. Then ask it to do something it has no tool for (e.g. "email this list to me") → it must say it can't, not claim success.
+- Manual script for me: start a voice call in split view → say "add a task to test the fetch it app on my iPhone, in the Fetch It app project" → row appears in the right pane within ~2s, filed under **Fetch It app** (no new project). Then say "actually move that to the Jasper music project" → watch it move live. Then "merge any duplicate projects" → duplicates gone. Then ask it to do something it has no tool for (e.g. "email this list to me") → it must say it can't, not claim success.

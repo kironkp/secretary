@@ -13,7 +13,7 @@ import {
 const BLOCKS: Resolvable[] = [
   { id: "overdue", summary: "2 overdue: ADM-2011 signature packet", position: 0, hidden: false },
   { id: "today", summary: "5 things today", position: 1, hidden: false },
-  { id: "caltrans-week", summary: "Caltrans this week: procurement, submittals", position: 2, hidden: false },
+  { id: "canterly-week", summary: "Canterly this week: procurement, submittals", position: 2, hidden: false },
 ];
 
 describe("resolving what the user meant", () => {
@@ -25,8 +25,8 @@ describe("resolving what the user meant", () => {
   });
 
   it("what Secretary just created is what \"that\" means", () => {
-    const focus = noteFocus({}, { kind: "create", id: "caltrans-week" });
-    expect(resolveReference("that", BLOCKS, focus)).toMatchObject({ ids: ["caltrans-week"] });
+    const focus = noteFocus({}, { kind: "create", id: "canterly-week" });
+    expect(resolveReference("that", BLOCKS, focus)).toMatchObject({ ids: ["canterly-week"] });
   });
 
   it("an explicit selection beats an older touch", () => {
@@ -44,16 +44,16 @@ describe("resolving what the user meant", () => {
   });
 
   it("resolves by name, without the exact title", () => {
-    expect(resolveReference("the caltrans one", BLOCKS, {})).toMatchObject({
-      ids: ["caltrans-week"],
+    expect(resolveReference("the canterly one", BLOCKS, {})).toMatchObject({
+      ids: ["canterly-week"],
     });
-    expect(resolveReference("procurement", BLOCKS, {})).toMatchObject({ ids: ["caltrans-week"] });
+    expect(resolveReference("procurement", BLOCKS, {})).toMatchObject({ ids: ["canterly-week"] });
     expect(resolveReference("the overdue stuff", BLOCKS, {})).toMatchObject({ ids: ["overdue"] });
   });
 
   it("resolves by position", () => {
     expect(resolveReference("the top one", BLOCKS, {})).toMatchObject({ ids: ["overdue"] });
-    expect(resolveReference("the last one", BLOCKS, {})).toMatchObject({ ids: ["caltrans-week"] });
+    expect(resolveReference("the last one", BLOCKS, {})).toMatchObject({ ids: ["canterly-week"] });
   });
 
   it("\"those\" is the last group acted on, else everything visible", () => {
@@ -77,10 +77,10 @@ describe("resolving what the user meant", () => {
 
   it("reports ambiguity with candidates when a name matches several", () => {
     const many: Resolvable[] = [
-      { id: "a", summary: "Caltrans procurement", position: 0, hidden: false },
-      { id: "b", summary: "Caltrans submittals", position: 1, hidden: false },
+      { id: "a", summary: "Canterly procurement", position: 0, hidden: false },
+      { id: "b", summary: "Canterly submittals", position: 1, hidden: false },
     ];
-    const r = resolveReference("the caltrans thing", many, {});
+    const r = resolveReference("the canterly thing", many, {});
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.candidates).toEqual(["a", "b"]);
   });

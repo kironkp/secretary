@@ -143,19 +143,19 @@ beforeAll(async () => {
     .insert(clarifications)
     .values([
       // The queue proper, across two projects, ranks apart so the order is the point.
-      one("need", ids.caltrans, "need_to_know", 100, [{ type: "task", id: ids.statement }], keep),
+      one("need", ids.canterly, "need_to_know", 100, [{ type: "task", id: ids.statement }], keep),
       one("addUp", ids.album, "doesnt_add_up", 200, [{ type: "task", id: ids.albumOverdue }], keep),
-      one("doneYet", ids.caltrans, "done_yet", 300, [{ type: "task", id: ids.checkCpo }], keep, "asked"),
+      one("doneYet", ids.canterly, "done_yet", 300, [{ type: "task", id: ids.checkCpo }], keep, "asked"),
       // Answered: one today, one yesterday, on the user's calendar (below, on the record).
-      one("resolvedToday", ids.caltrans, "need_to_know", 0, [{ type: "task", id: ids.statement }], keep, "resolved"),
-      one("resolvedYesterday", ids.caltrans, "need_to_know", 0, [{ type: "task", id: ids.statement }], keep, "resolved"),
+      one("resolvedToday", ids.canterly, "need_to_know", 0, [{ type: "task", id: ids.statement }], keep, "resolved"),
+      one("resolvedYesterday", ids.canterly, "need_to_know", 0, [{ type: "task", id: ids.statement }], keep, "resolved"),
       // The set_project answers. Ranks past the queue proper.
       one("fileIt", ids.album, "need_to_know", 400, [{ type: "task", id: t.fileIt }], [
         {
           id: "file-it",
-          label: "File it under Caltrans",
+          label: "File it under Canterly",
           // Lower case on purpose: the name is resolved the way a spoken one is.
-          writes: [{ op: "set_project", taskId: t.fileIt, project: "caltrans" }, { op: "resolve" }],
+          writes: [{ op: "set_project", taskId: t.fileIt, project: "canterly" }, { op: "resolve" }],
         },
         ...keep,
       ]),
@@ -167,7 +167,7 @@ beforeAll(async () => {
         },
         ...keep,
       ]),
-      one("fileOutside", ids.caltrans, "need_to_know", 420, [{ type: "task", id: ids.statement }], [
+      one("fileOutside", ids.canterly, "need_to_know", 420, [{ type: "task", id: ids.statement }], [
         {
           id: "file-it",
           label: "File it under Album",
@@ -215,12 +215,12 @@ beforeAll(async () => {
     .returning({ id: clarifications.id });
   q.asr = asr.id;
 
-  // The Caltrans record carries when the two answered questions were
+  // The Canterly record carries when the two answered questions were
   // answered: one an hour ago (today in Los Angeles), one 26 hours ago
   // (yesterday there). The Album has no record; its questions still answer.
   await db.insert(records).values({
     userId: U.id,
-    projectId: ids.caltrans,
+    projectId: ids.canterly,
     body: {
       ...emptyRecord(),
       asked: [
@@ -234,7 +234,7 @@ beforeAll(async () => {
   });
 
   await db.insert(understandingRuns).values([
-    { userId: U.id, projectId: ids.caltrans, startedAt: at(-3), finishedAt: at(-3), status: "ok" },
+    { userId: U.id, projectId: ids.canterly, startedAt: at(-3), finishedAt: at(-3), status: "ok" },
     { userId: U.id, projectId: ids.album, startedAt: at(-1), finishedAt: at(-1), status: "ok" },
   ]);
 });
@@ -246,9 +246,9 @@ afterAll(async () => {
 
 describe("the words", () => {
   it("counts progress through the sitting, not a position in the queue", () => {
-    expect(progressLine(0, 8, "Caltrans")).toBe("Question 1 of 8 · Caltrans");
+    expect(progressLine(0, 8, "Canterly")).toBe("Question 1 of 8 · Canterly");
     expect(progressLine(3, 5, null)).toBe("Question 4 of 8");
-    expect(progressLine(2, 0, "Caltrans")).toBe("Nothing waiting");
+    expect(progressLine(2, 0, "Canterly")).toBe("Nothing waiting");
   });
 
   it("says when the projects were last read, coarsely and in digits", () => {
@@ -265,20 +265,20 @@ describe("the words", () => {
   });
 
   it("puts set_project into words, naming the project when it is one project", () => {
-    expect(writesInWords([{ op: "set_project", project: "Caltrans" }, { op: "resolve" }])).toBe(
-      "files it under Caltrans"
+    expect(writesInWords([{ op: "set_project", project: "Canterly" }, { op: "resolve" }])).toBe(
+      "files it under Canterly"
     );
     expect(
       writesInWords([
-        { op: "set_project", project: "Caltrans" },
-        { op: "set_project", project: "Caltrans" },
+        { op: "set_project", project: "Canterly" },
+        { op: "set_project", project: "Canterly" },
       ])
-    ).toBe("files 2 tasks under Caltrans");
+    ).toBe("files 2 tasks under Canterly");
     expect(
-      writesInWords([{ op: "set_project", project: "Caltrans" }, { op: "set_project", project: "Album" }])
+      writesInWords([{ op: "set_project", project: "Canterly" }, { op: "set_project", project: "Album" }])
     ).toBe("files 2 tasks");
-    expect(appliedInWords([{ op: "set_project", project: "Caltrans" }])).toBe(
-      "Filed it under Caltrans"
+    expect(appliedInWords([{ op: "set_project", project: "Canterly" }])).toBe(
+      "Filed it under Canterly"
     );
     expect(
       appliedInWords([{ op: "complete_task" }, { op: "set_project", project: "Album" }])
@@ -306,10 +306,10 @@ describe("buildInterview", () => {
 
     // Each question comes with what the screen needs: its project by name,
     // its kind's label, and its evidence resolved.
-    expect(data.queue[0].projectName).toBe("Caltrans");
+    expect(data.queue[0].projectName).toBe("Canterly");
     expect(data.queue[0].kindLabel).toBe("Need to know");
     expect(data.queue[0].evidenceView).toEqual([
-      { type: "task", id: ids.statement, label: "Still open", text: "Do the US Bank statement", meta: "due Sep 23" },
+      { type: "task", id: ids.statement, label: "Still open", text: "Do the NW Bank statement", meta: "due Sep 23" },
     ]);
     expect(data.queue[1].projectName).toBe("Album");
     expect(data.queue[1].kindLabel).toBe("Doesn't add up");
@@ -334,8 +334,8 @@ describe("set_project", () => {
   let bundle: Bundle;
 
   beforeAll(async () => {
-    const b = await gatherProject(U.id, ids.caltrans, { now: NOW, timezone: TZ });
-    if (!b) throw new Error("no Caltrans bundle");
+    const b = await gatherProject(U.id, ids.canterly, { now: NOW, timezone: TZ });
+    if (!b) throw new Error("no Canterly bundle");
     bundle = b;
   });
 
@@ -347,11 +347,11 @@ describe("set_project", () => {
       questions: [
         {
           kind: "need_to_know",
-          question: "Does the check on CPO 2073 belong under Caltrans?",
+          question: "Does the check on CPO 4513 belong under Canterly?",
           why: `"${title}" sits in no project.`,
           evidence: [{ type: "task", id: ids.checkCpo }],
           answers: [
-            { id: "file-it", label: "File it under Caltrans", writes },
+            { id: "file-it", label: "File it under Canterly", writes },
             { id: "leave", label: "Leave it", writes: [{ op: "resolve" }] },
           ],
         },
@@ -361,7 +361,7 @@ describe("set_project", () => {
 
   it("(3) is accepted by validateRunOutput on a task in the bundle, and refused on one outside it", () => {
     const ok = validateRunOutput(
-      withQuestion([{ op: "set_project", taskId: ids.checkCpo, project: "Caltrans" }, { op: "resolve" }]),
+      withQuestion([{ op: "set_project", taskId: ids.checkCpo, project: "Canterly" }, { op: "resolve" }]),
       bundle
     );
     expect(ok.ok).toBe(true);
@@ -369,12 +369,12 @@ describe("set_project", () => {
       expect(ok.value.questions[0].answers[0].writes[0]).toEqual({
         op: "set_project",
         taskId: ids.checkCpo,
-        project: "Caltrans",
+        project: "Canterly",
       });
     }
 
     const ghost = validateRunOutput(
-      withQuestion([{ op: "set_project", taskId: "ghost", project: "Caltrans" }, { op: "resolve" }]),
+      withQuestion([{ op: "set_project", taskId: "ghost", project: "Canterly" }, { op: "resolve" }]),
       bundle
     );
     expect(ghost.ok).toBe(false);
@@ -390,7 +390,7 @@ describe("set_project", () => {
     // The bundle carries the user's project names (both seeded projects), and
     // a name that lands on none of them is refused here rather than failing
     // at apply time; the matching is resolveProject's, so "album" lands.
-    expect(bundle.projectNames).toEqual(["Album", "Caltrans"]);
+    expect(bundle.projectNames).toEqual(["Album", "Canterly"]);
     const lower = validateRunOutput(
       withQuestion([{ op: "set_project", taskId: ids.checkCpo, project: "album" }, { op: "resolve" }]),
       bundle
@@ -401,17 +401,17 @@ describe("set_project", () => {
       bundle
     );
     expect(nowhere.ok).toBe(false);
-    if (!nowhere.ok) expect(nowhere.errors.join("\n")).toMatch(/no project named "Nowhere Land".*Album, Caltrans/);
+    if (!nowhere.ok) expect(nowhere.errors.join("\n")).toMatch(/no project named "Nowhere Land".*Album, Canterly/);
 
     // The model writes one flat object; fields the op does not use are dropped.
     const mapped = toRunOutput({
       record: {},
       questions: [
-        { answers: [{ writes: [{ op: "set_project", taskId: "t", project: "Caltrans", reason: "stray" }] }] },
+        { answers: [{ writes: [{ op: "set_project", taskId: "t", project: "Canterly", reason: "stray" }] }] },
       ],
       words: { ledes: [] },
     }) as { questions: { answers: { writes: unknown[] }[] }[] };
-    expect(mapped.questions[0].answers[0].writes[0]).toEqual({ op: "set_project", taskId: "t", project: "Caltrans" });
+    expect(mapped.questions[0].answers[0].writes[0]).toEqual({ op: "set_project", taskId: "t", project: "Canterly" });
   });
 
   it("(4) is applied by answerQuestion: the task lands in the named project, resolved the way a spoken name is", async () => {
@@ -420,11 +420,11 @@ describe("set_project", () => {
     expect(result).toEqual({
       status: "resolved",
       projectId: ids.album,
-      applied: [{ op: "set_project", id: t.fileIt, project: "Caltrans" }],
+      applied: [{ op: "set_project", id: t.fileIt, project: "Canterly" }],
       failed: [],
       superseded: [],
     });
-    expect((await taskRow(t.fileIt)).projectId).toBe(ids.caltrans);
+    expect((await taskRow(t.fileIt)).projectId).toBe(ids.canterly);
   });
 
   it("(5) a name that is no project of the user's fails the write and mints nothing", async () => {
@@ -442,7 +442,7 @@ describe("set_project", () => {
 
   it("(6) is refused whole for a task outside the evidence", async () => {
     expect(await answer(q.fileOutside, "file-it")).toEqual({ status: "bad-answer" });
-    expect((await taskRow(ids.checkCpo)).projectId).toBe(ids.caltrans);
+    expect((await taskRow(ids.checkCpo)).projectId).toBe(ids.canterly);
     expect((await getQuestion(U.id, q.fileOutside))?.status).toBe("open");
   });
 });
@@ -489,8 +489,8 @@ describe("the interview mode", () => {
   const ADDENDUM_START = "The user is sitting down right now to organize their data with you, one question at a time.";
 
   it("(9) renderBundle appends the addendum after the closing line in interview mode and not otherwise", async () => {
-    const bundle = await gatherProject(U.id, ids.caltrans, { now: NOW, timezone: TZ });
-    if (!bundle) throw new Error("no Caltrans bundle");
+    const bundle = await gatherProject(U.id, ids.canterly, { now: NOW, timezone: TZ });
+    if (!bundle) throw new Error("no Canterly bundle");
     const plain = renderBundle(bundle);
     const closing = "Write the record, the questions and the words for this project now.";
     expect(plain).toContain(closing);
@@ -508,7 +508,7 @@ describe("the interview mode", () => {
 
   it("(10) runProject hands the model the addendum in interview mode, and nothing else about the run changes", async () => {
     const fake = fakeModel((bundle) => minimalOutputFor(bundle));
-    const result = await runProject(U.id, ids.caltrans, {
+    const result = await runProject(U.id, ids.canterly, {
       timezone: TZ,
       now: NOW,
       model: fake,
@@ -522,7 +522,7 @@ describe("the interview mode", () => {
     expect(fake.calls[0].system).not.toContain(ADDENDUM_START);
 
     const plain = fakeModel((bundle) => minimalOutputFor(bundle));
-    await runProject(U.id, ids.caltrans, { timezone: TZ, now: NOW, model: plain, dryRun: true });
+    await runProject(U.id, ids.canterly, { timezone: TZ, now: NOW, model: plain, dryRun: true });
     expect(plain.calls[0].user).not.toContain(ADDENDUM_START);
   });
 });

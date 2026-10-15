@@ -74,7 +74,7 @@ function expectation(id: string, status = "open"): BundleExpectation {
 function bundle(over: Partial<Bundle> = {}): Bundle {
   return {
     userId: "u",
-    project: { id: "p", name: "Caltrans", status: "active" },
+    project: { id: "p", name: "Canterly", status: "active" },
     clock: {
       nowIso: NOW.toISOString(),
       timezone: TZ,
@@ -90,7 +90,7 @@ function bundle(over: Partial<Bundle> = {}): Bundle {
     documents: [],
     previousRecord: null,
     widgets: [],
-    projectNames: ["Caltrans"],
+    projectNames: ["Canterly"],
     dropped: [],
     terms: [],
     ...over,
@@ -237,7 +237,7 @@ describe("syncQuestions", () => {
     await db.insert(user).values({ id: U.id, name: "Sync Tester", email: U.email, timezone: TZ });
     const [p] = await db
       .insert(projects)
-      .values({ userId: U.id, name: "Caltrans", status: "active" })
+      .values({ userId: U.id, name: "Canterly", status: "active" })
       .returning();
     projectId = p.id;
   });
@@ -252,7 +252,7 @@ describe("syncQuestions", () => {
       .where(eq(clarifications.userId, U.id))
       .orderBy(clarifications.createdAt);
 
-  const open = () => bundle({ project: { id: projectId, name: "Caltrans", status: "active" }, tasksOpen: [task("a", { dueAt: hours(20) })] });
+  const open = () => bundle({ project: { id: projectId, name: "Canterly", status: "active" }, tasksOpen: [task("a", { dueAt: hours(20) })] });
   const first = draft("need_to_know", [src("task", "a")], { question: "Is Task a due tomorrow?" });
   let id = "";
 
@@ -314,7 +314,7 @@ describe("syncQuestions", () => {
     // Finished on the database's clock: the row's created_at is wall-clock
     // time, and only a task finished AFTER that counts as the data moving.
     const finished = new Date().toISOString();
-    const gone = bundle({ project: { id: projectId, name: "Caltrans", status: "active" }, tasksOpen: [], tasksDone: [task("a", { status: "done", completedAt: finished, updatedAt: finished })] });
+    const gone = bundle({ project: { id: projectId, name: "Canterly", status: "active" }, tasksOpen: [], tasksDone: [task("a", { status: "done", completedAt: finished, updatedAt: finished })] });
     const r = await syncQuestions(U.id, projectId, [], gone);
     expect(r).toEqual({ created: [], updated: [], dismissed: [id], skippedDuplicates: [], skippedSettled: [], reopened: [] });
     const [row] = await rows();
@@ -336,7 +336,7 @@ describe("syncQuestions", () => {
   it("reopens a dismissed identity as a new row once a row it rests on changed after the ruling", async () => {
     const [closed] = await rows();
     const edited = new Date(closed.resolvedAt!.getTime() + 60_000).toISOString();
-    const changed = bundle({ project: { id: projectId, name: "Caltrans", status: "active" }, tasksOpen: [task("a", { dueAt: hours(20), updatedAt: edited })] });
+    const changed = bundle({ project: { id: projectId, name: "Canterly", status: "active" }, tasksOpen: [task("a", { dueAt: hours(20), updatedAt: edited })] });
     const r = await syncQuestions(U.id, projectId, [first], changed, { createdBy: "test-run" });
     expect(r.reopened).toHaveLength(1);
     expect(r).toMatchObject({ created: [], updated: [], dismissed: [], skippedDuplicates: [], skippedSettled: [] });
@@ -357,7 +357,7 @@ describe("syncQuestions", () => {
     // the open copy. The done copy was done on the day it was asked, so a run
     // that omits the question changes nothing; only finishing the open copy
     // afterwards does.
-    const project = { id: projectId, name: "Caltrans", status: "active" };
+    const project = { id: projectId, name: "Canterly", status: "active" };
     const doneCopy = task("done-copy", { status: "done", completedAt: days(-20), updatedAt: days(-20) });
     const twin = bundle({ project, tasksOpen: [task("open-copy")], tasksDone: [doneCopy] });
     const ask = draft("doesnt_add_up", [src("task", "done-copy"), src("task", "open-copy")], {
@@ -381,14 +381,14 @@ describe("syncQuestions", () => {
   });
 
   it("dismisses a forgotten question once an evidence expectation is no longer open", async () => {
-    const withX = bundle({ project: { id: projectId, name: "Caltrans", status: "active" }, expectations: [expectation("x1")] });
+    const withX = bundle({ project: { id: projectId, name: "Canterly", status: "active" }, expectations: [expectation("x1")] });
     const ask = draft("done_yet", [src("expectation", "x1")], {
       question: "Did the follow-up land?",
       why: `"follow up x1" was expected yesterday.`,
     });
     const created = await syncQuestions(U.id, projectId, [ask], withX);
     expect(created.created).toHaveLength(1);
-    const cleared = bundle({ project: { id: projectId, name: "Caltrans", status: "active" }, expectations: [] });
+    const cleared = bundle({ project: { id: projectId, name: "Canterly", status: "active" }, expectations: [] });
     const r = await syncQuestions(U.id, projectId, [], cleared);
     expect(r.dismissed).toEqual(created.created);
     const row = (await rows()).find((x) => x.id === created.created[0])!;
@@ -399,7 +399,7 @@ describe("syncQuestions", () => {
   it("a follow-up going missed is the calendar passing, not a change: the question stays", async () => {
     // "A missed follow-up" is one of done_yet's own triggers (SPEC §5), so a
     // question can only ever cite one in that state.
-    const project = { id: projectId, name: "Caltrans", status: "active" };
+    const project = { id: projectId, name: "Canterly", status: "active" };
     const missed = bundle({ project, expectations: [expectation("x2", "missed")] });
     const ask = draft("done_yet", [src("expectation", "x2")], {
       question: "Did the follow-up happen?",
@@ -425,9 +425,9 @@ describe("syncQuestions", () => {
       const theirs = draft("done_yet", [src("task", "b")], { why: `"Task b" is done, surely?` });
       const created = await syncQuestions(U.id, other.id, [theirs], albumBundle);
       expect(created.created).toHaveLength(1);
-      // A Caltrans run with an empty bundle would dismiss anything of its own
+      // A Canterly run with an empty bundle would dismiss anything of its own
       // whose evidence is gone; the Album row is not its business.
-      const r = await syncQuestions(U.id, projectId, [], bundle({ project: { id: projectId, name: "Caltrans", status: "active" } }));
+      const r = await syncQuestions(U.id, projectId, [], bundle({ project: { id: projectId, name: "Canterly", status: "active" } }));
       expect(r.dismissed).toEqual([]);
       const row = (await rows()).find((x) => x.id === created.created[0])!;
       expect(row.status).toBe("open");
@@ -443,21 +443,21 @@ describe("syncQuestions", () => {
 
 describe("syncQuestions dedupes by text", () => {
   const U = { id: `test-sync-text-${crypto.randomUUID()}`, email: `sync-text-${Date.now()}@p11.test` };
-  const p = { caltrans: "", album: "" };
+  const p = { canterly: "", album: "" };
   // The row Today showed twice: the same words from two evidence sets.
   const TEXT = "Do you still want my two event prep suggestions before tomorrow's event?";
 
   beforeAll(async () => {
     await db.insert(user).values({ id: U.id, name: "Sync Text Tester", email: U.email, timezone: TZ });
-    const [caltrans] = await db
+    const [canterly] = await db
       .insert(projects)
-      .values({ userId: U.id, name: "Caltrans", status: "active" })
+      .values({ userId: U.id, name: "Canterly", status: "active" })
       .returning();
     const [album] = await db
       .insert(projects)
       .values({ userId: U.id, name: "Album", status: "active" })
       .returning();
-    p.caltrans = caltrans.id;
+    p.canterly = canterly.id;
     p.album = album.id;
   });
   afterAll(async () => {
@@ -471,8 +471,8 @@ describe("syncQuestions dedupes by text", () => {
       .where(eq(clarifications.userId, U.id))
       .orderBy(clarifications.createdAt);
 
-  const caltrans = () =>
-    bundle({ project: { id: p.caltrans, name: "Caltrans", status: "active" }, tasksOpen: [task("a"), task("b")] });
+  const canterly = () =>
+    bundle({ project: { id: p.canterly, name: "Canterly", status: "active" }, tasksOpen: [task("a"), task("b")] });
   const album = () =>
     bundle({ project: { id: p.album, name: "Album", status: "active" }, tasksOpen: [task("c")] });
 
@@ -487,13 +487,13 @@ describe("syncQuestions dedupes by text", () => {
     expect(normalizeQuestionText("is the statement done")).toBe("is the statement done");
     expect(normalizeQuestionText("Is the statement done.")).toBe("is the statement done");
     // Inner punctuation is part of the question.
-    expect(normalizeQuestionText("CPO 2073: done?")).toBe("cpo 2073: done");
+    expect(normalizeQuestionText("CPO 4513: done?")).toBe("cpo 4513: done");
     expect(normalizeQuestionText("Is the statement done?")).not.toBe(normalizeQuestionText("Is the statement due?"));
   });
 
   it("two drafts with the same text and different evidence in one run yield one row", async () => {
     expect(questionIdentity(fromA)).not.toBe(questionIdentity(fromB));
-    const r = await syncQuestions(U.id, p.caltrans, [fromA, fromB], caltrans());
+    const r = await syncQuestions(U.id, p.canterly, [fromA, fromB], canterly());
     expect(r.created).toHaveLength(1);
     expect(r.updated).toEqual([]);
     expect(r.dismissed).toEqual([]);
@@ -521,7 +521,7 @@ describe("syncQuestions dedupes by text", () => {
   });
 
   it("the row a draft refreshes in place is not its own twin", async () => {
-    const r = await syncQuestions(U.id, p.caltrans, [{ ...fromA, why: `"Task a" is still my suggestion.` }], caltrans());
+    const r = await syncQuestions(U.id, p.canterly, [{ ...fromA, why: `"Task a" is still my suggestion.` }], canterly());
     expect(r).toEqual({ created: [], updated: [kept], dismissed: [], skippedDuplicates: [], skippedSettled: [], reopened: [] });
     const all = await rows();
     expect(all).toHaveLength(1);
@@ -562,15 +562,15 @@ describe("syncQuestions heals a standing pair of same-text rows", () => {
   // rows with different identities. The guard above stops a pair forming;
   // this is what happens to one that already exists.
   const U = { id: `test-sync-pair-${crypto.randomUUID()}`, email: `sync-pair-${Date.now()}@p11.test` };
-  const p = { caltrans: "", album: "" };
+  const p = { canterly: "", album: "" };
   const TEXT = "Do you still want my two Small Business event prep suggestions before tomorrow's event?";
   const fromA = draft("doesnt_add_up", [src("task", "a")], { question: TEXT, why: "why a" });
   const fromB = draft("doesnt_add_up", [src("task", "b")], { question: TEXT, why: "why b" });
   const fromC = draft("doesnt_add_up", [src("task", "c")], { question: TEXT, why: "why c" });
   const row = { a: "", b: "", c: "" };
 
-  const caltrans = () =>
-    bundle({ project: { id: p.caltrans, name: "Caltrans", status: "active" }, tasksOpen: [task("a"), task("b")] });
+  const canterly = () =>
+    bundle({ project: { id: p.canterly, name: "Canterly", status: "active" }, tasksOpen: [task("a"), task("b")] });
   const album = () =>
     bundle({
       project: { id: p.album, name: "Album", status: "active" },
@@ -607,18 +607,18 @@ describe("syncQuestions heals a standing pair of same-text rows", () => {
 
   beforeAll(async () => {
     await db.insert(user).values({ id: U.id, name: "Sync Pair Tester", email: U.email, timezone: TZ });
-    const [caltrans] = await db
+    const [canterly] = await db
       .insert(projects)
-      .values({ userId: U.id, name: "Caltrans", status: "active" })
+      .values({ userId: U.id, name: "Canterly", status: "active" })
       .returning();
     const [album] = await db
       .insert(projects)
       .values({ userId: U.id, name: "Album", status: "active" })
       .returning();
-    p.caltrans = caltrans.id;
+    p.canterly = canterly.id;
     p.album = album.id;
-    const [a] = await db.insert(clarifications).values(standing(p.caltrans, fromA)).returning({ id: clarifications.id });
-    const [b] = await db.insert(clarifications).values(standing(p.caltrans, fromB)).returning({ id: clarifications.id });
+    const [a] = await db.insert(clarifications).values(standing(p.canterly, fromA)).returning({ id: clarifications.id });
+    const [b] = await db.insert(clarifications).values(standing(p.canterly, fromB)).returning({ id: clarifications.id });
     row.a = a.id;
     row.b = b.id;
   });
@@ -629,12 +629,12 @@ describe("syncQuestions heals a standing pair of same-text rows", () => {
   it("both re-proposed: the first is refreshed and its twin is dismissed as its duplicate", async () => {
     const r = await syncQuestions(
       U.id,
-      p.caltrans,
+      p.canterly,
       [
         { ...fromA, why: "why a, run 2" },
         { ...fromB, why: "why b, run 2" },
       ],
-      caltrans()
+      canterly()
     );
     expect(r).toEqual({ created: [], updated: [row.a], dismissed: [row.b], skippedDuplicates: [], skippedSettled: [], reopened: [] });
     expect(await rowById(row.a)).toMatchObject({ status: "open", context: "why a, run 2", resolution: null });
@@ -647,7 +647,7 @@ describe("syncQuestions heals a standing pair of same-text rows", () => {
   });
 
   it("the next run that re-proposes only the kept one refreshes it and touches nothing else", async () => {
-    const r = await syncQuestions(U.id, p.caltrans, [{ ...fromA, why: "why a, run 3" }], caltrans());
+    const r = await syncQuestions(U.id, p.canterly, [{ ...fromA, why: "why a, run 3" }], canterly());
     expect(r).toEqual({ created: [], updated: [row.a], dismissed: [], skippedDuplicates: [], skippedSettled: [], reopened: [] });
     expect(await rowById(row.a)).toMatchObject({ status: "open", context: "why a, run 3" });
     expect(await rowById(row.b)).toMatchObject({ status: "dismissed" });
@@ -655,7 +655,7 @@ describe("syncQuestions heals a standing pair of same-text rows", () => {
     // no ruling on its row (supersede.ts settledEvidence), so it is the
     // text guard, not the settled guard, that keeps it out while the row
     // it was a twin of still stands.
-    const again = await syncQuestions(U.id, p.caltrans, [fromB], caltrans());
+    const again = await syncQuestions(U.id, p.canterly, [fromB], canterly());
     expect(again).toEqual({ created: [], updated: [], dismissed: [], skippedDuplicates: [TEXT], skippedSettled: [], reopened: [] });
     expect(await rows()).toHaveLength(2);
   });
@@ -667,10 +667,10 @@ describe("syncQuestions heals a standing pair of same-text rows", () => {
     expect(r).toEqual({ created: [], updated: [row.c], dismissed: [row.a], skippedDuplicates: [], skippedSettled: [], reopened: [] });
     expect(await rowById(row.c)).toMatchObject({ status: "open", context: "why c, run 2" });
     expect(await rowById(row.a)).toMatchObject({ status: "dismissed", resolution: `duplicate of ${row.c}` });
-    // The Caltrans run cannot bring the pair back either: the Album row now
+    // The Canterly run cannot bring the pair back either: the Album row now
     // holds the words, so its draft is a duplicate of that row.
-    const caltransAgain = await syncQuestions(U.id, p.caltrans, [fromA], caltrans());
-    expect(caltransAgain).toEqual({ created: [], updated: [], dismissed: [], skippedDuplicates: [TEXT], skippedSettled: [], reopened: [] });
+    const canterlyAgain = await syncQuestions(U.id, p.canterly, [fromA], canterly());
+    expect(canterlyAgain).toEqual({ created: [], updated: [], dismissed: [], skippedDuplicates: [TEXT], skippedSettled: [], reopened: [] });
     expect(await rows()).toHaveLength(3);
   });
 
@@ -727,7 +727,7 @@ describe("retireAsrClarifications (SPEC §5, confirmed by use)", () => {
   beforeAll(async () => {
     await db.insert(user).values({ id: U.id, name: "ASR Tester", email: U.email, timezone: TZ });
     await db.insert(entities).values([
-      { userId: U.id, name: "Walter Maiara", kind: "person", aliases: ["Walter Myala"], confirmed: true },
+      { userId: U.id, name: "Warren Maiada", kind: "person", aliases: ["Warren Meala"], confirmed: true },
       // Heard once, spelling unconfirmed: not a confirmation of anything.
       { userId: U.id, name: "Pay-Aye-Test", kind: "term", confirmed: false },
     ]);
@@ -746,23 +746,23 @@ describe("retireAsrClarifications (SPEC §5, confirmed by use)", () => {
       say("I need to do the CalCard reconcile this week"),
       say("The CalCard statement came in"),
       say("calcard is due Friday, remind me"),
-      say("Beacon glue is Marissa's first priority"),
+      say("Binder tape is Melissa's first priority"),
       // The assistant saying a name three times confirms nothing.
-      say("Beacon glue: noted.", "assistant"),
-      say("Beacon glue is on the list.", "assistant"),
-      say("Beacon glue, still open.", "assistant"),
+      say("Binder tape: noted.", "assistant"),
+      say("Binder tape is on the list.", "assistant"),
+      say("Binder tape, still open.", "assistant"),
     ]);
     const inserted = await db
       .insert(clarifications)
       .values([
         // Lowercase on purpose: the match is case-insensitive.
-        { userId: U.id, kind: "asr_span", subject: "walter myala", question: "I heard Walter Myala — who is that?", status: "open" },
+        { userId: U.id, kind: "asr_span", subject: "warren meala", question: "I heard Warren Meala — who is that?", status: "open" },
         { userId: U.id, kind: "asr_span", subject: "CalCard", question: "I heard CalCard — is that a card?", status: "asked" },
         { userId: U.id, kind: "asr_span", subject: "Beacon", question: "I heard Beacon — what is that?", status: "open" },
         { userId: U.id, kind: "new_name", subject: "Pay-Aye-Test", question: "How is Pay-Aye-Test spelled?", status: "open" },
         // A new-kind row that happens to share a subject: never touched.
         { userId: U.id, kind: "need_to_know", subject: "CalCard", question: "Which CalCard is next?", status: "open" },
-        { userId: U.id, kind: "referent", subject: "Walter Myala", question: "Which Walter?", status: "resolved", resolution: "the same one" },
+        { userId: U.id, kind: "referent", subject: "Warren Meala", question: "Which Warren?", status: "resolved", resolution: "the same one" },
       ])
       .returning({ id: clarifications.id });
     [c.alias, c.byUse, c.unused, c.unconfirmed, c.newKind, c.resolved] = inserted.map((r) => r.id);
@@ -798,9 +798,9 @@ describe("retireAsrClarifications (SPEC §5, confirmed by use)", () => {
   it("counts the messages it is handed instead of reading the database when opts.messages is given", async () => {
     const n = await retireAsrClarifications(U.id, {
       messages: [
-        { content: "Beacon glue first" },
+        { content: "Binder tape first" },
         { content: "then the Beacon components" },
-        { content: "Beacon is Marissa's" },
+        { content: "Beacon is Melissa's" },
       ],
     });
     expect(n).toBe(1);
@@ -829,7 +829,7 @@ describe("retireAsrClarifications (SPEC §5, confirmed by use)", () => {
 describe("listQuestions and getQuestion", () => {
   const U = { id: `test-list-${crypto.randomUUID()}`, email: `list-${Date.now()}@p11.test` };
   const other = { id: `test-list-other-${crypto.randomUUID()}`, email: `list-other-${Date.now()}@p11.test` };
-  const p = { caltrans: "", album: "" };
+  const p = { canterly: "", album: "" };
   const q = { hero: "", asked: "", older250: "", newer250: "", resolved: "", asr: "" };
   const t0 = new Date("2026-09-20T12:00:00.000Z");
   const at = (seconds: number) => new Date(t0.getTime() + seconds * 1000);
@@ -840,25 +840,25 @@ describe("listQuestions and getQuestion", () => {
       { id: U.id, name: "List Tester", email: U.email, timezone: TZ },
       { id: other.id, name: "Someone Else", email: other.email, timezone: TZ },
     ]);
-    const [caltrans] = await db
+    const [canterly] = await db
       .insert(projects)
-      .values({ userId: U.id, name: "Caltrans", status: "active" })
+      .values({ userId: U.id, name: "Canterly", status: "active" })
       .returning();
     const [album] = await db
       .insert(projects)
       .values({ userId: U.id, name: "Album", status: "active" })
       .returning();
-    p.caltrans = caltrans.id;
+    p.canterly = canterly.id;
     p.album = album.id;
     const base = { userId: U.id, evidence, answers: [{ id: "ok", label: "Fine", writes: [{ op: "resolve" as const }] }] };
     const inserted = await db
       .insert(clarifications)
       .values([
-        { ...base, kind: "need_to_know", question: "Which CPO is next?", context: "why hero", rank: 10, projectId: caltrans.id, status: "open", createdAt: at(0), identity: "id-hero" },
+        { ...base, kind: "need_to_know", question: "Which CPO is next?", context: "why hero", rank: 10, projectId: canterly.id, status: "open", createdAt: at(0), identity: "id-hero" },
         { ...base, kind: "doesnt_add_up", question: "Twice?", context: "why asked", rank: 5, projectId: album.id, status: "asked", createdAt: at(1), surfacedAt: at(2), identity: "id-asked" },
-        { ...base, kind: "done_yet", question: "Done yet, older?", context: "why older", rank: 250, projectId: caltrans.id, status: "open", createdAt: at(-10), identity: "id-older" },
+        { ...base, kind: "done_yet", question: "Done yet, older?", context: "why older", rank: 250, projectId: canterly.id, status: "open", createdAt: at(-10), identity: "id-older" },
         { ...base, kind: "done_yet", question: "Done yet, newer?", context: "why newer", rank: 250, projectId: album.id, status: "open", createdAt: at(3), identity: "id-newer" },
-        { ...base, kind: "need_to_know", question: "Already answered?", context: "why resolved", rank: 0, projectId: caltrans.id, status: "resolved", createdAt: at(4), identity: "id-resolved" },
+        { ...base, kind: "need_to_know", question: "Already answered?", context: "why resolved", rank: 0, projectId: canterly.id, status: "resolved", createdAt: at(4), identity: "id-resolved" },
         { userId: U.id, kind: "asr_span", subject: "CPO", question: "I heard CPO?", status: "open", createdAt: at(5) },
       ])
       .returning({ id: clarifications.id });
@@ -877,8 +877,8 @@ describe("listQuestions and getQuestion", () => {
     expect(hero.question).toBe("Which CPO is next?");
     expect(hero.why).toBe("why hero");
     expect(hero.rank).toBe(10);
-    expect(hero.projectId).toBe(p.caltrans);
-    expect(hero.projectName).toBe("Caltrans");
+    expect(hero.projectId).toBe(p.canterly);
+    expect(hero.projectName).toBe("Canterly");
     expect(hero.status).toBe("open");
     expect(hero.surfacedAt).toBeNull();
     expect(hero.createdAt.toISOString()).toBe(at(0).toISOString());
@@ -899,7 +899,7 @@ describe("listQuestions and getQuestion", () => {
     const mine = await getQuestion(U.id, q.hero);
     expect(mine).not.toBeNull();
     expect(mine!.id).toBe(q.hero);
-    expect(mine!.projectName).toBe("Caltrans");
+    expect(mine!.projectName).toBe("Canterly");
     expect(mine!.why).toBe("why hero");
     expect(await getQuestion(other.id, q.hero)).toBeNull();
     expect(await getQuestion(U.id, "not-a-question")).toBeNull();

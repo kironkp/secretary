@@ -27,7 +27,7 @@ afterAll(async () => {
   await db.delete(user).where(eq(user.id, U.id));
 });
 
-const projectIds = () => [ids.caltrans, ids.album];
+const projectIds = () => [ids.canterly, ids.album];
 const gather = (p: string) => gatherProject(U.id, p, { now: NOW, timezone: TZ });
 const record = async (p: string) =>
   (await db.select().from(records).where(and(eq(records.userId, U.id), eq(records.projectId, p))))[0];
@@ -55,7 +55,7 @@ describe("the A009 hash change costs no re-reads", { timeout: 30_000 }, () => {
 
   it("a record from before the digest gets one from an unchanged sweep, with 0 model calls", async () => {
     await db.update(records).set({ words: sql`${records.words} - 'taskDigest'` }).where(eq(records.userId, U.id));
-    expect((await record(ids.caltrans)).words.taskDigest).toBeUndefined();
+    expect((await record(ids.canterly)).words.taskDigest).toBeUndefined();
     const model = fakeModel((bundle) => minimalOutputFor(bundle));
     expect(Object.values(await runAll(model))).toEqual(["skipped:unchanged", "skipped:unchanged"]);
     expect(model.calls).toHaveLength(0);
@@ -87,10 +87,10 @@ describe("the A009 hash change costs no re-reads", { timeout: 30_000 }, () => {
   });
 
   it("a genuinely changed project still re-reads, once; the other does not", async () => {
-    await db.update(tasks).set({ notes: "Teresa says it waits on the FY27 conversion." }).where(eq(tasks.id, ids.checkCpo));
+    await db.update(tasks).set({ notes: "Tamsin says it waits on the FY27 conversion." }).where(eq(tasks.id, ids.checkCpo));
     const model = fakeModel((bundle) => minimalOutputFor(bundle));
     const out = await runAll(model);
-    expect(out[ids.caltrans]).toBe("ok");
+    expect(out[ids.canterly]).toBe("ok");
     expect(out[ids.album]).toBe("skipped:unchanged");
     expect(model.calls).toHaveLength(1);
     // And once is once: the next sweep has nothing new.
@@ -101,7 +101,7 @@ describe("the A009 hash change costs no re-reads", { timeout: 30_000 }, () => {
 });
 
 describe("a failure logged under the old formula keeps its backoff (sec rev's prod simulation)", { timeout: 30_000 }, () => {
-  // As Caltrans is in production: no record (a failed run stores none) and a
+  // As Canterly is in production: no record (a failed run stores none) and a
   // validator-refused run stamped with the formula before A009. Releasing
   // that backoff would buy one paid read the moment A009 deploys.
   let projectId = "";
@@ -132,7 +132,7 @@ describe("a failure logged under the old formula keeps its backoff (sec rev's pr
     // As the app writes it: update_task bumps updated_at with every change.
     await db
       .update(tasks)
-      .set({ notes: "Teresa signed it.", updatedAt: new Date(NOW.getTime() + 60_000) })
+      .set({ notes: "Tamsin signed it.", updatedAt: new Date(NOW.getTime() + 60_000) })
       .where(eq(tasks.projectId, projectId));
     const model = fakeModel((bundle) => minimalOutputFor(bundle));
     const result = await runProject(U.id, projectId, { timezone: TZ, now: NOW, model, backoffAfterFailure: true });

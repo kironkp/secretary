@@ -53,8 +53,8 @@ beforeAll(async () => {
     }))
   );
   voiceId = await makeConversation("voice", hoursAgo(24), [
-    { role: "user", content: "I told Teresa the CPO is signed", at: hoursAgo(24) },
-    { role: "assistant", content: "Logged — CPO signed, Teresa knows.", at: hoursAgo(23.9) },
+    { role: "user", content: "I told Tamsin the CPO is signed", at: hoursAgo(24) },
+    { role: "assistant", content: "Logged — CPO signed, Tamsin knows.", at: hoursAgo(23.9) },
   ]);
   // a voice token minted but never spoken into: no messages, must be skipped
   await makeConversation("voice", hoursAgo(12), []);
@@ -94,8 +94,8 @@ describe("briefing PRIOR SESSIONS block", () => {
     const briefing = await buildBriefing(U.id, tz, { excludeConversationId: currentId });
     expect(briefing.text).toContain("PRIOR SESSIONS");
     // verbatim, not summarized
-    expect(briefing.text).toContain("USER: I told Teresa the CPO is signed");
-    expect(briefing.text).toContain("SECRETARY: Logged — CPO signed, Teresa knows.");
+    expect(briefing.text).toContain("USER: I told Tamsin the CPO is signed");
+    expect(briefing.text).toContain("SECRETARY: Logged — CPO signed, Tamsin knows.");
     expect(briefing.text).toContain("so remember: the venue deposit is due Friday");
     // mode labels so the model can say "on our call yesterday"
     expect(briefing.text).toContain("[voice session ·");

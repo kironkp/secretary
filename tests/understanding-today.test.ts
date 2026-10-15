@@ -78,11 +78,11 @@ beforeAll(async () => {
       {
         userId: U.id,
         kind: "need_to_know",
-        question: "Is the US Bank statement the last step before CPO 2073 is reconciled?",
-        context: '"Do the US Bank statement" is due tomorrow, and you said "I finished everything else that reconciling that CPO".',
+        question: "Is the NW Bank statement the last step before CPO 4513 is reconciled?",
+        context: '"Do the NW Bank statement" is due tomorrow, and you said "the rest of squaring up that CPO is done".',
         evidence: [
           { type: "task", id: ids.statement },
-          { type: "message", id: ids.msgFinished, quote: "I finished everything else that reconciling that CPO" },
+          { type: "message", id: ids.msgFinished, quote: "the rest of squaring up that CPO is done" },
           { type: "expectation", id: ids.expectation },
           { type: "task", id: otherTaskId },
         ],
@@ -91,24 +91,24 @@ beforeAll(async () => {
             id: "yes-last-step",
             label: "Yes, that is the last step",
             writes: [
-              { op: "remember_fact", fact: "The US Bank statement is the last step of reconciling CPO 2073.", tags: ["Caltrans"] },
+              { op: "remember_fact", fact: "The NW Bank statement is the last step of reconciling CPO 4513.", tags: ["Canterly"] },
               { op: "resolve" },
             ],
           },
           { id: "not-yet", label: "Not yet", writes: [{ op: "resolve" }] },
         ],
         rank: 0,
-        projectId: ids.caltrans,
+        projectId: ids.canterly,
         identity: "today-hero",
         status: "open",
       },
       {
         userId: U.id,
         kind: "doesnt_add_up",
-        question: "CPO 2073 is on your list twice?",
-        context: "One copy is finished and says the new number is 0394; another is still open with 0 of 4 steps done.",
+        question: "CPO 4513 is on your list twice?",
+        context: "One copy is finished and says the new number is 0581; another is still open with 0 of 4 steps done.",
         evidence: [
-          { type: "task", id: ids.doneCpo, quote: "new number is 0394" },
+          { type: "task", id: ids.doneCpo, quote: "new number is 0581" },
           { type: "task", id: ids.blockedCpo },
           { type: "task", id: ids.checkCpo },
           { type: "memory", id: ids.memMonthly },
@@ -128,7 +128,7 @@ beforeAll(async () => {
           { id: "keep-them", label: "Keep them", writes: [{ op: "resolve" }] },
         ],
         rank: 200,
-        projectId: ids.caltrans,
+        projectId: ids.canterly,
         identity: "today-row",
         status: "open",
       },
@@ -140,7 +140,7 @@ beforeAll(async () => {
   // A record with no words yet: the Today line must fall back mechanically.
   await db.insert(records).values({
     userId: U.id,
-    projectId: ids.caltrans,
+    projectId: ids.canterly,
     body: emptyRecord(),
     inputsHash: "seed",
     words: { ledes: {} },
@@ -149,8 +149,8 @@ beforeAll(async () => {
   // Two runs, the later one failed: lastRunAt is when a run last finished,
   // whatever it made of it (the bars after an answer end on a failure too).
   await db.insert(understandingRuns).values([
-    { userId: U.id, projectId: ids.caltrans, startedAt: at(-3), finishedAt: at(-3), status: "ok" },
-    { userId: U.id, projectId: ids.caltrans, startedAt: at(-2), finishedAt: at(-2), status: "failed", errors: ["model: 429"] },
+    { userId: U.id, projectId: ids.canterly, startedAt: at(-3), finishedAt: at(-3), status: "ok" },
+    { userId: U.id, projectId: ids.canterly, startedAt: at(-2), finishedAt: at(-2), status: "failed", errors: ["model: 429"] },
   ]);
 });
 
@@ -170,9 +170,9 @@ describe("buildToday on the duplicate-CPO scenario", () => {
     expect(data.counts.questions).toBe(2);
     // The question text is carried whole; nothing shortens it (§9).
     expect(data.hero?.question).toBe(
-      "Is the US Bank statement the last step before CPO 2073 is reconciled?"
+      "Is the NW Bank statement the last step before CPO 4513 is reconciled?"
     );
-    expect(data.hero?.projectName).toBe("Caltrans");
+    expect(data.hero?.projectName).toBe("Canterly");
 
     // No record carries a Today line yet, and nothing is due today.
     expect(data.counts.dueToday).toBe(0);
@@ -185,13 +185,13 @@ describe("buildToday on the duplicate-CPO scenario", () => {
     expect(data.counts.pastDue).toBe(3);
     expect(data.counts.pastDueSuggested).toBe(0);
     expect(data.pastDue[0].fields.title).toBe(
-      "Process CPO 2073 / Production monitor as an FY 2027 transaction this month"
+      "Process CPO 4513 / Projection screen as an FY 2031 transaction this month"
     );
-    expect(data.pastDue[0].fields.project).toBe("Caltrans");
+    expect(data.pastDue[0].fields.project).toBe("Canterly");
     expect(data.pastDue[0].fields.source).toBe("typed");
 
     // Coming up: the three events inside seven days, in order.
-    expect(data.comingUp.map((r) => r.id)).toEqual([ids.eventLinked, ids.eventTerm, ids.eventDentist]);
+    expect(data.comingUp.map((r) => r.id)).toEqual([ids.eventLinked, ids.eventTerm, ids.eventHaircut]);
 
     expect(data.updatedAt).toBe(at(-1).toISOString());
     expect(data.lastRunAt).toBe(at(-2).toISOString());
@@ -210,7 +210,7 @@ describe("buildToday on the duplicate-CPO scenario", () => {
     // The status is untouched: surfaced is a timestamp, not a state change.
     expect(hero?.status).toBe("open");
 
-    const record = await recordFor(ids.caltrans);
+    const record = await recordFor(ids.canterly);
     // The entry carries the question's text and its evidence keys, not the id
     // alone: the next run reads this list to know what was already put to
     // the user, and an id told it nothing (SPEC §5).
@@ -229,7 +229,7 @@ describe("buildToday on the duplicate-CPO scenario", () => {
 
     // A second Today does not ask again.
     await today();
-    const again = await recordFor(ids.caltrans);
+    const again = await recordFor(ids.canterly);
     expect(again.body.asked).toHaveLength(2);
   });
 
@@ -246,14 +246,14 @@ describe("buildToday on the duplicate-CPO scenario", () => {
       type: "task",
       id: ids.statement,
       label: "Still open",
-      text: "Do the US Bank statement",
+      text: "Do the NW Bank statement",
       meta: "due Sep 23",
     });
     expect(said).toEqual({
       type: "message",
       id: ids.msgFinished,
       label: "You, Sep 1",
-      text: "I finished everything else that reconciling that CPO",
+      text: "the rest of squaring up that CPO is done",
     });
     expect(expected).toEqual({
       type: "expectation",
@@ -269,26 +269,26 @@ describe("buildToday on the duplicate-CPO scenario", () => {
     // text, and the quote from its notes as a note under it.
     expect(done.label).toBe("Done Sep 1");
     expect(done.text).toBe(
-      "CPO 2073 — Production monitor: convert to FY2027, create new CPO, obtain Marissa signature, send to Walter Myala"
+      "CPO 4513 — Projection screen: convert to FY2031, create new CPO, obtain Melissa signature, send to Warren Meala"
     );
-    expect(done.meta).toBe("note: new number is 0394");
+    expect(done.meta).toBe("note: new number is 0581");
     expect(blocked).toEqual({
       type: "task",
       id: ids.blockedCpo,
       label: "Still open",
-      text: "Process CPO 2073 / Production monitor as an FY 2027 transaction this month",
+      text: "Process CPO 4513 / Projection screen as an FY 2031 transaction this month",
       meta: "due Aug 21 · 0 of 4 steps",
     });
     expect(check.label).toBe("Still open");
     expect(check.meta).toBe("due Sep 20");
     // The memory was inserted at wall-clock time, so only the prefix is fixed.
     expect(memory.label).toMatch(/^Remembered [A-Z][a-z]{2} \d{1,2}$/);
-    expect(memory.text).toBe("User is handling CPOs by doing/paying one each month and spacing them out.");
+    expect(memory.text).toBe("User is paying off CPOs one a month, spaced apart.");
     expect(event).toEqual({
       type: "event",
       id: ids.eventLinked,
       label: "Event Sep 25",
-      text: "Sign the new form with Marissa",
+      text: "Sign the new form with Melissa",
     });
     expect(document).toEqual({
       type: "document",
@@ -307,7 +307,7 @@ describe("buildToday on the duplicate-CPO scenario", () => {
         type: "message",
         id: ids.msgFinished,
         label: "You, Sep 1",
-        text: "All right, I finished everything else that reconciling that CPO",
+        text: "Okay, the rest of squaring up that CPO is done",
       },
     ]);
 
@@ -327,7 +327,7 @@ describe("buildToday on the duplicate-CPO scenario", () => {
       .insert(tasks)
       .values({
         userId: U.id,
-        projectId: ids.caltrans,
+        projectId: ids.canterly,
         title: "Compile the prior-art results into a memo",
         // Waiting to be taken up: where every suggestion starts.
         status: "inbox",
@@ -354,13 +354,13 @@ describe("buildToday on the duplicate-CPO scenario", () => {
   });
 
   it("(6) the Today line comes from the project that owns the nearest dated item, else it is mechanical (§7)", async () => {
-    // Caltrans has the statement due tomorrow, so its line owns the day.
-    const caltransLine = "Nothing is due today. The US Bank statement is due tomorrow.";
+    // Canterly has the statement due tomorrow, so its line owns the day.
+    const canterlyLine = "Nothing is due today. The NW Bank statement is due tomorrow.";
     await db
       .update(records)
-      .set({ words: { todayLine: caltransLine, ledes: {} }, updatedAt: at(-1) })
-      .where(and(eq(records.userId, U.id), eq(records.projectId, ids.caltrans)));
-    expect((await today()).todayLine).toBe(caltransLine);
+      .set({ words: { todayLine: canterlyLine, ledes: {} }, updatedAt: at(-1) })
+      .where(and(eq(records.userId, U.id), eq(records.projectId, ids.canterly)));
+    expect((await today()).todayLine).toBe(canterlyLine);
 
     // The Album's only dated task is overdue (yesterday), which is before the
     // start of the day and does not count, so a newer Album record still loses.
@@ -373,7 +373,7 @@ describe("buildToday on the duplicate-CPO scenario", () => {
       words: { todayLine: albumLine, ledes: {} },
       updatedAt: at(0),
     });
-    expect((await today()).todayLine).toBe(caltransLine);
+    expect((await today()).todayLine).toBe(canterlyLine);
 
     // An Album event at 09:00 today is nearer than the statement tomorrow.
     const [listening] = await db
@@ -382,7 +382,7 @@ describe("buildToday on the duplicate-CPO scenario", () => {
       .returning({ id: events.id });
     expect((await today()).todayLine).toBe(albumLine);
     await db.delete(events).where(eq(events.id, listening.id));
-    expect((await today()).todayLine).toBe(caltransLine);
+    expect((await today()).todayLine).toBe(canterlyLine);
 
     // A record whose line is blank is not a candidate; with none left the
     // line is mechanical, with days and counts as digits.

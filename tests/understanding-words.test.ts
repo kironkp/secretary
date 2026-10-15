@@ -28,10 +28,10 @@ let ids: CpoIds;
 let emptyProjectId = "";
 
 const LEDES = {
-  caltrans: {
+  canterly: {
     overdue: "Both of these are the same CPO. The oldest has waited since August.",
     "everything-open": "Three are one job.",
-    shared: "Written by Caltrans, the older record.",
+    shared: "Written by Canterly, the older record.",
   },
   album: {
     "due-today": "One track is left to master.",
@@ -62,10 +62,10 @@ beforeAll(async () => {
   await db.insert(records).values([
     {
       userId: U.id,
-      projectId: ids.caltrans,
+      projectId: ids.canterly,
       body: emptyRecord(),
-      inputsHash: "test-caltrans",
-      words: { todayLine: "Nothing is due today.", ledes: LEDES.caltrans },
+      inputsHash: "test-canterly",
+      words: { todayLine: "Nothing is due today.", ledes: LEDES.canterly },
       updatedAt: hoursFromNow(1),
     },
     {
@@ -104,10 +104,10 @@ describe("ledesFor", () => {
     const ledes = await ledesFor(U.id);
     expect(Object.keys(ledes).sort()).toEqual(["due-today", "everything-open", "overdue", "shared"]);
 
-    expect(ledes.overdue.text).toBe(LEDES.caltrans.overdue);
-    expect(ledes.overdue.projectId).toBe(ids.caltrans);
-    expect(ledes["everything-open"].text).toBe(LEDES.caltrans["everything-open"]);
-    expect(ledes["everything-open"].projectId).toBe(ids.caltrans);
+    expect(ledes.overdue.text).toBe(LEDES.canterly.overdue);
+    expect(ledes.overdue.projectId).toBe(ids.canterly);
+    expect(ledes["everything-open"].text).toBe(LEDES.canterly["everything-open"]);
+    expect(ledes["everything-open"].projectId).toBe(ids.canterly);
     expect(ledes["due-today"].text).toBe(LEDES.album["due-today"]);
     expect(ledes["due-today"].projectId).toBe(ids.album);
   });
@@ -131,7 +131,7 @@ describe("ledesFor", () => {
   });
 
   it("goes stale when a task of its project moves after the record was written", async () => {
-    // Touch one Caltrans task past the Caltrans record (+1h): every lede of
+    // Touch one Canterly task past the Canterly record (+1h): every lede of
     // that record is stale, and the Album record's are not.
     await db
       .update(tasks)
@@ -142,11 +142,11 @@ describe("ledesFor", () => {
     expect(ledes.overdue.stale).toBe(true);
     expect(ledes["everything-open"].stale).toBe(true);
     expect(ledes["due-today"].stale).toBe(false);
-    // The shared lede is the Album record's, so the Caltrans touch does not
+    // The shared lede is the Album record's, so the Canterly touch does not
     // reach it.
     expect(ledes.shared.stale).toBe(false);
     // Stale is a flag, not a cut: the text is still the whole lede.
-    expect(ledes.overdue.text).toBe(LEDES.caltrans.overdue);
+    expect(ledes.overdue.text).toBe(LEDES.canterly.overdue);
   });
 
   it("returns {} for a user with no records", async () => {
@@ -181,8 +181,8 @@ describe("ledesFor with the task digest (SEC-A007, sec rev: a start drag left a 
   });
 
   it("a digest is per project: another project's change does not reach it", async () => {
-    const before = (await taskDigests(U.id, [ids.album, ids.caltrans])).get(ids.album);
-    await db.update(tasks).set({ notes: "Teresa called back." }).where(eq(tasks.id, ids.checkCpo));
+    const before = (await taskDigests(U.id, [ids.album, ids.canterly])).get(ids.album);
+    await db.update(tasks).set({ notes: "Tamsin called back." }).where(eq(tasks.id, ids.checkCpo));
     expect((await taskDigests(U.id, [ids.album])).get(ids.album)).toBe(before);
   });
 });

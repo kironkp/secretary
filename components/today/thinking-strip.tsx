@@ -112,7 +112,7 @@ const retryable = (reason: string | null | undefined) => reason === "validation"
 const PREVIEW: Record<string, Shown> = {
   open: {
     phase: "active",
-    line: "Reading Caltrans",
+    line: "Reading Canterly",
     detail: "43 tasks, 12 messages",
     action: null,
     retry: null,
@@ -121,7 +121,7 @@ const PREVIEW: Record<string, Shown> = {
   },
   failed: {
     phase: "failed",
-    line: "I couldn't update my notes on Caltrans",
+    line: "I couldn't update my notes on Canterly",
     detail: "the model has no credits",
     action: "Add credits, raise the limit, or connect your own key in Settings.",
     retry: null,

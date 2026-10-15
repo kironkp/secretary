@@ -36,7 +36,7 @@ describe("F2 timeline-day", () => {
   signals.conversation.questions_today = [
     "when is the album due?",
     "what date is the patent filing?",
-    "can we schedule findit for September?",
+    "can we schedule fetchit for September?",
   ];
   const plan = planFromRules(signals);
 
@@ -54,7 +54,7 @@ describe("F2 timeline-day", () => {
     expect(cardFor(plan, "patent")?.props).toMatchObject({ accent: true, variant: "full" });
   });
   it("compacts the non-accented cards", () => {
-    for (const id of ["album", "findit", "caltrans"]) {
+    for (const id of ["album", "fetchit", "canterly"]) {
       expect(cardFor(plan, id)?.props).toMatchObject({ variant: "compact" });
     }
   });
@@ -149,7 +149,7 @@ describe("what the rules can move", () => {
       for (let mask = 0; mask < 16; mask++) {
         const s = mask & 1 ? baseSignals() : quietBase(); // rule 1: a deadline in three days
         s.context.days_since_layout_change = days;
-        if (mask & 2) s.engagement.caltrans = { mentions_24h: 14, baseline_mentions: 2, last_touched: "2026-08-07T08:00:00Z" }; // rule 2
+        if (mask & 2) s.engagement.canterly = { mentions_24h: 14, baseline_mentions: 2, last_touched: "2026-08-07T08:00:00Z" }; // rule 2
         if (mask & 4) s.conversation.schedule_word_share = 0.42; // rule 3
         if (mask & 8) s.projects.find((p) => p.id === "album")!.subprojects = ["mixing", "artwork"].map((name) => ({ id: name, name, open_count: 1, done_count: 0 })); // rule 4
         situations.push(s);

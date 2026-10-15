@@ -29,18 +29,18 @@ const DAY_MS = 86_400_000;
 const daysFrom = (now: Date, n: number) => new Date(now.getTime() + n * DAY_MS);
 
 export type CpoIds = {
-  caltrans: string;
+  canterly: string;
   album: string;
   conversation: string;
-  /** done 21 days ago, notes "new number is 0394" */
+  /** done 21 days ago, notes "new number is 0581" */
   doneCpo: string;
   /** blocked, due 2026-08-21, 0 of 4 stages done */
   blockedCpo: string;
-  /** todo "Check what is blocking CPO 2073 and report back", 2 days overdue */
+  /** todo "Check what is blocking CPO 4513 and report back", 2 days overdue */
   checkCpo: string;
-  /** todo "Do the US Bank statement", due tomorrow */
+  /** todo "Do the NW Bank statement", due tomorrow */
   statement: string;
-  /** the other project's overdue task, so the Overdue widget has a non-Caltrans row */
+  /** the other project's overdue task, so the Overdue widget has a non-Canterly row */
   albumOverdue: string;
   memStatement: string;
   memMonthly: string;
@@ -53,7 +53,7 @@ export type CpoIds = {
   expectation: string;
   eventLinked: string;
   eventTerm: string;
-  eventDentist: string;
+  eventHaircut: string;
   document: string;
 };
 
@@ -64,9 +64,9 @@ export type CpoIds = {
 export async function seedCpoScenario(userId: string, now: Date = CPO_NOW): Promise<CpoIds> {
   const at = (n: number) => daysFrom(now, n);
 
-  const [caltrans] = await db
+  const [canterly] = await db
     .insert(projects)
-    .values({ userId, name: "Caltrans", status: "active" })
+    .values({ userId, name: "Canterly", status: "active" })
     .returning();
   const [album] = await db
     .insert(projects)
@@ -77,10 +77,10 @@ export async function seedCpoScenario(userId: string, now: Date = CPO_NOW): Prom
     .insert(tasks)
     .values({
       userId,
-      projectId: caltrans.id,
+      projectId: canterly.id,
       title:
-        "CPO 2073 — Production monitor: convert to FY2027, create new CPO, obtain Marissa signature, send to Walter Myala",
-      notes: "new number is 0394",
+        "CPO 4513 — Projection screen: convert to FY2031, create new CPO, obtain Melissa signature, send to Warren Meala",
+      notes: "new number is 0581",
       status: "done",
       completedAt: at(-21),
       updatedAt: at(-21),
@@ -91,8 +91,8 @@ export async function seedCpoScenario(userId: string, now: Date = CPO_NOW): Prom
     .insert(tasks)
     .values({
       userId,
-      projectId: caltrans.id,
-      title: "Process CPO 2073 / Production monitor as an FY 2027 transaction this month",
+      projectId: canterly.id,
+      title: "Process CPO 4513 / Projection screen as an FY 2031 transaction this month",
       status: "blocked",
       // SPEC §1: the open copy is due 2026-08-21 with 0 of 4 stages ticked.
       dueAt: new Date("2026-08-21T19:00:00.000Z"),
@@ -110,8 +110,8 @@ export async function seedCpoScenario(userId: string, now: Date = CPO_NOW): Prom
     .insert(tasks)
     .values({
       userId,
-      projectId: caltrans.id,
-      title: "Check what is blocking CPO 2073 and report back",
+      projectId: canterly.id,
+      title: "Check what is blocking CPO 4513 and report back",
       status: "todo",
       dueAt: at(-2),
       updatedAt: at(-14),
@@ -122,8 +122,8 @@ export async function seedCpoScenario(userId: string, now: Date = CPO_NOW): Prom
     .insert(tasks)
     .values({
       userId,
-      projectId: caltrans.id,
-      title: "Do the US Bank statement",
+      projectId: canterly.id,
+      title: "Do the NW Bank statement",
       status: "todo",
       // 08:00 tomorrow in Los Angeles: the hero question's 48-hour window.
       dueAt: at(1),
@@ -136,7 +136,7 @@ export async function seedCpoScenario(userId: string, now: Date = CPO_NOW): Prom
     .values({
       userId,
       projectId: album.id,
-      title: "Master the title track",
+      title: "Pick the running order",
       status: "todo",
       dueAt: at(-1),
     })
@@ -146,23 +146,23 @@ export async function seedCpoScenario(userId: string, now: Date = CPO_NOW): Prom
     .insert(memories)
     .values({
       userId,
-      fact: "The US Bank statement is part of the user's CPO reconciliation process.",
-      tags: ["Caltrans", "inferred"],
+      fact: "The NW Bank statement is part of the user's CPO reconciliation process.",
+      tags: ["Canterly", "inferred"],
     })
     .returning();
   const [memMonthly] = await db
     .insert(memories)
     .values({
       userId,
-      fact: "User is handling CPOs by doing/paying one each month and spacing them out.",
-      tags: ["Caltrans"],
+      fact: "User is paying off CPOs one a month, spaced apart.",
+      tags: ["Canterly"],
     })
     .returning();
   const [memAlbum] = await db
     .insert(memories)
     .values({
       userId,
-      fact: "The album cover needs a new photo before the release.",
+      fact: "The album needs a final listen before the release.",
       tags: ["Album"],
     })
     .returning();
@@ -182,13 +182,13 @@ export async function seedCpoScenario(userId: string, now: Date = CPO_NOW): Prom
   const [msgCpo, msgStatement, msgFinished, msgNothingBlocked, msgMilk] = await db
     .insert(messages)
     .values([
-      say("It's for that CPO. Yeah, it's a part of reconciling the CPO", 21),
-      say("All I need to do on the 22nd is change the bank statement", 21),
-      say("All right, I finished everything else that reconciling that CPO", 21),
-      say("Nothing is blocked right now on the CPO side", 21),
-      say("Remind me to buy milk on the way home", 1),
+      say("That one's for the CPO. It goes with squaring up the CPO", 21),
+      say("On the 22nd the only thing left is the bank statement", 21),
+      say("Okay, the rest of squaring up that CPO is done", 21),
+      say("Nothing on the CPO side is blocked at the moment", 21),
+      say("Remind me to pick up stamps on the way home", 1),
       // The assistant's turn is never an input, however many terms it carries.
-      say("Noted: CPO 2073 for Caltrans is reconciled once the statement changes.", 21, "assistant"),
+      say("Noted: CPO 4513 for Canterly is squared up once the statement is in.", 21, "assistant"),
     ])
     .returning();
 
@@ -203,23 +203,23 @@ export async function seedCpoScenario(userId: string, now: Date = CPO_NOW): Prom
     })
     .returning();
 
-  const [eventLinked, eventTerm, eventDentist] = await db
+  const [eventLinked, eventTerm, eventHaircut] = await db
     .insert(events)
     .values([
-      { userId, projectId: caltrans.id, title: "Sign the new form with Marissa", startsAt: at(3) },
+      { userId, projectId: canterly.id, title: "Sign the new form with Melissa", startsAt: at(3) },
       // Not linked to the project; joins the bundle only by the words in it.
-      { userId, title: "Call Walter about CPO 2073", startsAt: at(4) },
-      { userId, title: "Dentist", startsAt: at(5) },
+      { userId, title: "Call Warren about CPO 4513", startsAt: at(4) },
+      { userId, title: "Haircut", startsAt: at(5) },
     ])
     .returning();
 
   const [document] = await db
     .insert(documents)
-    .values({ userId, projectId: caltrans.id, title: "CPO reconciliation notes" })
+    .values({ userId, projectId: canterly.id, title: "CPO reconciliation notes" })
     .returning();
 
   return {
-    caltrans: caltrans.id,
+    canterly: canterly.id,
     album: album.id,
     conversation: conv.id,
     doneCpo: doneCpo.id,
@@ -238,7 +238,7 @@ export async function seedCpoScenario(userId: string, now: Date = CPO_NOW): Prom
     expectation: expectation.id,
     eventLinked: eventLinked.id,
     eventTerm: eventTerm.id,
-    eventDentist: eventDentist.id,
+    eventHaircut: eventHaircut.id,
     document: document.id,
   };
 }
@@ -342,9 +342,9 @@ export function minimalOutputFor(bundle: Bundle): RunOutput {
 }
 
 /**
- * The Caltrans run as SPEC §2's worked example would have it, reduced to what
- * the tests assert on: one thing (CPO 2073) sourced to the done task, one
- * contradiction sourced to both 2073 copies, one unknown, the doesnt_add_up
+ * The Canterly run as SPEC §2's worked example would have it, reduced to what
+ * the tests assert on: one thing (CPO 4513) sourced to the done task, one
+ * contradiction sourced to both 4513 copies, one unknown, the doesnt_add_up
  * question about the duplicate and the need_to_know question about the
  * statement due tomorrow. Titles are read from the bundle, not retyped, so the
  * `why` quotes exactly what validate.ts will look for.
@@ -361,12 +361,12 @@ export function validOutputFor(bundle: Bundle, ids: CpoIds): RunOutput {
       ...emptyRecord(bundle),
       things: [
         {
-          name: "Production monitor",
-          aliases: ["CPO 2073"],
-          ids: ["2073", "0394"],
+          name: "Projection screen",
+          aliases: ["CPO 4513"],
+          ids: ["4513", "0581"],
           state: {
-            text: "Converted to FY 2027 and signed; the new number is 0394.",
-            sources: [{ type: "task", id: ids.doneCpo, quote: "new number is 0394" }],
+            text: "Converted to FY 2031 and signed; the new number is 0581.",
+            sources: [{ type: "task", id: ids.doneCpo, quote: "new number is 0581" }],
             confidence: "high",
           },
         },
@@ -380,7 +380,7 @@ export function validOutputFor(bundle: Bundle, ids: CpoIds): RunOutput {
       ],
       contradictions: [
         {
-          text: "CPO 2073 is finished as one task and still open and blocked as another.",
+          text: "CPO 4513 is finished as one task and still open and blocked as another.",
           sources: [
             { type: "task", id: ids.blockedCpo },
             { type: "task", id: ids.doneCpo },
@@ -398,8 +398,8 @@ export function validOutputFor(bundle: Bundle, ids: CpoIds): RunOutput {
     questions: [
       {
         kind: "doesnt_add_up",
-        question: "CPO 2073 is on your list twice?",
-        why: `"${doneTitle}" is finished and says the new number is 0394, but "${blockedTitle}" is still open with 0 of 4 steps done.`,
+        question: "CPO 4513 is on your list twice?",
+        why: `"${doneTitle}" is finished and says the new number is 0581, but "${blockedTitle}" is still open with 0 of 4 steps done.`,
         evidence: [
           { type: "task", id: ids.doneCpo },
           { type: "task", id: ids.blockedCpo },
@@ -420,14 +420,14 @@ export function validOutputFor(bundle: Bundle, ids: CpoIds): RunOutput {
       },
       {
         kind: "need_to_know",
-        question: "Is the US Bank statement the last step before CPO 2073 is reconciled?",
-        why: `"${statementTitle}" is due tomorrow, and you said "I finished everything else that reconciling that CPO".`,
+        question: "Is the NW Bank statement the last step before CPO 4513 is reconciled?",
+        why: `"${statementTitle}" is due tomorrow, and you said "the rest of squaring up that CPO is done".`,
         evidence: [
           { type: "task", id: ids.statement },
           {
             type: "message",
             id: ids.msgFinished,
-            quote: "I finished everything else that reconciling that CPO",
+            quote: "the rest of squaring up that CPO is done",
           },
         ],
         answers: [
@@ -437,8 +437,8 @@ export function validOutputFor(bundle: Bundle, ids: CpoIds): RunOutput {
             writes: [
               {
                 op: "remember_fact",
-                fact: "The US Bank statement is the last step of reconciling CPO 2073.",
-                tags: ["Caltrans"],
+                fact: "The NW Bank statement is the last step of reconciling CPO 4513.",
+                tags: ["Canterly"],
               },
               { op: "resolve" },
             ],
@@ -448,7 +448,7 @@ export function validOutputFor(bundle: Bundle, ids: CpoIds): RunOutput {
       },
     ],
     words: {
-      todayLine: "Nothing is due today. The US Bank statement is due tomorrow.",
+      todayLine: "Nothing is due today. The NW Bank statement is due tomorrow.",
       ledes: ledesFor(bundle),
     },
   };

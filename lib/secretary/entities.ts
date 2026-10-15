@@ -1,6 +1,6 @@
 // Entity cross-reference (SPEC §11): every person/org/term mention resolves
 // against the store BEFORE write. Exact/alias match → touch. Near-miss →
-// entity_conflict clarification (NEVER silent merge or drop — the Marissa
+// entity_conflict clarification (NEVER silent merge or drop — the Melissa
 // fixture). Unknown → created; low-confidence spellings arrive unconfirmed
 // with a new_name clarification, and must not be used in documents until
 // confirmed. Pure DB mechanics — the model only supplies mentions.
@@ -41,9 +41,9 @@ function isNearMiss(mention: string, existing: string): boolean {
   const a = norm(mention),
     b = norm(existing);
   if (a === b) return false;
-  // whole-name closeness ("walter myara" ~ "walter maiara")
+  // whole-name closeness ("warren meada" ~ "warren maiada")
   if (editDistance(a, b) <= 2) return true;
-  // shared first token with differing surname ("teresa mahers" ~ "teresa maers")
+  // shared first token with differing surname ("tamsin malvey" ~ "tamsin maley")
   const [af, ...ar] = a.split(" ");
   const [bf, ...br] = b.split(" ");
   if (af === bf && ar.length && br.length && editDistance(ar.join(" "), br.join(" ")) <= 2)

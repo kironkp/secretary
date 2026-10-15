@@ -10,7 +10,7 @@ const refField = z
   .min(1)
   .max(120)
   .describe(
-    'Which block: an id from the CANVAS list, or the user\'s own words — "that", "this", "the other one", "the top one", "the caltrans one", "those". Prefer their words over guessing an id.'
+    'Which block: an id from the CANVAS list, or the user\'s own words — "that", "this", "the other one", "the top one", "the canterly one", "those". Prefer their words over guessing an id.'
   );
 
 export const toolSchemas = {
@@ -35,7 +35,7 @@ export const toolSchemas = {
       .array(z.string())
       .optional()
       .describe(
-        "For genuinely multi-step deliverables: ordered stage names, e.g. ['Outline','Draft','Review with Marissa','Submit']"
+        "For genuinely multi-step deliverables: ordered stage names, e.g. ['Outline','Draft','Review with Melissa','Submit']"
       ),
     recurrence: z
       .enum(["daily", "weekly", "monthly", "yearly"])
@@ -91,7 +91,7 @@ export const toolSchemas = {
       .string()
       .optional()
       .describe(
-        'What the task is stuck ON and what would clear it ("waiting on Teresa\'s signature"); "" clears it. Setting any status other than blocked clears it automatically.'
+        'What the task is stuck ON and what would clear it ("waiting on Tamsin\'s signature"); "" clears it. Setting any status other than blocked clears it automatically.'
       ),
     postpone_reason: z
       .string()
@@ -224,7 +224,7 @@ export const toolSchemas = {
             .string()
             .min(1)
             .max(80)
-            .describe("The section in the user's words: 'shopping list', 'timeline', 'Caltrans', 'stats'"),
+            .describe("The section in the user's words: 'shopping list', 'timeline', 'Canterly', 'stats'"),
         })
       )
       .min(1)
@@ -332,7 +332,7 @@ export const toolSchemas = {
       .string()
       .optional()
       .describe(
-        "What the user said, briefly. On signal blocked this is THE REASON — what it's stuck on and what would clear it (\"waiting on Teresa's signature\") — stored on the task so later sessions can explain the block instead of reciting the word.",
+        "What the user said, briefly. On signal blocked this is THE REASON — what it's stuck on and what would clear it (\"waiting on Tamsin's signature\") — stored on the task so later sessions can explain the block instead of reciting the word.",
       ),
   }),
   create_commitment: z.object({
@@ -434,7 +434,7 @@ export const toolSchemas = {
     commitment: z
       .string()
       .min(1)
-      .describe("What the user is expected to report, e.g. 'CPO 2073 updated and shown to Teresa'"),
+      .describe("What the user is expected to report, e.g. 'CPO 4513 updated and shown to Tamsin'"),
     expected_update_by: z.string().describe("ISO 8601 — when an update is due from the user"),
     task: z
       .string()
@@ -478,7 +478,7 @@ export const toolSchemas = {
       .describe("The documents that step needs, by the user's names: ['STD 65', \"Seller's permit\"]. [] clears them."),
   }),
   file_document: z.object({
-    task: z.string().min(1).describe("Task id, or a distinctive fragment of its title ('glue CPO', '2110')"),
+    task: z.string().min(1).describe("Task id, or a distinctive fragment of its title ('tape CPO', '4562')"),
     doc_type: z.string().min(1).max(80).describe("Which document it is, by the user's name: 'ADM 2029', 'Quote'"),
     attachment: z
       .string()
@@ -547,7 +547,7 @@ export const toolSchemas = {
   // generation — the shell moves things and animates. This is the workspace.
   //
   // Ids accept the user's OWN WORDS, not just ids: the server resolves "that",
-  // "this", "the other one", "the top one", "the caltrans one" against shared
+  // "this", "the other one", "the top one", "the canterly one" against shared
   // interaction state that touch updates too. Pass through what they said.
   // FLAT on purpose, not a discriminated union: zod renders a union as `oneOf`,
   // which the Realtime API rejects outright — and a rejected tool schema fails
@@ -561,7 +561,7 @@ export const toolSchemas = {
             .enum(["move", "resize", "hide", "show", "remove", "set_theme", "undo", "redo"])
             .describe("What to do. undo/redo take no other fields."),
           id: refField.optional().describe(
-            'Which block — an id from the CANVAS list, or the user\'s own words ("that", "this", "the other one", "the top one", "the caltrans one"). Required for move/resize/hide/show/remove.'
+            'Which block — an id from the CANVAS list, or the user\'s own words ("that", "this", "the other one", "the top one", "the canterly one"). Required for move/resize/hide/show/remove.'
           ),
           to: z
             .number()
@@ -728,13 +728,13 @@ const toolDescriptions: Record<ToolName, string> = {
   edit_layout_plan:
     "Rearrange the user's dashboard NOW: move/remove/add sections or change their props (variant, expanded, accent). User-initiated changes apply immediately. For 'never show X again' use set_layout_preference instead.",
   log_status:
-    "Voice: the user reported where something stands ('updated it this morning', 'pushing that to Friday'). One call PER ITEM — a list spoken in one breath is several calls in the same turn, blocked items included: on signal blocked the note is the REASON ('waiting on Teresa's signature'), stored on the task so you can explain the block later instead of reciting the word. If the user hasn't said why it's stuck, log it anyway and ask them right then, in one line. 'That shouldn't be a task' / 'forget that one' / 'take it off the list' → signal dropped: removes it from the checklist on the spot (reinstatable by asking). Drop ONLY the exact task the user named — when unsure which one they mean, ask first. If the drop states a standing rule ('never make Caltrans checks a task'), ALSO call remember_fact in the SAME turn. The store is the only truth; log it the moment you hear it.",
+    "Voice: the user reported where something stands ('updated it this morning', 'pushing that to Friday'). One call PER ITEM — a list spoken in one breath is several calls in the same turn, blocked items included: on signal blocked the note is the REASON ('waiting on Tamsin's signature'), stored on the task so you can explain the block later instead of reciting the word. If the user hasn't said why it's stuck, log it anyway and ask them right then, in one line. 'That shouldn't be a task' / 'forget that one' / 'take it off the list' → signal dropped: removes it from the checklist on the spot (reinstatable by asking). Drop ONLY the exact task the user named — when unsure which one they mean, ask first. If the drop states a standing rule ('never make Canterly checks a task'), ALSO call remember_fact in the SAME turn. The store is the only truth; log it the moment you hear it.",
   create_commitment:
     "Voice: the user took something on. Log it immediately with any stated deadline and stakes ('so I don't get a strike'). Several items mentioned together = several calls in the same turn. Never wait to be asked.",
   schedule_checkin:
     "Voice: you promised to follow up ('I'll be asking either way') — schedule it in the SAME breath. A user report clears it silently; a miss opens the next session.",
   amend_task:
-    "Voice: the user is changing something about a task that ALREADY exists — 'file that under Caltrans', 'move it to the trip project', 'rename it', 'add a note that the gate code is 4411'. Amends the EXISTING task in place: project (\"none\" unfiles it), title, note, planned start ('start the album cover on the 12th'; the timeline draws it from there to the due date). A new DUE date is log_status (postponed). NEVER creates a task — create_commitment is only for a genuinely new to-do.",
+    "Voice: the user is changing something about a task that ALREADY exists — 'file that under Canterly', 'move it to the trip project', 'rename it', 'add a note that the gate code is 4411'. Amends the EXISTING task in place: project (\"none\" unfiles it), title, note, planned start ('start the album cover on the 12th'; the timeline draws it from there to the due date). A new DUE date is log_status (postponed). NEVER creates a task — create_commitment is only for a genuinely new to-do.",
   update_persona:
     "The user asked you to BE different — sterner, gentler, brisker, more/less follow-up, quiet hours ('I need a nagging secretary', 'stop being so peppy') — or gave you a NAME ('I'll call you Dot'). Store it ONCE here; it applies to every future conversation, the transcript labels, and the nag engine. Never re-ask.",
   queue_clarification:
@@ -750,17 +750,17 @@ const toolDescriptions: Record<ToolName, string> = {
   set_step_documents:
     "Say which documents a step of a process needs ('for a CPO, step 2 needs the STD 65 and the seller's permit'). Every task on that process then shows those as a checklist it can upload against and compile into one PDF.",
   file_document:
-    "File a document the user sent in chat against a task, under its name ('that's the ADM 2029 for the glue CPO'). It then counts toward the task's packet and its compiled PDF.",
+    "File a document the user sent in chat against a task, under its name ('that's the ADM 2029 for the tape CPO'). It then counts toward the task's packet and its compiled PDF.",
   packet_status:
-    "What a task's packet has and is missing, step by step ('what am I missing for 2110?'). The packet and its Compile PDF button are on the task's detail.",
+    "What a task's packet has and is missing, step by step ('what am I missing for 4562?'). The packet and its Compile PDF button are on the task's detail.",
   apply_pipeline:
     "Instantiate a saved pipeline template onto a task: sets its stages with computed per-step dates. 'Where am I on X' is then answered from the task's stage state — never from memory.",
   paint_canvas:
     "Paint a NEW canvas: a free-form visual the user watches build live — posters, charts, big-number summaries, week views. Use for 'show me / draw / visualize / put it on the canvas' when there is nothing on the canvas yet, or when they want a genuinely different picture. If a canvas already exists and they are CHANGING it, use edit_canvas instead — repainting throws away what they are looking at. The painter READS THE RECENT CONVERSATION, so 'lay out the CPO statuses we just discussed' is a complete brief — everything the user just said will render. Never say you can't draw, and never promise a screen update without calling this or edit_canvas. The result appears on the Canvas tab; say so.",
   edit_canvas:
-    "THE DEFAULT when something is already on the canvas and the user changes it. Anything that modifies the existing view — 'add one more thing', 'make that purple', 'move this above that', 'only show the Caltrans items', 'make the urgent one bigger', 'put these on the right', 'change the title', 'drop the empty column' — is an EDIT: the current canvas is kept and changed. Use paint_canvas ONLY when they want a genuinely different picture ('now show me the album instead', 'paint my week'). If in doubt and a canvas exists, edit. Requires an existing canvas — otherwise use paint_canvas.",
+    "THE DEFAULT when something is already on the canvas and the user changes it. Anything that modifies the existing view — 'add one more thing', 'make that purple', 'move this above that', 'only show the Canterly items', 'make the urgent one bigger', 'put these on the right', 'change the title', 'drop the empty column' — is an EDIT: the current canvas is kept and changed. Use paint_canvas ONLY when they want a genuinely different picture ('now show me the album instead', 'paint my week'). If in doubt and a canvas exists, edit. Requires an existing canvas — otherwise use paint_canvas.",
   arrange_canvas:
-    "REARRANGE what is already on the canvas — instant, no repainting, nothing regenerated. Use this for anything about WHERE, HOW BIG, WHAT'S VISIBLE, or HOW IT LOOKS: 'move the album up' / 'put that at the top' (move), 'make that bigger/smaller', 'put those side by side' (resize), 'hide the finished ones' / 'just show me Caltrans' (hide), 'bring back the album' (show), 'bigger font', 'more spacing', 'use a serif' (set_theme). Block ids come from the CANVAS list in your briefing — refer to what the user can SEE. This is NOT edit_canvas: use edit_canvas only when the CONTENT of a block must change (different tasks, new wording, a rewritten note). Rearranging is free and instant; repainting is neither.",
+    "REARRANGE what is already on the canvas — instant, no repainting, nothing regenerated. Use this for anything about WHERE, HOW BIG, WHAT'S VISIBLE, or HOW IT LOOKS: 'move the album up' / 'put that at the top' (move), 'make that bigger/smaller', 'put those side by side' (resize), 'hide the finished ones' / 'just show me Canterly' (hide), 'bring back the album' (show), 'bigger font', 'more spacing', 'use a serif' (set_theme). Block ids come from the CANVAS list in your briefing — refer to what the user can SEE. This is NOT edit_canvas: use edit_canvas only when the CONTENT of a block must change (different tasks, new wording, a rewritten note). Rearranging is free and instant; repainting is neither.",
   show_canvas:
     "Bring the Canvas into view on the user's screen WITHOUT repainting — 'open the canvas', 'show me the canvas', 'put that back up'. paint_canvas and edit_canvas already open it automatically; use this only when the user wants to look at what's already there.",
   request_new_component:
@@ -840,7 +840,7 @@ export const VOICE_TOOL_NAMES = [
   "consult_brain",
   // the live web: "google what the dental provider is for state workers"
   "search_web",
-  // packets: "what am I missing for the glue CPO", "step 8 needs the ADM 2029"
+  // packets: "what am I missing for the tape CPO", "step 8 needs the ADM 2029"
   "packet_status",
   "set_step_documents",
   // the upward cycle: "I can't do that" files a shop request instead of dying

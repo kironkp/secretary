@@ -377,7 +377,7 @@ export function describeComposition(composition: CanvasComposition): {
   }));
 }
 
-/** First readable text in a block — enough for "the one about Caltrans". */
+/** First readable text in a block — enough for "the one about Canterly". */
 function summarize(markup: string): string {
   const text = markup
     .replace(/<[^>]*>/g, " ")

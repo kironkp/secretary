@@ -4,7 +4,7 @@
 import type { Signals } from "@/lib/layout/signals";
 
 // "Now" for the fixture world: 2026-08-07 → patent (2026-08-10) has days_left 3,
-// album (2026-08-18) has 11, findit (2026-09-07) has 31.
+// album (2026-08-18) has 11, fetchit (2026-09-07) has 31.
 export const FIXTURE_NOW = new Date("2026-08-07T09:00:00Z");
 
 export function baseSignals(): Signals {
@@ -21,7 +21,7 @@ export function baseSignals(): Signals {
         open_count: 4,
         done_count: 2,
         subprojects: [],
-        people: ["Ash"],
+        people: ["Avery"],
       },
       {
         id: "album",
@@ -34,11 +34,11 @@ export function baseSignals(): Signals {
         open_count: 6,
         done_count: 1,
         subprojects: [],
-        people: ["Jazz"],
+        people: ["Jasper"],
       },
       {
-        id: "findit",
-        name: "findit",
+        id: "fetchit",
+        name: "fetchit",
         kind: "project",
         parent_id: null,
         deadline: "2026-09-07",
@@ -50,8 +50,8 @@ export function baseSignals(): Signals {
         people: [],
       },
       {
-        id: "caltrans",
-        name: "caltrans",
+        id: "canterly",
+        name: "canterly",
         kind: "project",
         parent_id: null,
         deadline: null,
@@ -67,8 +67,8 @@ export function baseSignals(): Signals {
     engagement: {
       patent: { mentions_24h: 2, baseline_mentions: 2, last_touched: "2026-08-07T08:00:00Z" },
       album: { mentions_24h: 2, baseline_mentions: 2, last_touched: "2026-08-07T08:00:00Z" },
-      findit: { mentions_24h: 1, baseline_mentions: 2, last_touched: "2026-08-06T18:00:00Z" },
-      caltrans: { mentions_24h: 0, baseline_mentions: 2, last_touched: "2026-08-05T12:00:00Z" },
+      fetchit: { mentions_24h: 1, baseline_mentions: 2, last_touched: "2026-08-06T18:00:00Z" },
+      canterly: { mentions_24h: 0, baseline_mentions: 2, last_touched: "2026-08-05T12:00:00Z" },
     },
     conversation: { today_topics: [], schedule_word_share: 0.05, questions_today: [] },
     pending: { items_missing_dates: ["ct-item-1", "ct-item-2"], unanswered_asks: [] },

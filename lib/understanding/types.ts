@@ -140,7 +140,7 @@ export const writeSchema = z.discriminatedUnion("op", [
   // other op for it.
   z.object({ op: z.literal("set_blocked_reason"), taskId, reason: z.string().max(300) }),
   // A project NAME, not an id: the bundle names one project, and the task
-  // tools already resolve a name the way a spoken "file it under Caltrans"
+  // tools already resolve a name the way a spoken "file it under Canterly"
   // is resolved (lib/secretary/tools.ts update_task), so an answer and a
   // voice command land the task in the same place.
   z.object({ op: z.literal("set_project"), taskId, project: z.string().trim().min(1).max(80) }),

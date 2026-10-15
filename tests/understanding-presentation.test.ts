@@ -3,7 +3,7 @@
 //
 // F1: a rule about how something reads (an answer label, a question, the
 // Today line, a lede) drops the piece instead of costing the whole run. In
-// production Caltrans was refused for `questions[0].answers[1].label "Not
+// production Canterly was refused for `questions[0].answers[1].label "Not
 // yet, do it Friday"` and the $1.50 ceiling left no second attempt. Every
 // factual and evidence rule still rejects.
 //
@@ -61,11 +61,11 @@ describe("F1: a piece that reads wrong is dropped; the run lands on one call", (
       sent = out;
       return out;
     });
-    const result = await runProject(userId, ids.caltrans, { timezone: CPO_TZ, now: CPO_NOW, model, force: true });
+    const result = await runProject(userId, ids.canterly, { timezone: CPO_TZ, now: CPO_NOW, model, force: true });
     expect(result.status, JSON.stringify(result)).toBe("ok");
     expect(model.calls).toHaveLength(1);
     // The record is the model's, untouched.
-    const [row] = await db.select().from(records).where(and(eq(records.userId, userId), eq(records.projectId, ids.caltrans)));
+    const [row] = await db.select().from(records).where(and(eq(records.userId, userId), eq(records.projectId, ids.canterly)));
     expect(row.body).toEqual(sent!.record);
     // The question is stored with the other answers and without that one.
     const stored = await db.select().from(clarifications).where(eq(clarifications.userId, userId));
@@ -83,7 +83,7 @@ describe("F1: a piece that reads wrong is dropped; the run lands on one call", (
       out.record.rules[0] = { ...out.record.rules[0], sources: [{ type: "task", id: "00000000-0000-4000-8000-000000000000" }] };
       return out;
     });
-    const result = await runProject(userId, ids.caltrans, { timezone: CPO_TZ, now: CPO_NOW, model, force: true });
+    const result = await runProject(userId, ids.canterly, { timezone: CPO_TZ, now: CPO_NOW, model, force: true });
     expect(result.status).toBe("failed");
     expect(model.calls.length).toBeGreaterThan(1);
     expect(model.calls[1].previousErrors.join(" ")).toMatch(/unknown task id/);
@@ -95,7 +95,7 @@ describe("F1: a piece that reads wrong is dropped; the run lands on one call", (
       out.questions[0].why = "Something here looks off to me.";
       return out;
     });
-    const result = await runProject(userId, ids.caltrans, { timezone: CPO_TZ, now: CPO_NOW, model, force: true });
+    const result = await runProject(userId, ids.canterly, { timezone: CPO_TZ, now: CPO_NOW, model, force: true });
     expect(result.status).toBe("failed");
     expect(model.calls.length).toBeGreaterThan(1);
     expect(model.calls[1].previousErrors.join(" ")).toMatch(/does not name any of its evidence/);
@@ -107,7 +107,7 @@ describe("F1: a piece that reads wrong is dropped; the run lands on one call", (
       out.record.rules[0] = { ...out.record.rules[0], text: `${out.record.rules[0].text} It is stale.` };
       return out;
     });
-    const result = await runProject(userId, ids.caltrans, { timezone: CPO_TZ, now: CPO_NOW, model, force: true });
+    const result = await runProject(userId, ids.canterly, { timezone: CPO_TZ, now: CPO_NOW, model, force: true });
     expect(result.status).toBe("failed");
     expect(model.calls[1].previousErrors.join(" ")).toMatch(/record\.rules\[0\]\.text: banned word "stale"/);
   });
@@ -120,7 +120,7 @@ describe("F1 follow-up: a question dropped for how it reads is still asked, so i
     const ids = await seedCpoScenario(userId, CPO_NOW);
     let first: RunOutput | null = null;
     const once = fakeModel((bundle) => (first = validOutputFor(bundle, ids)));
-    expect((await runProject(userId, ids.caltrans, { timezone: CPO_TZ, now: CPO_NOW, model: once, force: true })).status).toBe("ok");
+    expect((await runProject(userId, ids.canterly, { timezone: CPO_TZ, now: CPO_NOW, model: once, force: true })).status).toBe("ok");
     const standing = (await db.select().from(clarifications).where(eq(clarifications.userId, userId))).find(
       (q) => q.question === first!.questions[0].question
     )!;
@@ -138,7 +138,7 @@ describe("F1 follow-up: a question dropped for how it reads is still asked, so i
       out.questions = [{ ...first.questions[0], question: `${first.questions[0].question} And is that the whole story for all of these?` }];
       return out;
     });
-    expect((await runProject(userId, ids.caltrans, { timezone: CPO_TZ, now: CPO_NOW, model: again, force: true })).status).toBe("ok");
+    expect((await runProject(userId, ids.canterly, { timezone: CPO_TZ, now: CPO_NOW, model: again, force: true })).status).toBe("ok");
     const [row] = await db.select().from(clarifications).where(eq(clarifications.id, standingId));
     expect(row.status).toBe("open");
   });
@@ -146,7 +146,7 @@ describe("F1 follow-up: a question dropped for how it reads is still asked, so i
   it("not asked at all, with its evidence moved: dismissed as before", async () => {
     const { userId, ids, standingId } = await askedThenMoved("gone");
     const without = fakeModel((bundle) => ({ ...validOutputFor(bundle, ids), questions: [] }));
-    expect((await runProject(userId, ids.caltrans, { timezone: CPO_TZ, now: CPO_NOW, model: without, force: true })).status).toBe("ok");
+    expect((await runProject(userId, ids.canterly, { timezone: CPO_TZ, now: CPO_NOW, model: without, force: true })).status).toBe("ok");
     const [row] = await db.select().from(clarifications).where(eq(clarifications.id, standingId));
     expect(row).toMatchObject({ status: "dismissed", resolution: "resolved by a change in the data" });
   });
@@ -158,7 +158,7 @@ describe("F1: what is dropped, and that nothing is ever added", () => {
     questions: [
       {
         kind: "need_to_know",
-        question: "CPO 2073 is on your list twice. Close the old one?",
+        question: "CPO 4513 is on your list twice. Close the old one?",
         why: "Two tasks say the same.",
         evidence: [{ type: "task", id: "t1" }],
         answers: [
@@ -195,8 +195,8 @@ describe("F1: what is dropped, and that nothing is ever added", () => {
 
   it("a question that reads wrong (too long, a slash, no ending, a promise, a 3-sentence why) is dropped whole", () => {
     for (const change of [
-      (q: Record<string, unknown>) => (q.question = "Should I clean up the old CPO 2073 production monitor tasks that still say they are blocked?"),
-      (q: Record<string, unknown>) => (q.question = "Close CPO 2073 / Production monitor?"),
+      (q: Record<string, unknown>) => (q.question = "Should I clean up the old CPO 4513 projection screen tasks that still say they are blocked?"),
+      (q: Record<string, unknown>) => (q.question = "Close CPO 4513 / Projection screen?"),
       (q: Record<string, unknown>) => (q.question = "Close the old one"),
       (q: Record<string, unknown>) => (q.why = "Two tasks say the same. I'll clear them for you."),
       (q: Record<string, unknown>) => (q.why = "One. Two. Three."),

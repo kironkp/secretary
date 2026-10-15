@@ -56,15 +56,15 @@ afterAll(async () => {
 });
 
 const run = (opts: Partial<Parameters<typeof runProject>[2]> = {}) =>
-  runProject(U.id, ids.caltrans, { timezone: TZ, now: NOW, ...opts });
+  runProject(U.id, ids.canterly, { timezone: TZ, now: NOW, ...opts });
 
-const gather = () => gatherProject(U.id, ids.caltrans, { now: NOW, timezone: TZ });
+const gather = () => gatherProject(U.id, ids.canterly, { now: NOW, timezone: TZ });
 
 const recordRow = async () => {
   const [row] = await db
     .select()
     .from(records)
-    .where(and(eq(records.userId, U.id), eq(records.projectId, ids.caltrans)));
+    .where(and(eq(records.userId, U.id), eq(records.projectId, ids.canterly)));
   return row;
 };
 
@@ -128,7 +128,7 @@ describe("runProject on the duplicate-CPO scenario", () => {
 
     // The code owns `asked`, not the model (§4, §5).
     expect(row.body.asked).toEqual([]);
-    expect(row.body.things.map((t) => t.name)).toEqual(["Production monitor"]);
+    expect(row.body.things.map((t) => t.name)).toEqual(["Projection screen"]);
     expect(row.body.contradictions).toHaveLength(1);
 
     // The words are stored beside the body, keyed by widget id.
@@ -155,10 +155,10 @@ describe("runProject on the duplicate-CPO scenario", () => {
     // The other project's rows and the milk message are not this project's.
     expect(message).not.toContain(`[task:${ids.albumOverdue}]`);
     expect(message).not.toContain(`[message:${ids.msgMilk}]`);
-    expect(message).not.toContain(`[event:${ids.eventDentist}]`);
+    expect(message).not.toContain(`[event:${ids.eventHaircut}]`);
     expect(message).toContain("PREVIOUS RECORD");
     expect(message).toContain("none (first run)");
-    expect(message).toContain("Caltrans");
+    expect(message).toContain("Canterly");
     expect(message).toContain(TZ);
     // The system prompt is the understanding prompt, not the extraction one.
     expect(system).toContain("need_to_know");
@@ -184,7 +184,7 @@ describe("runProject on the duplicate-CPO scenario", () => {
       [dau, dauDraft],
     ] as const) {
       expect(row.status).toBe("open");
-      expect(row.projectId).toBe(ids.caltrans);
+      expect(row.projectId).toBe(ids.canterly);
       expect(row.question).toBe(draft.question);
       expect(row.context).toBe(draft.why);
       expect(row.identity).toBe(questionIdentity(draft));
@@ -299,7 +299,7 @@ describe("runProject on the duplicate-CPO scenario", () => {
 
     const failed = (await runRows()).filter((r) => r.status === "failed");
     expect(failed).toHaveLength(1);
-    expect(failed[0].projectId).toBe(ids.caltrans);
+    expect(failed[0].projectId).toBe(ids.canterly);
     expect(failed[0].model).toBe("fake");
     expect(failed[0].errors.join("\n")).toContain("not-a-real-task");
     expect(failed[0].finishedAt.getTime()).toBeGreaterThanOrEqual(failed[0].startedAt.getTime());
@@ -380,8 +380,8 @@ describe("runProject on the duplicate-CPO scenario", () => {
       dismissed: [],
       skippedDuplicates: [],
       skippedSettled: [
-        "CPO 2073 is on your list twice?",
-        "Is the US Bank statement the last step before CPO 2073 is reconciled?",
+        "CPO 4513 is on your list twice?",
+        "Is the NW Bank statement the last step before CPO 4513 is reconciled?",
       ],
       reopened: [],
     });
@@ -495,7 +495,7 @@ describe("runProject on the duplicate-CPO scenario", () => {
     const slow = fakeModel(async (bundle) => {
       entered();
       await gate;
-      return bundle.project.id === ids.caltrans
+      return bundle.project.id === ids.canterly
         ? validOutputFor(bundle, ids)
         : minimalOutputFor(bundle);
     });
@@ -510,8 +510,8 @@ describe("runProject on the duplicate-CPO scenario", () => {
 
     release();
     const done = await inFlight;
-    expect(Object.keys(done.results).sort()).toEqual([ids.album, ids.caltrans].sort());
-    expect(done.results[ids.caltrans].status, JSON.stringify(done.results)).toBe("ok");
+    expect(Object.keys(done.results).sort()).toEqual([ids.album, ids.canterly].sort());
+    expect(done.results[ids.canterly].status, JSON.stringify(done.results)).toBe("ok");
     expect(done.results[ids.album].status, JSON.stringify(done.results)).toBe("ok");
     expect(slow.calls).toHaveLength(2);
     expect(done.retiredAsr).toBe(1);
@@ -524,8 +524,8 @@ describe("runProject on the duplicate-CPO scenario", () => {
     // The latch released: a third sweep runs, and with nothing changed it
     // skips both projects on the hash.
     const third = await runAll(U.id, { timezone: TZ, now: NOW, model: slow });
-    expect(Object.keys(third.results).sort()).toEqual([ids.album, ids.caltrans].sort());
-    expect(third.results[ids.caltrans]).toEqual({ status: "skipped", reason: "unchanged" });
+    expect(Object.keys(third.results).sort()).toEqual([ids.album, ids.canterly].sort());
+    expect(third.results[ids.canterly]).toEqual({ status: "skipped", reason: "unchanged" });
     expect(third.results[ids.album]).toEqual({ status: "skipped", reason: "unchanged" });
     expect(slow.calls).toHaveLength(2);
 

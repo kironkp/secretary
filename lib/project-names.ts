@@ -1,6 +1,6 @@
 // How a project NAME lands on one of the user's projects, in one place: the
 // voice tools (lib/secretary/tools.ts resolveProject) resolve "file it under
-// Caltrans" with it, and the understanding validator (lib/understanding/
+// Canterly" with it, and the understanding validator (lib/understanding/
 // validate.ts) refuses a set_project write with it, so a name the validator
 // lets through is a name the apply path will find. Pure: no database, so the
 // validator stays mechanical.
@@ -21,10 +21,10 @@ export type ProjectNameMatch = {
 };
 
 /**
- * "Find It" must land in "Find It app", never spawn a duplicate. Exact
+ * "Fetch It" must land in "Fetch It app", never spawn a duplicate. Exact
  * (case-insensitive) → normalized (punctuation/whitespace-blind) → containment
  * either way, the candidate closest in length winning. Normalized and fuzzy
- * matching need three characters, so "IT" cannot land on "Find It app".
+ * matching need three characters, so "IT" cannot land on "Fetch It app".
  */
 export function matchProjectName(name: string, names: readonly string[]): ProjectNameMatch | null {
   const lower = name.toLowerCase();

@@ -184,7 +184,7 @@ describe("adding", () => {
   it("makes ids readable, stable and unique", () => {
     const existing = [w("today")];
     expect(nextWidgetId(existing, "Today")).toBe("today-2");
-    expect(nextWidgetId(existing, "Caltrans budget")).toBe("caltrans-budget");
+    expect(nextWidgetId(existing, "Canterly budget")).toBe("canterly-budget");
     expect(nextWidgetId([], "!!!")).toBe("widget");
   });
 });

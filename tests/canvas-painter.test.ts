@@ -14,14 +14,14 @@ const U = { id: `test-painter-${crypto.randomUUID()}`, email: `paint-${Date.now(
 describe("buildPainterInput", () => {
   it("places the conversation excerpt between SIGNALS and BRIEF when present", () => {
     const input = buildPainterInput("lay out what we discussed", '{"projects":[]}', {
-      conversationExcerpt: "USER: CPO 2079 is antenna, blocked on the TASCAM.",
+      conversationExcerpt: "USER: CPO 4519 is awning, blocked on the VELTOR.",
     });
     const iSignals = input.indexOf("SIGNALS:");
     const iConv = input.indexOf("CONVERSATION (");
     const iBrief = input.indexOf("BRIEF:");
     expect(iConv).toBeGreaterThan(iSignals);
     expect(iBrief).toBeGreaterThan(iConv);
-    expect(input).toContain("blocked on the TASCAM");
+    expect(input).toContain("blocked on the VELTOR");
     expect(input).toContain("verbatim source of truth");
   });
 
@@ -55,14 +55,14 @@ describe("paintCanvas conversation context (integration)", () => {
         role: "user",
         mode: "voice",
         content:
-          "The one I paid this month was CPO ending in 0035, called comms. 2073 is production monitor, doing it this month. 2110 lenses and camera accessories moves to fiscal year 2027. And 2079 is antenna — blocked, we're still waiting on the TASCAM.",
+          "Paid the 0212 one this month, the signage. 4513, the projection screen, is this month. 4562, benches and patio accessories, goes to fiscal year 2031. 4519 is the awning, blocked on the VELTOR.",
       },
       {
         userId: U.id,
         conversationId,
         role: "assistant",
         mode: "voice",
-        content: "Got it. 2073 this month, 2110 to FY 2027.",
+        content: "Got it. 4513 this month, 4562 to FY 2031.",
       },
     ]);
   });
@@ -80,7 +80,7 @@ describe("paintCanvas conversation context (integration)", () => {
       conversationId,
       stream: captureStream,
     });
-    for (const detail of ["0035", "comms", "2073", "production monitor", "2110", "2079", "antenna", "TASCAM"]) {
+    for (const detail of ["0212", "signage", "4513", "projection screen", "4562", "4519", "awning", "VELTOR"]) {
       expect(received).toContain(detail);
     }
     expect(received).toContain("USER:");

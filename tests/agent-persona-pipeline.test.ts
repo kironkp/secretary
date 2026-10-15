@@ -1,5 +1,5 @@
 // SPEC §11 phase: persona_config, stakes, pipeline templates. Every test is a
-// beat from the Aug 18 voice transcript (docs/adaptive-ui/transcript-2026-08-18.md)
+// beat from the Aug 18 voice transcript (the record is kept outside the public repo)
 // that the session got wrong — or right only by luck of context length.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
@@ -98,7 +98,7 @@ describe("dispatcher rules (Aug 25 mobile session: 'can't make the call rn' → 
 describe("stakes (transcript: reconcile by Sep 8 'so I don't get a strike')", () => {
   it("captures stakes on create and cites them in the overdue briefing", async () => {
     await executeTool(ctx, "create_task", {
-      title: "Reconcile and send documents to Caltrans HQ",
+      title: "Reconcile and send documents to Canterly HQ",
       due_at: new Date(Date.now() - 2 * 86400000).toISOString(), // overdue
       stakes: "miss reconcile → strike from HQ",
     });
@@ -123,7 +123,7 @@ describe("pipeline templates (transcript: update → sign → pay → reconcile+
       name: "CPO procurement",
       steps: [
         { name: "Update the CPO" },
-        { name: "Get it signed (Teresa Mahers, Walter Maiara)", blocked_by: 0 },
+        { name: "Get it signed (Tamsin Malvey, Warren Maiada)", blocked_by: 0 },
         { name: "Pay on the CalCard", blocked_by: 1 },
         { name: "Reconcile + submit to HQ", blocked_by: 2, offset_days: 20 },
       ],
@@ -131,9 +131,9 @@ describe("pipeline templates (transcript: update → sign → pay → reconcile+
     });
     expect((save.result as { saved?: boolean }).saved).toBe(true);
 
-    await executeTool(ctx, "create_task", { title: "CPO 2073 — production monitor" });
+    await executeTool(ctx, "create_task", { title: "CPO 4513 — projection screen" });
     const apply = await executeTool(ctx, "apply_pipeline", {
-      task: "CPO 2073",
+      task: "CPO 4513",
       template: "cpo",
       anchor_date: "2026-08-19",
     });
@@ -146,12 +146,12 @@ describe("pipeline templates (transcript: update → sign → pay → reconcile+
 
   it("'where am I' reads pipeline state from the store, not memory", async () => {
     // Advance a stage, then read the task fresh — DB is the only truth.
-    await executeTool(ctx, "update_task", { task: "CPO 2073", stage_done: "update" });
+    await executeTool(ctx, "update_task", { task: "CPO 4513", stage_done: "update" });
     const [t] = await db
       .select()
       .from(tasks)
       .where(eq(tasks.userId, U.id))
-      .then((rows) => rows.filter((x) => x.title.includes("CPO 2073")));
+      .then((rows) => rows.filter((x) => x.title.includes("CPO 4513")));
     const current = t.stages.find((s) => !s.done);
     expect(t.stages[0].done).toBe(true);
     expect(current?.name).toContain("signed");

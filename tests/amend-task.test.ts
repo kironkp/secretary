@@ -1,4 +1,4 @@
-// "File that under Caltrans" must land on the EXISTING task — the voice-path
+// "File that under Canterly" must land on the EXISTING task — the voice-path
 // amend_task delegate, the "no project" sentinels, and the create-guard's
 // fill-a-blank-project behavior, against the real database.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -12,7 +12,7 @@ const ctx = { userId: U.id, timezone: "America/Los_Angeles" };
 
 beforeAll(async () => {
   await db.insert(user).values({ id: U.id, name: "Amend Tester", email: U.email });
-  await db.insert(projects).values({ userId: U.id, name: "Caltrans" });
+  await db.insert(projects).values({ userId: U.id, name: "Canterly" });
 });
 
 afterAll(async () => {
@@ -40,12 +40,12 @@ describe("amend_task: change the EXISTING task, never a twin", () => {
     await executeTool(ctx, "create_commitment", { title: "Pick up the glue samples" });
     const { result, toast } = await executeTool(ctx, "amend_task", {
       task: "glue samples",
-      project: "caltrans",
+      project: "canterly",
     });
-    expect((result as { project: string }).project).toBe("Caltrans");
+    expect((result as { project: string }).project).toBe("Canterly");
     expect(toast?.text).toContain("Moved");
     const t = await taskRow("glue");
-    const p = await projectRow("Caltrans");
+    const p = await projectRow("Canterly");
     expect(t.projectId).toBe(p.id);
     // amended in place — still exactly one glue task
     const rows = await db
@@ -57,7 +57,7 @@ describe("amend_task: change the EXISTING task, never a twin", () => {
 
   it('"none"/"unfiled"/"no project" unfile without crashing', async () => {
     for (const sentinel of ["none", "unfiled", "no project"]) {
-      await executeTool(ctx, "amend_task", { task: "glue samples", project: "Caltrans" });
+      await executeTool(ctx, "amend_task", { task: "glue samples", project: "Canterly" });
       const { result } = await executeTool(ctx, "amend_task", {
         task: "glue samples",
         project: sentinel,
@@ -88,7 +88,7 @@ describe("amend_task: change the EXISTING task, never a twin", () => {
     const before = await db.select().from(tasks).where(eq(tasks.userId, U.id));
     const { result } = await executeTool(ctx, "amend_task", {
       task: "no such task anywhere",
-      project: "Caltrans",
+      project: "Canterly",
     });
     expect((result as { error: string }).error).toContain("No task matching");
     const after = await db.select().from(tasks).where(eq(tasks.userId, U.id));
@@ -101,20 +101,20 @@ describe("create-guard twin: a named project files the existing task", () => {
     const first = await executeTool(ctx, "create_task", { title: "Order the reflective vests" });
     const second = await executeTool(ctx, "create_task", {
       title: "Order the reflective vests",
-      project: "Caltrans",
+      project: "Canterly",
     });
     expect((second.result as { already_existed: boolean }).already_existed).toBe(true);
     expect((second.result as { task_id: string }).task_id).toBe(
       (first.result as { task_id: string }).task_id
     );
-    expect((second.result as { project: string }).project).toBe("Caltrans");
-    expect(second.toast?.text).toContain("Caltrans"); // the move is always visible
+    expect((second.result as { project: string }).project).toBe("Canterly");
+    expect(second.toast?.text).toContain("Canterly"); // the move is always visible
     const rows = await db
       .select()
       .from(tasks)
       .where(and(eq(tasks.userId, U.id), ilike(tasks.title, "%reflective vests%")));
     expect(rows).toHaveLength(1); // never a second row
-    const p = await projectRow("Caltrans");
+    const p = await projectRow("Canterly");
     expect(rows[0].projectId).toBe(p.id);
   });
 
@@ -127,8 +127,8 @@ describe("create-guard twin: a named project files the existing task", () => {
     expect((again.result as { project?: string }).project).toBeUndefined();
     expect(again.toast).toBeUndefined(); // nothing changed, no toast
     const t = await taskRow("reflective vests");
-    const p = await projectRow("Caltrans");
-    expect(t.projectId).toBe(p.id); // still Caltrans
+    const p = await projectRow("Canterly");
+    expect(t.projectId).toBe(p.id); // still Canterly
     expect(await projectRow("Brand New Zone")).toBeUndefined();
   });
 });

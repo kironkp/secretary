@@ -249,7 +249,7 @@ export async function buildBriefing(
     .limit(30);
 
   // The model must know what projects exist, or it files things into
-  // near-duplicates ("Find It" next to "Find It app").
+  // near-duplicates ("Fetch It" next to "Fetch It app").
   const projectRows = await db
     .select()
     .from(projects)

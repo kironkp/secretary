@@ -23,8 +23,7 @@ You review at phase boundaries, not line-by-line.
    - `KICKOFF.md` — this file: prompts + process
    - `reference-demo.html` — visual reference for the Dashboard (Phase 1)
    - `canvas-reference.html` — visual + behavioral reference for the Canvas (Phase 2.5)
-   - `trace-2026-08-18.html` — annotated analysis behind SPEC §11
-   - `transcript-2026-08-18.md` — the raw voice-session fixture §11 cites
+   - The voice-session record §11 cites, and its annotated analysis, are kept outside the public repo.
 2. Append the block below to `CLAUDE.md` at the repo root (create if missing).
    This is what makes the invariants survive *every* future session — including
    sessions about unrelated features.
@@ -195,7 +194,7 @@ clarification queue, ASR lexicon export, and the voice fast/slow split are a
 separate track from the dashboard phases above. Run them as their own sessions
 once the dashboard track is green (or in parallel in a second worktree — they
 touch extraction and chat, not the renderer). Same method: point the prompt at
-SPEC §11 and `transcript-2026-08-18.md`, and have Claude Code first turn each
+SPEC §11 (the record it cites is kept outside the public repo), and have Claude Code first turn each
 §11 bullet into a failing test derived from the transcript, then make it pass.
 Suggested order: pipeline templates + stakes → expectations/nag engine →
 clarification queue + entity cross-ref → lexicon export → voice split last

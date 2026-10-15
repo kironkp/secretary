@@ -29,7 +29,7 @@ export function footerLine(answeredToday: number, lastRunAt: string | null, now:
 }
 
 /**
- * "Question 4 of 14 · Caltrans": the count is progress through the sitting,
+ * "Question 4 of 14 · Canterly": the count is progress through the sitting,
  * not a position in the stored queue. `done` is how many were answered on
  * this screen and `waiting` how many are still open, so the total holds
  * still as questions are answered and only moves when a reading adds some

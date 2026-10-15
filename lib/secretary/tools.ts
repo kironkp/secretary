@@ -66,7 +66,7 @@ import { toolSchemas, type ToolName } from "./tool-schemas";
 
 /** Live create-guard threshold: only near-identical titles count as dupes —
  *  the realtime model sometimes re-issues a create after a barge-in, and that
- *  must be idempotent, but "Email Ash" vs "Call Ash" must both go through. */
+ *  must be idempotent, but "Email Avery" vs "Call Avery" must both go through. */
 const CREATE_GUARD_SIMILARITY = 0.85;
 
 export type ToolContext = {
@@ -432,7 +432,7 @@ export type ProjectResolution = {
 };
 
 /**
- * "Find It" must land in "Find It app", never spawn a duplicate. Exact
+ * "Fetch It" must land in "Fetch It app", never spawn a duplicate. Exact
  * (case-insensitive) → normalized (punctuation/whitespace-blind) → containment
  * either way — and only when nothing is close does `create` make a new one.
  */

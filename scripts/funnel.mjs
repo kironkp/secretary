@@ -9,7 +9,7 @@
 // Funnel's public ports are limited to 443/8443/10000. We publish on 8443 so
 // the public URL is the SAME https://<machine>.ts.net:8443 the tailnet has
 // always used — its origin is already in TRUSTED_ORIGINS, and :443 on this
-// machine belongs to the findit app. tailscaled terminates TLS with a real
+// machine belongs to his other app. tailscaled terminates TLS with a real
 // certificate, so voice (WebRTC needs a secure context) works.
 //
 // While Funnel is up it also serves tailnet traffic on :8443, so the old

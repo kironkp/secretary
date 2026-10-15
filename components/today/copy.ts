@@ -59,7 +59,7 @@ function countOps(writes: WordedWrite[]): OpCounts {
 }
 
 /**
- * " under Caltrans" when every set_project in the list names the same
+ * " under Canterly" when every set_project in the list names the same
  * project, nothing when they differ: "files 2 tasks" is true either way, and
  * a sentence naming two projects for two tasks would need to say which.
  */
@@ -211,7 +211,7 @@ export function setAsideInWords(n: number): string | null {
 
 /**
  * The line beside the thinking bars after an answer: what is being re-read.
- * "Reading Caltrans…" when the question knows its project, "Reading the
+ * "Reading Canterly…" when the question knows its project, "Reading the
  * project…" when it does not; never a claim about what the reading found.
  */
 export function readingLabel(projectName: string | null | undefined): string {

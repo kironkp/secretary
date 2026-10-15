@@ -64,8 +64,8 @@ describe("DEFAULT_PLAN, top to bottom", () => {
       "timeline",
       "project_card:patent", // 3 days left
       "project_card:album", // 11
-      "project_card:findit", // 31
-      "project_card:caltrans", // no date: after the dated ones
+      "project_card:fetchit", // 31
+      "project_card:canterly", // no date: after the dated ones
       "date_chase",
       "people_index",
     ]);
@@ -236,11 +236,11 @@ describe("one urgency order for cards, strip and Timeline (sec rev: late first)"
     const signals = baseSignals();
     signals.projects[3] = { ...signals.projects[3], soonest_days: -5 }; // no deadline of its own, one late task
     const plan = defaultPlan(signals);
-    const without = { ...plan, sections: plan.sections.filter((s) => s.props?.project_id !== "caltrans") };
+    const without = { ...plan, sections: plan.sections.filter((s) => s.props?.project_id !== "canterly") };
     const res = validatePlan(without, ctx({ signals }));
     expect(res.ok).toBe(false);
     if (res.ok) return;
-    expect(res.reasons.join(" ")).toMatch(/urgent project "caltrans" \(5d late\) would have no card/);
+    expect(res.reasons.join(" ")).toMatch(/urgent project "canterly" \(5d late\) would have no card/);
   });
 
   it("and where a system plan has that card does not matter: composed, the cards are in data order (tests/composition.test.ts has the rest)", () => {
@@ -248,7 +248,7 @@ describe("one urgency order for cards, strip and Timeline (sec rev: late first)"
     signals.projects[3] = { ...signals.projects[3], soonest_days: -5 };
     const plan = defaultPlan(signals);
     // The late project's card last among the cards: every quiet card is now ahead of it.
-    const late = plan.sections.find((s) => s.props?.project_id === "caltrans")!;
+    const late = plan.sections.find((s) => s.props?.project_id === "canterly")!;
     const lastCard = plan.sections.findLastIndex((s) => s.component === "project_card");
     const rest = plan.sections.filter((s) => s !== late);
     const pushedDown = { ...plan, sections: [...rest.slice(0, lastCard), late, ...rest.slice(lastCard)] };

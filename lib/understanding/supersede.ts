@@ -3,7 +3,7 @@
 //
 // An answer applies writes to rows. Every other pending question that rests
 // on one of those rows now asks about a premise the user just changed: the
-// "check what is blocking CPO 2073" question after "close the old 2073 copy".
+// "check what is blocking CPO 4513" question after "close the old 4513 copy".
 // Waiting for the model re-read to notice that takes a minute, and in that
 // minute the user can answer an obsolete question. So the moment the writes
 // apply, those questions are marked superseded, here, mechanically, and the

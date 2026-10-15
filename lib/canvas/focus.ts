@@ -204,7 +204,7 @@ export function resolveReference(
   if (BOTTOM.test(phrase) && visible.length)
     return { ok: true, ids: [visible[visible.length - 1].id], via: "position" };
 
-  // A name: "the caltrans one", "overdue", "my music projects". Strip the
+  // A name: "the canterly one", "overdue", "my music projects". Strip the
   // filler people actually say around a name.
   const needle = phrase
     .replace(/^(the|my|that|this|those|these)\s+/g, "")
@@ -224,7 +224,7 @@ export function resolveReference(
         candidates: matches.map((b) => b.id),
       };
     }
-    // Every word matching somewhere is still a usable group ("the caltrans ones").
+    // Every word matching somewhere is still a usable group ("the canterly ones").
     const words = needle.split(/\s+/).filter((w) => w.length > 2);
     if (words.length) {
       const loose = blocks.filter((b) => words.every((w) => hay(b).includes(w)));
@@ -234,7 +234,7 @@ export function resolveReference(
   }
 
   // Last resort: a pronoun buried in a sentence ("make this bigger", "shove
-  // that up"). Checked AFTER name matching so "the caltrans one" still wins.
+  // that up"). Checked AFTER name matching so "the canterly one" still wins.
   if (/\b(those|these|them|they)\b/.test(phrase)) {
     const group = focus.lastGroup?.filter((id) => live.has(id));
     if (group?.length) return { ok: true, ids: group, via: "group" };

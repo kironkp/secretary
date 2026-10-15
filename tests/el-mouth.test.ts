@@ -4,8 +4,8 @@ import { cutSentences } from "@/lib/realtime/el-mouth";
 
 describe("cutSentences", () => {
   it("cuts complete sentences and keeps the tail buffered", () => {
-    const [sentences, rest] = cutSentences("Okay, hang on. CPO 2073 is due Friday. And the alb");
-    expect(sentences).toEqual(["Okay, hang on.", "CPO 2073 is due Friday."]);
+    const [sentences, rest] = cutSentences("Okay, hang on. CPO 4513 is due Friday. And the alb");
+    expect(sentences).toEqual(["Okay, hang on.", "CPO 4513 is due Friday."]);
     expect(rest).toBe("And the alb");
   });
 
@@ -22,8 +22,8 @@ describe("cutSentences", () => {
   });
 
   it("keeps question/exclamation cuts and quoted ends", () => {
-    const [sentences, rest] = cutSentences('Is that 2073 or 2079? Pick one. "Fine." Then');
-    expect(sentences).toEqual(["Is that 2073 or 2079?", "Pick one.", '"Fine."']);
+    const [sentences, rest] = cutSentences('Is that 4513 or 4519? Pick one. "Fine." Then');
+    expect(sentences).toEqual(["Is that 4513 or 4519?", "Pick one.", '"Fine."']);
     expect(rest).toBe("Then");
   });
 });

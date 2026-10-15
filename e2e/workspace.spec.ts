@@ -182,8 +182,8 @@ test("nothing is clipped: every body fits inside its widget", async ({ page }) =
  */
 // Exactly 140 characters; asserted below so the number in the spec stays true.
 const LONG_TITLE =
-  "Reconcile the production monitor purchase order against the September bank " +
-  "statement, then send the signed copy to Marissa and Walter today.";
+  "Reconcile the projection screen purchase order against the September bank " +
+  "statement, then send the signed copy to Melissa and Warren today.";
 let longTitleTaskId: string | null = null;
 
 /** There is no DELETE route for a task. Dropping it through the task API takes

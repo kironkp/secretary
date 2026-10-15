@@ -43,7 +43,7 @@ const row = async (id: string) => {
 beforeAll(async () => {
   await db.insert(user).values({ id: U.id, name: "Interview Voice Tester", email: U.email, timezone: CPO_TZ });
   const ids = await seedCpoScenario(U.id, CPO_NOW);
-  const base = { userId: U.id, status: "open" as const, kind: "need_to_know" as const, projectId: ids.caltrans };
+  const base = { userId: U.id, status: "open" as const, kind: "need_to_know" as const, projectId: ids.canterly };
   const answers = [
     { id: "yes", label: "Yes, that's it", writes: [{ op: "resolve" as const }] },
     { id: "no", label: "No", writes: [{ op: "resolve" as const }] },
@@ -52,8 +52,8 @@ beforeAll(async () => {
     .insert(clarifications)
     .values([
       { ...base, rank: 0, identity: "iv-1", question: "Is the statement the last step?", context: "Due tomorrow.", answers },
-      { ...base, rank: 1, identity: "iv-2", question: "Is beacon glue paid?", context: "No CPO number yet.", answers },
-      { ...base, rank: 2, identity: "iv-3", question: "Is 0394 reconciled?", context: "Two copies.", answers },
+      { ...base, rank: 1, identity: "iv-2", question: "Is binder tape paid?", context: "No CPO number yet.", answers },
+      { ...base, rank: 2, identity: "iv-3", question: "Is 0581 reconciled?", context: "Two copies.", answers },
     ])
     .returning({ id: clarifications.id });
   [q.first, q.second, q.third] = inserted.map((r) => r.id);

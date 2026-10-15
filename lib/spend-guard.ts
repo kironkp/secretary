@@ -31,7 +31,7 @@ export const backgroundCapUsd = () => envUsd("UNDERSTANDING_DAILY_CAP_USD", 3, t
  * One understanding run may spend this much, every attempt included
  * (run.ts stops before an attempt that could pass it), and never more than
  * the daily cap. It is also what the daily cap counts a run as before it
- * starts: a Caltrans run that failed three times at 32k output tokens each
+ * starts: a Canterly run that failed three times at 32k output tokens each
  * cost about $3 on Opus. 0 turns runs off.
  */
 export const runCapUsd = () =>

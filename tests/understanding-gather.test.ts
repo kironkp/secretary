@@ -33,7 +33,7 @@ const NOW = new Date("2026-09-21T18:00:00.000Z");
 const daysFromNow = (n: number) => new Date(NOW.getTime() + n * 86_400_000);
 
 const ids = {
-  caltrans: "",
+  canterly: "",
   album: "",
   doneCpo: "",
   blockedCpo: "",
@@ -47,22 +47,22 @@ const ids = {
   expectation: "",
   eventLinked: "",
   eventTerm: "",
-  eventDentist: "",
+  eventHaircut: "",
   document: "",
 };
 
 beforeAll(async () => {
   await db.insert(user).values({ id: U.id, name: "Understanding Tester", email: U.email, timezone: TZ });
 
-  const [caltrans] = await db
+  const [canterly] = await db
     .insert(projects)
-    .values({ userId: U.id, name: "Caltrans", status: "active" })
+    .values({ userId: U.id, name: "Canterly", status: "active" })
     .returning();
   const [album] = await db
     .insert(projects)
     .values({ userId: U.id, name: "Album", status: "active" })
     .returning();
-  ids.caltrans = caltrans.id;
+  ids.canterly = canterly.id;
   ids.album = album.id;
 
   // The duplicate-CPO scenario (SPEC §1).
@@ -70,10 +70,10 @@ beforeAll(async () => {
     .insert(tasks)
     .values({
       userId: U.id,
-      projectId: caltrans.id,
+      projectId: canterly.id,
       title:
-        "CPO 2073 — Production monitor: convert to FY2027, create new CPO, obtain Marissa signature, send to Walter Myala",
-      notes: "new number is 0394",
+        "CPO 4513 — Projection screen: convert to FY2031, create new CPO, obtain Melissa signature, send to Warren Meala",
+      notes: "new number is 0581",
       status: "done",
       completedAt: daysFromNow(-20),
       updatedAt: daysFromNow(-20),
@@ -84,8 +84,8 @@ beforeAll(async () => {
     .insert(tasks)
     .values({
       userId: U.id,
-      projectId: caltrans.id,
-      title: "Process CPO 2073 / Production monitor as an FY 2027 transaction this month",
+      projectId: canterly.id,
+      title: "Process CPO 4513 / Projection screen as an FY 2031 transaction this month",
       status: "blocked",
       dueAt: daysFromNow(-5),
       stages: [
@@ -102,8 +102,8 @@ beforeAll(async () => {
     .insert(tasks)
     .values({
       userId: U.id,
-      projectId: caltrans.id,
-      title: "Check what is blocking CPO 2073 and report back",
+      projectId: canterly.id,
+      title: "Check what is blocking CPO 4513 and report back",
       status: "todo",
       dueAt: daysFromNow(-2),
       updatedAt: daysFromNow(-13),
@@ -111,13 +111,13 @@ beforeAll(async () => {
     })
     .returning();
   // One overdue task on the other project: the Overdue widget then has two
-  // Caltrans rows and one Album row, and Caltrans must own it.
+  // Canterly rows and one Album row, and Canterly must own it.
   const [albumOverdue] = await db
     .insert(tasks)
     .values({
       userId: U.id,
       projectId: album.id,
-      title: "Master the title track",
+      title: "Pick the running order",
       status: "todo",
       dueAt: daysFromNow(-1),
     })
@@ -131,15 +131,15 @@ beforeAll(async () => {
     .insert(memories)
     .values({
       userId: U.id,
-      fact: "The US Bank statement is part of the user's CPO reconciliation process.",
-      tags: ["Caltrans"],
+      fact: "The NW Bank statement is part of the user's CPO reconciliation process.",
+      tags: ["Canterly"],
     })
     .returning();
   const [memAlbum] = await db
     .insert(memories)
     .values({
       userId: U.id,
-      fact: "The album cover needs a new photo before the release.",
+      fact: "The album needs a final listen before the release.",
       tags: ["Album"],
     })
     .returning();
@@ -158,7 +158,7 @@ beforeAll(async () => {
         conversationId: conv.id,
         role: "user",
         mode: "voice",
-        content: "All I need to do on the 22nd is change the bank statement",
+        content: "On the 22nd the only thing left is the bank statement",
         createdAt: daysFromNow(-20),
       },
       {
@@ -166,7 +166,7 @@ beforeAll(async () => {
         conversationId: conv.id,
         role: "user",
         mode: "voice",
-        content: "I finished everything else that reconciling that CPO",
+        content: "the rest of squaring up that CPO is done",
         createdAt: daysFromNow(-20),
       },
       {
@@ -174,7 +174,7 @@ beforeAll(async () => {
         conversationId: conv.id,
         role: "user",
         mode: "voice",
-        content: "Remind me to buy milk on the way home",
+        content: "Remind me to pick up stamps on the way home",
         createdAt: daysFromNow(-1),
       },
       // The assistant's turn is never an input, however many terms it carries.
@@ -183,7 +183,7 @@ beforeAll(async () => {
         conversationId: conv.id,
         role: "assistant",
         mode: "voice",
-        content: "Noted: CPO 2073 for Caltrans is reconciled once the statement changes.",
+        content: "Noted: CPO 4513 for Canterly is squared up once the statement is in.",
         createdAt: daysFromNow(-20),
       },
     ])
@@ -204,27 +204,27 @@ beforeAll(async () => {
     .returning();
   ids.expectation = expectation.id;
 
-  const [eventLinked, eventTerm, eventDentist] = await db
+  const [eventLinked, eventTerm, eventHaircut] = await db
     .insert(events)
     .values([
       {
         userId: U.id,
-        projectId: caltrans.id,
-        title: "Sign the new form with Marissa",
+        projectId: canterly.id,
+        title: "Sign the new form with Melissa",
         startsAt: daysFromNow(3),
       },
       // Not linked to the project; joins the bundle only by the words in it.
-      { userId: U.id, title: "Call Walter about CPO 2073", startsAt: daysFromNow(4) },
-      { userId: U.id, title: "Dentist", startsAt: daysFromNow(5) },
+      { userId: U.id, title: "Call Warren about CPO 4513", startsAt: daysFromNow(4) },
+      { userId: U.id, title: "Haircut", startsAt: daysFromNow(5) },
     ])
     .returning();
   ids.eventLinked = eventLinked.id;
   ids.eventTerm = eventTerm.id;
-  ids.eventDentist = eventDentist.id;
+  ids.eventHaircut = eventHaircut.id;
 
   const [document] = await db
     .insert(documents)
-    .values({ userId: U.id, projectId: caltrans.id, title: "CPO reconciliation notes" })
+    .values({ userId: U.id, projectId: canterly.id, title: "CPO reconciliation notes" })
     .returning();
   ids.document = document.id;
 
@@ -236,14 +236,14 @@ afterAll(async () => {
   await db.delete(user).where(eq(user.id, U.id));
 });
 
-const gather = (projectId = ids.caltrans, now = NOW) =>
+const gather = (projectId = ids.canterly, now = NOW) =>
   gatherProject(U.id, projectId, { now, timezone: TZ });
 
-describe("the Caltrans bundle", () => {
+describe("the Canterly bundle", () => {
   it("carries the three CPO tasks, open and done, with their fields", async () => {
     const b = await gather();
     expect(b).not.toBeNull();
-    expect(b!.project).toEqual({ id: ids.caltrans, name: "Caltrans", status: "active" });
+    expect(b!.project).toEqual({ id: ids.canterly, name: "Canterly", status: "active" });
     expect(b!.tasksOpen.map((t) => t.id).sort()).toEqual([ids.blockedCpo, ids.checkCpo].sort());
     expect(b!.tasksDone.map((t) => t.id)).toEqual([ids.doneCpo]);
 
@@ -253,22 +253,22 @@ describe("the Caltrans bundle", () => {
     expect(blocked.stages.every((s) => s.done === false)).toBe(true);
     expect(blocked.dueAt).toBe(daysFromNow(-5).toISOString());
     const done = b!.tasksDone[0];
-    expect(done.notes).toBe("new number is 0394");
+    expect(done.notes).toBe("new number is 0581");
     expect(done.completedAt).toBe(daysFromNow(-20).toISOString());
   });
 
   it("derives its terms from the project name, the task titles and the task notes", async () => {
     const b = await gather();
     const lower = b!.terms.map((t) => t.toLowerCase());
-    expect(lower).toContain("caltrans");
+    expect(lower).toContain("canterly");
     expect(lower).toContain("cpo");
-    expect(lower).toContain("2073");
-    // 0394 exists only in the done task's notes. Digit tokens are taken from
+    expect(lower).toContain("4513");
+    // 0581 exists only in the done task's notes. Digit tokens are taken from
     // notes on purpose (lib/understanding/terms.ts extractTerms): on the first
     // run there is no record yet whose things[].ids could carry it.
-    expect(lower).toContain("0394");
-    expect(lower).toContain("marissa");
-    expect(lower).toContain("walter");
+    expect(lower).toContain("0581");
+    expect(lower).toContain("melissa");
+    expect(lower).toContain("warren");
     // Sentence-starters from task titles never become terms.
     expect(lower).not.toContain("process");
     expect(lower).not.toContain("check");
@@ -279,14 +279,14 @@ describe("the Caltrans bundle", () => {
   it("finds the memory by its tag and excludes the other project's memory", async () => {
     const b = await gather();
     expect(b!.memories.map((m) => m.id)).toEqual([ids.memStatement]);
-    expect(b!.memories[0].tags).toEqual(["Caltrans"]);
+    expect(b!.memories[0].tags).toEqual(["Canterly"]);
   });
 
   it("finds the CPO message through the term CPO from the task titles, and only that one", async () => {
     const b = await gather();
     const got = b!.messages.map((m) => m.id);
     expect(got).toContain(ids.msgCpo);
-    // "Remind me to buy milk" names nothing the project knows.
+    // "Remind me to pick up stamps" names nothing the project knows.
     expect(got).not.toContain(ids.msgMilk);
     // "change the bank statement" names nothing the project knows YET. It
     // joins once the record's things carry the statement as an alias — see
@@ -321,8 +321,8 @@ describe("the Caltrans bundle", () => {
       .insert(tasks)
       .values({
         userId: U.id,
-        projectId: ids.caltrans,
-        title: "CPO 2110 — Lenses: paid",
+        projectId: ids.canterly,
+        title: "CPO 4562 — Benches: paid",
         status: "done",
         completedAt: daysFromNow(-10),
         updatedAt: daysFromNow(-90),
@@ -334,8 +334,8 @@ describe("the Caltrans bundle", () => {
       .insert(tasks)
       .values({
         userId: U.id,
-        projectId: ids.caltrans,
-        title: "CPO 1992 — Comms: paid",
+        projectId: ids.canterly,
+        title: "CPO 3907 — Signage: paid",
         status: "done",
         completedAt: daysFromNow(-70),
         updatedAt: daysFromNow(-70),
@@ -356,7 +356,7 @@ describe("the Caltrans bundle", () => {
   });
 
   it("uses memories and messages handed in rather than reading them again", async () => {
-    const b = await gatherProject(U.id, ids.caltrans, {
+    const b = await gatherProject(U.id, ids.canterly, {
       now: NOW,
       timezone: TZ,
       memories: [],
@@ -391,7 +391,7 @@ describe("the Caltrans bundle", () => {
       .returning();
     const [theirs] = await db
       .insert(projects)
-      .values({ userId: otherUser.id, name: "Caltrans" })
+      .values({ userId: otherUser.id, name: "Canterly" })
       .returning();
     try {
       expect(await gather(theirs.id)).toBeNull();
@@ -402,19 +402,19 @@ describe("the Caltrans bundle", () => {
 });
 
 describe("widgets: the project that owns the plurality of a widget's rows", () => {
-  it("gives Caltrans the Overdue widget, with the row titles a lede may name", async () => {
+  it("gives Canterly the Overdue widget, with the row titles a lede may name", async () => {
     const b = await gather();
     const overdue = b!.widgets.find((w) => w.title === "Overdue");
     expect(overdue, JSON.stringify(b!.widgets)).toBeDefined();
     expect(overdue!.id).toBe("overdue");
-    // Two Caltrans rows, one Album row: Caltrans wins the plurality.
+    // Two Canterly rows, one Album row: Canterly wins the plurality.
     expect(overdue!.rows.map((r) => r.id).sort()).toEqual(
       [ids.blockedCpo, ids.checkCpo, ids.albumOverdue].sort()
     );
     expect(overdue!.rows.find((r) => r.id === ids.checkCpo)!.title).toBe(
-      "Check what is blocking CPO 2073 and report back"
+      "Check what is blocking CPO 4513 and report back"
     );
-    // Every open task here is Caltrans or Album; Caltrans has more.
+    // Every open task here is Canterly or Album; Canterly has more.
     expect(b!.widgets.map((w) => w.title)).toContain("Everything open");
   });
 
@@ -426,13 +426,13 @@ describe("widgets: the project that owns the plurality of a widget's rows", () =
 
   it("gatherAll covers every active project and resolves the board once", async () => {
     const all = await gatherAll(U.id, { now: NOW, timezone: TZ });
-    expect(all.map((b) => b.project.name)).toEqual(["Album", "Caltrans"]);
-    const caltrans = all.find((b) => b.project.name === "Caltrans")!;
-    expect(caltrans.widgets.map((w) => w.title)).toContain("Overdue");
+    expect(all.map((b) => b.project.name)).toEqual(["Album", "Canterly"]);
+    const canterly = all.find((b) => b.project.name === "Canterly")!;
+    expect(canterly.widgets.map((w) => w.title)).toContain("Overdue");
     // The shared memory and message reads still land on the right project.
     const album = all.find((b) => b.project.name === "Album")!;
-    expect(caltrans.memories.map((m) => m.id)).toEqual([ids.memStatement]);
-    expect(caltrans.messages.map((m) => m.id)).toEqual([ids.msgCpo]);
+    expect(canterly.memories.map((m) => m.id)).toEqual([ids.memStatement]);
+    expect(canterly.messages.map((m) => m.id)).toEqual([ids.msgCpo]);
     expect(album.memories.map((m) => m.id)).toEqual([ids.memAlbum]);
     expect(album.messages).toEqual([]);
   });
@@ -442,7 +442,7 @@ describe("widgets: the project that owns the plurality of a widget's rows", () =
     // runs writing one lede would be a contradiction the loop itself made.
     const [twin] = await db
       .insert(projects)
-      .values({ userId: U.id, name: "Caltrans", status: "active" })
+      .values({ userId: U.id, name: "Canterly", status: "active" })
       .returning();
     try {
       expect((await gather())!.widgets.map((w) => w.title)).not.toContain("Overdue");
@@ -475,7 +475,7 @@ describe("hashBundle", () => {
 
   it("changes when the local date changes for a project with something dated near now", async () => {
     const today = await gather();
-    const tomorrow = await gather(ids.caltrans, daysFromNow(1));
+    const tomorrow = await gather(ids.canterly, daysFromNow(1));
     expect(tomorrow!.clock.localDate).toBe("2026-09-22");
     // Same rows either way; only the date moved.
     expect(tomorrow!.tasksOpen.map((t) => t.id).sort()).toEqual(
@@ -496,7 +496,7 @@ describe("hashBundle", () => {
 
   it("ignores the local date for a project with nothing dated near now (SPEC §8: no daily re-run)", async () => {
     const today = await gather();
-    const tomorrow = await gather(ids.caltrans, daysFromNow(1));
+    const tomorrow = await gather(ids.canterly, daysFromNow(1));
     type B = NonNullable<Awaited<ReturnType<typeof gather>>>;
     // Every due date a month out, no events: a day passing changes nothing
     // the record says, so it must not cost a model call.
@@ -519,7 +519,7 @@ describe("hashBundle", () => {
 
   it("a day passing re-reads only when an item crosses a line (SEC-A004: no daily re-read)", async () => {
     const today = await gather();
-    const tomorrow = await gather(ids.caltrans, daysFromNow(1));
+    const tomorrow = await gather(ids.canterly, daysFromNow(1));
     type B = NonNullable<Awaited<ReturnType<typeof gather>>>;
     const due = (b: B, at: Date, events: B["events"] = []): B => ({
       ...b,
@@ -561,7 +561,7 @@ describe("hashBundle", () => {
     expect(
       taskStamp({
         id: "t1",
-        title: "Master the title track",
+        title: "Pick the running order",
         notes: null,
         status: "todo",
         stages: [{ name: "Mix", done: true }],
@@ -587,7 +587,7 @@ describe("hashBundle", () => {
       await set({ updatedAt: daysFromNow(-12), startAt: daysFromNow(2) });
       expect(hashBundle((await gather())!)).toBe(hashBundle(before!));
       // A note is read: that is news.
-      await set({ notes: "Teresa says it is waiting on the FY27 conversion." });
+      await set({ notes: "Tamsin says it is waiting on the FY27 conversion." });
       expect(hashBundle((await gather())!)).not.toBe(hashBundle(before!));
     } finally {
       // Put it back so no other test in this file depends on this one.
@@ -612,9 +612,9 @@ describe("the previous record widens the terms", () => {
     body = recordSchema.parse({
       things: [
         {
-          name: "Production monitor",
+          name: "Projection screen",
           aliases: ["bank statement"],
-          ids: ["0394"],
+          ids: ["0581"],
           state: {
             text: "Converted and signed; reconcile after the statement.",
             sources: [{ type: "task", id: ids.doneCpo }],
@@ -626,7 +626,7 @@ describe("the previous record widens the terms", () => {
     });
     await db.insert(records).values({
       userId: U.id,
-      projectId: ids.caltrans,
+      projectId: ids.canterly,
       body,
       inputsHash: "seed",
     });
@@ -635,7 +635,7 @@ describe("the previous record widens the terms", () => {
   afterAll(async () => {
     await db
       .delete(records)
-      .where(and(eq(records.userId, U.id), eq(records.projectId, ids.caltrans)));
+      .where(and(eq(records.userId, U.id), eq(records.projectId, ids.canterly)));
   });
 
   it("a thing alias on the stored record pulls in the bank-statement message", async () => {
@@ -651,12 +651,12 @@ describe("the previous record widens the terms", () => {
     const [row] = await db
       .select({ id: records.id })
       .from(records)
-      .where(and(eq(records.userId, U.id), eq(records.projectId, ids.caltrans)));
+      .where(and(eq(records.userId, U.id), eq(records.projectId, ids.canterly)));
     expect(row).toBeDefined();
     await expect(
       db.insert(records).values({
         userId: U.id,
-        projectId: ids.caltrans,
+        projectId: ids.canterly,
         body: recordSchema.parse({ lastActivityAt: "y" }),
         inputsHash: "dup",
       })

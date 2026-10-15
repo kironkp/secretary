@@ -56,9 +56,9 @@ beforeAll(async () => {
         ...base,
         kind: "doesnt_add_up",
         rank: 200,
-        question: "CPO 2073 is on your list twice?",
+        question: "CPO 4513 is on your list twice?",
         context: "One copy is finished; another is still open with 0 of 4 steps done.",
-        projectId: ids.caltrans,
+        projectId: ids.canterly,
         identity: "voice-close",
         evidence: [
           { type: "task", id: ids.doneCpo },
@@ -78,9 +78,9 @@ beforeAll(async () => {
         kind: "need_to_know",
         // Rank 0: the hero, so it is the FIRST line of the block.
         rank: 0,
-        question: "Is the US Bank statement the last step before CPO 2073 is reconciled?",
-        context: '"Do the US Bank statement" is due tomorrow.',
-        projectId: ids.caltrans,
+        question: "Is the NW Bank statement the last step before CPO 4513 is reconciled?",
+        context: '"Do the NW Bank statement" is due tomorrow.',
+        projectId: ids.canterly,
         identity: "voice-statement",
         evidence: [{ type: "task", id: ids.statement }],
         answers: [
@@ -88,7 +88,7 @@ beforeAll(async () => {
             id: "yes-last-step",
             label: "Yes, that is the last step",
             writes: [
-              { op: "remember_fact", fact: "The statement is the last step.", tags: ["Caltrans"] },
+              { op: "remember_fact", fact: "The statement is the last step.", tags: ["Canterly"] },
               { op: "resolve" },
             ],
           },
@@ -101,9 +101,9 @@ beforeAll(async () => {
       {
         ...base,
         kind: "asr_span",
-        subject: "Walter Myara",
-        question: 'I heard "Walter Myara" — is that Walter Maiara, or someone new?',
-        context: "send it to Walter Myara",
+        subject: "Warren Meada",
+        question: 'I heard "Warren Meada" — is that Warren Maiada, or someone new?',
+        context: "send it to Warren Meada",
       },
     ])
     .returning({ id: clarifications.id });
@@ -161,7 +161,7 @@ describe("answer_question, the voice tool", () => {
     const outcome = await executeTool(ctx, "answer_question", {
       question_id: q.close,
       answer_id: "close-it",
-      note: "the new one is 0394",
+      note: "the new one is 0581",
     });
     const result = outcome.result as {
       status?: string;
@@ -182,7 +182,7 @@ describe("answer_question, the voice tool", () => {
 
     const row = await questionRow(q.close);
     expect(row.status).toBe("resolved");
-    expect(row.resolution).toBe("Close it: the new one is 0394");
+    expect(row.resolution).toBe("Close it: the new one is 0581");
   });
 
   it("answering it again says it was already answered", async () => {
@@ -203,16 +203,16 @@ describe("resolve_clarification, the voice-flow tool", () => {
         kind: "need_to_know",
         rank: 100,
         status: "open",
-        projectId: ids.caltrans,
+        projectId: ids.canterly,
         identity: "voice-not-for-resolve",
-        question: "Is the parking permit on the Caltrans list on purpose?",
+        question: "Is the parking permit on the Canterly list on purpose?",
         context: "why",
         evidence: [{ type: "task", id: ids.statement }],
         answers: [{ id: "yes", label: "Yes", writes: [{ op: "resolve" }] }],
       })
       .returning({ id: clarifications.id });
     const { result } = await executeTool(ctx, "resolve_clarification", {
-      question: "parking permit on the Caltrans list",
+      question: "parking permit on the Canterly list",
       answer: "yes, on purpose",
       action: "note",
     });
@@ -228,13 +228,13 @@ describe("resolve_clarification, the voice-flow tool", () => {
         userId: U.id,
         kind: "asr_span",
         status: "open",
-        subject: "Marisa Toledo",
-        question: 'I heard "Marisa Toledo" — is that Marissa, or someone new?',
-        context: "send it to Marisa Toledo",
+        subject: "Melisa Tarrow",
+        question: 'I heard "Melisa Tarrow" — is that Melissa, or someone new?',
+        context: "send it to Melisa Tarrow",
       })
       .returning({ id: clarifications.id });
     const { result } = await executeTool(ctx, "resolve_clarification", {
-      question: "Marisa Toledo",
+      question: "Melisa Tarrow",
       answer: "someone new, leave it",
       action: "note",
     });
@@ -261,8 +261,8 @@ describe("the briefing", () => {
     expect(lines).toHaveLength(1);
     expect(lines[0]).toContain(`question_id: ${q.statement}`);
     expect(lines[0]).toContain("Need to know");
-    expect(lines[0]).toContain("Is the US Bank statement the last step");
-    expect(lines[0]).toContain('why: "Do the US Bank statement" is due tomorrow.');
+    expect(lines[0]).toContain("Is the NW Bank statement the last step");
+    expect(lines[0]).toContain('why: "Do the NW Bank statement" is due tomorrow.');
     // Semicolons between answers: a label may itself carry a comma.
     expect(lines[0]).toContain("answers: yes-last-step=Yes, that is the last step; not-yet=Not yet");
     expect(block).not.toContain(q.close);
@@ -279,7 +279,7 @@ describe("the briefing", () => {
     // SPEC §6: the briefing "reads the new kinds first". The ASR row is not
     // injected alongside, and not marked asked either, because it was not asked.
     expect(text).not.toContain("CLARIFICATION QUEUE");
-    expect(text).not.toContain("Walter Myara");
+    expect(text).not.toContain("Warren Meada");
     expect((await questionRow(q.asr)).status).toBe("open");
   });
 
@@ -294,9 +294,9 @@ describe("the briefing", () => {
     expect(text).not.toContain("OPEN QUESTIONS");
     expect(text).toContain("CLARIFICATION QUEUE");
     const block = text.split("CLARIFICATION QUEUE")[1].split("\n\n")[0];
-    expect(block).toContain("Walter Myara");
+    expect(block).toContain("Warren Meada");
     expect(block).not.toContain(q.statement);
-    expect(block).not.toContain("US Bank statement");
+    expect(block).not.toContain("NW Bank statement");
     expect(block).not.toContain("question_id");
     // Surfacing marked it asked, so it is no longer counted as open.
     expect((await questionRow(q.asr)).status).toBe("asked");
@@ -317,7 +317,7 @@ describe("the briefing", () => {
         rank: 0,
         question: "Which CPO is next?",
         context: "The rule is one a month.",
-        projectId: ids.caltrans,
+        projectId: ids.canterly,
         identity: "voice-next-cpo",
         evidence: [{ type: "memory", id: ids.memMonthly }],
         answers: [{ id: "unknown", label: "Not decided", writes: [{ op: "resolve" }] }],

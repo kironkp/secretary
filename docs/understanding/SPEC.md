@@ -16,28 +16,28 @@ questions that come from them.
 
 The third pass fed a model the *resolved rows* of a widget: titles, due
 labels, projects, stages, blockers. Rows are what got filed. A row titled
-"Do the US Bank statement" cannot know that the statement is the last step of
-reconciling CPO 2073 and the gate to paying the next CPO. That knowledge
+"Do the NW Bank statement" cannot know that the statement is the last step of
+reconciling CPO 4513 and the gate to paying the next CPO. That knowledge
 exists in the database, but not in the row:
 
 | Where it is | What it says |
 |---|---|
-| `messages`, user, 2026-09-01 14:xx | "It's for that CPO. Yeah, it's a part of reconciling the CPO" |
-| `messages`, user, 2026-09-01 15:xx | "All I need to do on the 22nd is change the bank statement" |
-| `tasks.notes` on a task that is `done` | "User finished everything else for reconciling; new number is 0394. Remaining dependency is bank statement change on the 22nd" |
-| `memories` (tag `inferred`) | "The US Bank statement is part of the user's CPO reconciliation process." |
-| `memories` | "User is handling CPOs by doing/paying one each month and spacing them out." |
+| `messages`, user, 2026-09-01 14:xx | "That one's for the CPO. It goes with squaring up the CPO" |
+| `messages`, user, 2026-09-01 15:xx | "On the 22nd the only thing left is the bank statement" |
+| `tasks.notes` on a task that is `done` | "The rest of squaring up is done; new number is 0581. What's left is the bank statement on the 22nd" |
+| `memories` (tag `inferred`) | "The NW Bank statement is part of the user's CPO reconciliation process." |
+| `memories` | "User is paying off CPOs one a month, spaced apart." |
 
 Nothing in the app reads those five things together. The fix is the input,
 not the prose.
 
 The same data holds contradictions nobody has been asked about:
 
-- CPO 2073 exists as a `done` task (2026-09-01, "new number is 0394") **and**
+- CPO 4513 exists as a `done` task (2026-09-01, "new number is 0581") **and**
   as a `blocked` task due 2026-08-21 with 0 of 4 stages ticked, **and** as a
-  `todo` "Check what is blocking CPO 2073" from 2026-09-08, after the user
+  `todo` "Check what is blocking CPO 4513" from 2026-09-08, after the user
   said on 2026-09-01 "nothing is blocked".
-- CPO 2110 exists as a `done` task (2026-09-01) **and** as a `todo` with 0 of
+- CPO 4562 exists as a `done` task (2026-09-01) **and** as a `todo` with 0 of
   4 stages ticked.
 - 15 of the 23 past-due tasks have `source = suggested` and were never
   accepted. Three of them are "this week's WSR" and one is "this week's
@@ -75,7 +75,7 @@ type Source = { type: "task" | "memory" | "message" | "event" | "document" | "ex
 type Record = {
   objective?: Claim;                 // one sentence
   things: Thing[];                   // the nouns the project is about: CPOs, tracks, forms
-  rules: Claim[];                    // "one CPO payment a month", "Marissa signs, then Walter"
+  rules: Claim[];                    // "one CPO payment a month", "Melissa signs, then Warren"
   decisions: Claim[];                // choices made, dated
   currentWork: Claim[];
   nextAction?: Claim;
@@ -100,23 +100,23 @@ array is invalid and is rejected before storage.** A thing the model believes
 but cannot point at is not a claim; it is an `Unknown`, and it becomes a
 question.
 
-Worked example, the CPO part of the Caltrans record as the data stands today:
+Worked example, the CPO part of the Canterly record as the data stands today:
 
 | Section | Line | Source |
 |---|---|---|
 | rules | One CPO payment a month, spaced out | memory, 2026-08-19 |
-| rules | The US Bank statement is part of reconciling a CPO | message 2026-09-01, memory |
-| rules | Marissa signs a new CPO, then Walter Myala | memory, 2026-08-19 |
-| rules | CPO work needs the Caltrans-issued laptop | memory, 2026-08-25 |
-| things | Production monitor · 2073 → 0394 · converted, signed; reconcile after statement | task done 2026-09-01 |
-| things | Lenses and camera accessories · 2110 · converted 09-01, signed by 09-09; ready to pay | tasks done 09-01, 09-09 |
-| things | Antenna · 2079 · waiting on the TASCAM item | task, memory |
-| things | Beacon glue and components · no number · Marissa's first priority | message 2026-09-10, task |
-| things | Comms · 1992 → 0035 · paid August | tasks done 08-19, memory |
-| contradictions | 2073 filed twice; open copy 0/4 steps; "check blocker" after "nothing is blocked" | 3 tasks, 1 message |
-| contradictions | 2110 filed twice; open copy 0/4 steps | 2 tasks |
+| rules | The NW Bank statement is part of reconciling a CPO | message 2026-09-01, memory |
+| rules | Melissa signs a new CPO, then Warren Meala | memory, 2026-08-19 |
+| rules | CPO work needs the Canterly-issued laptop | memory, 2026-08-25 |
+| things | Projection screen · 4513 → 0581 · converted, signed; reconcile after statement | task done 2026-09-01 |
+| things | Benches and patio accessories · 4562 · converted 09-01, signed by 09-09; ready to pay | tasks done 09-01, 09-09 |
+| things | Awning · 4519 · waiting on the VELTOR item | task, memory |
+| things | Binder tape and components · no number · Melissa's first priority | message 2026-09-10, task |
+| things | Signage · 3907 → 0212 · paid August | tasks done 08-19, memory |
+| contradictions | 4513 filed twice; open copy 0/4 steps; "check blocker" after "nothing is blocked" | 3 tasks, 1 message |
+| contradictions | 4562 filed twice; open copy 0/4 steps | 2 tasks |
 | unknowns | Which CPO is paid next | rule + no decision |
-| unknowns | Whether beacon glue has a number yet | task open since 09-10 |
+| unknowns | Whether binder tape has a number yet | task open since 09-10 |
 
 ## 3. Inputs (gather)
 
@@ -140,7 +140,7 @@ punctuation-blind, whole words) to prose rather than to a spoken name. The
 terms are the project's name, every `things[].name`, alias and id from the
 previous record, and the numbers and proper nouns in the project's task
 titles (numbers from task notes too, because on a first run the notes are
-the only place a new number lives), so "0394" finds the CPO 2073 thread once
+the only place a new number lives), so "0581" finds the CPO 4513 thread once
 the record knows they are the same thing.
 
 Bundle size is bounded: 60 tasks, 60 memories, 80 messages, 20 events, 20
@@ -246,7 +246,7 @@ an answer whose writes name an id not in `evidence` is refused by the API.
 in the wrong project or in none. The bundle carries every non-archived
 project name of the user's (`projectNames`, rendered as PROJECTS in the
 input); the validator refuses a name that lands on none of them, matched the
-way a spoken "file it under Caltrans" is matched (`lib/project-names.ts`:
+way a spoken "file it under Canterly" is matched (`lib/project-names.ts`:
 exact, then punctuation-blind, then contained), and the apply path resolves
 the name with the same matcher and creation off, so an answer can never mint
 a project. The receipt names the project as it is really called.
@@ -256,9 +256,9 @@ from today's data:
 
 | Kind | Detect when | Today |
 |---|---|---|
-| `need_to_know` | a stated rule needs a value nothing holds; a name has no meaning; a milestone date passed with no new date; a `blocked` task has no `blocked_reason` | "Which CPO are you paying for next?" · "The album with Jazz was due August 18. Is there a new date?" |
-| `doesnt_add_up` | a done copy and an open copy of the same job; `blocked` after the user said it is not; weekly things filed as one-offs; `source = suggested` items past due and never accepted; an open task whose notes say it is done | "CPO 2073 and 2110 are each on your list twice." · "The weekly report and timesheet keep getting filed as one-offs." |
-| `done_yet` | an open item where a later message, a finished sibling, a passed milestone, or a missed expectation says it probably happened | "Did Find It go to the App Store? You had it ready on August 31." · "Did Mary's Canva quote come in? You expected it by the 16th." |
+| `need_to_know` | a stated rule needs a value nothing holds; a name has no meaning; a milestone date passed with no new date; a `blocked` task has no `blocked_reason` | "Which CPO are you paying for next?" · "The album with Jasper was due August 18. Is there a new date?" |
+| `doesnt_add_up` | a done copy and an open copy of the same job; `blocked` after the user said it is not; weekly things filed as one-offs; `source = suggested` items past due and never accepted; an open task whose notes say it is done | "CPO 4513 and 4562 are each on your list twice." · "The weekly report and timesheet keep getting filed as one-offs." |
+| `done_yet` | an open item where a later message, a finished sibling, a passed milestone, or a missed expectation says it probably happened | "Did Fetch It go to the App Store? You had it ready on August 31." · "Did Mary's Canva quote come in? You expected it by the 16th." |
 
 Ranking (`lib/understanding/questions.ts`), mechanical, not model-chosen:
 
@@ -331,7 +331,7 @@ open after that.
    (`supersedeByWrites`): status `superseded`, `supersededBy` = this
    question, `resolvedAt` = the moment the answer landed, read after the
    writes so the rows they changed never count as changed after the
-   ruling. Closing the old CPO 2073 copy sets "What is blocking CPO 2073?"
+   ruling. Closing the old CPO 4513 copy sets "What is blocking CPO 4513?"
    aside before the user can answer an obsolete premise, without waiting
    for the re-read. Only writes that went through count.
 5. Run that project immediately (§8). Return the writes that succeeded and
@@ -375,8 +375,8 @@ exist, `rename_task` when the words say what it really is. Filing them as a
 memory and leaving the wrong task on the list is the defect to avoid.
 
 **Processes.** Some answers describe how a recurring job goes, step by step
-("for a CPO: get quotes, fill the Advantage form, get signatures from Marissa
-and Walter, …"). A process is stored as a `pipeline_templates` row: a short
+("for a CPO: get quotes, fill the Advantage form, get signatures from Melissa
+and Warren, …"). A process is stored as a `pipeline_templates` row: a short
 name ("CPO purchase cycle") and its ordered steps in the user's words, each
 blocked by the one before. The interpreter returns it as `process: { name,
 steps[] } | null` next to `fact`, and the answer path saves it through the
@@ -384,7 +384,7 @@ steps[] } | null` next to `fact`, and the answer path saves it through the
 steps). The `fact` then stays one short sentence that points at it. The
 interpreter and every run see the user's processes as `PROCESSES` in their
 input, so an answer or a question can place a task on a step (`set_step`)
-and the record can say "CPO 2110 is on step 7, waiting for the US Bank
+and the record can say "CPO 4562 is on step 7, waiting for the NW Bank
 statement". Processes and facts are both visible, and deletable, on the
 Memory tab.
 
@@ -418,7 +418,7 @@ The briefing already injects one open clarification per pause
 (`lib/secretary/briefing.ts:558`) and tells the model to call
 `resolve_clarification`. It keeps doing that, but reads the new kinds first,
 in rank order, and offers `answer_question` with the answer labels spoken as
-choices. "The beacon glue one" maps to an answer label; the voice model does
+choices. "The binder tape one" maps to an answer label; the voice model does
 the mapping, the API does the writes. Still one question a session: while
 an understanding question is open the ASR clarification queue waits, its row
 left open rather than marked asked, and is reached again in a session with
@@ -457,7 +457,7 @@ already returns the ledes and, for one project, the Today line. Rules:
 
 Plain-language rules (validated in §4 step 4): the real title the first time
 a thing is named; nickname and number together for anything with both
-("Lenses (2110)"); days as digits; no shorthand the user has not used in
+("Benches (4562)"); days as digits; no shorthand the user has not used in
 their own titles or messages; no banned words. Dates as dates, never
 countdowns (2026-10-06, SEC-A004): "due Thu, Oct 22", not "in 3 days" or
 "42 days late". The words are kept until the next read, and a read no
@@ -531,7 +531,7 @@ write site to say the same thing less reliably.
 - **Backoff, until the inputs change.** A project with a failed run on the
   same inputs is not run again by the sweep until its inputs change, so a
   rejection is paid for once, not every six hours. (Until 2026-10-04 the
-  backoff lasted six hours and a restarted process ignored it; Caltrans
+  backoff lasted six hours and a restarted process ignored it; Canterly
   failed on unchanged inputs about every six and a half hours, at about $3
   a run.) A run the model answered and the validator refused arms this, and
   so does a run that was billed, whatever ended it; every failed row on the
@@ -594,12 +594,12 @@ write site to say the same thing less reliably.
 - **The screen sees the run** (`lib/understanding/progress.ts`, `GET
   /api/understanding/progress`). A run that does not skip publishes each
   phase to an in-process channel keyed by user and project — `queued`
-  ("Waiting to read Caltrans", a follow-up behind a run in flight),
-  `gathering` ("Reading Caltrans" — "4 tasks, 4 messages, 2 memories"),
+  ("Waiting to read Canterly", a follow-up behind a run in flight),
+  `gathering` ("Reading Canterly" — "4 tasks, 4 messages, 2 memories"),
   `reading` ("Thinking with Claude Sonnet 5" — the gather's counts, and
   "attempt 2 of 3" first on a retry), `checking` ("Checking what it wrote"), `storing` ("Writing the
-  record") — and finishes as `ok` ("Read Caltrans" — "2 new questions, 1
-  updated", or "nothing new to ask") or `failed` ("Could not read Caltrans"
+  record") — and finishes as `ok` ("Read Canterly" — "2 new questions, 1
+  updated", or "nothing new to ask") or `failed` ("Could not read Canterly"
   — "the model has no credits", "the Claude limit resets on October 1",
   "the model's answer did not check out"), with a reason (`no-credits`,
   `capped`, `auth`, `validation`, `other`). Finished runs stay five minutes,
@@ -651,7 +651,7 @@ day and under a second a run.
   sentence per answer saying what it will write.
 - **Workspace**: `ledes[widgetId]` in the payload; a `lede` slot at the top
   of each widget body; the CPO widget in the mockup is an ordinary widget
-  bound to `tasks where project = Caltrans and search = CPO`, with rows
+  bound to `tasks where project = Canterly and search = CPO`, with rows
   templated as `name / number / state`.
 - **Voice**: `answer_question`; the briefing reads the ranked queue.
 - **Interview** (`app/(app)/interview`, the second tab): the whole open
@@ -719,9 +719,9 @@ Built 2026-09-22, commit "Understanding phase 1".
 `questions.ts` with identity, rank and storage; `records.words` and
 `understanding_runs`; `scripts/understand.ts` run against a copy of
 production data (the `copy-db.ts` path exists), output to stdout, `--dry`
-writing nothing. Judged by: on today's data, the Caltrans run produces the
+writing nothing. Judged by: on today's data, the Canterly run produces the
 two duplicate-CPO contradictions, the next-payment unknown and the
-Lenses/Antenna/beacon-glue states with correct sources, and zero claims
+Benches/Awning/binder-tape states with correct sources, and zero claims
 without sources. This is the gate; nothing ships until this is true.
 Built 2026-09-22, commit "Understanding phase 2".
 

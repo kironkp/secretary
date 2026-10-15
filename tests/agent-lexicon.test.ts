@@ -15,11 +15,11 @@ beforeAll(async () => {
   await db.insert(entities).values([
     { userId: U.id, name: "CPO", kind: "acronym", aliases: ["CPU"] }, // the classic garble, aliased
     { userId: U.id, name: "CalCard", kind: "term", aliases: ["calc card"] },
-    { userId: U.id, name: "Teresa Mahers", kind: "person" },
-    { userId: U.id, name: "Walter Maiara", kind: "person" },
-    { userId: U.id, name: "DTC", kind: "acronym" },
+    { userId: U.id, name: "Tamsin Malvey", kind: "person" },
+    { userId: U.id, name: "Warren Maiada", kind: "person" },
+    { userId: U.id, name: "QTB", kind: "acronym" },
   ]);
-  await db.insert(projects).values({ userId: U.id, name: "caltrans", status: "active" });
+  await db.insert(projects).values({ userId: U.id, name: "canterly", status: "active" });
 });
 afterAll(async () => {
   await db.delete(user).where(eq(user.id, U.id));
@@ -28,15 +28,15 @@ afterAll(async () => {
 describe("lexicon export", () => {
   it("exports store vocabulary — entities, aliases, and project names", async () => {
     const terms = await buildLexicon(U.id);
-    for (const expected of ["CPO", "CPU", "CalCard", "calc card", "Teresa Mahers", "Walter Maiara", "DTC", "caltrans"]) {
+    for (const expected of ["CPO", "CPU", "CalCard", "calc card", "Tamsin Malvey", "Warren Maiada", "QTB", "canterly"]) {
       expect(terms).toContain(expected);
     }
   });
 
   it("updates on every new entity — the next session hears the new name", async () => {
-    await crossReferenceMention(U.id, { name: "Ash Winter", kind: "person", confidence: "high" });
+    await crossReferenceMention(U.id, { name: "Avery Linden", kind: "person", confidence: "high" });
     const terms = await buildLexicon(U.id);
-    expect(terms).toContain("Ash Winter");
+    expect(terms).toContain("Avery Linden");
   });
 
   it("dedupes case-insensitively and produces a biasing prompt", async () => {

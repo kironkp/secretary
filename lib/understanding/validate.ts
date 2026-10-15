@@ -123,8 +123,8 @@ export function countSentences(text: string): number {
  * The names a lede uses: 3+-digit numbers and capitalized 3+-letter words,
  * minus the stoplist. A capitalized word that begins a sentence is ordinary
  * prose ("Three of these are past due") unless it is written in all caps
- * (CPO, TASCAM), so it is exempt from the row-title check; the cost is that a
- * proper noun in first position ("Antenna waits on the TASCAM item") is not
+ * (CPO, VELTOR), so it is exempt from the row-title check; the cost is that a
+ * proper noun in first position ("Awning waits on the VELTOR item") is not
  * caught. Without the exemption every English lede would fail on its first
  * word and the run could never converge.
  */
@@ -167,7 +167,7 @@ const wordsOf = (s: string): string[] =>
 
 /**
  * A word with its plain English inflections, both ways: "CPOs" must find a
- * row titled "Process CPO 2073", and "copy" a row that says "copies". Without
+ * row titled "Process CPO 4513", and "copy" a row that says "copies". Without
  * this the row-title check rejects ordinary prose ("Both CPOs are the same
  * job") and, since a failed lede regenerates, the run can loop on grammar.
  */
@@ -253,7 +253,7 @@ const NOT_NAMES = new Set([
 /**
  * A capitalized word inside the item's text (never its first word, which is
  * capitalized for being first) that the why also uses: a person, a place, a
- * product. "Marissa" in a why about a task that names Marissa is a reference.
+ * product. "Melissa" in a why about a task that names Melissa is a reference.
  */
 function sharesName(why: string, text: string): boolean {
   const names = new Set(
@@ -272,7 +272,7 @@ function sharesName(why: string, text: string): boolean {
  * wrote itself), with four or more words in a row from the item, with a
  * number the item carries, or with a name the item carries. Anything looser
  * is a why about nothing in particular; anything stricter rejects "the open
- * 2073 copy", which is how a person refers to a task with a long title.
+ * 4513 copy", which is how a person refers to a task with a long title.
  * Evidence whose id is not in the bundle is skipped here — step 1 already
  * reported it.
  */
@@ -387,8 +387,8 @@ export function questionProblems(question: string): string[] {
   const out: string[] = [];
   if (!/[?.]["')]*$/.test(question.trim())) out.push("must end with ? or .");
   // Said out loud in one breath (SPEC §7; the user could not read
-  // "Should I clean up the CPO 2073 / Production monitor tasks that still
-  // say blocked even though the notes and finished task say the FY2027
+  // "Should I clean up the CPO 4513 / Projection screen tasks that still
+  // say blocked even though the notes and finished task say the FY2031
   // work is done?"). Words, not characters: numbers and names are words.
   const words = question.trim().split(/\s+/).length;
   if (words > MAX_QUESTION_WORDS) {

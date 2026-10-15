@@ -227,7 +227,7 @@ exists, the interim carrier is stated in 4.4.
 | Field | Meaning | Interim source today |
 |---|---|---|
 | `id` | stable project id | `projects.id` |
-| `name`, `aliases` | what the user calls it, including "the Caltrans thing" | `projects.name`; aliases via `entities.aliases` and `resolveProject` (`lib/secretary/tools.ts:185-210`) |
+| `name`, `aliases` | what the user calls it, including "the Canterly thing" | `projects.name`; aliases via `entities.aliases` and `resolveProject` (`lib/secretary/tools.ts:185-210`) |
 | `objective`, `why_it_matters` | one sentence each | none; must be captured |
 | `status`, `phase` | active / someday / archived; the current phase name | `projects.status`; phase from the active task's `stages` |
 | `priority` | relative to other projects | none; inferred from deadlines and `procrastination_score` |
@@ -904,7 +904,7 @@ database access, any provider key belonging to the app.
 | Heroku production | deployed, verified live 2026-09-16 | v13, 29 tables, 1,995 rows, `/sign-in` 200 |
 | Project record, attempt history, resume pointer | designed here, not implemented | grep returns nothing |
 | Machine-readable roadmap | not implemented | prose only: README, HANDOFF, LOGBOOK |
-| FindIt | not in this repo | three attribution comments only |
+| FetchIt | not in this repo | three attribution comments only |
 
 ## Appendix B. What the old guidance lacked
 

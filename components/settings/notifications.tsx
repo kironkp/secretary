@@ -1,6 +1,6 @@
 "use client";
 
-// Notifications enable flow (FindIt pattern, iOS-aware): on iPhone, Web Push
+// Notifications enable flow (the pattern from his other app, iOS-aware): on iPhone, Web Push
 // only works AFTER the app is added to the Home Screen — so this component
 // walks that order: install first, then enable, then test.
 import { useEffect, useState } from "react";

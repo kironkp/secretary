@@ -1,4 +1,4 @@
-// Web Push, first-party (FindIt pattern): the server signs each push with its
+// Web Push, first-party (the pattern from his other app): the server signs each push with its
 // VAPID key and talks straight to the browser vendor's push service — no relay
 // in the middle. Dead subscriptions (404/410) are pruned on the spot.
 //

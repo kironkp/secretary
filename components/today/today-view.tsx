@@ -10,7 +10,7 @@
 // Answering, as the user feels it: the tapped pill fills and the others fade
 // the moment it is pressed, the thinking strip above the card says "Applying
 // your answer", then what was applied, then what the server is doing with
-// it ("Reading Caltrans", "Thinking with Claude Sonnet 5") until the reading
+// it ("Reading Canterly", "Thinking with Claude Sonnet 5") until the reading
 // has landed or failed; a line under the card keeps the receipt. The next
 // question takes the card's place with the old one fading out and the new
 // one rising in. The page is never rebuilt: every change is a state update

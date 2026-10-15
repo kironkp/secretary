@@ -4,7 +4,7 @@
 // question and the Interview. The mockup's rule: the choices are filled pills
 // in the tint, and the last answer, the way out ("Something else", "Keep
 // them"), is the grey one. Pills share the row and wrap onto the next line as
-// a group; a label never wraps inside its pill, so "Lenses 2110" stays one
+// a group; a label never wraps inside its pill, so "Benches 4562" stays one
 // shape.
 //
 // After the answers comes "Write your own" (the user's words, 2026-09-22:

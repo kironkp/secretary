@@ -57,7 +57,7 @@ belt beside the sandbox's braces. §7 states what that requires.
 ```ts
 type Widget = {
   id: string;              // stable kebab-case, generated once, never reused
-  title: string;           // spoken name: "the Caltrans one"
+  title: string;           // spoken name: "the Canterly one"
   x: number; y: number;    // grid units, not pixels
   w: number; h: number;    // grid units; h is a minimum, content may grow it
   z: number;               // stacking, and the tie-break for "the top one"
@@ -134,7 +134,7 @@ The model writes one item as a template and the shell repeats it. So this:
 
 ```html
 <div class="cv-card">
-  <h3>Caltrans</h3>
+  <h3>Canterly</h3>
   <ul data-each>
     <li data-check><span data-field="title"></span> <em data-field="due"></em></li>
   </ul>
@@ -249,7 +249,7 @@ widget id. It becomes a union with `{type: "show_workspace", focusId?: string}`,
 and the two client branches change accordingly.
 
 **The briefing gains a WORKSPACE block**, listing widget ids and titles the way
-it already lists canvas blocks, so the model can say "the Caltrans one" and mean
+it already lists canvas blocks, so the model can say "the Canterly one" and mean
 something.
 
 ## 7. Safety

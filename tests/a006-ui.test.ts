@@ -41,22 +41,22 @@ describe("Today's failure line", () => {
   const healthy = { ok: true, line: null, action: null } as unknown as Progress["provider"];
   const progress = (over: Partial<Progress>): Progress => ({ active: [], recent: [], lastRun: null, provider: healthy, ...over });
   const lastRun = (hoursAgo: number, reason: "validation" | "no-credits" | "other" = "validation") => ({
-    projectId: "p-caltrans",
-    projectName: "Caltrans",
+    projectId: "p-canterly",
+    projectName: "Canterly",
     status: "failed" as const,
-    ...failedLines("Caltrans", reason === "validation" ? ["questions[0].answers[1].label: too long"] : []),
+    ...failedLines("Canterly", reason === "validation" ? ["questions[0].answers[1].label: too long"] : []),
     reason,
     finishedAt: new Date(NOW - hoursAgo * 3_600_000).toISOString(),
   });
 
   it("never says the model's answer did not check out", () => {
     for (const lines of [
-      failedLines("Caltrans", ["record.things[0].state.sources: at least one source"]),
-      failedLines("Caltrans", []),
-      failedOtherLines("Caltrans"),
+      failedLines("Canterly", ["record.things[0].state.sources: at least one source"]),
+      failedLines("Canterly", []),
+      failedOtherLines("Canterly"),
     ]) {
       expect(`${lines.line} ${lines.detail}`).not.toMatch(/did not check out|something went wrong|Could not read/);
-      expect(lines.line).toBe("I couldn't update my notes on Caltrans");
+      expect(lines.line).toBe("I couldn't update my notes on Canterly");
     }
   });
 
@@ -69,9 +69,9 @@ describe("Today's failure line", () => {
 
   it("a recent one says so in plain words, with Try now for that project", () => {
     const shown = derive(progress({ lastRun: lastRun(2) }), null, null, NOW);
-    expect(shown.line).toBe("I couldn't update my notes on Caltrans");
+    expect(shown.line).toBe("I couldn't update my notes on Canterly");
     expect(shown.detail).toMatch(/^I'll try again when something changes, /);
-    expect(shown.retry).toBe("p-caltrans");
+    expect(shown.retry).toBe("p-canterly");
   });
 
   it("a provider out of money or down gets its own way out, not Try now", () => {
@@ -83,15 +83,15 @@ describe("Today's failure line", () => {
   it("a read that failed in the last minutes shows Try now while it is fresh", () => {
     const recent = [
       {
-        projectId: "p-caltrans",
-        projectName: "Caltrans",
+        projectId: "p-canterly",
+        projectName: "Canterly",
         status: "failed" as const,
-        ...failedLines("Caltrans", ["questions[0].why: too long"]),
+        ...failedLines("Canterly", ["questions[0].why: too long"]),
         finishedAt: new Date(NOW - 60_000).toISOString(),
       },
     ];
     const shown = derive(progress({ recent }), null, null, NOW);
     expect(shown.phase).toBe("failed");
-    expect(shown.retry).toBe("p-caltrans");
+    expect(shown.retry).toBe("p-canterly");
   });
 });

@@ -292,7 +292,7 @@ test.describe("before answering", () => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto("/today?thinking=open");
     await expect(strip(page)).toHaveAttribute("data-phase", "active");
-    await expect(stripLine(page)).toHaveAttribute("data-line", "Reading Caltrans");
+    await expect(stripLine(page)).toHaveAttribute("data-line", "Reading Canterly");
     expect(await strip(page).locator(".thinking-bar").first().evaluate((el) => getComputedStyle(el).animationName)).toBe("none");
     const running = await strip(page).evaluate((el) =>
       Array.from(el.querySelectorAll("*")).filter((n) => {

@@ -6,7 +6,7 @@
 // being enforced by the API (run.ts OUTPUT_FORMAT_TEXT), a Sonnet 5 answer
 // now and then carries a UUID with one hex digit wrong, and the validator
 // rightly refuses it as unknown; on 2026-09-23 the first production run of
-// Caltrans spent all three attempts on that. The fix here is narrow: an id
+// Canterly spent all three attempts on that. The fix here is narrow: an id
 // that is unknown, but is within two characters of exactly ONE known id of
 // its type and the same length, is that id. Two other UUIDs differ in about
 // twenty-seven characters, so a two-character neighbour is never ambiguous
@@ -54,7 +54,7 @@ export function nearestId(id: string, known: Set<string>): string | null {
     hit = candidate;
   }
   if (hit !== null) return hit;
-  // A dropped dash or a UUID cut short: on 2026-09-25 Caltrans spent three
+  // A dropped dash or a UUID cut short: on 2026-09-25 Canterly spent three
   // attempts twice over on memory ids like "da6ff733-c9ba-419e-bd5b43ac…"
   // (one dash gone) and "b47d3561-883c-4a80-9908-376f70580" (cut off). No
   // same-length slip reaches those. Compared as hex alone, an id whose first
@@ -127,9 +127,9 @@ export function repairLine(r: Repair): string {
 // Presentation, mended by dropping (2026-10-06, sec plan F1)
 // --------------------------------------------------------------------------
 //
-// Caltrans failed in production on `questions[0].answers[1].label "Not yet,
+// Canterly failed in production on `questions[0].answers[1].label "Not yet,
 // do it Friday"`: five words where a button takes four. The run ceiling
-// ($1.50) leaves no room for a second attempt, so every change to Caltrans
+// ($1.50) leaves no room for a second attempt, so every change to Canterly
 // paid about $0.81 for a record that was then thrown away over one button.
 //
 // A rule about how something reads (validate.ts: wordingProblems,

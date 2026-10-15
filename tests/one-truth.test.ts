@@ -35,27 +35,27 @@ const ids: Record<string, string> = {};
 
 beforeAll(async () => {
   await db.insert(user).values({ id: U.id, name: "One Truth", email: U.email, timezone: TZ });
-  const [jazz, personal, shopping] = await db
+  const [jasper, personal, shopping] = await db
     .insert(projects)
     .values([
-      { userId: U.id, name: "Jazz music project" },
+      { userId: U.id, name: "Jasper music project" },
       { userId: U.id, name: "Personal" },
       { userId: U.id, name: "Shopping", kind: "list" as const },
     ])
     .returning();
-  ids.jazz = jazz.id;
+  ids.jasper = jasper.id;
   ids.personal = personal.id;
   const rows = await db
     .insert(tasks)
     .values([
-      { userId: U.id, projectId: jazz.id, title: "Send stems to Marcus", status: "todo" as const, source: "spoken" as const, dueAt: new Date("2026-10-04T19:00:00Z") },
+      { userId: U.id, projectId: jasper.id, title: "Send stems to Milo", status: "todo" as const, source: "spoken" as const, dueAt: new Date("2026-10-04T19:00:00Z") },
       // 9 AM today: due today, not late, and never "yesterday".
-      { userId: U.id, projectId: jazz.id, title: "Finish the mix", status: "in_progress" as const, source: "typed" as const, dueAt: new Date("2026-10-06T16:00:00Z") },
-      { userId: U.id, projectId: jazz.id, title: "Pick the album title", status: "todo" as const, source: "spoken" as const },
+      { userId: U.id, projectId: jasper.id, title: "Finish the mix", status: "in_progress" as const, source: "typed" as const, dueAt: new Date("2026-10-06T16:00:00Z") },
+      { userId: U.id, projectId: jasper.id, title: "Pick the album title", status: "todo" as const, source: "spoken" as const },
       // A suggestion the user took up: their work now.
-      { userId: U.id, projectId: jazz.id, title: "Call Marcus about the mix", status: "todo" as const, source: "suggested" as const, dueAt: new Date("2026-10-05T19:00:00Z") },
+      { userId: U.id, projectId: jasper.id, title: "Call Milo about the mix", status: "todo" as const, source: "suggested" as const, dueAt: new Date("2026-10-05T19:00:00Z") },
       // A suggestion still waiting: counted apart everywhere.
-      { userId: U.id, projectId: jazz.id, title: "Batch the session notes", status: "inbox" as const, source: "suggested" as const, dueAt: new Date("2026-10-03T19:00:00Z") },
+      { userId: U.id, projectId: jasper.id, title: "Batch the session notes", status: "inbox" as const, source: "suggested" as const, dueAt: new Date("2026-10-03T19:00:00Z") },
       { userId: U.id, projectId: personal.id, title: "Reply to the patent attorney", status: "todo" as const, source: "spoken" as const, dueAt: new Date("2026-09-24T19:00:00Z") },
       { userId: U.id, projectId: personal.id, title: "Old thing, done", status: "done" as const, source: "spoken" as const, dueAt: new Date("2026-09-20T19:00:00Z") },
       // Blocked is still open work, and late is late (E11).
@@ -96,14 +96,14 @@ describe("one truth across Today, the board, the project page and the Workspace"
     expect(pastDueOnBoard).toHaveLength(4);
     expect(new Set(pastDueOnBoard.map((t) => t.id))).toEqual(new Set(today.pastDue.map((r) => r.id)));
     expect(new Set(today.pastDue.map((r) => r.id))).toEqual(
-      new Set([ids["Send stems to Marcus"], ids["Call Marcus about the mix"], ids["Reply to the patent attorney"], ids["Renew the passport"]])
+      new Set([ids["Send stems to Milo"], ids["Call Milo about the mix"], ids["Reply to the patent attorney"], ids["Renew the passport"]])
     );
     // Each item reads the same on both screens.
     for (const row of today.pastDue) {
       expect(board.find((t) => t.id === row.id)?.dueLabel, row.fields.title).toBe(row.fields.due);
     }
     expect(board.find((t) => t.id === ids["Reply to the patent attorney"])?.dueLabel).toBe("12 days late");
-    expect(board.find((t) => t.id === ids["Send stems to Marcus"])?.dueLabel).toBe("2 days late");
+    expect(board.find((t) => t.id === ids["Send stems to Milo"])?.dueLabel).toBe("2 days late");
   });
 
   it("due earlier today is today: not past due, never yesterday", async () => {
@@ -138,22 +138,22 @@ describe("one truth across Today, the board, the project page and the Workspace"
     expect(rows.find((r) => r.fields.name === "Personal")?.fields.open).toBe("2");
   });
 
-  it('"4 open" under Jazz is exactly the 4 tasks Jazz\'s page lists', async () => {
+  it('"4 open" under Jasper is exactly the 4 tasks Jasper\'s page lists', async () => {
     const board = await boardTasks();
-    const card = buildProjects(board).find((p) => p.id === ids.jazz)!;
+    const card = buildProjects(board).find((p) => p.id === ids.jasper)!;
     expect(card.open).toHaveLength(4);
-    const page = (await db.select().from(tasks).where(eq(tasks.projectId, ids.jazz))).filter(isOpenWork);
+    const page = (await db.select().from(tasks).where(eq(tasks.projectId, ids.jasper))).filter(isOpenWork);
     expect(new Set(page.map((t) => t.id))).toEqual(new Set(card.open.map((t) => t.id)));
     expect(page.map((t) => t.title)).not.toContain("Batch the session notes");
     const listed = await listProjects(U.id, TZ, NOON);
-    expect(listed.find((p) => p.id === ids.jazz)).toMatchObject({ open: 4, pastDue: 2, next: "2 days late" });
+    expect(listed.find((p) => p.id === ids.jasper)).toMatchObject({ open: 4, pastDue: 2, next: "2 days late" });
     expect(listed.find((p) => p.name === "Shopping")).toMatchObject({ kind: "list", open: 2 });
   });
 
   it("the Workspace's project counts are real (they were 0 for every project) and leave waiting suggestions out", async () => {
     const rows = await resolveBinding(U.id, { source: "projects", where: { open: true } }, TZ, NOON);
     const by = Object.fromEntries(rows.map((r) => [r.fields.name, r.fields.open]));
-    expect(by["Jazz music project"]).toBe("4");
+    expect(by["Jasper music project"]).toBe("4");
     expect(by["Personal"]).toBe("2");
   });
 

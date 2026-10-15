@@ -243,7 +243,7 @@ export function displayModelName(id: string): string {
 
 const n = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
 
-/** "Reading Caltrans" — "4 tasks, 4 messages, 2 memories, 2 events, 1 expectation" (the last two only when there are any). */
+/** "Reading Canterly" — "4 tasks, 4 messages, 2 memories, 2 events, 1 expectation" (the last two only when there are any). */
 export function gatheringLines(
   projectName: string,
   bundle: Pick<Bundle, "tasksOpen" | "tasksDone" | "messages" | "memories" | "events" | "expectations">
@@ -270,7 +270,7 @@ export function readingLines(
   };
 }
 
-/** "Read Caltrans" — "2 new questions, 1 updated" or "nothing new to ask". */
+/** "Read Canterly" — "2 new questions, 1 updated" or "nothing new to ask". */
 export function okLines(
   projectName: string,
   counts: { created: number; updated?: number; dismissed?: number; skippedSettled?: number }
@@ -293,7 +293,7 @@ const REASON_OF: Record<Exclude<FailureState, "other">, FailReason> = {
 
 /**
  * What a failed read says, in plain words (SEC-A006): "I couldn't update my
- * notes on Caltrans", and never "the model's answer did not check out" (the
+ * notes on Canterly", and never "the model's answer did not check out" (the
  * validator's business, not the user's). The why, from the logged errors: a
  * log that is provider failures only (every line carries
  * MODEL_ERROR_PREFIX; run.ts failedAtProvider says the same) is the

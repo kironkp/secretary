@@ -1,4 +1,4 @@
-Follow-up to the capture-fidelity work, which succeeded at the data layer: I re-ran the Ash request by voice and the secretary correctly updated the existing calendar event (11:00 AM PT / 2:00 PM ET, reminders 10:50 / 10:55 / 11:00) and was honest about phone alarms. **But on the dashboard, that update is only visible if I dig into the Calendar view.** Open Loops shows nothing about it. Projects shows nothing. The default zones — the ones I actually look at — are blind to it, because they render tasks only. That makes the capture useless in practice.
+Follow-up to the capture-fidelity work, which succeeded at the data layer: I re-ran the Avery request by voice and the secretary correctly updated the existing calendar event (11:00 AM PT / 2:00 PM ET, reminders 10:50 / 10:55 / 11:00) and was honest about phone alarms. **But on the dashboard, that update is only visible if I dig into the Calendar view.** Open Loops shows nothing about it. Projects shows nothing. The default zones — the ones I actually look at — are blind to it, because they render tasks only. That makes the capture useless in practice.
 
 **The requirement, stated once and applying everywhere: when the secretary logs or updates something, it must show up clearly in EVERY view whose scope covers it — Open Loops, Projects, focus card, calendar, timeline, all of it — immediately.** Events and their reminders are peers of tasks, not calendar-only footnotes.
 
@@ -14,9 +14,9 @@ The structural root cause: **events have no project association**, so no project
 
 1. Migration: `events.projectId` (nullable FK to projects).
 2. `create_event` / `update_event` accept `project` (resolved through the same fuzzy `resolveProject` path as tasks; same "file into an existing project unless genuinely new" briefing guidance).
-3. Briefing: upcoming-events lines include their project; the PROJECTS section counts include upcoming events (e.g. `"DAW patent" (1 open task · 1 event this week)`).
+3. Briefing: upcoming-events lines include their project; the PROJECTS section counts include upcoming events (e.g. `"Dorado patent" (1 open task · 1 event this week)`).
 4. Persona: when a meeting/event relates to an ongoing workstream, file it under that project — same rule as tasks.
-5. One-off repair: link the existing "Patent meeting with Ash" event to the DAW patent project.
+5. One-off repair: link the existing "Patent meeting with Avery" event to the Dorado patent project.
 
 ## Phase 2 — unified visibility across every zone
 
@@ -34,6 +34,6 @@ The structural root cause: **events have no project association**, so no project
 
 ## Phase 4 — final QA sweep + report (then come back to me, once)
 
-1. Verify the repaired Ash event now appears in: Open Loops under DAW patent (with ⏰ 3 and PT time), the DAW patent project card, the focus card (if it's the next thing), the coming-up strip (on Monday), calendar, timeline.
+1. Verify the repaired Avery event now appears in: Open Loops under Dorado patent (with ⏰ 3 and PT time), the Dorado patent project card, the focus card (if it's the next thing), the coming-up strip (on Monday), calendar, timeline.
 2. Full sweep: both themes × {split view, /dashboard, all dashboard views, detail views} × {1280px, 390px}. `npm run build`, lint, all vitest (old + new) green. No console errors during a dashboard render.
-3. Report back with: what changed per phase, the migration(s) run, any judgment calls (e.g. chart markers), anything you found via the render-completeness audit beyond events, and a short voice test script for me — including one turn that should update an event and one that should create a project-filed event from scratch ("set up a jazz rehearsal Thursday 7pm under the Jazz project, remind me an hour before"), with exactly what I should see change live in each zone.
+3. Report back with: what changed per phase, the migration(s) run, any judgment calls (e.g. chart markers), anything you found via the render-completeness audit beyond events, and a short voice test script for me — including one turn that should update an event and one that should create a project-filed event from scratch ("set up a jasper rehearsal Thursday 7pm under the Jasper project, remind me an hour before"), with exactly what I should see change live in each zone.

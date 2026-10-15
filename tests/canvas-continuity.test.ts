@@ -16,7 +16,7 @@ const U = { id: `canvas-cont-${crypto.randomUUID()}`, email: `cc-${crypto.random
 
 const EXISTING =
   '<div style="display:flex;flex-direction:column;gap:16px">' +
-  '<div style="font-size:30px;font-weight:700">Caltrans — this week</div>' +
+  '<div style="font-size:30px;font-weight:700">Canterly — this week</div>' +
   '<div data-check="11111111-1111-4111-8111-111111111111">ADM-2011 signature packet</div>' +
   "</div>";
 
@@ -51,7 +51,7 @@ describe("the canvas never blanks while a model call is in flight", () => {
       yield "<div>par";
       const [row] = await snapshots();
       midFlight = row.markup;
-      yield '<div style="display:flex"><div style="font-size:30px">Caltrans — revised</div>' +
+      yield '<div style="display:flex"><div style="font-size:30px">Canterly — revised</div>' +
         '<div data-check="11111111-1111-4111-8111-111111111111">ADM-2011 signature packet</div>' +
         "<div>Telework Agreement — revise and resubmit</div></div>";
     };
@@ -74,7 +74,7 @@ describe("the canvas never blanks while a model call is in flight", () => {
     const big =
       '<div style="display:flex;flex-direction:column">' +
       "<div>".repeat(60) +
-      "Caltrans rebuilt" +
+      "Canterly rebuilt" +
       "</div>".repeat(60) +
       "</div>";
 
@@ -89,9 +89,9 @@ describe("the canvas never blanks while a model call is in flight", () => {
 
     // The stub is far under the replace threshold, so the old canvas held.
     expect(afterStub).not.toBe("");
-    expect(afterStub).toContain("Caltrans");
+    expect(afterStub).toContain("Canterly");
     const [latest] = await snapshots();
-    expect(latest.markup).toContain("Caltrans rebuilt");
+    expect(latest.markup).toContain("Canterly rebuilt");
   });
 
   it("an aborted stream never commits the half-built canvas it had so far", async () => {

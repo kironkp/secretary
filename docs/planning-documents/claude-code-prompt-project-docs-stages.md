@@ -12,11 +12,11 @@ Explicitly OUT of scope this round: notifications of any kind. Reminders stay da
 
 ## The scenes this must serve (my real life, use these as acceptance tests)
 
-**Scene 1 — the car.** I'm driving. I start a voice call and say "let's work on my duty statement." The secretary knows it's the Caltrans document, reads me what we have — or the one section I ask for, not a ten-minute recitation. I say "make the second responsibility stronger, emphasize that I supervise the auditorium project." It rewrites that section, tells me briefly what changed, and if I'm home with the split view open, I watch the document update on the right while we keep talking. If it botched an edit, "go back to how it was" works. Nothing I do by voice can permanently destroy writing.
+**Scene 1 — the car.** I'm driving. I start a voice call and say "let's work on my duty statement." The secretary knows it's the Canterly document, reads me what we have — or the one section I ask for, not a ten-minute recitation. I say "make the second responsibility stronger, emphasize that I supervise the auditorium project." It rewrites that section, tells me briefly what changed, and if I'm home with the split view open, I watch the document update on the right while we keep talking. If it botched an edit, "go back to how it was" works. Nothing I do by voice can permanently destroy writing.
 
-**Scene 2 — the stages.** "Complete new duty statement" isn't a checkbox in real life. It's outline → draft → review with Marissa → submit. I want to see where I am at a glance — on the task, on the project card — and move it forward by saying "outline's done." Same for the DTC auditorium budget. The secretary should also be smart about offering this: when I mention a genuinely multi-step deliverable, it can propose breaking it down — but it shouldn't decorate every little errand with a checklist.
+**Scene 2 — the stages.** "Complete new duty statement" isn't a checkbox in real life. It's outline → draft → review with Melissa → submit. I want to see where I am at a glance — on the task, on the project card — and move it forward by saying "outline's done." Same for the QTB auditorium budget. The secretary should also be smart about offering this: when I mention a genuinely multi-step deliverable, it can propose breaking it down — but it shouldn't decorate every little errand with a checklist.
 
-**Scene 3 — the deliverable.** The duty statement eventually goes to Caltrans as a real file. When the draft is ready I need to get it out of the app in a format an office accepts (Word, at minimum). One obvious button, not a ceremony.
+**Scene 3 — the deliverable.** The duty statement eventually goes to Canterly as a real file. When the draft is ready I need to get it out of the app in a format an office accepts (Word, at minimum). One obvious button, not a ceremony.
 
 **Scene 4 — the rent problem.** "Remind me to pay rent on the first, every month." That's one sentence from me, and from then on the task reappears each month after I complete it. The dashboard should make recurring items recognizable.
 
@@ -32,7 +32,7 @@ Explicitly OUT of scope this round: notifications of any kind. Reminders stay da
 
 ## Setup for me
 
-Seed my actual Caltrans work so I can test the moment you're done: a "Duty statement" doc and a "DTC auditorium budget" doc under the Caltrans project (sensible outline headings are fine), with their two existing tasks staged appropriately.
+Seed my actual Canterly work so I can test the moment you're done: a "Duty statement" doc and a "QTB auditorium budget" doc under the Canterly project (sensible outline headings are fine), with their two existing tasks staged appropriately.
 
 ## Working style
 

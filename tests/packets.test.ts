@@ -35,7 +35,7 @@ beforeAll(async () => {
     name: "CPO purchase cycle",
     steps: STEPS.map((name, i) => ({ name, blocked_by: i === 0 ? null : i - 1 })),
   });
-  const created = await executeTool(ctx, "create_task", { title: "CPO 2110 lenses" });
+  const created = await executeTool(ctx, "create_task", { title: "CPO 4562 benches" });
   taskId = (created.result as { task_id?: string; id?: string }).task_id ?? (created.result as { id: string }).id;
   await executeTool(ctx, "apply_pipeline", { task: taskId, template: "CPO purchase cycle" });
 });
@@ -65,7 +65,7 @@ describe("packets", () => {
 
   it("file_document files the latest upload under a name, matched loosely", async () => {
     await upload("std65.pdf", "application/pdf", await onePagePdf());
-    const r = (await executeTool(ctx, "file_document", { task: "2110", doc_type: "std-65" })).result as {
+    const r = (await executeTool(ctx, "file_document", { task: "4562", doc_type: "std-65" })).result as {
       filed: boolean;
       still_missing: string[];
     };

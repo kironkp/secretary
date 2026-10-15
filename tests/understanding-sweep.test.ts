@@ -66,7 +66,7 @@ async function withEnv<T>(name: string, value: string | undefined, fn: () => Pro
 
 describe("sweepUnderstanding", () => {
   const model = fakeModel((bundle) =>
-    bundle.project.id === ids.caltrans ? validOutputFor(bundle, ids) : minimalOutputFor(bundle)
+    bundle.project.id === ids.canterly ? validOutputFor(bundle, ids) : minimalOutputFor(bundle)
   );
 
   it("(1) runs both active projects of the user and writes two records", async () => {
@@ -74,7 +74,7 @@ describe("sweepUnderstanding", () => {
     expect(result).toEqual({ users: 1, ran: 2, skipped: 0, failed: 0, retiredAsr: 0, healed: 0, repaired: 0, restored: 0 });
     expect(model.calls).toHaveLength(2);
     const rows = await recordRows();
-    expect(rows.map((r) => r.projectId).sort()).toEqual([ids.album, ids.caltrans].sort());
+    expect(rows.map((r) => r.projectId).sort()).toEqual([ids.album, ids.canterly].sort());
     expect(rows.every((r) => r.version === 1)).toBe(true);
   });
 
@@ -101,7 +101,7 @@ describe("sweepUnderstanding", () => {
     const slow = fakeModel(async (bundle) => {
       entered();
       await gate;
-      return bundle.project.id === ids.caltrans
+      return bundle.project.id === ids.canterly
         ? validOutputFor(bundle, ids)
         : minimalOutputFor(bundle);
     });
@@ -132,7 +132,7 @@ describe("sweepUnderstanding", () => {
     expect(runs.filter((r) => r.status === "ok")).toHaveLength(4);
 
     const latest = await latestRunPerProject(U.id);
-    expect(latest.map((p) => p.projectName)).toEqual(["Album", "Caltrans"]);
+    expect(latest.map((p) => p.projectName)).toEqual(["Album", "Canterly"]);
     for (const p of latest) {
       expect(p.lastStatus).toBe("ok");
       expect(p.lastModel).toBe("fake");
@@ -141,7 +141,7 @@ describe("sweepUnderstanding", () => {
       expect(p.lastErrors).toEqual([]);
       expect(Number.isNaN(Date.parse(p.lastFinishedAt))).toBe(false);
     }
-    // The Caltrans output carried two questions; the Album one none.
+    // The Canterly output carried two questions; the Album one none.
     expect(await openQuestionCount(U.id)).toBe(2);
   });
 
@@ -151,9 +151,9 @@ describe("sweepUnderstanding", () => {
     // vitest, so this is the keyless branch of the sweep.
     await db.insert(entities).values({
       userId: U.id,
-      name: "Walter Maiara",
+      name: "Warren Maiada",
       kind: "person",
-      aliases: ["Walter Myala"],
+      aliases: ["Warren Meala"],
       confirmed: true,
     });
     const [row] = await db
@@ -161,8 +161,8 @@ describe("sweepUnderstanding", () => {
       .values({
         userId: U.id,
         kind: "asr_span",
-        subject: "Walter Myala",
-        question: "I heard Walter Myala — who is that?",
+        subject: "Warren Meala",
+        question: "I heard Warren Meala — who is that?",
         status: "open",
       })
       .returning({ id: clarifications.id });
@@ -200,20 +200,20 @@ describe("the configuration Settings shows", () => {
   it("errorsForScreen: the validator's lines in full, a provider's in the app's words, never the wire", () => {
     // The validator's alone: untouched, each in full (SPEC §9).
     const validator = ["questions[0].answers[1].writes: at least one write", "record.things: banned word"];
-    expect(errorsForScreen("Caltrans", validator)).toEqual(validator);
-    expect(errorsForScreen("Caltrans", [])).toEqual([]);
+    expect(errorsForScreen("Canterly", validator)).toEqual(validator);
+    expect(errorsForScreen("Canterly", [])).toEqual([]);
     // The provider's alone: one line, the app's words, the billing page not quoted.
     const wire =
       "model: openai: 429 You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.";
-    expect(errorsForScreen("Caltrans", [wire])).toEqual(["The model has no credits."]);
+    expect(errorsForScreen("Canterly", [wire])).toEqual(["The model has no credits."]);
     expect(
-      errorsForScreen("Caltrans", [
+      errorsForScreen("Canterly", [
         "model: anthropic: 400 usage limits; you will regain access on 2026-10-01 at 00:00 UTC.",
         wire,
       ])
     ).toEqual(["The Claude limit resets on October 1 and OpenAI has no credits."]);
     // Mixed: the provider's word first, then the validator's lines in full.
-    expect(errorsForScreen("Caltrans", [wire, ...validator])).toEqual(["The model has no credits.", ...validator]);
+    expect(errorsForScreen("Canterly", [wire, ...validator])).toEqual(["The model has no credits.", ...validator]);
   });
 
   it("sweepMinutes: default 10, never under 2, never over a day, junk ignored", async () => {

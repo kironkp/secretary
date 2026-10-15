@@ -385,7 +385,7 @@ LayoutPlan JSON only. It must validate against LayoutPlan.schema.json.
       <span class="k">"props"</span>: { <span class="k">"span_days"</span>: 21, <span class="k">"expanded"</span>: true },
       <span class="k">"why"</span>: <span class="s">"You asked 3 schedule questions this morning"</span> },
     { <span class="k">"component"</span>: <span class="s">"project_card"</span>,
-      <span class="k">"props"</span>: { <span class="k">"project_id"</span>: <span class="s">"jazz-album"</span>, <span class="k">"variant"</span>: <span class="s">"compact"</span> } }
+      <span class="k">"props"</span>: { <span class="k">"project_id"</span>: <span class="s">"jasper-album"</span>, <span class="k">"variant"</span>: <span class="s">"compact"</span> } }
   ],
   <span class="k">"wishlist"</span>: [
     { <span class="k">"need"</span>: <span class="s">"per-track progress bars inside the album card"</span>,
@@ -447,16 +447,16 @@ LayoutPlan JSON only. It must validate against LayoutPlan.schema.json.
 (function(){
 /* ---------------- data: the four situations ---------------- */
 var P = {
-  patent:  {name:"VR DAW patent", pill:["crit","Mon 11 AM"], prog:38, col:"var(--crit)",
-            kv:"<b>Ash</b> · Stephens Law · prep questions open",
-            loops:["Prep questions on prior art results","Meet Ash — Mon Aug 10, 11 AM"]},
-  album:   {name:"Jazz album", pill:["ser","committed Aug 18"], prog:80, col:"var(--serious)",
-            kv:"<b>Jazz</b> · committed Aug 18 · define “done”",
+  patent:  {name:"VR Dorado patent", pill:["crit","Mon 11 AM"], prog:38, col:"var(--crit)",
+            kv:"<b>Avery</b> · Harlow Law · prep questions open",
+            loops:["Prep questions on prior art results","Meet Avery — Mon Aug 10, 11 AM"]},
+  album:   {name:"Jasper album", pill:["ser","committed Aug 18"], prog:80, col:"var(--serious)",
+            kv:"<b>Jasper</b> · committed Aug 18 · define “done”",
             subs:[["Track 4 mixdown",60],["Master",20],["Artwork",90],["Distribution",0]]},
-  findit:  {name:"Find It", pill:["warn","≈ Sep 7"], prog:65, col:"var(--warn)",
+  fetchit:  {name:"Fetch It", pill:["warn","≈ Sep 7"], prog:65, col:"var(--warn)",
             kv:"prototype works · bug list pending"},
-  caltrans:{name:"Caltrans", pill:["warn","no dates"], prog:6, col:"var(--warn)",
-            kv:"<b>Marissa</b> duty statement · DTC budget"}
+  canterly:{name:"Canterly", pill:["warn","no dates"], prog:6, col:"var(--warn)",
+            kv:"<b>Melissa</b> duty statement · QTB budget"}
 };
 
 var PRESETS = [
@@ -466,7 +466,7 @@ var PRESETS = [
   plan:{reason:null, sections:[
     {c:"hero"},{c:"stats"},
     {c:"cards2",items:[["patent","full"],["album","full"]]},
-    {c:"cards2",items:[["findit","full"],["caltrans","full"]]},
+    {c:"cards2",items:[["fetchit","full"],["canterly","full"]]},
     {c:"tl",span:21,exp:false},
     {c:"loops"},{c:"chase"},{c:"people"}]}},
 
@@ -478,17 +478,17 @@ var PRESETS = [
     {c:"tl",span:14,exp:true,why:"You asked 3 schedule questions this morning"},
     {c:"hero"},
     {c:"cards2",items:[["album","compact"],["patent","compact"]],why:"Compact — details are one tap away, the calendar is today's language"},
-    {c:"cards2",items:[["findit","compact"],["caltrans","compact"]]},
+    {c:"cards2",items:[["fetchit","compact"],["canterly","compact"]]},
     {c:"chase"},{c:"loops"}]}},
 
  {label:"Deep in the patent today",
-  sig:["patent mentions_24h: 14 (baseline 2)","meeting with Ash in 3 days","other projects at baseline","engagement strong + dated event → promote"],
+  sig:["patent mentions_24h: 14 (baseline 2)","meeting with Avery in 3 days","other projects at baseline","engagement strong + dated event → promote"],
   note:"Your example: “really engaged in this project today → make it stand out.” Note what standing out means: first position, full variant, accent ring, loops inlined — but the card is NOT recolored. Color still means deadline pressure (rule 5); the ring means attention.",
   plan:{reason:"Patent front and center — it's all you've talked about", sections:[
     {c:"hero"},
-    {c:"card",id:"patent",variant:"full",accent:true,inline:true,why:"14 patent mentions today vs 2 typical — and Ash is Monday"},
-    {c:"cards2",items:[["album","compact"],["findit","compact"]]},
-    {c:"card",id:"caltrans",variant:"compact"},
+    {c:"card",id:"patent",variant:"full",accent:true,inline:true,why:"14 patent mentions today vs 2 typical — and Avery is Monday"},
+    {c:"cards2",items:[["album","compact"],["fetchit","compact"]]},
+    {c:"card",id:"canterly",variant:"compact"},
     {c:"tl",span:21,exp:false},
     {c:"chase"}]}},
 
@@ -498,8 +498,8 @@ var PRESETS = [
   plan:{reason:"Album expanded into a tracker — 4 pieces, 11 days", sections:[
     {c:"hero"},
     {c:"card",id:"album",variant:"nested",accent:true,why:"You broke the album into 4 tracks yesterday — 11 days to the committed date"},
-    {c:"cards2",items:[["patent","compact"],["findit","compact"]]},
-    {c:"card",id:"caltrans",variant:"compact"},
+    {c:"cards2",items:[["patent","compact"],["fetchit","compact"]]},
+    {c:"card",id:"canterly",variant:"compact"},
     {c:"tl",span:14,exp:false},
     {c:"loops"}],
     wishlist:{need:"per-track burndown vs days-remaining", closest:"project_card variant:nested"}}}
@@ -531,7 +531,7 @@ var R={
   banner:function(s){return el('ms m-banner',why(s.why)+s.text);},
   hero:function(s){return el('ms m-hero',why(s.why)+
     '<div><div class="d">10</div><div class="dm">Mon·Aug</div></div><div style="width:1px;background:var(--line-2);align-self:stretch"></div>'+
-    '<div><div class="tt">11:00 — Ash · Stephens Law</div><div class="ts">VR DAW patent · in 3 days</div></div>');},
+    '<div><div class="tt">11:00 — Avery · Harlow Law</div><div class="ts">VR Dorado patent · in 3 days</div></div>');},
   stats:function(s){return el('ms m-stats',why(s.why)+
     [['4','projects'],['3d','next commit'],['2','promises'],['3','undated']].map(function(t){
       return '<div class="m-stat"><div class="v">'+t[0]+'</div><div class="l">'+t[1]+'</div></div>';}).join(''));},
@@ -539,7 +539,7 @@ var R={
   cards2:function(s){var w=el('ms m-cards2');w.innerHTML=why(s.why);
     s.items.forEach(function(it){w.appendChild(card(it[0],it[1],false,false,null));});return w;},
   tl:function(s){
-    var rows=[["Patent",[8.8,"var(--crit)","dot"]],["Album",[32.4,"var(--serious)","bar"]],["Find It",[91,"var(--warn)","bar"]],["Caltrans",[100,"#3a4a5e","dash"]]];
+    var rows=[["Patent",[8.8,"var(--crit)","dot"]],["Album",[32.4,"var(--serious)","bar"]],["Fetch It",[91,"var(--warn)","bar"]],["Canterly",[100,"#3a4a5e","dash"]]];
     var d=el('ms m-tl'+(s.exp?' expanded':''));
     var h=why(s.why)+'<div class="tlh">Next '+s.span+' days <span class="sp">'+(s.exp?'expanded':'')+'</span></div>';
     rows.forEach(function(r){
@@ -553,17 +553,17 @@ var R={
     });
     d.innerHTML=h;return d;},
   loops:function(s){return el('ms m-tabl',why(s.why)+
-    '<div class="m-grow">VR DAW patent <span>2 open · next in 3d</span></div>'+
+    '<div class="m-grow">VR Dorado patent <span>2 open · next in 3d</span></div>'+
     '<div class="m-irow">Prep questions on prior art<span class="w">before Mon</span></div>'+
-    '<div class="m-grow">Jazz album <span>committed Aug 18</span></div>'+
+    '<div class="m-grow">Jasper album <span>committed Aug 18</span></div>'+
     '<div class="m-irow">Finish and release<span class="w">Tue Aug 18</span></div>'+
-    '<div class="m-grow">Caltrans <span>2 open · undated</span></div>'+
-    '<div class="m-irow">Duty statement → Marissa<span class="w">no date</span></div>');},
+    '<div class="m-grow">Canterly <span>2 open · undated</span></div>'+
+    '<div class="m-irow">Duty statement → Melissa<span class="w">no date</span></div>');},
   chase:function(s){return el('ms m-chase',why(s.why)+
-    ['Marissa duty statement — when?','DTC budget — when?','Find It ship date — real date?'].map(function(c){
+    ['Melissa duty statement — when?','QTB budget — when?','Fetch It ship date — real date?'].map(function(c){
       return '<span class="m-chip">'+c+'</span>';}).join(''));},
   people:function(s){return el('ms m-people',why(s.why)+
-    [['Ash','patent attorney'],['Jazz','album co-creator'],['Marissa','Caltrans']].map(function(p){
+    [['Avery','patent attorney'],['Jasper','album co-creator'],['Melissa','Canterly']].map(function(p){
       return '<div class="m-person"><b>'+p[0]+'</b><div class="r">'+p[1]+'</div></div>';}).join(''));}
 };
 

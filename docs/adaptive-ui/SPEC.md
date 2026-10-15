@@ -835,7 +835,7 @@ secretary's chat agent gets layout tools. Two tiers, and the split is the point:
 - `arrange_dashboard(operations)` (2026-10-06, SEC-A003) → the voice-safe
   way to rearrange: flat ops `move_to_top | move_up | move_down |
   move_to_bottom | hide | show`, each naming a section in the user's words
-  ("shopping list", "Caltrans", "the timeline"). The server maps words to
+  ("shopping list", "Canterly", "the timeline"). The server maps words to
   section keys with no model call, validates as user-initiated, saves the head
   and pins what it placed (so the background planner cannot move it back);
   `hide` stores `{hide_section}`, `show` removes it. It is on the call
@@ -914,7 +914,7 @@ Rules:
 - **Chat AND voice tools:** `paint_canvas(brief)` — a NEW canvas, streamed so
   first paint lands fast; `edit_canvas(patch)` — a change to the canvas the
   user is looking at ("add one more thing", "make that purple", "only show the
-  Caltrans items"); `show_canvas()` — bring the existing canvas into view
+  Canterly items"); `show_canvas()` — bring the existing canvas into view
   without touching it. **All three ride the voice session**: a spoken change
   with no edit tool available can only become a from-scratch repaint, which is
   the failure this rule exists to prevent. `edit_canvas` is the DEFAULT
@@ -1073,8 +1073,8 @@ extract is persisted into the stored user message so a later "what was in row
 
 Fixtures are (signals → assertions on the plan). Materialize each as a test.
 Shared base: 4 projects — `patent` (deadline 2026-08-10, committed, days_left 3,
-people:[Ash]), `album` (2026-08-18, committed, days_left 11, people:[Jazz]),
-`findit` (2026-09-07, inferred), `caltrans` (none, 2 items missing dates).
+people:[Avery]), `album` (2026-08-18, committed, days_left 11, people:[Jasper]),
+`fetchit` (2026-09-07, inferred), `canterly` (none, 2 items missing dates).
 Baseline engagement 2/day each; `days_since_layout_change: 2`; nothing pinned;
 calm_mode false. Each fixture overrides only what it names.
 
@@ -1190,7 +1190,7 @@ imported at runtime.
 
 These sit in the extraction/agent layer, not the LayoutPlan renderer — build
 them alongside Phase 2. Each traces to an observed failure or success in a real
-claude.ai session used as a fixture (docs/adaptive-ui/transcript-2026-08-18).
+claude.ai session used as a fixture (the record is kept outside the public repo).
 
 - **persona_config**: `{strictness, tone, praise, followup_aggressiveness,
   quiet_hours}` — stored once, editable in Settings, applied to voice, chat,
@@ -1229,10 +1229,10 @@ claude.ai session used as a fixture (docs/adaptive-ui/transcript-2026-08-18).
 - **entity cross-reference on extraction**: every person/org mention resolves
   against the store before write. A mention matching an existing entity can
   never be silently dropped or merged — conflict → clarification queue.
-  (Fixture: "Marissa, Teresa Mahers, my boss" — Marissa existed since Jul 30;
+  (Fixture: "Melissa, Tamsin Malvey, my boss" — Melissa existed since Jul 30;
   the session dropped her without asking.)
 - **ASR lexicon export**: the store continuously exports a vocabulary (people,
-  orgs, project terms, acronyms: CPO, CalCard, DTC…) into the realtime voice
+  orgs, project terms, acronyms: CPO, CalCard, QTB…) into the realtime voice
   session's transcription biasing config. Update on every new entity.
 - **voice modality rule**: voice replies ≤ 2 sentences + at most one question,
   ending with the single next action. Anything visual routes to a surface
@@ -1240,7 +1240,7 @@ claude.ai session used as a fixture (docs/adaptive-ui/transcript-2026-08-18).
   "I can't draw a chart out loud" is a forbidden answer.
   A status is never spoken as a bare word: "blocked" alone is a database row
   read aloud, not an answer. The voice names what the item is stuck ON and
-  what clears it ("the CPO's sitting with Teresa till she signs it"), read
+  what clears it ("the CPO's sitting with Tamsin till she signs it"), read
   from the blocker recorded on the task (`tasks.blocked_reason`, set by
   `log_status`'s note and cleared the moment any other signal moves the item).
   When the reason is NOT recorded, that one question is asked IN FLOW, once —
@@ -1277,11 +1277,11 @@ claude.ai session used as a fixture (docs/adaptive-ui/transcript-2026-08-18).
   shouldn't be a task" / "forget that one" removes the item from the
   checklist on the spot (status → dropped, audit check-in, "✕ Dropped:"
   toast) and it can be reinstated just by asking (status back to todo).
-  When the drop states a durable rule ("never make Caltrans checks a
+  When the drop states a durable rule ("never make Canterly checks a
   task"), the mouth pairs it with `remember_fact` in the SAME turn — the
   same idiom as stated-fact capture; the extractor's own `dropped` signal
   stays the safety net, and its dedupe never resurrects a dropped task.
-  A change to something ALREADY logged ("file that under Caltrans",
+  A change to something ALREADY logged ("file that under Canterly",
   "rename it", "add a note to it") is `amend_task` — a thin delegate to
   `update_task` that files (or unfiles: "none"), retitles, or annotates
   the EXISTING row, never a second commitment. The create-guard backs it

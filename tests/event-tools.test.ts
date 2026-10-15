@@ -30,9 +30,9 @@ afterAll(async () => {
 describe("event tools", () => {
   it("create_event stores notes + reminders and reports push delivery", async () => {
     const res = await executeTool(ctx, "create_event", {
-      title: "Patent meeting with Ash",
+      title: "Patent meeting with Avery",
       starts_at: MEETING_AT.toISOString(),
-      location: "Stephens Law Group",
+      location: "Harlow Law Group",
       notes: "11:00 AM PT / 2:00 PM ET",
       reminders: [r(10), r(5), r(0)],
     });
@@ -78,7 +78,7 @@ describe("event tools", () => {
 
   it("delete_event removes it", async () => {
     const res = await executeTool(ctx, "delete_event", { event: "patent meeting" });
-    expect((res.result as { deleted: string }).deleted).toBe("Patent meeting with Ash");
+    expect((res.result as { deleted: string }).deleted).toBe("Patent meeting with Avery");
     const rows = await db.select().from(events).where(eq(events.userId, U.id));
     expect(rows).toHaveLength(0);
   });

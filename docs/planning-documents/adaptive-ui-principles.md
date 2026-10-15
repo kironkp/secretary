@@ -18,7 +18,7 @@ improvised HTML at runtime.
 Every field a tool can write must have a visible home in the UI (the detail
 dialogs are the floor). If the model can store it and the user can't see it,
 the model's only move is to flatten details into titles — or drop them.
-*(Incident: the Ash meeting's timezone conversion and alarm times were
+*(Incident: the Avery meeting's timezone conversion and alarm times were
 perfectly captured into a task's `notes`… which rendered nowhere.)*
 
 ## 3. Notes are the safety net, not the default

@@ -206,7 +206,7 @@ describe("the receipt", () => {
 
 describe("the reading line", () => {
   it("names the project being re-read, and says 'the project' when the question has none", () => {
-    expect(readingLabel("Caltrans")).toBe("Reading Caltrans…");
+    expect(readingLabel("Canterly")).toBe("Reading Canterly…");
     expect(readingLabel(" Album ")).toBe("Reading Album…");
     expect(readingLabel("  ")).toBe("Reading the project…");
     expect(readingLabel(null)).toBe("Reading the project…");

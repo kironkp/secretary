@@ -46,7 +46,7 @@ beforeAll(async () => {
     { id: ME.id, name: "Me", email: ME.email, timezone: ME.timezone },
     { id: OTHER.id, name: "Other", email: OTHER.email },
   ]);
-  [{ id: mine }] = await db.insert(projects).values({ userId: ME.id, name: "Caltrans" }).returning({ id: projects.id });
+  [{ id: mine }] = await db.insert(projects).values({ userId: ME.id, name: "Canterly" }).returning({ id: projects.id });
   [{ id: theirs }] = await db.insert(projects).values({ userId: OTHER.id, name: "Theirs" }).returning({ id: projects.id });
 });
 beforeEach(() => {

@@ -33,7 +33,7 @@ const task = (over: Partial<TlTask>): TlTask => ({
   status: "todo",
   dueAt: null,
   startAt: null,
-  projectId: "jazz",
+  projectId: "jasper",
   reminders: [],
   ...over,
 });
@@ -42,13 +42,13 @@ const event = (over: Partial<TlEvent>): TlEvent => ({
   title: over.title ?? "An event",
   startsAt: "2026-10-08T17:00:00Z",
   endsAt: null,
-  projectId: "jazz",
+  projectId: "jasper",
   recurrence: [],
   reminders: [],
   ...over,
 });
 const PROJECTS: TlProject[] = [
-  { id: "jazz", name: "Jazz music project", color: "#7c3aed", deadline: "2026-11-20T08:00:00Z", deadlineKind: "committed" },
+  { id: "jasper", name: "Jasper music project", color: "#7c3aed", deadline: "2026-11-20T08:00:00Z", deadlineKind: "committed" },
   { id: "personal", name: "Personal", color: null, deadline: null, deadlineKind: null },
   { id: "empty", name: "Empty project", color: null, deadline: null, deadlineKind: null },
 ];
@@ -108,32 +108,32 @@ describe("items: a bar from start to due, or a single date", () => {
 
 describe("lanes: one per project, with its progress, late first", () => {
   const tasks = [
-    task({ title: "Send stems", dueAt: "2026-10-12T19:00:00Z", projectId: "jazz" }),
-    task({ title: "Mix", status: "done", dueAt: "2026-10-01T19:00:00Z", projectId: "jazz" }),
-    task({ title: "Title", projectId: "jazz" }),
-    task({ title: "Dropped one", status: "dropped", dueAt: "2026-10-02T19:00:00Z", projectId: "jazz" }),
+    task({ title: "Send stems", dueAt: "2026-10-12T19:00:00Z", projectId: "jasper" }),
+    task({ title: "Mix", status: "done", dueAt: "2026-10-01T19:00:00Z", projectId: "jasper" }),
+    task({ title: "Title", projectId: "jasper" }),
+    task({ title: "Dropped one", status: "dropped", dueAt: "2026-10-02T19:00:00Z", projectId: "jasper" }),
     task({ title: "Passport", status: "blocked", dueAt: "2026-10-05T19:00:00Z", projectId: "personal" }),
     task({ title: "Loose end", dueAt: "2026-10-20T19:00:00Z", projectId: null }),
   ];
-  const lanes = buildLanes(PROJECTS, tasks, [event({ title: "Session", projectId: "jazz" })], TZ, NOW, DEFAULT_FILTERS);
+  const lanes = buildLanes(PROJECTS, tasks, [event({ title: "Session", projectId: "jasper" })], TZ, NOW, DEFAULT_FILTERS);
 
   it("progress counts every task of the project but dropped ones, whatever the filter shows", () => {
-    const jazz = lanes.find((l) => l.id === "jazz")!;
-    expect({ done: jazz.done, total: jazz.total }).toEqual({ done: 1, total: 3 });
+    const jasper = lanes.find((l) => l.id === "jasper")!;
+    expect({ done: jasper.done, total: jasper.total }).toEqual({ done: 1, total: 3 });
     // Open by default: the done one is counted but not drawn.
-    expect(jazz.items.map((i) => i.title)).toEqual(["Session", "Send stems"]);
+    expect(jasper.items.map((i) => i.title)).toEqual(["Session", "Send stems"]);
   });
   it("a late project comes first; a project with nothing is left out; tasks in none get a lane", () => {
-    expect(lanes.map((l) => l.name)).toEqual(["Personal", "Jazz music project", "No project"]);
+    expect(lanes.map((l) => l.name)).toEqual(["Personal", "Jasper music project", "No project"]);
     expect(lanes[0].late).toBe(true);
   });
   it("a late project stays first even when the filter hides its late task", () => {
     // Done shows no open task anywhere, so the nearest-date order ties; late still leads.
     const done = buildLanes(PROJECTS, tasks, [], TZ, NOW, { ...DEFAULT_FILTERS, status: "done" });
-    expect(done.map((l) => l.name)).toEqual(["Personal", "Jazz music project", "No project"]);
+    expect(done.map((l) => l.name)).toEqual(["Personal", "Jasper music project", "No project"]);
   });
   it("the deadline is a flag at its day, committed or not", () => {
-    expect(lanes.find((l) => l.id === "jazz")!.deadline).toEqual({ day: day("2026-11-20T08:00:00Z"), committed: true });
+    expect(lanes.find((l) => l.id === "jasper")!.deadline).toEqual({ day: day("2026-11-20T08:00:00Z"), committed: true });
   });
   it("filters: Late, Done, All, events off, one project", () => {
     const names = (f: Partial<typeof DEFAULT_FILTERS>) =>

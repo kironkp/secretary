@@ -107,7 +107,7 @@ export type ModelCall = ((input: {
  * the same model a run would use.
  *
  * Opus at high effort, not Sonnet at medium, since 2026-09-23. Kiron's
- * words: "it's asked me about CPO 2110 like 10 times. It feels really
+ * words: "it's asked me about CPO 4562 like 10 times. It feels really
  * stupid. It's not thinking enough." Reading nine projects' worth of tasks,
  * messages and memories and noticing that a question has already been
  * settled in different words is the kind of work the deeper model is for,
@@ -119,7 +119,7 @@ const DEFAULT_EFFORT: BrainEffort = "high";
 /**
  * Thinking counts against max_tokens when output_config.effort is set, and
  * a Sonnet 5 run at medium effort spent most of 16000 on it: the first
- * Caltrans dry run on 2026-09-23 had its JSON cut at 2,900 characters
+ * Canterly dry run on 2026-09-23 had its JSON cut at 2,900 characters
  * (stop_reason max_tokens). Room for the thinking and a full record.
  */
 const MAX_TOKENS = 32000;
@@ -686,10 +686,10 @@ export type RunOptions = {
  * A failed run stores no record, so without the backoff the hash compare
  * would call the model again every sweep for a project whose output keeps
  * failing validation: six calls an hour, about a dollar each, for the same
- * rejection. The first production sweep did exactly that on the Jazz
+ * rejection. The first production sweep did exactly that on the Jasper
  * project. The backoff used to last six hours, and a restarted process
  * ignored it; Heroku restarts the dyno daily, and from 2026-09-30 to
- * 2026-10-04 Caltrans failed on the same inputs about every six and a half
+ * 2026-10-04 Canterly failed on the same inputs about every six and a half
  * hours at about $3 a run. Now it lasts until the inputs change.
  */
 
@@ -758,7 +758,7 @@ function failedAtProvider(errors: string[]): boolean {
  * The output with any asked list the model wrote taken out of its record.
  * The code owns `asked` (SPEC §5) and the store replaces it with the stored
  * list, so the model's copy is not judged either: copied faithfully, one
- * stored answer of 1,015 characters failed the validator on every Caltrans
+ * stored answer of 1,015 characters failed the validator on every Canterly
  * attempt it reached (record.asked.51.answer).
  */
 function withoutAsked(output: unknown): unknown {
@@ -820,7 +820,7 @@ async function logRun(entry: RunLog): Promise<void> {
 /**
  * Three, not two, since the schema stopped being API-enforced (see
  * OUTPUT_FORMAT_TEXT): a text-JSON answer trips the validator on one rule
- * at a time (an empty reason, then a banned word), and the Caltrans dry run
+ * at a time (an empty reason, then a banned word), and the Canterly dry run
  * of 2026-09-23 needed the third go. Each retry quotes the errors of the
  * attempt before it (rejectionAddendum), not every error so far: the ones
  * an earlier retry fixed are no longer the model's to fix.
@@ -1113,7 +1113,7 @@ async function runOnce(
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS && !output; attempt++) {
     // The run's cost ceiling: no attempt starts that could take the run past
-    // it. Three Caltrans attempts cut at max_tokens cost about $3; with the
+    // it. Three Canterly attempts cut at max_tokens cost about $3; with the
     // ceiling, a prompt that size gets one.
     const pricedAs = modelId || model.modelName;
     const spentUsd = priceUsage({
@@ -1318,7 +1318,7 @@ async function runOnce(
         // was read before the model call. A run takes minutes; answering a
         // question starts one; so while it thinks, the user answers the next
         // question and upsertAsked appends that answer — and writing the
-        // snapshot back here erased it. Kiron's three answers about CPO 2110
+        // snapshot back here erased it. Kiron's three answers about CPO 4562
         // on 2026-09-23 were wiped that way within five minutes, which is why
         // the next run asked a fourth time: the history really was gone. The
         // merge is done in SQL for the same reason upsertAsked is (record.ts).
@@ -1479,8 +1479,8 @@ export async function runAll(
     // gatherAll reads the board, the memories and the messages once for every
     // project; the model is resolved once for the same reason.
     // Most recently used first (2026-10-06): the daily cap is spent in this
-    // order, and alphabetical spent it on Caltrans, DAW and Find It before
-    // Jazz or Personal were reached.
+    // order, and alphabetical spent it on Canterly, Dorado and Fetch It before
+    // Jasper or Personal were reached.
     const bundles = byRecentUse(await gatherAll(userId, { now, timezone: opts.timezone }));
     const model = opts.model ?? (await modelCallFor(userId)) ?? undefined;
 

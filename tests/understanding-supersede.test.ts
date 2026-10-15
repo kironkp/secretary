@@ -36,7 +36,7 @@ async function insertQuestion(input: {
     .insert(clarifications)
     .values({
       userId: U.id,
-      projectId: ids.caltrans,
+      projectId: ids.canterly,
       kind: input.kind,
       question: input.question,
       context: "why",
@@ -55,11 +55,11 @@ const rowOf = async (id: string) =>
 beforeAll(async () => {
   await db.insert(user).values({ id: U.id, name: "Supersede Tester", email: U.email, timezone: "America/Los_Angeles" });
   ids = await seedCpoScenario(U.id);
-  // The Caltrans pair the goal names: closing the old 2073 copy (Q1) makes
-  // "what is blocking 2073" (Q2) a question about a premise that is gone.
+  // The Canterly pair the goal names: closing the old 4513 copy (Q1) makes
+  // "what is blocking 4513" (Q2) a question about a premise that is gone.
   q1 = await insertQuestion({
     kind: "doesnt_add_up",
-    question: "CPO 2073 is on your list twice. Close the old one?",
+    question: "CPO 4513 is on your list twice. Close the old one?",
     evidence: [task(ids.doneCpo), task(ids.blockedCpo), task(ids.checkCpo)],
     answers: [
       {
@@ -77,7 +77,7 @@ beforeAll(async () => {
   });
   q2 = await insertQuestion({
     kind: "need_to_know",
-    question: "What is blocking CPO 2073?",
+    question: "What is blocking CPO 4513?",
     evidence: [task(ids.blockedCpo), task(ids.checkCpo), { type: "message", id: ids.msgNothingBlocked }],
     answers: [
       { id: "nothing", label: "Nothing, close it", writes: [{ op: "complete_task", taskId: ids.checkCpo }, { op: "resolve" }] },

@@ -1,4 +1,4 @@
-/* Secretary's service worker (FindIt pattern): exists ONLY so the installed
+/* Secretary's service worker (the pattern from his other app): exists ONLY so the installed
  * PWA can receive Web Push and land taps on the right page. Deliberately no
  * fetch/caching layer — offline can come later without touching this contract.
  */

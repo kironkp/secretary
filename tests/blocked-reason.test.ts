@@ -1,5 +1,5 @@
 // SPEC §11 voice modality rule: a status is never spoken as a bare word.
-// Transcript failure: "CPO 2073, blocked." — the blocker only ever lived in
+// Transcript failure: "CPO 4513, blocked." — the blocker only ever lived in
 // `notes` (overwritten by the next amend, never rendered), so the briefing had
 // nothing but the enum to hand the mouth. Now the reason is its own field:
 // log_status writes it, any other signal clears it, and the briefing either
@@ -33,46 +33,46 @@ const taskLike = async (fragment: string) => {
 
 describe("the blocker is a field, not a note", () => {
   it("log_status blocked stores the reason the user gave", async () => {
-    await executeTool(ctx, "create_commitment", { title: "Update CPO 2073 (production monitor)" });
+    await executeTool(ctx, "create_commitment", { title: "Update CPO 4513 (projection screen)" });
     const { result } = await executeTool(ctx, "log_status", {
-      task: "CPO 2073",
+      task: "CPO 4513",
       signal: "blocked",
-      note: "waiting on Teresa's signature",
+      note: "waiting on Tamsin's signature",
     });
     expect((result as { status?: string }).status).toBe("blocked");
     expect((result as { blocked_reason?: string }).blocked_reason).toBe(
-      "waiting on Teresa's signature"
+      "waiting on Tamsin's signature"
     );
-    const t = await taskLike("CPO 2073");
-    expect(t.blockedReason).toBe("waiting on Teresa's signature");
+    const t = await taskLike("CPO 4513");
+    expect(t.blockedReason).toBe("waiting on Tamsin's signature");
   });
 
   it("survives a later amend_task note — the reason is not free-form notes", async () => {
     await executeTool(ctx, "amend_task", {
-      task: "CPO 2073",
+      task: "CPO 4513",
       note: "form is in the shared drive",
     });
-    const t = await taskLike("CPO 2073");
+    const t = await taskLike("CPO 4513");
     expect(t.notes).toBe("form is in the shared drive");
-    expect(t.blockedReason).toBe("waiting on Teresa's signature");
+    expect(t.blockedReason).toBe("waiting on Tamsin's signature");
   });
 
   it("a later signal clears it — a moving item isn't stuck on what it was", async () => {
-    await executeTool(ctx, "log_status", { task: "CPO 2073", signal: "started" });
-    const t = await taskLike("CPO 2073");
+    await executeTool(ctx, "log_status", { task: "CPO 4513", signal: "started" });
+    const t = await taskLike("CPO 4513");
     expect(t.status).toBe("in_progress");
     expect(t.blockedReason).toBeNull();
   });
 
   it("completing a task clears it too", async () => {
     await executeTool(ctx, "update_task", {
-      task: "CPO 2073",
+      task: "CPO 4513",
       status: "blocked",
       blocked_reason: "waiting on the CalCard reconcile",
     });
-    expect((await taskLike("CPO 2073")).blockedReason).toBe("waiting on the CalCard reconcile");
-    await executeTool(ctx, "log_status", { task: "CPO 2073", signal: "done" });
-    const t = await taskLike("CPO 2073");
+    expect((await taskLike("CPO 4513")).blockedReason).toBe("waiting on the CalCard reconcile");
+    await executeTool(ctx, "log_status", { task: "CPO 4513", signal: "done" });
+    const t = await taskLike("CPO 4513");
     expect(t.status).toBe("done");
     expect(t.blockedReason).toBeNull();
   });
@@ -114,11 +114,11 @@ describe("blocked with no reason steers the mouth to ask NOW", () => {
     const { result } = await executeTool(ctx, "log_status", {
       task: "CalCard reconcile",
       signal: "blocked",
-      note: "Walter hasn't confirmed the payment",
+      note: "Warren hasn't confirmed the payment",
     });
     expect((result as { note?: string }).note).toBeUndefined();
     expect((await taskLike("CalCard reconcile")).blockedReason).toBe(
-      "Walter hasn't confirmed the payment"
+      "Warren hasn't confirmed the payment"
     );
   });
 
@@ -135,12 +135,12 @@ describe("blocked with no reason steers the mouth to ask NOW", () => {
 describe("the briefing hands the mouth a reason, never a bare word", () => {
   it("renders the recorded blocker inline", async () => {
     const { text } = await buildBriefing(U.id, ctx.timezone);
-    expect(text).toContain("· blocked: Walter hasn't confirmed the payment");
+    expect(text).toContain("· blocked: Warren hasn't confirmed the payment");
     expect(text).not.toContain('"Submit the CalCard reconcile" · blocked ·');
   });
 
   it("marks a reasonless blocker as a pause question, not a mid-flow one", async () => {
-    await executeTool(ctx, "create_commitment", { title: "Renew the DTC parking permit" });
+    await executeTool(ctx, "create_commitment", { title: "Renew the QTB parking permit" });
     await executeTool(ctx, "log_status", { task: "parking permit", signal: "blocked" });
     const { text } = await buildBriefing(U.id, ctx.timezone);
     expect(text).toContain("· blocked (reason unknown — ask if it comes up)");
@@ -152,7 +152,7 @@ describe("the briefing hands the mouth a reason, never a bare word", () => {
       signal: "started",
     });
     const { text } = await buildBriefing(U.id, ctx.timezone);
-    const line = text.split("\n").find((l) => l.includes("Renew the DTC parking permit"))!;
+    const line = text.split("\n").find((l) => l.includes("Renew the QTB parking permit"))!;
     expect(line).toContain("· in_progress");
     expect(line).not.toContain("reason unknown");
     expect(line).not.toContain("blocked");

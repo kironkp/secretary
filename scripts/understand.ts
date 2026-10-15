@@ -1,6 +1,6 @@
 // The understanding loop, run offline — docs/understanding/SPEC.md §11 phase 2.
 //
-// The gate for the whole loop is whether, on real data, the Caltrans run
+// The gate for the whole loop is whether, on real data, the Canterly run
 // produces the duplicate-CPO contradictions, the next-payment unknown and the
 // thing states with correct sources. That is judged by reading the output,
 // so this prints everything the run wrote, one line per claim, and with

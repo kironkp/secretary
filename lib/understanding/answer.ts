@@ -185,7 +185,7 @@ async function applyWrite(ctx: ToolContext, w: Write, now: Date): Promise<WriteO
         : viaTool(ctx, "update_task", { task: w.taskId, status: "todo", blocked_reason: "" });
     case "set_project": {
       // update_task resolves a project name the way a spoken "file it under
-      // Caltrans" is resolved, and when nothing matches it CREATES one
+      // Canterly" is resolved, and when nothing matches it CREATES one
       // (resolveProject's default). A typo in a stored answer must not mint a
       // project, so the name is resolved here first with creation off, the
       // write fails when nothing matches, and the tool is handed the exact
@@ -218,7 +218,7 @@ async function applyWrite(ctx: ToolContext, w: Write, now: Date): Promise<WriteO
     case "set_step": {
       // The process's steps become the task's stages (apply_pipeline, which
       // matches the name the way validate.ts does), then every step before
-      // this one is done: "CPO 2110 is on step 7" is a stage state.
+      // this one is done: "CPO 4562 is on step 7" is a stage state.
       const applied = await viaTool(ctx, "apply_pipeline", { task: w.taskId, template: w.process });
       if (!applied.ok) return applied;
       const [row] = await db
@@ -384,7 +384,7 @@ async function commitAnswer(
     await remember(ctx, fact, tags, outcome);
   } else if (read?.fact) {
     // Typed words that meant an answer AND said more ("yes, close them
-    // both, the new one is 0394"): the writes carry the answer, and the
+    // both, the new one is 0581"): the writes carry the answer, and the
     // fact the model distilled from the rest is kept the way the fact path
     // below keeps one, under the project and "answer", so the explanation
     // the user typed reaches the next run. The words themselves reach it

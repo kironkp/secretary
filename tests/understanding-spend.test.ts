@@ -3,7 +3,7 @@
 // one counts the fake's calls, because a call is what costs money.
 //
 // From 2026-09-30 to 2026-10-04 production spent about $3 a run, four runs a
-// day, all of it Caltrans failing on the same inputs. Kiron: "I am not made
+// day, all of it Canterly failing on the same inputs. Kiron: "I am not made
 // of money." One describe per cause:
 //   - the $5 daily cap never ran for a run handed a model, which every
 //     sweep run is;
@@ -451,7 +451,7 @@ describe("2c: the asked list is not the model's to write", () => {
 
   it("an asked list the model writes anyway is ignored, even one the validator would refuse", async () => {
     const { userId, projectIds } = await seedUser(1);
-    // Caltrans's stored record holds an answer of 1,015 characters, five
+    // Canterly's stored record holds an answer of 1,015 characters, five
     // past the schema's limit; copied back as told, it failed every attempt.
     const copying = fakeModel((bundle) => {
       const out = minimalOutputFor(bundle);

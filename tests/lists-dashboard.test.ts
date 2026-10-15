@@ -132,7 +132,7 @@ describe("lists: 'add lotion to my shopping list for the boat'", () => {
     expect(parseListPhrase("my shopping list for the boat")).toEqual({ name: "Shopping", purpose: "for the boat" });
     expect(parseListPhrase("packing list")).toEqual({ name: "Packing", purpose: null });
     expect(parseListPhrase("my boat list")).toEqual({ name: "Boat", purpose: null });
-    expect(parseListPhrase("the Caltrans project")).toBeNull();
+    expect(parseListPhrase("the Canterly project")).toBeNull();
     expect(listFor(undefined)).toEqual({ name: "Shopping", purpose: null });
     expect(listFor("shopping")).toEqual({ name: "Shopping", purpose: null });
     expect(listFor("Shopping for the boat")).toEqual({ name: "Shopping", purpose: "for the boat" });
@@ -159,7 +159,7 @@ describe("arrange_dashboard: 'can you put the shopping list at the top of the da
   const keys = (plan: LayoutPlan) => plan.sections.map((s) => sectionKey(s));
 
   it("moves the Shopping card to the top at once, pins it there, says so, and calls no model", async () => {
-    const userId = await newUser(["Caltrans", "Personal"]);
+    const userId = await newUser(["Canterly", "Personal"]);
     await executeTool(call(userId), "add_to_list", { items: ["lotion"], note: "for the boat" });
     const shopping = (await projectsOf(userId)).find((p) => p.kind === "list")!;
     const network = vi.spyOn(globalThis, "fetch");
@@ -181,22 +181,22 @@ describe("arrange_dashboard: 'can you put the shopping list at the top of the da
   });
 
   it("a pin preference on another section does not refuse the user's own move", async () => {
-    const userId = await newUser(["Caltrans", "Personal"]);
+    const userId = await newUser(["Canterly", "Personal"]);
     await db.insert(layoutPreferences).values({ userId, kind: "pin_section", value: { section: "hero_next_up" } });
-    const caltrans = (await projectsOf(userId)).find((p) => p.name === "Caltrans")!;
-    const out = await executeTool(call(userId), "arrange_dashboard", { operations: [{ op: "move_to_top", section: "caltrans" }] });
+    const canterly = (await projectsOf(userId)).find((p) => p.name === "Canterly")!;
+    const out = await executeTool(call(userId), "arrange_dashboard", { operations: [{ op: "move_to_top", section: "canterly" }] });
     expect(out.result).toMatchObject({ applied: true });
-    expect(keys((await getPlanHead(userId))!.spec as LayoutPlan)[0]).toBe(`project_card:${caltrans.id}`);
+    expect(keys((await getPlanHead(userId))!.spec as LayoutPlan)[0]).toBe(`project_card:${canterly.id}`);
   });
 
   it("hide stays hidden when the data changes; show brings it back", async () => {
-    const userId = await newUser(["Caltrans"]);
+    const userId = await newUser(["Canterly"]);
     const hid = await executeTool(call(userId), "arrange_dashboard", { operations: [{ op: "hide", section: "the timeline" }] });
     // "The timeline" is the projects progress strip since SEC-A007, and is read back by that name.
     expect(hid.result).toMatchObject({ applied: true, read_back: "Done: hid project progress." });
     expect(keys((await getPlanHead(userId))!.spec as LayoutPlan)).not.toContain("timeline");
     // New work changes the signals, so the board is planned again.
-    await executeTool(call(userId), "create_task", { title: "Send the CPO", project: "Caltrans" });
+    await executeTool(call(userId), "create_task", { title: "Send the CPO", project: "Canterly" });
     expect(keys((await computeCurrentPlan(userId)).plan)).not.toContain("timeline");
 
     const shown = await executeTool(call(userId), "arrange_dashboard", { operations: [{ op: "show", section: "timeline" }] });
@@ -208,7 +208,7 @@ describe("arrange_dashboard: 'can you put the shopping list at the top of the da
   });
 
   it("show puts a section back where the system has it, everything else as he saw it, and the board is his", async () => {
-    const userId = await newUser(["Caltrans"]);
+    const userId = await newUser(["Canterly"]);
     // Pin the board first, so its order is the user's and stable.
     await executeTool(call(userId), "arrange_dashboard", { operations: [{ op: "move_down", section: "stats" }] });
     const pinned = (await getPlanHead(userId))!;
@@ -248,7 +248,7 @@ describe("arrange_dashboard: 'can you put the shopping list at the top of the da
   });
 
   it("a section that isn't there is said, and nothing changes", async () => {
-    const userId = await newUser(["Caltrans"]);
+    const userId = await newUser(["Canterly"]);
     await executeTool(call(userId), "arrange_dashboard", { operations: [{ op: "move_down", section: "stats" }] });
     const before = (await getPlanHead(userId))!.version;
     const out = await executeTool(call(userId), "arrange_dashboard", { operations: [{ op: "move_to_top", section: "weather" }] });
@@ -259,23 +259,23 @@ describe("arrange_dashboard: 'can you put the shopping list at the top of the da
 
 describe("a list is not work", () => {
   it("understanding never reads a list, and the model's project names leave it out", async () => {
-    const userId = await newUser(["Caltrans"]);
+    const userId = await newUser(["Canterly"]);
     await executeTool(call(userId), "add_to_list", { items: ["lotion"] });
     const shopping = (await projectsOf(userId)).find((p) => p.kind === "list")!;
     const now = new Date();
     const bundles = await gatherAll(userId, { now, timezone: TZ });
-    expect(bundles.map((b) => b.project.name)).toEqual(["Caltrans"]);
+    expect(bundles.map((b) => b.project.name)).toEqual(["Canterly"]);
     expect(await gatherProject(userId, shopping.id, { now, timezone: TZ })).toBeNull();
-    expect(await loadProjectNames(userId)).toEqual(["Caltrans"]);
+    expect(await loadProjectNames(userId)).toEqual(["Canterly"]);
   });
 
   it("a list item scores no procrastination, however long it sits", async () => {
-    const userId = await newUser(["Caltrans"]);
+    const userId = await newUser(["Canterly"]);
     await executeTool(call(userId), "add_to_list", { items: ["lotion"] });
-    const [caltrans] = (await projectsOf(userId)).filter((p) => p.name === "Caltrans");
+    const [canterly] = (await projectsOf(userId)).filter((p) => p.name === "Canterly");
     const old = new Date(Date.now() - 60 * 86_400_000);
     await db.update(tasks).set({ postponedCount: 4, createdAt: old }).where(eq(tasks.userId, userId));
-    await db.insert(tasks).values({ userId, title: "Send the CPO", projectId: caltrans.id, status: "todo", postponedCount: 4, createdAt: old });
+    await db.insert(tasks).values({ userId, title: "Send the CPO", projectId: canterly.id, status: "todo", postponedCount: 4, createdAt: old });
     await refreshProcrastinationScores(userId);
     const rows = await db.select({ title: tasks.title, score: tasks.procrastinationScore }).from(tasks).where(eq(tasks.userId, userId));
     expect(rows.find((r) => r.title === "Lotion")?.score).toBe(0);

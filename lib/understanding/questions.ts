@@ -497,7 +497,7 @@ export async function healDuplicates(userId: string, now: Date): Promise<string[
  * 6057270), so a question drafted before then can carry answers naming
  * tasks its evidence never listed: every pill returns 400, the user reads
  * "That answer could not be applied", and the question can never be
- * answered at all. Kiron hit one on 2026-09-23 (the Find It release
+ * answered at all. Kiron hit one on 2026-09-23 (the Fetch It release
  * question, five tasks off its evidence) and tapped it twice.
  *
  * So the rows are repaired rather than the rule relaxed: a write target

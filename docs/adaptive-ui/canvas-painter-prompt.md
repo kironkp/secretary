@@ -42,7 +42,7 @@ lanes, grids, annotated SVG charts — and zero interactivity.
    Emit each block as a SEPARATE top-level element — never wrap the whole
    canvas in a single outer <div>. Give every top-level block a stable, human
    meaningful `id` in kebab-case naming what it holds, not where it sits:
-   `id="overdue"`, `id="today"`, `id="caltrans-week"`, `id="burndown"` —
+   `id="overdue"`, `id="today"`, `id="canterly-week"`, `id="burndown"` —
    never `id="block-1"` or `id="section-2"`.
 
    This is what makes a later "add one more thing" or "make that bigger"

@@ -4,9 +4,9 @@ Copy everything below the line into Claude Code, run from the repo root.
 
 ---
 
-Real-use failure to fix. By voice I said: *"I scheduled a meeting with Ash for 11am Pacific Time on Monday. Add the East Coast time on there. I need to set alarms for ten minutes before, five minutes before, and the actual time of the meeting."*
+Real-use failure to fix. By voice I said: *"I scheduled a meeting with Avery for 11am Pacific Time on Monday. Add the East Coast time on there. I need to set alarms for ten minutes before, five minutes before, and the actual time of the meeting."*
 
-The secretary UNDERSTOOD everything — it replied "Ash meeting is 11:00 AM Pacific / 2:00 PM Eastern, with alarms for 10:50, 10:55, and 11:00 AM PT" and correctly admitted it can't set device alarms. But all that landed in the system was **one flat task titled "Add East Coast time and alarms to Ash meeting"** under DAW patent. The times, the timezone conversion, the three alarm times — gone, or invisible. The existing event ("Patent meeting with Ash · 11:00 AM", visible in the today strip) wasn't touched. And task rows in the dashboard aren't clickable, so even if details had been stored in `notes`, I couldn't see them.
+The secretary UNDERSTOOD everything — it replied "Avery meeting is 11:00 AM Pacific / 2:00 PM Eastern, with alarms for 10:50, 10:55, and 11:00 AM PT" and correctly admitted it can't set device alarms. But all that landed in the system was **one flat task titled "Add East Coast time and alarms to Avery meeting"** under Dorado patent. The times, the timezone conversion, the three alarm times — gone, or invisible. The existing event ("Patent meeting with Avery · 11:00 AM", visible in the today strip) wasn't touched. And task rows in the dashboard aren't clickable, so even if details had been stored in `notes`, I couldn't see them.
 
 The failure mode: **the model comprehends details but the system gives it nowhere concrete to put them, and the UI gives me no way to see what it did store.** Fix the whole chain: data model → tools → persona → UI.
 
@@ -17,8 +17,8 @@ As always: the voice/audio plumbing is FROZEN (`lib/realtime/openai-webrtc.ts`, 
 ## Phase 1 — data model + tools: give details a home
 
 1. **Events become editable.** There is create_event but no way to update or delete one — "I can't edit the existing calendar event" was literally true. Add `update_event` (fuzzy find by title fragment like `findTask` does; change title, starts_at, ends_at, location, notes) and `delete_event`. Drizzle migration: add `notes` to events if it doesn't exist.
-2. **Reminders become first-class.** Add a `reminders` column (jsonb array of ISO timestamps, default `[]`) to BOTH tasks and events. Expose on create_task/update_task/create_event/update_event as `reminders: string[]` ("exact times as ISO 8601 in the user's timezone"). The Ash request maps to: update the event with notes "11:00 AM PT / 2:00 PM ET" + reminders [10:50, 10:55, 11:00 PT on Monday].
-3. **Honest reminder semantics.** No push notifications exist yet, so: (a) tool result for reminder writes includes `"delivery": "logged-only"`; (b) persona tells the model to say reminders are logged on the dashboard but won't ring the device yet; (c) the briefing gains a line for today's upcoming reminders ("Reminders today: 10:50 AM, 10:55 AM — Ash meeting") so the secretary can actually surface them at session start — that's the delivery mechanism we DO have.
+2. **Reminders become first-class.** Add a `reminders` column (jsonb array of ISO timestamps, default `[]`) to BOTH tasks and events. Expose on create_task/update_task/create_event/update_event as `reminders: string[]` ("exact times as ISO 8601 in the user's timezone"). The Avery request maps to: update the event with notes "11:00 AM PT / 2:00 PM ET" + reminders [10:50, 10:55, 11:00 PT on Monday].
+3. **Honest reminder semantics.** No push notifications exist yet, so: (a) tool result for reminder writes includes `"delivery": "logged-only"`; (b) persona tells the model to say reminders are logged on the dashboard but won't ring the device yet; (c) the briefing gains a line for today's upcoming reminders ("Reminders today: 10:50 AM, 10:55 AM — Avery meeting") so the secretary can actually surface them at session start — that's the delivery mechanism we DO have.
 4. **Persona rule — capture fidelity:** every concrete detail the user states (times, timezone conversions, alarm offsets, names, places, amounts) must be written into structured fields or `notes` via tools in the same turn. A detail that exists only in the conversation transcript is a dropped detail. When the user says "add X to that meeting," prefer updating the existing event/task over creating a parallel task about it (creating a companion task is fine ONLY for genuine to-dos).
 5. Tool descriptions updated so the model knows it can now edit events and set reminders. Keep the flat Realtime-compatible schema shape.
 
@@ -39,10 +39,10 @@ The product vision: the dashboard adapts to each user's life. The rule that keep
 
 ## Phase 4 — verify end-to-end (through the secretary itself, in split view)
 
-1. Voice: "Add the East Coast time and the three alarms onto the Ash patent meeting." → the EVENT gets notes + 3 reminders (live update in the right pane), no new junk task. Click the event: 11:00 AM PT with ET noted, reminders 10:50 / 10:55 / 11:00.
-2. Voice: "Remind me 30 minutes before the Caltrans budget is due." → reminder lands on that task, chip visible, detail view shows it.
+1. Voice: "Add the East Coast time and the three alarms onto the Avery patent meeting." → the EVENT gets notes + 3 reminders (live update in the right pane), no new junk task. Click the event: 11:00 AM PT with ET noted, reminders 10:50 / 10:55 / 11:00.
+2. Voice: "Remind me 30 minutes before the Canterly budget is due." → reminder lands on that task, chip visible, detail view shows it.
 3. Click any task row → detail view shows notes, reminders, provenance, history.
 4. Ask the secretary what reminders exist today → it answers from the briefing.
 5. `npm run build`, lint, vitest green; migration runs cleanly on the local DB (existing rows default to `[]` reminders).
 
-Also do a one-off repair of the current bad state OR just perform test #1 live — either way, the "Add East Coast time and alarms to Ash meeting" task should end up either deleted (if fully absorbed into the event) or carrying the real details, not a bare title.
+Also do a one-off repair of the current bad state OR just perform test #1 live — either way, the "Add East Coast time and alarms to Avery meeting" task should end up either deleted (if fully absorbed into the event) or carrying the real details, not a bare title.

@@ -1,4 +1,4 @@
-// PWA manifest (FindIt pattern): standalone display + icons is what makes
+// PWA manifest (the pattern from his other app): standalone display + icons is what makes
 // iOS offer "Add to Home Screen" as a real app — and an installed PWA is the
 // prerequisite for Web Push on iOS.
 import type { MetadataRoute } from "next";

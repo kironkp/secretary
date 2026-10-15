@@ -21,7 +21,7 @@ let projectId = "";
 
 beforeAll(async () => {
   await db.insert(user).values({ id: U.id, name: "Dates", email: U.email, timezone: CPO_TZ });
-  const [p] = await db.insert(projects).values({ userId: U.id, name: "Caltrans" }).returning();
+  const [p] = await db.insert(projects).values({ userId: U.id, name: "Canterly" }).returning();
   projectId = p.id;
   await db.insert(tasks).values({ userId: U.id, projectId, title: "Send the CPO", status: "todo" });
 });

@@ -111,7 +111,7 @@ async function eventsDuring(fn: () => Promise<unknown>): Promise<ProgressEvent[]
 }
 
 const run = (opts: Partial<Parameters<typeof runProject>[2]> = {}) =>
-  runProject(U.id, ids.caltrans, { timezone: TZ, now: NOW, ...opts });
+  runProject(U.id, ids.canterly, { timezone: TZ, now: NOW, ...opts });
 
 const runRows = () =>
   db
@@ -142,14 +142,14 @@ describe("the phases a run publishes", () => {
       "storing",
       "finished",
     ]);
-    for (const e of events) expect(e.projectId).toBe(ids.caltrans);
+    for (const e of events) expect(e.projectId).toBe(ids.canterly);
 
     const [gathering, reading, checking, storing, finished] = events;
     if (gathering.kind !== "active" || reading.kind !== "active" || checking.kind !== "active" || storing.kind !== "active" || finished.kind !== "finished") {
       throw new Error("unexpected event kinds");
     }
-    expect(gathering.entry.projectName).toBe("Caltrans");
-    expect(gathering.entry.line).toBe("Reading Caltrans");
+    expect(gathering.entry.projectName).toBe("Canterly");
+    expect(gathering.entry.line).toBe("Reading Canterly");
     // The counts are the bundle's: 4 tasks (3 open, 1 done), the 4 CPO
     // messages, 2 memories, 2 events, 1 expectation in the seeded scenario.
     const b = model.calls[0].bundle;
@@ -176,9 +176,9 @@ describe("the phases a run publishes", () => {
     expect(Date.parse(storing.entry.updatedAt)).toBeGreaterThanOrEqual(Date.parse(gathering.entry.updatedAt));
 
     expect(finished.entry).toMatchObject({
-      projectName: "Caltrans",
+      projectName: "Canterly",
       status: "ok",
-      line: "Read Caltrans",
+      line: "Read Canterly",
       detail: "2 new questions",
       reason: null,
     });
@@ -214,7 +214,7 @@ describe("the phases a run publishes", () => {
     const finished = events.find((e) => e.kind === "finished");
     expect(finished?.kind === "finished" && finished.entry).toMatchObject({
       status: "ok",
-      line: "Read Caltrans",
+      line: "Read Canterly",
       detail: "2 updated",
     });
   });
@@ -239,7 +239,7 @@ describe("the phases a run publishes", () => {
     const finished = events.find((e) => e.kind === "finished");
     expect(finished?.kind === "finished" && finished.entry).toMatchObject({
       status: "failed",
-      line: "I couldn't update my notes on Caltrans",
+      line: "I couldn't update my notes on Canterly",
       detail: "the model has no credits",
       reason: "no-credits",
     });
@@ -379,7 +379,7 @@ describe("the phases a run publishes", () => {
     const kinds = events.map((e) => (e.kind === "active" ? e.entry.phase : e.kind));
     expect(kinds).toEqual(["gathering", "reading", "checking", "storing", "finished", "queued", "dropped"]);
     const queued = events.find((e) => e.kind === "active" && e.entry.phase === "queued");
-    expect(queued?.kind === "active" && queued.entry.line).toBe("Waiting to read Caltrans");
+    expect(queued?.kind === "active" && queued.entry.line).toBe("Waiting to read Canterly");
     expect(snapshot(U.id).active).toEqual([]);
     expect(slow.calls).toHaveLength(1);
   });
@@ -440,52 +440,52 @@ describe("the lines", () => {
 
   it("failedLines: provider failures name each provider, one alone is 'the model', the validator's are a rejection", () => {
     expect(
-      failedLines("Caltrans", [
+      failedLines("Canterly", [
         `${MODEL_ERROR_PREFIX}openai: ${OPENAI_NO_CREDITS}`,
         `${MODEL_ERROR_PREFIX}anthropic: ${CLAUDE_CAPPED}`,
       ])
     ).toEqual({
-      line: "I couldn't update my notes on Caltrans",
+      line: "I couldn't update my notes on Canterly",
       detail: "the Claude limit resets on October 1 and OpenAI has no credits",
       reason: "no-credits",
     });
-    expect(failedLines("Caltrans", [`${MODEL_ERROR_PREFIX}anthropic: ${CLAUDE_CAPPED}`])).toEqual({
-      line: "I couldn't update my notes on Caltrans",
+    expect(failedLines("Canterly", [`${MODEL_ERROR_PREFIX}anthropic: ${CLAUDE_CAPPED}`])).toEqual({
+      line: "I couldn't update my notes on Canterly",
       detail: "the model's limit resets on October 1",
       reason: "capped",
     });
-    expect(failedLines("Caltrans", [`${MODEL_ERROR_PREFIX}openai: 401 Incorrect API key provided`])).toMatchObject({
+    expect(failedLines("Canterly", [`${MODEL_ERROR_PREFIX}openai: 401 Incorrect API key provided`])).toMatchObject({
       detail: "the model's key was refused",
       reason: "auth",
     });
-    expect(failedLines("Caltrans", [`${MODEL_ERROR_PREFIX}claude refusal`])).toEqual({
-      line: "I couldn't update my notes on Caltrans",
+    expect(failedLines("Canterly", [`${MODEL_ERROR_PREFIX}claude refusal`])).toEqual({
+      line: "I couldn't update my notes on Canterly",
       detail: "the model did not answer",
       reason: "other",
     });
     // A road that merely did not answer is named beside the one that is out
     // of credits, not dropped so that the other reads as "the model".
     expect(
-      failedLines("Caltrans", [
+      failedLines("Canterly", [
         `${MODEL_ERROR_PREFIX}anthropic: 529 overloaded_error`,
         `${MODEL_ERROR_PREFIX}openai: 429 You have no credits remaining`,
       ])
     ).toEqual({
-      line: "I couldn't update my notes on Caltrans",
+      line: "I couldn't update my notes on Canterly",
       detail: "Claude is not answering and OpenAI has no credits",
       reason: "no-credits",
     });
-    expect(failedLines("Caltrans", ["record.things[0].state.sources: at least one source"])).toEqual({
-      line: "I couldn't update my notes on Caltrans",
+    expect(failedLines("Canterly", ["record.things[0].state.sources: at least one source"])).toEqual({
+      line: "I couldn't update my notes on Canterly",
       detail: "I'll try again when something changes",
       reason: "validation",
     });
-    expect(failedLines("Caltrans", [])).toMatchObject({ detail: "I'll try again when something changes", reason: "other" });
+    expect(failedLines("Canterly", [])).toMatchObject({ detail: "I'll try again when something changes", reason: "other" });
   });
 
   it("okLines, displayModelName, outageLine", () => {
-    expect(okLines("Caltrans", { created: 0 })).toEqual({ line: "Read Caltrans", detail: "nothing new to ask" });
-    expect(okLines("Caltrans", { created: 1, updated: 2, dismissed: 1, skippedSettled: 3 }).detail).toBe(
+    expect(okLines("Canterly", { created: 0 })).toEqual({ line: "Read Canterly", detail: "nothing new to ask" });
+    expect(okLines("Canterly", { created: 1, updated: 2, dismissed: 1, skippedSettled: 3 }).detail).toBe(
       "1 new question, 2 updated, 1 dismissed, 3 already settled"
     );
     expect(displayModelName("claude-sonnet-5")).toBe("Claude Sonnet 5");
@@ -541,12 +541,12 @@ describe("GET /api/understanding/progress", () => {
     );
     expect(body.active).toEqual([]);
     expect(body.recent).toEqual([]);
-    // The newest ok-or-failed row is (6)'s Caltrans run, which updated the
+    // The newest ok-or-failed row is (6)'s Canterly run, which updated the
     // two questions (1) created and made none of its own.
     expect(body.lastRun).toMatchObject({
-      projectName: "Caltrans",
+      projectName: "Canterly",
       status: "ok",
-      line: "Read Caltrans",
+      line: "Read Canterly",
       detail: "nothing new to ask",
     });
     expect(Number.isNaN(Date.parse(body.lastRun.finishedAt))).toBe(false);
@@ -559,7 +559,7 @@ describe("GET /api/understanding/progress", () => {
     });
 
     // A failed run's row reads as the finish would have: with the ok rows
-    // gone the newest is (3)'s Caltrans row (started seconds ago; (5)'s
+    // gone the newest is (3)'s Canterly row (started seconds ago; (5)'s
     // legacy Album row was backdated a minute).
     await db
       .delete(understandingRuns)
@@ -568,9 +568,9 @@ describe("GET /api/understanding/progress", () => {
       (await GET()).json()
     );
     expect(again.lastRun).toMatchObject({
-      projectName: "Caltrans",
+      projectName: "Canterly",
       status: "failed",
-      line: "I couldn't update my notes on Caltrans",
+      line: "I couldn't update my notes on Canterly",
       detail: "the model has no credits",
     });
   });

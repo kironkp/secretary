@@ -1,4 +1,4 @@
-// "Find It" must never spawn a duplicate next to "Find It app" — fuzzy
+// "Fetch It" must never spawn a duplicate next to "Fetch It app" — fuzzy
 // project resolution, task moves, and merge, against the real database.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq, inArray } from "drizzle-orm";
@@ -16,8 +16,8 @@ beforeAll(async () => {
     { id: B.id, name: "Proj B", email: B.email },
   ]);
   await db.insert(projects).values([
-    { userId: A.id, name: "Find It app" },
-    { userId: A.id, name: "Jazz music project" },
+    { userId: A.id, name: "Fetch It app" },
+    { userId: A.id, name: "Jasper music project" },
     { userId: B.id, name: "B's Secret Plan" },
   ]);
 });
@@ -28,28 +28,28 @@ afterAll(async () => {
 
 describe("resolveProject", () => {
   it("exact name matches", async () => {
-    const r = await resolveProject(A.id, "Find It app");
-    expect(r.project?.name).toBe("Find It app");
+    const r = await resolveProject(A.id, "Fetch It app");
+    expect(r.project?.name).toBe("Fetch It app");
     expect(r.matched).toBe("exact");
   });
 
   it("case-insensitive exact matches", async () => {
-    const r = await resolveProject(A.id, "find it APP");
-    expect(r.project?.name).toBe("Find It app");
+    const r = await resolveProject(A.id, "fetch it APP");
+    expect(r.project?.name).toBe("Fetch It app");
     expect(r.matched).toBe("exact");
   });
 
-  it('"Find It" fuzzy-matches "Find It app" instead of creating a duplicate', async () => {
-    const r = await resolveProject(A.id, "Find It");
-    expect(r.project?.name).toBe("Find It app");
+  it('"Fetch It" fuzzy-matches "Fetch It app" instead of creating a duplicate', async () => {
+    const r = await resolveProject(A.id, "Fetch It");
+    expect(r.project?.name).toBe("Fetch It app");
     expect(r.matched).toBe("fuzzy");
     const all = await db.select().from(projects).where(eq(projects.userId, A.id));
-    expect(all.filter((p) => p.name.toLowerCase().includes("find it"))).toHaveLength(1);
+    expect(all.filter((p) => p.name.toLowerCase().includes("fetch it"))).toHaveLength(1);
   });
 
   it("punctuation/whitespace differences match via normalization", async () => {
-    const r = await resolveProject(A.id, "find-it-app!");
-    expect(r.project?.name).toBe("Find It app");
+    const r = await resolveProject(A.id, "fetch-it-app!");
+    expect(r.project?.name).toBe("Fetch It app");
     expect(["normalized", "fuzzy"]).toContain(r.matched);
   });
 
@@ -102,15 +102,15 @@ describe("create idempotency guard (the double-tool-call bug)", () => {
   });
 
   it("similar-but-distinct tasks still both go through", async () => {
-    await executeTool(ctx, "create_task", { title: "Email Ash about the patent" });
-    const second = await executeTool(ctx, "create_task", { title: "Call Ash about the patent" });
+    await executeTool(ctx, "create_task", { title: "Email Avery about the patent" });
+    const second = await executeTool(ctx, "create_task", { title: "Call Avery about the patent" });
     expect((second.result as { already_existed?: boolean }).already_existed).toBeUndefined();
   });
 
   it("an identical re-issued create_event returns the existing event", async () => {
     const at = new Date(Date.now() + 3 * 86400000).toISOString();
-    const first = await executeTool(ctx, "create_event", { title: "Sync with Jazz", starts_at: at });
-    const second = await executeTool(ctx, "create_event", { title: "Sync with Jazz", starts_at: at });
+    const first = await executeTool(ctx, "create_event", { title: "Sync with Jasper", starts_at: at });
+    const second = await executeTool(ctx, "create_event", { title: "Sync with Jasper", starts_at: at });
     expect((second.result as { already_existed: boolean }).already_existed).toBe(true);
     expect((second.result as { event_id: string }).event_id).toBe(
       (first.result as { event_id: string }).event_id
@@ -121,24 +121,24 @@ describe("create idempotency guard (the double-tool-call bug)", () => {
 describe("update_task project moves + update_project merge", () => {
   it("update_task with project moves the task (fuzzy) and reports it", async () => {
     const created = await executeTool(ctx, "create_task", {
-      title: "Test Find It on iPad",
-      project: "Find It app",
+      title: "Test Fetch It on iPad",
+      project: "Fetch It app",
     });
     const taskId = (created.result as { task_id: string }).task_id;
 
     const moved = await executeTool(ctx, "update_task", {
       task: taskId,
-      project: "jazz music",
+      project: "jasper music",
     });
-    expect((moved.result as { project: string }).project).toBe("Jazz music project");
+    expect((moved.result as { project: string }).project).toBe("Jasper music project");
     expect(moved.toast?.text).toContain("Moved");
     const [row] = await db.select().from(tasks).where(eq(tasks.id, taskId));
-    const [jazz] = await db
+    const [jasper] = await db
       .select()
       .from(projects)
       .where(eq(projects.userId, A.id))
-      .then((r) => r.filter((p) => p.name === "Jazz music project"));
-    expect(row.projectId).toBe(jazz.id);
+      .then((r) => r.filter((p) => p.name === "Jasper music project"));
+    expect(row.projectId).toBe(jasper.id);
 
     const cleared = await executeTool(ctx, "update_task", { task: taskId, project: "none" });
     expect((cleared.result as { project: null }).project).toBeNull();
@@ -154,7 +154,7 @@ describe("update_task project moves + update_project merge", () => {
     await executeTool(ctx, "create_task", { title: "stranded task", project: "Duplicate Zone" });
     const merged = await executeTool(ctx, "update_project", {
       project: "Duplicate Zone",
-      merge_into: "Jazz music project",
+      merge_into: "Jasper music project",
     });
     expect((merged.result as { error: string }).error).toMatch(/merging projects is not available yet/i);
     const remaining = await db
