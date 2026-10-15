@@ -66,7 +66,8 @@ orders.
 **r2** (`31f9d2e` the rule; `aba4b27`, `3b6d2b7`, `9376f9b`, `de3503d` the
 tests; `db14c26` the code; this commit; 1.09 r4 merged in as `15eba81`, 1.09
 r5 as `3e3b735`, 1.09 r6 as `2595700`, 1.09 r7 as `fab7f85`; `8a79bc6`,
-`cee1a3b` and this entry's line on them, the pill tests). The Reviewer
+`cee1a3b`, `5327bd9`, `46bc58c` and this entry's lines on them, the pill
+tests). The Reviewer
 failed the first round. Most of it held: 139 moves against their own model of
 the order, none wrong; no model call; the screen at 390; touch on the handle
 and the row; New project. What did not:
@@ -102,6 +103,10 @@ and the row; New project. What did not:
   340 ms), and one run under load wheeled on the panel's edge, not the
   thread. They wait now until it has risen. Tests only. 1.09 r7 has the same
   change and makes every scroll test wait for it.
+- With the page's CPU slowed fourfold, the pill test's answer could finish
+  before its own checks did, so when he scrolled down to the bottom nothing
+  more came for the pill to show for. It checks first that the answer is still
+  being written, and the answer is twice as long. Tests only.
 
 The Projects screen's browser tests all passed in both browsers.
 
