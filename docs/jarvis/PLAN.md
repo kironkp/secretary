@@ -10,8 +10,8 @@ beside me in a workshop."*
 - **Cycle counter: 111.** 1.00, 1.02, 1.03, 1.04, 1.09 and 1.11 are
   accepted (1.09 live 2026-10-15 at `5d4d98e`; 1.11 live the same day at
   `282c7e0`); 1.01 is open; 1.16 (the names on public main) is built and
-  waits on Kiron to allow its push; 1.10's rules are with the Reviewer;
-  then 1.13, 1.12, 1.14, 1.15 (Kiron's feedback,
+  waits on Kiron to allow its push; 1.17 (his notes are kept)
+  is being built; then 1.10, 1.13, 1.12, 1.14, 1.15 (Kiron's feedback,
   his mockup approved 2026-10-14, and the whole site in its look), then
   1.08, 1.05, 1.06, 1.07. Each pushed to Heroku as it passes (Kiron:
   "Push to heroku for each update"). See §9.
@@ -268,6 +268,19 @@ beside me in a workshop."*
   Test nit for a later round: "the pill in dark" can take its wheel point
   before the panel has risen (1 run of 26 under load); wait for the panel
   first.
+- **1.17** — a model write never loses his notes. Found in 1.10's
+  diagnosis and the Reviewer's probe (2026-10-15), on main: update_task,
+  amend_task and log_status replace the whole note, so a model's "add a
+  note" wipes what he typed; a note given with "done", to a task that
+  already exists or to a list item already there is dropped (the list
+  result even says it was kept); update_event does the same to events;
+  and his editor's save drops a line the model added while it was open.
+  Built before 1.10 because it loses his data today. The rule: a model
+  note write appends in one statement and skips only a line already
+  there; it replaces only when he asks, and says what it replaced; a
+  blocked reason goes in its own field; his save keeps lines added since
+  he opened the editor. Tests from no rule: his text survives any
+  sequence of model writes byte for byte.
 - **1.16** — names on public main, after 1.11 (the Reviewer, 2026-10-15): words
   from his real data (a client's name and a person's first name) have
   been on public main since 2026-08-07, in test fixtures, Today and
