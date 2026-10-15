@@ -709,7 +709,10 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
   });
 
   test("the pill: 44 px or more, clear of the composer, only when needed; a tap brings the bottom into view and follows again (input: wheel, then a tap)", async ({ page }) => {
-    const answer = [...LONG, ...LONG];
+    // 56 pieces, 250 ms apart (14 s): still being written when he wheels down, after the checks of the pill's size,
+    // place and words and a screenshot, even with the page's CPU slowed fourfold (they took about 8 s there).
+    test.setTimeout(60_000);
+    const answer = [...LONG, ...LONG, ...LONG, ...LONG];
     await streamAnswers(page, [{ rounds: [answer], delayMs: 250 }]);
     await open(page);
     await send(page, "E2E: a long plan please");
