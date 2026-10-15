@@ -85,10 +85,14 @@ arrow keys, or says "move Garden shed to the top" in the chat or on a call:
   restart).
 - On a call, the function calls of one reply run one after the other, in
   the order the model gave them, and the reply goes on once, after the last
-  of them has answered. A call that has not answered in 20 seconds (under
-  Heroku's 30 s limit on a request) is given up on: the model is told it got
-  no answer and that it may still have been done, the calls after it run,
-  and the reply still goes on once (v1.11 r3).
+  of them has answered. A call that has not answered in 28 seconds (under
+  Heroku's 30 s limit on a request) is given up on, the calls after it run,
+  and the reply still goes on once (v1.11 r3; 28 s since r4). The model is
+  told it got no answer, and what to do about it by what the call does: a
+  lookup that pays for its answer (consult_brain, search_web) took too long
+  and is not asked again unless he asks, since asking again pays again; any
+  other call may still have been done, so it is checked before it is done
+  again (v1.11 r4).
 
 **A project that changes group** (set aside, made active again, made a list
 or a project) arrives in its new group unplaced, at its urgency place, and
