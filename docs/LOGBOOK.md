@@ -230,7 +230,8 @@ every test passing (Safari's engine 170, Chrome 220, four of them calls), and
 no frame showed the answer out of view while following.
 
 **r7** (`7a0c42c` the rule; `5045f58`, `411de4d`, `195c433`, `089d093`,
-`e7c1a93`, `a849d36` the tests; `7d16f5c` the code; this commit). On main, r6's
+`e7c1a93`, `a849d36`, `5a82215` the tests; `7d16f5c` the code; `de821ff`
+and this commit). On main, r6's
 browser tests failed in the one place they run as an iPhone, GitHub's WebKit,
 which none of us had run them in; nothing was released. That WebKit draws six
 or seven frames a second, and three tests failed on how many frames they had
