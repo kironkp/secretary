@@ -153,6 +153,8 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
    *  so a read inside one sees, while the panel animates shorter, a state the screen never shows. */
   const watch = (page: import("@playwright/test").Page) =>
     page.evaluate(() => {
+      // Moments are marked by how many frames were recorded before them, not by time: WebKit's clock is coarse (a frame
+      // read just before his hand can carry the same time as the hand, and the position from before it).
       const w = window as unknown as { __frames: Frame[]; __stop: boolean; __handAt: number | null; __handTop: number | null; __taps: number[] };
       w.__frames = [];
       w.__stop = false;
@@ -166,12 +168,12 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
         const el = document.querySelector("[data-thread-scroll]") as HTMLElement | null;
         if (!el) return;
         if (e.type === "keydown" ? document.activeElement?.matches("input, textarea, select, [contenteditable]") : !el.contains(e.target as Node)) return;
-        w.__handAt = performance.now();
+        w.__handAt = w.__frames.length;
         w.__handTop = el.scrollTop;
       };
       for (const type of ["wheel", "pointerdown", "touchstart", "keydown"]) document.addEventListener(type, hand, { capture: true, passive: true });
       // Each tap on the pill: when.
-      document.addEventListener("click", (e) => (e.target as Element).closest?.("[data-new-reply-pill]") && w.__taps.push(performance.now()), { capture: true });
+      document.addEventListener("click", (e) => (e.target as Element).closest?.("[data-new-reply-pill]") && w.__taps.push(w.__frames.length), { capture: true });
       // At paint: whether the answer being written is wholly in the thread's view. An IntersectionObserver's
       // intersections are computed after the frame's ResizeObserver callbacks, just before it is painted; its root is
       // the thread with the top pushed far up, so only the thread's bottom edge (the composer's top) can cut it off.
@@ -232,10 +234,13 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
     });
     expect(handAt, "his hand reached the page").not.toBeNull();
     const seen = await frames(page);
-    const tapAt = taps.find((t) => t > handAt!) ?? Infinity;
-    const after = seen.filter((f) => f.t >= handAt! && f.t < tapAt);
+    // Frame numbers: the frames recorded after his hand, up to the first tap on the pill after it.
+    const tapIdx = taps.find((t) => t >= handAt!) ?? seen.length;
+    const after = seen.slice(handAt!, tapIdx);
     let pulled = 0;
     for (let i = 1; i < after.length; i++) pulled = Math.max(pulled, after[i].scroll - after[i - 1].scroll);
+    // From the tap on, by time (the at-paint reports carry times): the first frame recorded after it.
+    const tapAt = tapIdx < seen.length ? seen[tapIdx].t : Infinity;
     return { handTop: handTop!, after, pulled, tapAt, seen };
   };
   /** The answer being written, two ways: at paint, how many times it was not wholly in the thread's view (the check);
@@ -422,6 +427,7 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
     // drawn, the others at a moment of their own; 250 ms later the pill is tapped, which follows again.
     const trials = await thread(page).evaluate(async (el) => {
       const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+      const frames = (window as unknown as { __frames: unknown[] }).__frames;
       const out: { at: number; top: number; tapAt: number; pill: boolean }[] = [];
       for (let k = 0; k < 5; k++) {
         if (k === 0) {
@@ -434,11 +440,12 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
           });
         } else await wait(10 + Math.random() * 60);
         el.scrollTop = el.scrollTop - 150;
-        const at = performance.now();
+        // Frame numbers, not times (WebKit's clock is coarse): the frames recorded after this scroll, before the tap.
+        const at = frames.length;
         const top = el.scrollTop;
         await wait(250);
         const p = document.querySelector("[data-new-reply-pill]") as HTMLElement | null;
-        const tapAt = performance.now();
+        const tapAt = frames.length;
         p?.click();
         out.push({ at, top, tapAt, pill: !!p });
         await wait(150);
@@ -448,7 +455,7 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
     await landed(page, 1);
     const seen = await frames(page);
     for (const [k, t] of trials.entries()) {
-      const between = seen.filter((f) => f.t >= t.at && f.t < t.tapAt);
+      const between = seen.slice(t.at, t.tapAt);
       expect(between.length, `trial ${k + 1}: frames before the pill`).toBeGreaterThan(3);
       expect(Math.max(...between.map((f) => f.scroll)) - t.top, `trial ${k + 1}: pulled back`).toBeLessThanOrEqual(2);
       expect(t.pill, `trial ${k + 1}: the pill showed`).toBe(true);
