@@ -65,7 +65,8 @@ orders.
 
 **r2** (`31f9d2e` the rule; `aba4b27`, `3b6d2b7`, `9376f9b`, `de3503d` the
 tests; `db14c26` the code; this commit; 1.09 r4 merged in as `15eba81`, 1.09
-r5 as `3e3b735`, 1.09 r6 as `2595700`). The Reviewer
+r5 as `3e3b735`, 1.09 r6 as `2595700`; `8a79bc6`, `cee1a3b` and this
+entry's line on them, the pill tests). The Reviewer
 failed the first round. Most of it held: 139 moves against their own model of
 the order, none wrong; no model call; the screen at 390; touch on the handle
 and the row; New project. What did not:
@@ -96,6 +97,10 @@ and the row; New project. What did not:
   (a move down, the groups' order, a fresh load during a move, the Timeline's
   lanes, the briefing's order, and a project whose only date is an event this
   week, which is urgent). The seventh changes nothing anyone sees.
+- From 1.09's review: the chat's two pill tests could take their wheel point
+  while the panel was still rising from the bar (a send raises it over
+  340 ms), and one run under load wheeled on the panel's edge, not the
+  thread. They wait now until it has risen. Tests only.
 
 The Projects screen's browser tests all passed in both browsers.
 
