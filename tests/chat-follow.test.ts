@@ -167,6 +167,20 @@ describe("a scroll with no input (rule 4)", () => {
     expect(t.box.top).toBe(t.end());
   });
 
+  it("the panel growing pulls the position down to the old bottom in the same read as a new piece (Chromium, logged): still on", () => {
+    // Logged at the start of a turn, 3 of 30: the page wrote 95 (content 261, view 166); then, in one read, the view
+    // was 249, the browser had pulled the position to 12 (261 - 249), and a piece had made the content 318: 57 px
+    // above the bottom, at a position the page did not write. Not his scroll.
+    const t = thread({ top: 95, height: 261, view: 166 });
+    t.f.toBottom();
+    t.box.view = 249;
+    t.box.top = 12;
+    t.box.height = 318;
+    t.f.keep();
+    expect(t.f.following()).toBe(true);
+    expect(t.box.top).toBe(t.end());
+  });
+
   it("a round that starts over shorter (the content shrank, the position pulled down to fit): still on", () => {
     const t = thread({ top: 0, height: 1400, view: 500 });
     t.f.toBottom();
