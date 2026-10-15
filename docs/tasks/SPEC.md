@@ -85,7 +85,7 @@ row's lock:
 - nothing changed since: his text is stored exactly as sent;
 - lines were added since (by a model, while he was typing): they are kept,
   after his text, in their order, each once, and not when his text already
-  has the line;
+  has the line (blank lines are not carried);
 - lines he deleted that were there when he opened it stay deleted;
 - a page loaded before v1.17 sends no base: his text, then the stored lines
   his text does not have. Nothing is lost; a deletion made through such a

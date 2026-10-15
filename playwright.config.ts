@@ -19,6 +19,9 @@ const PORT = Number(process.env.E2E_PORT ?? 3000);
 // `localhost`, not 127.0.0.1: lib/auth.ts allowlists hosts as `localhost:*`
 // when BETTER_AUTH_URL is unset, and the loopback IP is not that string.
 export const BASE_URL = `http://localhost:${PORT}`;
+// The model stand-in (e2e/model-standin.mjs): a chat turn that reaches the
+// server is answered by it, never by a real model (v1.17).
+const STANDIN_PORT = Number(process.env.E2E_STANDIN_PORT ?? PORT + 1000);
 
 export default defineConfig({
   testDir: "./e2e",
@@ -126,35 +129,61 @@ export default defineConfig({
       testMatch: /projects-order\.spec\.ts/,
       use: { ...devices["iPhone 15"] },
     },
+    {
+      // A model write never loses his notes (v1.17, docs/tasks/SPEC.md §1):
+      // his save from the editor keeps what a chat turn (the real route, the
+      // model stand-in answering) and a call (the real tool route) added
+      // while it was open.
+      name: "notes",
+      testMatch: /task-notes\.spec\.ts/,
+      use: { ...devices["iPhone 15"] },
+    },
   ],
 
-  webServer: {
-    // Uses the build the verify job already produced; does not rebuild.
-    command: `npx next start -p ${PORT}`,
-    url: BASE_URL,
-    env: {
-      // `next start` runs in production mode, and without an explicit base URL
-      // Better Auth falls through its protocol checks to "is production" and
-      // issues a __Secure- prefixed session cookie. No browser accepts one of
-      // those over plain http, so every spec ran signed out (CI run 8). Naming
-      // the real http origin makes the decision deterministic and truthful.
-      BETTER_AUTH_URL: BASE_URL,
-      NEXT_PUBLIC_APP_URL: BASE_URL,
-      // Answering a question schedules that project's understanding run
-      // (docs/understanding/SPEC.md §6 step 4). CI carries placeholder model
-      // keys, so without this the run would try a real call and fail in the
-      // log after every answer; the specs assert on the writes, not the run.
-      UNDERSTANDING_DISABLED: "true",
-      // The Overview production renders (the LayoutPlan board), not the
-      // legacy one that runs when the flag is unset (SEC-A007). Its planner
-      // refines in the background with a model; SPEND_KILL refuses every
-      // paid call but a user's own chat or voice turn, so none is made.
-      ADAPTIVE_V2: "true",
-      SPEND_KILL: "true",
+  webServer: [
+    {
+      // Uses the build the verify job already produced; does not rebuild.
+      command: `npx next start -p ${PORT}`,
+      url: BASE_URL,
+      env: {
+        // `next start` runs in production mode, and without an explicit base URL
+        // Better Auth falls through its protocol checks to "is production" and
+        // issues a __Secure- prefixed session cookie. No browser accepts one of
+        // those over plain http, so every spec ran signed out (CI run 8). Naming
+        // the real http origin makes the decision deterministic and truthful.
+        BETTER_AUTH_URL: BASE_URL,
+        NEXT_PUBLIC_APP_URL: BASE_URL,
+        // Answering a question schedules that project's understanding run
+        // (docs/understanding/SPEC.md §6 step 4). CI carries placeholder model
+        // keys, so without this the run would try a real call and fail in the
+        // log after every answer; the specs assert on the writes, not the run.
+        UNDERSTANDING_DISABLED: "true",
+        // The Overview production renders (the LayoutPlan board), not the
+        // legacy one that runs when the flag is unset (SEC-A007). Its planner
+        // refines in the background with a model; SPEND_KILL refuses every
+        // paid call but a user's own chat or voice turn, so none is made.
+        ADAPTIVE_V2: "true",
+        SPEND_KILL: "true",
+        // A chat turn on a Claude model goes to the stand-in, with a key that is
+        // not one (v1.17). The shared user's chat stays on the OpenAI default
+        // unless a spec picks a Claude model for itself.
+        CLAUDE_BRAIN: "true",
+        ANTHROPIC_API_KEY: "e2e-standin-not-a-key",
+        ANTHROPIC_BASE_URL: `http://127.0.0.1:${STANDIN_PORT}`,
+      },
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+      stdout: "pipe",
+      stderr: "pipe",
     },
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-    stdout: "pipe",
-    stderr: "pipe",
-  },
+    {
+      command: "node e2e/model-standin.mjs",
+      url: `http://127.0.0.1:${STANDIN_PORT}/health`,
+      env: { STANDIN_PORT: String(STANDIN_PORT) },
+      reuseExistingServer: !process.env.CI,
+      timeout: 30_000,
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  ],
 });
