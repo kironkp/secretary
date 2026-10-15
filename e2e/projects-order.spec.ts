@@ -87,9 +87,13 @@ test("the Projects screen as approved, at 390 wide: sizes, colours, the 44 × 44
   await page.screenshot({ path: `${DIR}/projects-390.png` });
 });
 
-test("dark: the same roles on the dark tokens, text at 4.5:1", async ({ page }) => {
-  await page.emulateMedia({ colorScheme: "dark" });
+test("dark: the same roles on the dark tokens, text at 4.5:1", async ({ page, baseURL }) => {
+  // Dark is his theme setting, kept in a cookie (app/layout.tsx), not the system's preference: v1.11's test set
+  // the preference and measured the light page.
+  await page.context().addCookies([{ name: "theme", value: "dark", url: baseURL! }]);
   await page.goto("/projects");
+  expect(await page.evaluate(() => document.documentElement.dataset.theme), "the page is dark").toBe("dark");
+  expect(await page.locator("[data-project-group='active']").evaluate((el) => getComputedStyle(el).backgroundColor)).not.toBe("rgb(255, 255, 255)");
   const ratios = await page.evaluate(() => {
     const rgb = (s: string) => (s.match(/\d+(\.\d+)?/g) ?? []).slice(0, 3).map(Number);
     const lum = ([r, g, b]: number[]) => {
@@ -115,12 +119,17 @@ test("dark: the same roles on the dark tokens, text at 4.5:1", async ({ page }) 
 test("a drag by the handle moves the project at once, and the order stays after a reload", async ({ page }) => {
   await page.goto("/projects");
   expect(await order(page)).toEqual(MINE);
-  // Held halfway: the row is lifted, the handle accent.
+  // Held halfway: the row is lifted (at least 60 px tall, the rows it has not passed where they were), the handle
+  // accent.
   const from = (await handle(page, "Tax paperwork").boundingBox())!;
+  const firstTop = async () => (await row(page, "Garden shed").boundingBox())!.y;
+  const firstBefore = await firstTop();
   await page.mouse.move(from.x + 22, from.y + 22);
   await page.mouse.down();
   await page.mouse.move(from.x + 22, from.y - 40, { steps: 4 });
   await expect(row(page, "Tax paperwork")).toHaveAttribute("data-lifted", "true");
+  expect((await row(page, "Tax paperwork").boundingBox())!.height, "the lifted row's height").toBeGreaterThanOrEqual(60);
+  expect(Math.abs((await firstTop()) - firstBefore), "a row it has not passed does not move").toBeLessThanOrEqual(0.5);
   await page.screenshot({ path: `${DIR}/projects-390-dragging.png` });
   // Back where it started before letting go: no move, nothing stored.
   await page.mouse.move(from.x + 22, from.y + 22, { steps: 4 });
@@ -145,6 +154,15 @@ test("a drag never starts from the row body, and a tap on the row opens the proj
   await page.goto("/projects");
   expect(await order(page)).toEqual(before);
   await row(page, "Kitchen repaint").locator("[data-project-name-text]").tap();
+  await expect(page).toHaveURL(/\/projects\/[^/]+$/);
+});
+
+test("the strip between the count and the handle opens the project, like the rest of the row", async ({ page }) => {
+  await page.goto("/projects");
+  const count = (await row(page, "Kitchen repaint").locator("[data-project-count]").boundingBox())!;
+  const grab = (await handle(page, "Kitchen repaint").boundingBox())!;
+  expect(grab.x - (count.x + count.width), "the strip is there, 12 px").toBeGreaterThanOrEqual(10);
+  await page.mouse.click((count.x + count.width + grab.x) / 2, count.y + count.height / 2);
   await expect(page).toHaveURL(/\/projects\/[^/]+$/);
 });
 
@@ -187,4 +205,35 @@ test("a store that fails puts the row back and says so plainly", async ({ page }
   await drag(page, before.at(-1)!, before[0]);
   await expect(page.getByText(`Couldn't move ${before.at(-1)}. It's back where it was.`)).toBeVisible();
   expect(await order(page)).toEqual(before);
+});
+
+test("held near the top edge, a long list scrolls under the row: a project goes from the bottom to the top in one drag", async ({ page, request }) => {
+  for (let i = 1; i <= 12; i++) await tool(request, "create_project", { name: `Long list ${String(i).padStart(2, "0")}` });
+  await page.goto("/projects");
+  const names = () => page.locator("[data-project-group='active'] [data-project-row]").evaluateAll((rows) => rows.map((r) => r.getAttribute("data-project-name") ?? ""));
+  const before = await names();
+  expect(before.length).toBeGreaterThanOrEqual(16);
+  const last = before.at(-1)!;
+  // The list is longer than the screen: its last row is reached by scrolling the page's own scroller.
+  const scroller = page.locator("main");
+  await handle(page, last).scrollIntoViewIfNeeded();
+  const startScroll = await scroller.evaluate((el) => el.scrollTop);
+  expect(startScroll, "the list is longer than the screen").toBeGreaterThan(200);
+  const from = (await handle(page, last).boundingBox())!;
+  const top = (await scroller.boundingBox())!.y;
+  await page.mouse.move(from.x + 22, from.y + 22);
+  await page.mouse.down();
+  // To the top edge of the list's view, and held there while the list scrolls under it.
+  await page.mouse.move(from.x + 22, top + 6, { steps: 12 });
+  const t0 = Date.now();
+  await expect.poll(() => scroller.evaluate((el) => el.scrollTop), { timeout: 10_000 }).toBe(0);
+  console.log(`[edge scroll] ${startScroll} px to the top in ${Date.now() - t0} ms, held 6 px from the edge`);
+  // Then onto the first row, and let go.
+  const first = (await row(page, before[0]).boundingBox())!;
+  await page.mouse.move(from.x + 22, first.y + 4, { steps: 4 });
+  const saved = stored(page);
+  await page.mouse.up();
+  await saved;
+  await page.reload();
+  expect((await names())[0]).toBe(last);
 });
