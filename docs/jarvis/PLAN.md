@@ -9,7 +9,8 @@ beside me in a workshop."*
 
 - **Cycle counter: 108.** 1.00, 1.02, 1.03 and 1.04 are accepted; 1.01 is
   open; 1.09 is being built (on `jarvis-1.09-chat-stream`, from `bdf56fc`,
-  with the Reviewer's two r5 follow-ups, test and walker only); then 1.11, 1.10, 1.13, 1.12, 1.14, 1.15 (Kiron's feedback,
+  with the Reviewer's two r5 follow-ups, test and walker only); then 1.11,
+  then the names on public main (below), then 1.10, 1.13, 1.12, 1.14, 1.15 (Kiron's feedback,
   his mockup approved 2026-10-14, and the whole site in its look), then
   1.08, 1.05, 1.06, 1.07. Each pushed to Heroku as it passes (Kiron:
   "Push to heroku for each update"). See §9.
@@ -252,11 +253,24 @@ beside me in a workshop."*
   killed and the 12th equivalent, a rule-free fake call) and pushed to main.
   Main's CI then failed (run 38732670478) in the iPhone browser job, the
   Linux WebKit run only GitHub has, on three tests' frame-count minimums;
-  Heroku stayed on v66. A test-only fix is being made, and from now on
-  every offer carries a green GitHub run on `test` for its exact SHA.
+  Heroku stayed on v66. From now on every offer carries a green GitHub run
+  on `test` for its exact SHA. The cause was not only the tests: in that
+  WebKit (26.6) the browser's scroll anchoring held the thread at the
+  bottom after his hand, with the page writing nothing. r7 (`5d4d98e`)
+  turns anchoring off on the thread and makes the frame minimums count
+  frames that drew new words. **PASSed 2026-10-15 at `5d4d98e`** (GitHub
+  `test` 3 of 3, CI-exact, 10 runs per local engine plus 5 throttled with
+  exit 0, the cause agreed from the logs) and pushed to main.
   Test nit for a later round: "the pill in dark" can take its wheel point
   before the panel has risen (1 run of 26 under load); wait for the panel
   first.
+- **Names on public main** — after 1.11 (the Reviewer, 2026-10-15): words
+  from his real data (a client's name and a person's first name) have
+  been on public main since 2026-08-07, in test fixtures, Today and
+  interview copy, and docs/adaptive-ui/, about a dozen files. Replace
+  them with made-up names in the current files; the counts of files and
+  places go in the RESULT, never the words. Whether the history is
+  rewritten or the repo made private is Kiron's call (§10).
 - **1.08** — after 1.09, ahead of 1.05: an understanding
   call that was sent and not answered is counted, and a provider failure
   backs off. Today: up to 3 attempts a sweep per project, every 10 minutes,
@@ -366,7 +380,14 @@ beside me in a workshop."*
     other scrollers whose position the page writes itself, i.e. the tab
     bar (`nav-tabs.tsx:64`) and the Timeline's zoom and "today" scrolls
     (`timeline-board.tsx:469`, `:473`), and turn anchoring off where it
-    moves them.
+    moves them. With anchoring off on the chat thread, a thread opened on
+    a found message (search, Spreadsheet, a task's source link) lets
+    images that load late above it push it down, out of view (the
+    Reviewer, 1.09 r7; main before 1.09 landed at the bottom anyway): the
+    page keeps the found message in place while what is above settles.
+    And one test gap named in 1.09 r7: no typed test forces the last
+    piece and the landing into one frame and judges that frame at paint
+    (the Reviewer forced it by hand: 0 under, 10 of 10).
 - **1.05** — "asked means asked", the rest of what 1.03 began, built on main
   after 1.04: clarifications, understanding questions and nudges marked only
   after the hand-over; voice settles when the call really ran, not when the
@@ -872,3 +893,8 @@ Still open:
    for the rest of the background work (table in §5). One Heroku setting,
    Kiron's to run:
    `heroku config:set UNDERSTANDING_DAILY_CAP_USD=2.5 -a secretary-kiron`.
+7. **Names in the public history.** Words from his real data have been on
+   public main since 2026-08-07 (the Reviewer, 2026-10-15). The current files
+   are cleaned in a task after 1.11; the history keeps them. Rewriting the
+   history or making the repository private is his call; neither is done
+   without him.
