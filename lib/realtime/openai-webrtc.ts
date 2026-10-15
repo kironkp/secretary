@@ -19,6 +19,8 @@ import type {
 
 const OPENAI_CALLS_URL = "https://api.openai.com/v1/realtime/calls";
 const MAX_RECONNECTS = 5;
+/** How long a function call on a call may take before it is given up on: under Heroku's 30 s router limit. */
+export const TOOL_CALL_LIMIT_MS = 20_000;
 
 /** Direction attribute of the first audio m-line section of an SDP. */
 function sdpAudioDirection(sdp: string): string | null {
@@ -621,6 +623,11 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
     let body: { result?: unknown; toast?: unknown; uiAction?: unknown } = {
       result: { error: "Tool call failed" },
     };
+    // A reply's calls run one after the other, so one that never answers would
+    // hold every call after it and the reply itself (v1.11 r3): past the
+    // limit it is given up on, and gets an output that says so.
+    const stop = new AbortController();
+    const limit = setTimeout(() => stop.abort(), TOOL_CALL_LIMIT_MS);
     try {
       const res = await fetch("/api/secretary/tools", {
         method: "POST",
@@ -632,10 +639,16 @@ export class OpenAIRealtimeVoice implements VoiceProvider {
           ...(this.flavor ? { surface: this.flavor } : {}),
           ...this.placeOf(itemId),
         }),
+        signal: stop.signal,
       });
       if (res.ok) body = await res.json();
     } catch {
-      /* the default above */
+      if (stop.signal.aborted) {
+        body = { result: { error: `No answer within ${TOOL_CALL_LIMIT_MS / 1000} seconds. It may still have been done: check before doing it again.` } };
+      }
+      /* otherwise the default above */
+    } finally {
+      clearTimeout(limit);
     }
     this.send({
       type: "conversation.item.create",

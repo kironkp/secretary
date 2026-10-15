@@ -207,7 +207,7 @@ export function ProjectList({ group, rows, leading = null }: { group: string; ro
               data-project-name={p.name}
               data-lifted={lifted ? "true" : undefined}
               className={`relative flex min-h-14 items-center pl-4 pr-1 ${i > 0 || leading ? "border-t border-hairline" : ""} ${
-                lifted ? "z-10 -mx-1.5 select-none rounded-[12px] border-transparent bg-card pl-[22px]" : "bg-card first:rounded-t-[12px] last:rounded-b-[12px]"
+                lifted ? "z-10 -mx-1.5 select-none rounded-[12px] border-transparent bg-lifted pl-[22px]" : "bg-card first:rounded-t-[12px] last:rounded-b-[12px]"
               }`}
               style={{
                 // Under the pointer: it moved, and the list scrolled under it.

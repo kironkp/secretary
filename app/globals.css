@@ -31,6 +31,8 @@
   /* The new look (docs/projects/SPEC.md §5, from the approved screens): accent TEXT and icons at 4.5:1 on white, and the hairline between rows. */
   --accent-ink: #3a5bd0;
   --hairline: rgba(60, 60, 67, 0.18);
+  /* A row lifted off its card (the Projects drag): white on the light page; raised in dark, where a shadow does not show on black. */
+  --lifted: #ffffff;
 }
 
 [data-theme="dark"] {
@@ -55,6 +57,7 @@
   --bar: rgba(22, 22, 24, 0.94);
   --accent-ink: #7a9bff;
   --hairline: rgba(84, 84, 88, 0.6);
+  --lifted: #2c2c2e;
 }
 
 @theme inline {
@@ -62,6 +65,7 @@
   --color-surface: var(--surface);
   --color-surface-2: var(--surface-2);
   --color-card: var(--card);
+  --color-lifted: var(--lifted);
   --color-edge: var(--edge);
   --color-ink: var(--ink);
   --color-muted: var(--muted);

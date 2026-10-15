@@ -24,4 +24,17 @@ const pool = new Pool({
 export const db = drizzle(pool, { schema });
 /** What a read can go through: the pool, or a transaction it is part of (so it waits for no second connection). */
 export type Reader = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * Several reads through one reader: all at once on the pool, one after another in a transaction. A transaction is
+ * one connection, and a query sent on it while another is running is deprecated in pg 8 (it warns: "Calling
+ * client.query() when the client is already executing a query") and refused in pg 9.
+ */
+export async function readAll<T extends readonly unknown[]>(reader: Reader, reads: { [K in keyof T]: () => PromiseLike<T[K]> }): Promise<T> {
+  const thunks = reads as unknown as readonly (() => PromiseLike<unknown>)[];
+  if (reader === db) return (await Promise.all(thunks.map((read) => read()))) as unknown as T;
+  const out: unknown[] = [];
+  for (const read of thunks) out.push(await read());
+  return out as unknown as T;
+}
 export { schema };

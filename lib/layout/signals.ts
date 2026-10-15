@@ -3,7 +3,7 @@
 // this object; only computeSignals touches the database.
 import { and, desc, eq, gte, lt, or, sql } from "drizzle-orm";
 import { daysFromToday, isOpenWork } from "@/lib/due";
-import { db, type Reader } from "@/lib/db";
+import { db, readAll, type Reader } from "@/lib/db";
 import { events, layoutSpecs, messages, projects, tasks, user } from "@/lib/db/schema";
 import { notIntakeMail } from "@/lib/secretary/proposals";
 
@@ -116,86 +116,93 @@ export async function computeSignals(userId: string, now = new Date(), reader: R
   startOfDay.setHours(0, 0, 0, 0);
 
   const [projectRows, taskRows, eventRows, userMessages24h, dailyCounts, [userRow], headRows] =
-    await Promise.all([
+    await readAll(reader, [
       // The order they were made in, the id breaking a tie (rows made in one go share a stamp): the hash walks it.
-      reader.select().from(projects).where(eq(projects.userId, userId)).orderBy(projects.createdAt, projects.id),
-      reader
-        .select({
-          id: tasks.id,
-          projectId: tasks.projectId,
-          title: tasks.title,
-          status: tasks.status,
-          dueAt: tasks.dueAt,
-          source: tasks.source,
-        })
-        .from(tasks)
-        .where(eq(tasks.userId, userId))
-        // An order of their own (v1.11): the lists made from them reach the planner's prompt and the cap of 50.
-        .orderBy(tasks.createdAt, tasks.id),
-      reader
-        .select({ id: events.id, projectId: events.projectId, startsAt: events.startsAt })
-        .from(events)
-        .where(and(eq(events.userId, userId), gte(events.startsAt, now)))
-        // Two at one instant: the id decides which is the next commitment, which the hash carries (v1.11).
-        .orderBy(events.startsAt, events.id),
-      reader
-        .select({ content: messages.content, createdAt: messages.createdAt })
-        .from(messages)
-        .where(
-          // The user's own words: not forwarded mail an intake thread stores as theirs (SEC-A005b).
-          and(eq(messages.userId, userId), eq(messages.role, "user"), notIntakeMail(), gte(messages.createdAt, ago24h))
-        )
-        // In the order he said them (v1.11): the questions reach the planner's prompt, the last mention its read.
-        .orderBy(messages.createdAt, messages.id),
-      // Daily user-message counts for the trailing 14 days (baseline denominator).
-      reader
-        .select({
-          day: sql<string>`date_trunc('day', ${messages.createdAt})::date::text`,
-          content: messages.content,
-        })
-        .from(messages)
-        .where(
-          and(
-            eq(messages.userId, userId),
-            eq(messages.role, "user"),
-            notIntakeMail(),
-            gte(messages.createdAt, ago14d),
-            lt(messages.createdAt, ago24h)
+      () =>
+        reader.select().from(projects).where(eq(projects.userId, userId)).orderBy(projects.createdAt, projects.id),
+      () =>
+        reader
+          .select({
+            id: tasks.id,
+            projectId: tasks.projectId,
+            title: tasks.title,
+            status: tasks.status,
+            dueAt: tasks.dueAt,
+            source: tasks.source,
+          })
+          .from(tasks)
+          .where(eq(tasks.userId, userId))
+          // An order of their own (v1.11): the lists made from them reach the planner's prompt and the cap of 50.
+          .orderBy(tasks.createdAt, tasks.id),
+      () =>
+        reader
+          .select({ id: events.id, projectId: events.projectId, startsAt: events.startsAt })
+          .from(events)
+          .where(and(eq(events.userId, userId), gte(events.startsAt, now)))
+          // Two at one instant: the id decides which is the next commitment, which the hash carries (v1.11).
+          .orderBy(events.startsAt, events.id),
+      () =>
+        reader
+          .select({ content: messages.content, createdAt: messages.createdAt })
+          .from(messages)
+          .where(
+            // The user's own words: not forwarded mail an intake thread stores as theirs (SEC-A005b).
+            and(eq(messages.userId, userId), eq(messages.role, "user"), notIntakeMail(), gte(messages.createdAt, ago24h))
           )
-        ),
-      reader.select({ calmMode: user.calmMode, timezone: user.timezone }).from(user).where(eq(user.id, userId)),
-      reader
-        .select({
-          spec: layoutSpecs.spec,
-          pinned: layoutSpecs.pinned,
-          kind: layoutSpecs.kind,
-          createdAt: layoutSpecs.createdAt,
-        })
-        .from(layoutSpecs)
-        // The newest ten rows, and every row of the last two days with the
-        // one before the oldest of them (a row is judged against the row it
-        // follows): the layout clock below is exact about "today" however
-        // many rows a day wrote.
-        .where(
-          and(
-            eq(layoutSpecs.userId, userId),
-            eq(layoutSpecs.kind, "plan"),
-            or(
-              gte(layoutSpecs.version, sql`(select coalesce(max(version), 0) - 9 from layout_specs where user_id = ${userId} and kind = 'plan')`),
-              // (No row in the last two days: nothing is added to the ten.)
-              gte(
-                layoutSpecs.version,
-                sql`coalesce(
-                  (select max(o.version) from layout_specs o where o.user_id = ${userId} and o.kind = 'plan'
-                    and o.version < (select min(r.version) from layout_specs r where r.user_id = ${userId} and r.kind = 'plan' and r.created_at >= ${twoDaysAgo})),
-                  (select min(r.version) from layout_specs r where r.user_id = ${userId} and r.kind = 'plan' and r.created_at >= ${twoDaysAgo}),
-                  2147483647)`
+          // In the order he said them (v1.11): the questions reach the planner's prompt, the last mention its read.
+          .orderBy(messages.createdAt, messages.id),
+      // Daily user-message counts for the trailing 14 days (baseline denominator).
+      () =>
+        reader
+          .select({
+            day: sql<string>`date_trunc('day', ${messages.createdAt})::date::text`,
+            content: messages.content,
+          })
+          .from(messages)
+          .where(
+            and(
+              eq(messages.userId, userId),
+              eq(messages.role, "user"),
+              notIntakeMail(),
+              gte(messages.createdAt, ago14d),
+              lt(messages.createdAt, ago24h)
+            )
+          ),
+      () =>
+        reader.select({ calmMode: user.calmMode, timezone: user.timezone }).from(user).where(eq(user.id, userId)),
+      () =>
+        reader
+          .select({
+            spec: layoutSpecs.spec,
+            pinned: layoutSpecs.pinned,
+            kind: layoutSpecs.kind,
+            createdAt: layoutSpecs.createdAt,
+          })
+          .from(layoutSpecs)
+          // The newest ten rows, and every row of the last two days with the
+          // one before the oldest of them (a row is judged against the row it
+          // follows): the layout clock below is exact about "today" however
+          // many rows a day wrote.
+          .where(
+            and(
+              eq(layoutSpecs.userId, userId),
+              eq(layoutSpecs.kind, "plan"),
+              or(
+                gte(layoutSpecs.version, sql`(select coalesce(max(version), 0) - 9 from layout_specs where user_id = ${userId} and kind = 'plan')`),
+                // (No row in the last two days: nothing is added to the ten.)
+                gte(
+                  layoutSpecs.version,
+                  sql`coalesce(
+                    (select max(o.version) from layout_specs o where o.user_id = ${userId} and o.kind = 'plan'
+                      and o.version < (select min(r.version) from layout_specs r where r.user_id = ${userId} and r.kind = 'plan' and r.created_at >= ${twoDaysAgo})),
+                    (select min(r.version) from layout_specs r where r.user_id = ${userId} and r.kind = 'plan' and r.created_at >= ${twoDaysAgo}),
+                    2147483647)`
+                )
               )
             )
           )
-        )
-        .orderBy(desc(layoutSpecs.version))
-        .limit(CLOCK_ROWS),
+          .orderBy(desc(layoutSpecs.version))
+          .limit(CLOCK_ROWS),
     ]);
 
   const active = projectRows.filter((p) => p.status === "active");
