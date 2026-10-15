@@ -87,6 +87,9 @@ The thread's own moves go through the same rule: his send and the panel
 opening turn following on; so does the end of a call, when the saved messages
 take the place of the spoken lines and the thread lands at the newest; a jump
 to a message found by search turns it off.
+The page alone sets the thread's position: the browser's scroll anchoring is
+off on it (`overflow-anchor: none`; v1.09 r7, where a WebKit that has it held
+the thread at the bottom after his wheel).
 While an answer is written, the room of the row that will hold its Copy and
 Read aloud buttons is kept below it, so when it lands nothing moves. "Not
 delivered — tap to retry" is a 44 px tall target: it is the only way he runs a
