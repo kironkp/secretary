@@ -261,6 +261,30 @@ thread. The whole chat spec ran 20 times in each browser: every test passed
 every time (Safari's engine 320, Chrome 340), and no frame showed the answer
 out of view while following.
 
+**r6** (`c103e31`, `8058bcc` the rule; `a0823f3`, `6930333`, `2016092`,
+`595b53b`, `e1d44cc` the tests; `d6e0346`, `b0a87a0` the code; this
+commit). The
+Reviewer found that a call broke the rule: one touch on the thread during a
+spoken answer stopped following for the rest of the call, so his next spoken
+question and its answer were written under the composer, up to 1,466 px,
+with only the button to bring them up. Typed messages were fine. A new line
+of his on a call is now a send, through the same path as a typed one: a
+spoken move and a touched move are the same. The first try at that pulled
+him down when he had just scrolled up: his own words are often heard after
+the answer has begun, and their arrival counted as a send. Now his line is
+judged from the moment his turn began (his speech taken as a message, which
+the stream reports before any answer): a send only if he has not touched the
+thread since. A line with no words in it (an empty or noisy transcription)
+never counts. The answer's first words can still come before his own line
+is heard; they are followed from when it is. When a call ends and the saved
+messages take the place of the spoken lines, the thread lands at the newest,
+as it did before v1.09. The "New reply below" button's words were white on
+light blue, 2.64:1; they are now dark on that blue, 6.45:1. The chat is
+always drawn dark, so that is what he sees in either theme; the app's other
+blue buttons are 1.15's. The whole chat spec ran 10 times in each browser,
+every test passing (Safari's engine 170, Chrome 220, four of them calls), and
+no frame showed the answer out of view while following.
+
 ## v1.02 — A clear Overview (2026-10-13)
 
 `b980803` (the round as one commit: written 2026-10-06 as v0.34 and parked,

@@ -179,10 +179,12 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
       // the thread with the top pushed far up, so only the thread's bottom edge (the composer's top) can cut it off.
       const ww = w as unknown as { __out: { t: number; ratio: number }[] };
       ww.__out = [];
+      // The answer being written: the typed turn's, or on a call the secretary's line while it is said.
+      const LIVE = "[data-live-answer], [data-call-line='assistant'][data-call-final='false']";
       const ios = new Map<Element, IntersectionObserver>();
       let seenLive: Element | null = null;
       const look = () => {
-        const live = document.querySelector("[data-live-answer]");
+        const live = document.querySelector(LIVE);
         const root = live?.closest("[data-thread-scroll]");
         if (!live || !root || live === seenLive) return;
         seenLive = live;
@@ -204,7 +206,7 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
       look();
       const drawn = new MessageChannel();
       drawn.port1.onmessage = () => {
-        const live = document.querySelector("[data-live-answer]");
+        const live = document.querySelector(LIVE);
         const composer = document.querySelector("[data-composer]");
         const el = document.querySelector("[data-thread-scroll]") as HTMLElement | null;
         if (composer && el) {
@@ -259,8 +261,39 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
   const topOf = (page: import("@playwright/test").Page, id: string) => page.evaluate((id) => document.getElementById(id)!.getBoundingClientRect().top, `m-${id}`);
   const thread = (page: import("@playwright/test").Page) => page.locator("[data-thread-scroll]");
   const pill = (page: import("@playwright/test").Page) => page.locator("[data-new-reply-pill]");
+  /** The pill's words against the pill, as WCAG measures it. (The chat card is drawn dark whatever his theme, so the
+   *  pill shows its dark pairing on both pages.) */
+  const pillContrast = async (page: import("@playwright/test").Page) => {
+    const m = await pill(page).evaluate((el) => {
+      const lum = (css: string) => {
+        const [r, g, b] = css.match(/[\d.]+/g)!.slice(0, 3).map((v) => {
+          const c = Number(v) / 255;
+          return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+        });
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      };
+      const s = getComputedStyle(el);
+      const [hi, lo] = [lum(s.color), lum(s.backgroundColor)].sort((a, b) => b - a);
+      return {
+        page: document.documentElement.dataset.theme ?? "light",
+        card: el.closest("[data-theme]")?.getAttribute("data-theme") ?? "light",
+        color: s.color,
+        background: s.backgroundColor,
+        ratio: (hi + 0.05) / (lo + 0.05),
+      };
+    });
+    console.log(`[pill] page ${m.page}, chat card ${m.card}: ${m.color} on ${m.background}, ${m.ratio.toFixed(2)}:1`);
+    return m.ratio;
+  };
   /** How far the thread stands above its bottom. */
   const gap = (page: import("@playwright/test").Page) => thread(page).evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight);
+  /** The same, as the next frame is drawn: a read between a change and its frame sees the content grown and its size
+   *  change not yet handled, which is never painted. (The second requestAnimationFrame runs after the first frame's
+   *  ResizeObserver callbacks.) */
+  const gapDrawn = async (page: import("@playwright/test").Page) => {
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(null)))));
+    return gap(page);
+  };
   async function open(page: import("@playwright/test").Page) {
     await page.goto("/today");
     await page.getByTestId("chat-launcher").click();
@@ -540,6 +573,7 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
     expect(p.height, "its height").toBeGreaterThanOrEqual(44);
     expect(p.y + p.height, "clear of the composer").toBeLessThanOrEqual(composer.y - 4);
     expect(Math.abs(p.x + p.width / 2 - (t.x + t.width / 2)), "centred over the thread").toBeLessThanOrEqual(1);
+    expect(await pillContrast(page), "its words against it (his theme light)").toBeGreaterThanOrEqual(4.5);
     mkdirSync("screenshots", { recursive: true });
     await page.screenshot({ path: "screenshots/chat-new-reply-pill.png" });
     // He scrolls to the bottom himself: in view, so no pill (still off: the next piece is written below him again).
@@ -554,6 +588,20 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
     expect(self.length, "at the bottom by his own wheel, no pill").toBeGreaterThan(0);
     const f = await followed(page, seen, tapAt);
     expect(f.out, inViewMessage(f)).toBe(0);
+  });
+
+  test("the pill in dark (his theme setting, a cookie): its words at 4.5:1 or better (input: wheel)", async ({ page, baseURL }) => {
+    await page.context().addCookies([{ name: "theme", value: "dark", url: baseURL! }]);
+    await streamAnswers(page, [{ rounds: [[...LONG, ...LONG]], delayMs: 250 }]);
+    await open(page);
+    expect(await page.evaluate(() => document.documentElement.dataset.theme), "the page is dark").toBe("dark");
+    await send(page, "E2E: a long plan please");
+    await followedDown(page, 150);
+    await wheel(page, -150);
+    await expect(pill(page)).toBeVisible();
+    expect(await pillContrast(page), "its words against it (his theme dark)").toBeGreaterThanOrEqual(4.5);
+    mkdirSync("screenshots", { recursive: true });
+    await page.screenshot({ path: "screenshots/chat-new-reply-pill-dark.png" });
   });
 
   test.describe("by touch (Chromium: real touches through the DevTools protocol)", () => {
@@ -589,6 +637,231 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
       await expect.poll(() => gap(page), { timeout: 2_000 }).toBeLessThanOrEqual(1);
       const { pulled } = await afterHand(page);
       expect(pulled, "moved back down between two frames before the pill").toBeLessThanOrEqual(2);
+    });
+  });
+
+  // v1.09 r6: on a call, a new line of his is a send. The realtime peer is stood in for in the page, as the Reviewer
+  // built it: no microphone (an empty stream), no OpenAI (a peer connection whose data channel the test feeds the
+  // realtime events), the call's own routes answered in the page. Made-up words. Chromium only: in this Mac's WebKit
+  // (Playwright 1.45.3) the stand-in call never connects.
+  test.describe("on a call (the realtime peer stood in for)", () => {
+    const SAID = Array.from({ length: 24 }, (_, i) => `Point ${i + 1} of the plan, said out loud, with enough words to wrap. `);
+    const QUESTIONS = ["E2E: spoken question 1, what comes next?", "E2E: spoken question 2, and after that?"];
+    /** What the call's end brings back from the server: what was said, saved. */
+    const SAVED = QUESTIONS.flatMap((q, i) => [
+      { id: `e2e-call-${2 * i + 1}`, role: "user", content: q, mode: "voice" },
+      { id: `e2e-call-${2 * i + 2}`, role: "assistant", content: SAID.join(""), mode: "voice" },
+    ]);
+    async function standIn(page: import("@playwright/test").Page) {
+      await page.addInitScript((saved: unknown[]) => {
+        const json = (o: unknown) => new Response(JSON.stringify(o), { status: 200, headers: { "Content-Type": "application/json" } });
+        const w = window as unknown as { __dc: { readyState: string; onmessage?: ((e: { data: string }) => void) | null } | null; __fire: (ev: unknown) => void };
+        w.__dc = null;
+        if (navigator.mediaDevices) navigator.mediaDevices.getUserMedia = async () => new MediaStream();
+        class DC {
+          readyState = "connecting";
+          onopen: (() => void) | null = null;
+          onmessage: ((e: { data: string }) => void) | null = null;
+          constructor() {
+            w.__dc = this;
+            setTimeout(() => {
+              this.readyState = "open";
+              this.onopen?.();
+            }, 50);
+          }
+          send() {}
+          close() {
+            this.readyState = "closed";
+          }
+          addEventListener() {}
+          removeEventListener() {}
+        }
+        class PC {
+          connectionState = "new";
+          ontrack = null;
+          onconnectionstatechange = null;
+          addTrack() {}
+          createDataChannel() {
+            return new DC();
+          }
+          async createOffer() {
+            return { type: "offer", sdp: "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=sendrecv\r\n" };
+          }
+          async setLocalDescription() {}
+          async setRemoteDescription() {}
+          async getStats() {
+            return new Map();
+          }
+          getSenders() {
+            return [];
+          }
+          getReceivers() {
+            return [];
+          }
+          close() {
+            this.connectionState = "closed";
+          }
+          addEventListener() {}
+          removeEventListener() {}
+        }
+        (window as unknown as { RTCPeerConnection: unknown }).RTCPeerConnection = PC;
+        w.__fire = (ev) => w.__dc?.onmessage?.({ data: JSON.stringify(ev) });
+        const real = window.fetch.bind(window);
+        window.fetch = async (input, init) => {
+          const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+          if (url.includes("/api/realtime/token")) return json({ clientSecret: "standin", conversationId: "e2e-call-conv", usageId: "e2e-usage", model: "gpt-realtime" });
+          if (url.startsWith("https://api.openai.com/")) return new Response("v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=sendrecv\r\n", { status: 201 });
+          if (url.includes("/api/realtime/")) return json({});
+          if (url.includes("/api/conversations/e2e-call-conv/")) return (init?.method ?? "GET") === "GET" ? json({ messages: saved }) : json({});
+          if (url.includes("/api/elevenlabs/")) return new Response("", { status: 404 });
+          return real(input, init);
+        };
+      }, SAVED);
+    }
+    const fire = (page: import("@playwright/test").Page, ev: Record<string, unknown>) =>
+      page.evaluate((ev) => (window as unknown as { __fire: (e: unknown) => void }).__fire(ev), ev);
+    const framesSoFar = (page: import("@playwright/test").Page) => page.evaluate(() => (window as unknown as { __frames: unknown[] }).__frames.length);
+    /** The realtime events in the order a real stream sends them (the Reviewer's REAL shapes). `created`: the beta
+     *  name for an item added. */
+    function stream(page: import("@playwright/test").Page, created = false) {
+      let prev: string | null = null;
+      const added = async (id: string, role: "user" | "assistant") => {
+        await fire(page, {
+          type: created ? "conversation.item.created" : "conversation.item.added",
+          previous_item_id: prev,
+          item: role === "user" ? { id, type: "message", role, status: "completed", content: [{ type: "input_audio", transcript: null }] } : { id, type: "message", role, status: "in_progress", content: [] },
+        });
+        prev = id;
+      };
+      return {
+        /** His turn begins: his speech started, stopped, and committed as an item. Nothing on screen yet. */
+        async commit(k: number) {
+          const id = `u${k}`;
+          await fire(page, { type: "input_audio_buffer.speech_started", item_id: id, audio_start_ms: 0 });
+          await fire(page, { type: "input_audio_buffer.speech_stopped", item_id: id, audio_end_ms: 900 });
+          await fire(page, { type: "input_audio_buffer.committed", item_id: id, previous_item_id: prev });
+          await added(id, "user");
+        },
+        /** His line's words, heard (they come whenever the transcription is ready). */
+        line: (k: number) => fire(page, { type: "conversation.item.input_audio_transcription.completed", item_id: `u${k}`, transcript: QUESTIONS[k - 1] }),
+        /** The answer begins. */
+        async head(k: number) {
+          await fire(page, { type: "response.created", response: { id: `r-a${k}`, status: "in_progress" } });
+          await added(`a${k}`, "assistant");
+        },
+        piece: (k: number, i: number) => fire(page, { type: "response.output_audio_transcript.delta", item_id: `a${k}`, delta: SAID[i] }),
+        // The final transcript replaces the line: it carries the whole of it.
+        done: (k: number) => fire(page, { type: "response.output_audio_transcript.done", item_id: `a${k}`, transcript: SAID.join("") }),
+      };
+    }
+    /** One exchange: his turn committed; his line's words before the answer begins (lineAfter 0) or after that many of
+     *  its pieces; the answer in 24 pieces 70 ms apart; his wheel up after the piece `wheelAfter`. Returns the frame
+     *  counts just before his line's event was handed to the page and just after. */
+    async function exchange(page: import("@playwright/test").Page, s: ReturnType<typeof stream>, k: number, o: { lineAfter?: number; wheelAfter?: number } = {}) {
+      let lineAt = -1;
+      let heardAt = -1;
+      const hear = async () => {
+        lineAt = await framesSoFar(page);
+        await s.line(k);
+        heardAt = await framesSoFar(page);
+      };
+      await s.commit(k);
+      if (!o.lineAfter) await hear();
+      await s.head(k);
+      for (let i = 0; i < SAID.length; i++) {
+        await s.piece(k, i);
+        await page.waitForTimeout(70);
+        if (i === o.wheelAfter) await wheel(page, -200);
+        if (i + 1 === o.lineAfter) await hear();
+      }
+      await s.done(k);
+      await expect(page.getByText(/Point 24 of the plan/)).toHaveCount(k);
+      return { lineAt, heardAt };
+    }
+    async function startCall(page: import("@playwright/test").Page) {
+      await standIn(page);
+      await open(page);
+      await page.getByRole("button", { name: "Start a live voice conversation" }).click();
+      await expect
+        .poll(() => page.evaluate(() => (window as unknown as { __dc: { readyState: string } | null }).__dc?.readyState), { timeout: 10_000 })
+        .toBe("open");
+      // The call starts with the conversation put away: open it, as he would to read along.
+      await page.getByRole("button", { name: "Drag up to show the conversation" }).click();
+      await page.waitForTimeout(700);
+      await watch(page);
+    }
+    /** From his first hand on the page to the given frame (or the end): frames said, and how far the thread was moved
+     *  back down between two of them. */
+    async function sinceHand(page: import("@playwright/test").Page, seen: Frame[], to = seen.length) {
+      const handAt = await page.evaluate(() => (window as unknown as { __handAt: number | null }).__handAt);
+      expect(handAt, "his wheel reached the page").not.toBeNull();
+      const span = seen.slice(handAt!, to);
+      let pulled = 0;
+      for (let i = 1; i < span.length; i++) pulled = Math.max(pulled, span[i].scroll - span[i - 1].scroll);
+      return { said: span.filter((f) => f.bottom !== null).length, pulled };
+    }
+
+    test("a wheel during one spoken answer: his next spoken question and its answer are followed; the call's end lands at the newest (input: wheel)", async ({ page, browserName }) => {
+      test.skip(browserName !== "chromium", "the stand-in call does not connect in this Mac's WebKit");
+      await startCall(page);
+      const s = stream(page);
+      // The first exchange, his wheel up a third of the way into the answer: off, never pulled back, the pill.
+      await exchange(page, s, 1, { wheelAfter: 8 });
+      await expect(pill(page), "off, and the answer went on below him").toBeVisible();
+      // The second: his spoken question is a send.
+      const { lineAt, heardAt } = await exchange(page, s, 2);
+      await expect(pill(page)).toHaveCount(0);
+      expect(await gapDrawn(page), "the second answer ends in view").toBeLessThanOrEqual(1);
+      const seen = await frames(page);
+      const before = await sinceHand(page, seen, lineAt);
+      expect(before.said, "frames said between his wheel and his next question").toBeGreaterThan(5);
+      expect(before.pulled, "moved back down between two frames before his next question").toBeLessThanOrEqual(2);
+      const f = await followed(page, seen, seen[heardAt].t);
+      expect(f.live, "frames said after his second question").toBeGreaterThan(20);
+      expect(f.out, inViewMessage(f)).toBe(0);
+      // He scrolls up again and ends the call: the saved messages take the spoken lines' place, and the thread lands at
+      // the newest, following.
+      await wheel(page, -400);
+      await expect.poll(() => gap(page)).toBeGreaterThan(100);
+      await page.getByRole("button", { name: "End call" }).filter({ visible: true }).first().click();
+      await expect(page.locator("#m-e2e-call-4")).toBeAttached({ timeout: 10_000 });
+      await expect.poll(() => gap(page), { timeout: 2_000 }).toBeLessThanOrEqual(1);
+      await expect(pill(page)).toHaveCount(0);
+    });
+
+    for (const created of [false, true]) {
+      test(`his line heard after the answer's first pieces, no hand since his turn began: followed from when it is heard (${created ? "beta: conversation.item.created" : "conversation.item.added"}; input: wheel in the turn before)`, async ({ page, browserName }) => {
+        test.skip(browserName !== "chromium", "the stand-in call does not connect in this Mac's WebKit");
+        await startCall(page);
+        const s = stream(page, created);
+        await exchange(page, s, 1, { wheelAfter: 8 });
+        // His turn is committed, the answer begins, and his words are heard only after its fourth piece: the head is
+        // written under the composer until then (named in the spec), and followed from then on.
+        const { lineAt, heardAt } = await exchange(page, s, 2, { lineAfter: 4 });
+        await expect(pill(page)).toHaveCount(0);
+        expect(await gapDrawn(page), "the second answer ends in view").toBeLessThanOrEqual(1);
+        const seen = await frames(page);
+        expect((await sinceHand(page, seen, lineAt)).pulled, "moved back down before his line was heard").toBeLessThanOrEqual(2);
+        const f = await followed(page, seen, seen[heardAt].t);
+        expect(f.live, "frames said after his line was heard").toBeGreaterThan(15);
+        expect(f.out, inViewMessage(f)).toBe(0);
+      });
+    }
+
+    test("his line heard after his hand in the same turn: off, and never moved (input: wheel after his turn began)", async ({ page, browserName }) => {
+      test.skip(browserName !== "chromium", "the stand-in call does not connect in this Mac's WebKit");
+      await startCall(page);
+      const s = stream(page);
+      await exchange(page, s, 1);
+      expect(await gapDrawn(page), "the first exchange followed").toBeLessThanOrEqual(1);
+      // His turn is committed; the answer begins and is followed; his wheel after its sixth piece; his words heard
+      // after its eighth.
+      await exchange(page, s, 2, { wheelAfter: 5, lineAfter: 8 });
+      await expect(pill(page), "off, and the answer went on below him").toBeVisible();
+      const seen = await frames(page);
+      const after = await sinceHand(page, seen);
+      expect(after.said, "frames said after his wheel").toBeGreaterThan(10);
+      expect(after.pulled, "moved back down after his wheel, his line heard or not").toBeLessThanOrEqual(2);
     });
   });
 });

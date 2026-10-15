@@ -23,6 +23,9 @@
   --danger: #ff3b30;
   --grape: #9a4fd1;
   --bubble: #e8edfd;
+  /* The chat's "New reply below" pill: its words at 4.5:1 or better (5.85:1). */
+  --pill: #3a5bd0;
+  --pill-ink: #ffffff;
   --sep: rgba(60, 60, 67, 0.22);
   --bar: rgba(249, 249, 249, 0.94);
   /* The new look (docs/projects/SPEC.md §5, from the approved screens): accent TEXT and icons at 4.5:1 on white, and the hairline between rows. */
@@ -46,6 +49,8 @@
   --danger: #ff453a;
   --grape: #bf5af2;
   --bubble: #1d2540;
+  --pill: #7a9bff;
+  --pill-ink: #1c1c1e; /* 6.45:1 */
   --sep: rgba(84, 84, 88, 0.6);
   --bar: rgba(22, 22, 24, 0.94);
   --accent-ink: #7a9bff;
@@ -67,6 +72,8 @@
   --color-danger: var(--danger);
   --color-grape: var(--grape);
   --color-bubble: var(--bubble);
+  --color-pill: var(--pill);
+  --color-pill-ink: var(--pill-ink);
   --color-sep: var(--sep);
   --color-accent-ink: var(--accent-ink);
   --color-hairline: var(--hairline);

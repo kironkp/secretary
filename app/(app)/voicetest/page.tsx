@@ -20,9 +20,10 @@ const CALLS_URL = "https://api.openai.com/v1/realtime/calls";
 
 // The mockup's Talk frame, word for word: what you said, and her reply.
 const PREVIEW_LINES: ReturnType<typeof useVoiceSession>["transcript"] = [
-  { id: "user:1", role: "user", text: "The beacon glue one.", final: true },
+  { id: "user:1", itemId: "1", role: "user", text: "The beacon glue one.", final: true },
   {
     id: "assistant:1",
+    itemId: "1",
     role: "assistant",
     text: "Beacon glue, then. So tomorrow is the statement, reconciling 0394, and paying beacon glue. It doesn't have a CPO number yet. Is that still to do, or did it happen?",
     final: true,
@@ -50,6 +51,7 @@ function TalkPreview({ minimized, state }: { minimized: boolean; state: PreviewS
       muted,
       assistantSpeaking: state === "connected",
       model: "gpt-realtime-2.1",
+      onTurn: () => () => {},
       start: async () => {},
       end: async () => null,
       switchModel: async () => {},
