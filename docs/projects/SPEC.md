@@ -69,18 +69,26 @@ arrow keys, or says "move Garden shed to the top" in the chat or on a call:
   (see §4).
 - One move is one transaction: the group's rows are read and written
   together, so two moves at once cannot interleave into an order neither
-  asked for. Everything a move reads, it reads inside its own transaction.
+  asked for. Everything a move reads, it reads inside its own transaction,
+  one read after another: a transaction is one connection, and a second
+  query sent on it while one is running is deprecated in pg 8 and refused in
+  pg 9 (v1.11 r3). Outside a transaction the same reads go at once.
 - His moves are applied one at a time, in the order they arrived. A move
   waiting its turn holds no database connection, so however many arrive at
   once (a call can send several in one breath: "put these eight in this
   order"), each one finishes, and nothing else he does waits behind them.
+  A move that is refused, or fails, does not stop the moves after it; and
+  someone else's moves never wait behind his.
   No request waits for a database connection for more than 10 seconds: past
   that it fails with an error rather than hanging (v1.11 r2: eight moves at
   once held every connection and the whole app stopped answering until a
   restart).
 - On a call, the function calls of one reply run one after the other, in
   the order the model gave them, and the reply goes on once, after the last
-  of them has answered.
+  of them has answered. A call that has not answered in 20 seconds (under
+  Heroku's 30 s limit on a request) is given up on: the model is told it got
+  no answer and that it may still have been done, the calls after it run,
+  and the reply still goes on once (v1.11 r3).
 
 **A project that changes group** (set aside, made active again, made a list
 or a project) arrives in its new group unplaced, at its urgency place, and
@@ -129,7 +137,8 @@ styles.
   a 44 × 44 button named "Reorder <project>". While held it is accent
   (`#3a5bd0`) and the row is lifted: its own white card, at least 60 px
   tall, shadow `0 10px 28px rgba(0,0,0,0.18)`, 6 px wider on each side, the
-  name semibold; the rows around it do not move for its extra height. The
+  name semibold (in dark, where the shadow does not show on black, the card
+  is the raised `#2c2c2e`, its text at 4.5:1 or better; v1.11 r3); the rows around it do not move for its extra height. The
   rows it passes make room for it. Held near the top or the bottom edge of
   the screen, the list scrolls under it, faster the nearer the edge, so in
   a long list a project goes from the bottom to the top in one drag. The
