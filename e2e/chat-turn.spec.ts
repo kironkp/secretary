@@ -709,7 +709,8 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
   });
 
   test("the pill: 44 px or more, clear of the composer, only when needed; a tap brings the bottom into view and follows again (input: wheel, then a tap)", async ({ page }) => {
-    await streamAnswers(page, [{ rounds: [[...LONG, ...LONG]], delayMs: 250 }]);
+    const answer = [...LONG, ...LONG];
+    await streamAnswers(page, [{ rounds: [answer], delayMs: 250 }]);
     await open(page);
     await send(page, "E2E: a long plan please");
     await followedDown(page, 150);
@@ -727,6 +728,11 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
     mkdirSync("screenshots", { recursive: true });
     await page.screenshot({ path: "screenshots/chat-new-reply-pill.png" });
     // He scrolls to the bottom himself: in view, so no pill (still off: the next piece is written below him again).
+    // First, that there is a next piece: the answer still being written, two pieces or more to come. (Once it has
+    // landed nothing more is written below him, and the pill has nothing to show for.)
+    const written = await page.locator("[data-live-answer]").evaluateAll((els) => (els.length === 1 ? (els[0].textContent ?? "").length : null));
+    const whole = answer.join("").length;
+    expect(written !== null && written < whole - 2 * LONG[0].length, `the answer still being written when he wheels down, two pieces or more to come (${written ?? "landed"} of ${whole} characters written)`).toBe(true);
     await wheel(page, 5000);
     await expect(pill(page)).toBeVisible({ timeout: 2_000 });
     await pill(page).click();
