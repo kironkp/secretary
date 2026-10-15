@@ -238,6 +238,29 @@ answer being written is in view is now judged at paint. Named, seen only on
 a device: a real finger, its momentum, VoiceOver, and dragging the iOS scroll
 indicator.
 
+**r5** (`eca950c`, `09993cf` the rule; `aac0b21`, `b4d5d13`, `4c4e4ca`,
+`d0a1f1c` the tests; `f744f99`, `d08cbe9` the code; this commit). The Reviewer failed `3beebe4`: when the answer landed
+under his finger, the lift went to a part of the page that had just been
+replaced, so the thread never heard it, stayed "held", and his next drag was
+judged from the old one and pulled him to the bottom (ten times in ten, with
+real touches). Four rounds on one behaviour, each lost to a race of this
+kind. The rule is now one that needs no lift and decides nothing from where
+he stops: following is on when he sends and when the panel opens; his first
+touch, wheel, click or scroll key on the thread turns it off for the rest of
+that answer; a "New reply below" button, which shows only when something new
+is written below him, turns it back on with one tap, and so does his next
+message. A scroll with no hand on it (VoiceOver, say) turns it off when it
+leaves him well above the bottom. The cost, named: a tap on the thread while
+reading at the bottom (on Copy, say) stops following until he taps the
+button. One more race turned up on the way, and is closed: as the panel
+opened, Chrome pulled the thread down to where the answer had ended in the
+same moment a new piece landed, which looked like a scroll with no hand on it
+and stopped following before he had touched anything (3 times in 30); a
+scroll with no hand is now measured from where the page last put the
+thread. The whole chat spec ran 20 times in each browser: every test passed
+every time (Safari's engine 320, Chrome 340), and no frame showed the answer
+out of view while following.
+
 ## v1.02 — A clear Overview (2026-10-13)
 
 `b980803` (the round as one commit: written 2026-10-06 as v0.34 and parked,
