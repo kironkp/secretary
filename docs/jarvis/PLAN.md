@@ -342,7 +342,9 @@ beside me in a workshop."*
     handle, tab bar, plain content), kept with the pictures outside the
     repo in `secretary-extras/design/2026-10-14-simple-screens/` and given
     to both peers; each cycle copies its own screen's reference into the
-    spec. The font is the system face the app already has; sizes,
+    spec. First fix in the tokens (the Reviewer, 1.09): white 15 px text
+    on the accent fill is 4.44:1 in light and 2.64:1 in dark, app-wide
+    (voice mode, interview, answer buttons); white on #3a5bd0 is 5.85:1. The font is the system face the app already has; sizes,
     weights, spacing and cards change. Screen by screen, smallest risk
     first, shared tokens and pieces, no per-screen copies; the Overview
     keeps its behaviour. A screen that needs a new layout rather than a
