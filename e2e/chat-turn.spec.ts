@@ -4,7 +4,7 @@
 // the mark. The network is page.route, so no model is reached. What vitest
 // cannot see: the page's own fetch, what it sends, and the answer drawn in the
 // thread.
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { test, expect, type Route } from "@playwright/test";
 
 type Ask = { turnId?: string; resume?: boolean; accept: string | null };
@@ -146,7 +146,42 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
     }, answers);
   }
 
-  type Frame = { t: number; top: number | null; bottom: number | null; composerTop: number; scroll: number; height: number; view: number; pill: boolean };
+  type Frame = { t: number; top: number | null; bottom: number | null; chars: number | null; composerTop: number; scroll: number; height: number; view: number; pill: boolean };
+  /** How many frames drew new words of the answer being written (its text longer than in the frame before): the
+   *  moments the follow is judged at, and what a test needs enough of. A count of frames says less: CI's WebKit (Linux,
+   *  no GPU, the iPhone's 3× pixels) draws about ten a second, so two pieces can land in one frame, and a fast browser
+   *  draws many frames with nothing new in them. */
+  const grew = (frames: Frame[]) => frames.filter((f, i) => i > 0 && f.chars !== null && f.chars > (frames[i - 1].chars ?? 0)).length;
+  /** Until new words have been drawn in `n` frames after frame `from`: enough written for the test to judge, however
+   *  fast this browser draws. Read every 50 ms. */
+  const grownSince = (page: import("@playwright/test").Page, from: number, n: number) =>
+    expect
+      .poll(async () => grew((await page.evaluate(() => (window as unknown as { __frames: Frame[] }).__frames)).slice(from)), { timeout: 15_000, intervals: [50] })
+      .toBeGreaterThanOrEqual(n);
+  /** On a failure, the frames: printed to the log and written beside the screenshots (CI uploads those on every run),
+   *  so the in-view and pulled-back numbers can be read where it failed. */
+  test.afterEach(async ({ page }, info) => {
+    if (info.status === info.expectedStatus) return;
+    const got = await page
+      .evaluate(() => {
+        const w = window as unknown as { __frames?: Frame[]; __out?: unknown[]; __handAt?: number | null; __taps?: number[]; __wheels?: unknown[]; __scrolls?: [number, number][] };
+        return w.__frames ? { frames: w.__frames, out: w.__out, handAt: w.__handAt, taps: w.__taps, wheels: w.__wheels, scrolls: w.__scrolls } : null;
+      })
+      .catch(() => null);
+    if (!got) return;
+    mkdirSync("screenshots/chat-frames", { recursive: true });
+    writeFileSync(`screenshots/chat-frames/${info.title.replace(/[^a-z0-9]+/gi, "-").slice(0, 80)}.json`, JSON.stringify(got));
+    const n = (v: number | null) => (v === null ? "-" : v.toFixed(0));
+    console.log(
+      [
+        `[frames] ${info.title}: ${got.frames.length} frames; his hand at frame ${got.handAt ?? "-"}; taps at ${JSON.stringify(got.taps ?? [])}; at paint not wholly in view: ${JSON.stringify(got.out ?? [])}`,
+        `  wheels: ${JSON.stringify(got.wheels ?? [])}`,
+        `  the thread's scrolls [frame, top]: ${JSON.stringify(got.scrolls ?? [])}`,
+        "  i t(ms) live-top live-bottom chars composer-top scroll height view pill",
+        ...got.frames.map((f, i) => `  ${i} ${f.t.toFixed(0)} ${n(f.top)} ${n(f.bottom)} ${f.chars ?? "-"} ${f.composerTop.toFixed(0)} ${f.scroll.toFixed(0)} ${f.height} ${f.view} ${f.pill ? 1 : 0}`),
+      ].join("\n")
+    );
+  });
   /** Every animation frame from now: the live answer's box (null once it has landed), the composer, the thread. Each
    *  frame's requestAnimationFrame callback posts a read that runs once that frame is drawn: the callbacks run before
    *  the frame's layout and its ResizeObserver callbacks (which keep the bottom in view when the thread changes size),
@@ -172,6 +207,28 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
         w.__handTop = el.scrollTop;
       };
       for (const type of ["wheel", "pointerdown", "touchstart", "keydown"]) document.addEventListener(type, hand, { capture: true, passive: true });
+      // For a failure's log, by frame number: each wheel (where, on what, the thread's position then, whether the
+      // panel's height was moving) and each scroll of the thread, whoever made it.
+      const log = w as unknown as { __wheels: unknown[]; __scrolls: [number, number][] };
+      log.__wheels = [];
+      log.__scrolls = [];
+      document.addEventListener(
+        "wheel",
+        (e) => {
+          const el = document.querySelector("[data-thread-scroll]") as HTMLElement | null;
+          const card = document.querySelector("[data-testid='chat-card']");
+          log.__wheels.push({ at: w.__frames.length, x: Math.round(e.clientX), y: Math.round(e.clientY), dy: e.deltaY, mode: e.deltaMode, onThread: !!el?.contains(e.target as Node), top: el ? Math.round(el.scrollTop) : null, panelMoving: !!card?.getAnimations({ subtree: true }).some((a) => a.playState === "running") });
+        },
+        { capture: true, passive: true }
+      );
+      document.addEventListener(
+        "scroll",
+        (e) => {
+          const el = e.target as HTMLElement;
+          if (el instanceof HTMLElement && el.matches("[data-thread-scroll]")) log.__scrolls.push([w.__frames.length, Math.round(el.scrollTop)]);
+        },
+        { capture: true, passive: true }
+      );
       // Each tap on the pill: when.
       document.addEventListener("click", (e) => (e.target as Element).closest?.("[data-new-reply-pill]") && w.__taps.push(w.__frames.length), { capture: true });
       // At paint: whether the answer being written is wholly in the thread's view. An IntersectionObserver's
@@ -211,7 +268,7 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
         const el = document.querySelector("[data-thread-scroll]") as HTMLElement | null;
         if (composer && el) {
           const r = live?.getBoundingClientRect();
-          w.__frames.push({ t: performance.now(), top: r ? r.top : null, bottom: r ? r.bottom : null, composerTop: composer.getBoundingClientRect().top, scroll: el.scrollTop, height: el.scrollHeight, view: el.clientHeight, pill: !!document.querySelector("[data-new-reply-pill]") });
+          w.__frames.push({ t: performance.now(), top: r ? r.top : null, bottom: r ? r.bottom : null, chars: live ? (live.textContent ?? "").length : null, composerTop: composer.getBoundingClientRect().top, scroll: el.scrollTop, height: el.scrollHeight, view: el.clientHeight, pill: !!document.querySelector("[data-new-reply-pill]") });
         }
       };
       const tick = () => {
@@ -252,8 +309,9 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
     await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0))));
     const out = (await page.evaluate(() => (window as unknown as { __out: { t: number; ratio: number }[] }).__out)).filter((o) => o.t >= since);
     const live = seen.filter((f) => f.bottom !== null && f.t >= since);
-    const r = { live: live.length, out: out.length, drawnUnder: live.filter((f) => f.bottom! > f.composerTop + 1).length };
-    console.log(`[follow] ${test.info().title}: at paint ${r.out} not wholly in view; read once drawn ${r.drawnUnder} of ${r.live} under`);
+    const r = { live: live.length, out: out.length, drawnUnder: live.filter((f) => f.bottom! > f.composerTop + 1).length, grew: grew(seen.filter((f) => f.t >= since)) };
+    const ms = live.length > 1 ? live.at(-1)!.t - live[0].t : 0;
+    console.log(`[follow] ${test.info().title}: at paint ${r.out} not wholly in view; read once drawn ${r.drawnUnder} of ${r.live} under (${r.grew} with new words, over ${ms.toFixed(0)} ms)`);
     return r;
   };
   const inViewMessage = (f: { live: number; out: number; drawnUnder: number }) =>
@@ -314,16 +372,19 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
     await expect(page.locator(`#m-e2e-reply-${n}`)).toBeAttached({ timeout: 20_000 });
     await expect(page.locator("[data-live-answer]")).toHaveCount(0);
   };
-  /** Until the thread has followed this far down: room for a step up. A precondition, read every 50 ms; not how the
-   *  follow is measured. (Not waitForFunction: Playwright's WebKit on this Mac evaluates it as a string, which the
-   *  app's script policy refuses.) */
-  const followedDown = (page: import("@playwright/test").Page, px: number) =>
-    expect
+  /** Until the panel has risen and stopped, and the thread has followed this far down: room for a step up. A
+   *  precondition, read every 50 ms; not how the follow is measured. (Not waitForFunction: Playwright's WebKit on this
+   *  Mac evaluates it as a string, which the app's script policy refuses.) */
+  const followedDown = async (page: import("@playwright/test").Page, px: number) => {
+    await panelOpen(page);
+    await expect
       .poll(() => thread(page).evaluate((el) => el.scrollTop), { timeout: 15_000, intervals: [50] })
       .toBeGreaterThanOrEqual(px);
+  };
   /** Until the panel has risen and stopped: open, and its height no longer moving. A send raises it from the bar over
-   *  340 ms, and the bar's own thread is followed down at once, so followedDown can pass before it has risen; a wheel
-   *  point taken then can land on the panel's edge, not the thread. Read every 50 ms, like followedDown. */
+   *  340 ms, and the bar's own thread is followed down at once, so a scroll depth alone can be reached before it has
+   *  risen; a wheel point taken then can land on the panel's edge, not the thread, and a wheel while its height moves
+   *  may not scroll it. Read every 50 ms. */
   const panelOpen = (page: import("@playwright/test").Page) =>
     expect
       .poll(
@@ -347,17 +408,19 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
   const earlier = (n: number): Answer[] => Array.from({ length: n }, (_, i) => ({ rounds: [[`E2E: an earlier answer ${i + 1}, `, "two sentences long. ", "And a third to fill the thread."]], delayMs: 0 }));
 
   test("a long answer (input: none): every frame's last line above the composer; it lands without moving", async ({ page }) => {
-    await streamAnswers(page, [{ rounds: [LONG], delayMs: 120 }]);
+    // 56 pieces, 120 ms apart (6.7 s): enough for new words in more than 20 frames in a browser that draws four frames
+    // a second.
+    await streamAnswers(page, [{ rounds: [[...LONG, ...LONG, ...LONG, ...LONG]], delayMs: 120 }]);
     await open(page);
     await watch(page);
     await send(page, "E2E: a long plan please");
     await landed(page, 1);
     const seen = await frames(page);
     const f = await followed(page, seen);
-    expect(f.live).toBeGreaterThan(20);
     expect(f.out, inViewMessage(f)).toBe(0);
     const last = seen.filter((x) => x.top !== null).at(-1)!;
-    expect(Math.abs((await topOf(page, "e2e-reply-1")) - last.top!)).toBeLessThanOrEqual(1);
+    expect(Math.abs((await topOf(page, "e2e-reply-1")) - last.top!), "landed where it was last drawn").toBeLessThanOrEqual(1);
+    expect(f.grew, "frames that drew new words of it").toBeGreaterThan(20);
     mkdirSync("screenshots", { recursive: true });
     await page.screenshot({ path: "screenshots/chat-long-landed.png" });
   });
@@ -396,7 +459,9 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
   });
 
   test("pieces every 40 ms and one wheel step up (input: wheel): off for the turn, never pulled back; the pill follows again", async ({ page }) => {
-    await streamAnswers(page, [{ rounds: [[...LONG, ...LONG, ...LONG]], delayMs: 40 }]);
+    // 140 pieces, 40 ms apart (5.6 s): enough for new words in more than 5 frames below him and more than 5 after the
+    // tap, in a browser that draws four frames a second.
+    await streamAnswers(page, [{ rounds: [Array.from({ length: 10 }, () => LONG).flat()], delayMs: 40 }]);
     await open(page);
     await send(page, "E2E: a long plan please");
     await followedDown(page, 200);
@@ -404,20 +469,23 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
     await wheel(page, -120);
     await expect(pill(page)).toBeVisible();
     await page.waitForTimeout(300);
+    await grownSince(page, await page.evaluate(() => (window as unknown as { __handAt: number }).__handAt), 6);
     await pill(page).click();
     await landed(page, 1);
     const { handTop, after, pulled, tapAt, seen } = await afterHand(page);
-    expect(after.filter((f) => f.bottom !== null).length, "frames written between his wheel and the pill").toBeGreaterThan(5);
     expect(pulled, "moved back down between two frames before the pill").toBeLessThanOrEqual(2);
-    expect(handTop - after.at(-1)!.scroll, "and the wheel did move him up").toBeGreaterThanOrEqual(100);
+    expect(handTop - (after.at(-1)?.scroll ?? handTop), "and the wheel did move him up").toBeGreaterThanOrEqual(100);
     // From the tap on: followed again, every paint.
     const f = await followed(page, seen, tapAt);
-    expect(f.live, "frames written after the tap").toBeGreaterThan(5);
     expect(f.out, inViewMessage(f)).toBe(0);
+    expect(grew(after), "frames that drew new words between his wheel and the pill").toBeGreaterThan(5);
+    expect(f.grew, "frames that drew new words after the tap").toBeGreaterThan(5);
   });
 
   test("a wheel up while the panel opens (input: wheel): off, never pulled back, the pill shows", async ({ page }) => {
-    await streamAnswers(page, [...earlier(6), { rounds: [[...LONG, ...LONG]], delayMs: 60 }]);
+    // 70 pieces, 60 ms apart (4.2 s): enough for new words in more than 10 frames after his wheel, in a browser that
+    // draws four frames a second.
+    await streamAnswers(page, [...earlier(6), { rounds: [Array.from({ length: 5 }, () => LONG).flat()], delayMs: 60 }]);
     await open(page);
     await fillThread(page, 6);
     // Put the panel away to the bar (a tap on its grabber), so the next send opens it again while the answer starts.
@@ -431,8 +499,8 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
     await expect(pill(page)).toBeVisible();
     await landed(page, 7);
     const { after, pulled } = await afterHand(page);
-    expect(after.length).toBeGreaterThan(10);
     expect(pulled, "moved back down between two frames after his wheel").toBeLessThanOrEqual(2);
+    expect(grew(after), "frames that drew new words after his wheel").toBeGreaterThan(10);
   });
 
   test("the keyboard opening, as the view growing shorter (input: none): still followed", async ({ page }) => {
@@ -468,16 +536,21 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
   });
 
   test("a scroll with no input while pieces come every 40 ms (input: none, standing in for VoiceOver or the indicator): off each time, never pulled back", async ({ page }) => {
-    await streamAnswers(page, [{ rounds: [[...LONG, ...LONG, ...LONG, ...LONG, ...LONG, ...LONG]], delayMs: 40 }]);
+    // 224 pieces, 40 ms apart (9 s): enough for five trials of 4 frames with new words each, in a browser that draws
+    // four frames a second.
+    await streamAnswers(page, [{ rounds: [Array.from({ length: 16 }, () => LONG).flat()], delayMs: 40 }]);
     await open(page);
     await send(page, "E2E: a long plan please");
     await followedDown(page, 300);
     await watch(page);
     // Five times in one answer: the thread scrolled up 150 px by script (no input), the first right after a piece is
-    // drawn, the others at a moment of their own; 250 ms later the pill is tapped, which follows again.
+    // drawn, the others at a moment of their own; 250 ms later, and once new words have been drawn in 4 frames since
+    // (the count grew() makes: enough written below him to judge, however fast this browser draws; 5 s at most), the
+    // pill is tapped, which follows again.
     const trials = await thread(page).evaluate(async (el) => {
       const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
-      const frames = (window as unknown as { __frames: unknown[] }).__frames;
+      const frames = (window as unknown as { __frames: { chars: number | null }[] }).__frames;
+      const grewSince = (from: number) => frames.filter((f, i) => i > from && f.chars !== null && f.chars > (frames[i - 1].chars ?? 0)).length;
       const out: { at: number; top: number; tapAt: number; pill: boolean }[] = [];
       for (let k = 0; k < 5; k++) {
         if (k === 0) {
@@ -493,7 +566,8 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
         // Frame numbers, not times (WebKit's clock is coarse): the frames recorded after this scroll, before the tap.
         const at = frames.length;
         const top = el.scrollTop;
-        await wait(250);
+        const t0 = performance.now();
+        while ((performance.now() - t0 < 250 || grewSince(at) < 4) && performance.now() - t0 < 5_000) await wait(20);
         const p = document.querySelector("[data-new-reply-pill]") as HTMLElement | null;
         const tapAt = frames.length;
         p?.click();
@@ -506,9 +580,11 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
     const seen = await frames(page);
     for (const [k, t] of trials.entries()) {
       const between = seen.slice(t.at, t.tapAt);
-      expect(between.length, `trial ${k + 1}: frames before the pill`).toBeGreaterThan(3);
-      expect(Math.max(...between.map((f) => f.scroll)) - t.top, `trial ${k + 1}: pulled back`).toBeLessThanOrEqual(2);
+      expect(Math.max(t.top, ...between.map((f) => f.scroll)) - t.top, `trial ${k + 1}: pulled back`).toBeLessThanOrEqual(2);
       expect(t.pill, `trial ${k + 1}: the pill showed`).toBe(true);
+    }
+    for (const [k, t] of trials.entries()) {
+      expect(grew(seen.slice(t.at, t.tapAt)), `trial ${k + 1}: frames that drew new words before the pill`).toBeGreaterThan(3);
     }
   });
 
@@ -528,7 +604,9 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
   });
 
   test("a new send turns following on (input: wheel, then a send)", async ({ page }) => {
-    await streamAnswers(page, [{ rounds: [[...LONG, ...LONG]], delayMs: 60 }, { rounds: [LONG], delayMs: 120 }]);
+    // The second answer 28 pieces, 120 ms apart (3.4 s): enough for new words in more than 5 frames, in a browser that
+    // draws four frames a second.
+    await streamAnswers(page, [{ rounds: [[...LONG, ...LONG]], delayMs: 60 }, { rounds: [[...LONG, ...LONG]], delayMs: 120 }]);
     await open(page);
     await send(page, "E2E: a long plan please");
     await followedDown(page, 200);
@@ -538,12 +616,14 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
     await send(page, "E2E: and another");
     await landed(page, 2);
     const f = await followed(page, await frames(page));
-    expect(f.live).toBeGreaterThan(5);
     expect(f.out, inViewMessage(f)).toBe(0);
+    expect(f.grew, "frames that drew new words of the second answer").toBeGreaterThan(5);
   });
 
   test("a scroll key with no field focused (input: the PageUp key): off for the turn, never pulled back, the pill shows", async ({ page }) => {
-    await streamAnswers(page, [{ rounds: [[...LONG, ...LONG, ...LONG]], delayMs: 60 }]);
+    // 70 pieces, 60 ms apart (4.2 s): enough for new words in more than 5 frames after the key, in a browser that
+    // draws four frames a second.
+    await streamAnswers(page, [{ rounds: [Array.from({ length: 5 }, () => LONG).flat()], delayMs: 60 }]);
     await open(page);
     await send(page, "E2E: a long plan please");
     await followedDown(page, 200);
@@ -553,12 +633,14 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
     await expect(pill(page)).toBeVisible();
     await landed(page, 1);
     const { after, pulled } = await afterHand(page);
-    expect(after.filter((f) => f.bottom !== null).length, "frames written after the key").toBeGreaterThan(5);
     expect(pulled, "moved back down between two frames after the key").toBeLessThanOrEqual(2);
+    expect(grew(after), "frames that drew new words after the key").toBeGreaterThan(5);
   });
 
   test("a mouse button held on the answer through its landing (input: mouse): off, never pulled back, the pill shows", async ({ page }) => {
-    await streamAnswers(page, [{ rounds: [[...LONG, ...LONG]], delayMs: 60 }]);
+    // 70 pieces, 60 ms apart (4.2 s): enough for new words in more than 10 frames after the press, in a browser that
+    // draws four frames a second.
+    await streamAnswers(page, [{ rounds: [Array.from({ length: 5 }, () => LONG).flat()], delayMs: 60 }]);
     await open(page);
     await send(page, "E2E: a long plan please");
     await followedDown(page, 200);
@@ -571,15 +653,14 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
     await page.waitForTimeout(300);
     await expect(pill(page)).toBeVisible();
     const { after, pulled } = await afterHand(page);
-    expect(after.length).toBeGreaterThan(10);
     expect(pulled, "moved back down between two frames after the press").toBeLessThanOrEqual(2);
+    expect(grew(after), "frames that drew new words after the press").toBeGreaterThan(10);
   });
 
   test("the pill: 44 px or more, clear of the composer, only when needed; a tap brings the bottom into view and follows again (input: wheel, then a tap)", async ({ page }) => {
     await streamAnswers(page, [{ rounds: [[...LONG, ...LONG]], delayMs: 250 }]);
     await open(page);
     await send(page, "E2E: a long plan please");
-    await panelOpen(page);
     await followedDown(page, 150);
     await watch(page);
     await expect(pill(page), "following: no pill").toHaveCount(0);
@@ -614,7 +695,6 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
     await open(page);
     expect(await page.evaluate(() => document.documentElement.dataset.theme), "the page is dark").toBe("dark");
     await send(page, "E2E: a long plan please");
-    await panelOpen(page);
     await followedDown(page, 150);
     await wheel(page, -150);
     await expect(pill(page)).toBeVisible();
@@ -833,11 +913,11 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
       expect(await gapDrawn(page), "the second answer ends in view").toBeLessThanOrEqual(1);
       const seen = await frames(page);
       const before = await sinceHand(page, seen, lineAt);
-      expect(before.said, "frames said between his wheel and his next question").toBeGreaterThan(5);
       expect(before.pulled, "moved back down between two frames before his next question").toBeLessThanOrEqual(2);
       const f = await followed(page, seen, seen[heardAt].t);
-      expect(f.live, "frames said after his second question").toBeGreaterThan(20);
       expect(f.out, inViewMessage(f)).toBe(0);
+      expect(before.said, "frames said between his wheel and his next question").toBeGreaterThan(5);
+      expect(f.live, "frames said after his second question").toBeGreaterThan(20);
       // He scrolls up again and ends the call: the saved messages take the spoken lines' place, and the thread lands at
       // the newest, following.
       await wheel(page, -400);
@@ -862,8 +942,8 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
         const seen = await frames(page);
         expect((await sinceHand(page, seen, lineAt)).pulled, "moved back down before his line was heard").toBeLessThanOrEqual(2);
         const f = await followed(page, seen, seen[heardAt].t);
-        expect(f.live, "frames said after his line was heard").toBeGreaterThan(15);
         expect(f.out, inViewMessage(f)).toBe(0);
+        expect(f.live, "frames said after his line was heard").toBeGreaterThan(15);
       });
     }
 
@@ -879,8 +959,8 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
       await expect(pill(page), "off, and the answer went on below him").toBeVisible();
       const seen = await frames(page);
       const after = await sinceHand(page, seen);
-      expect(after.said, "frames said after his wheel").toBeGreaterThan(10);
       expect(after.pulled, "moved back down after his wheel, his line heard or not").toBeLessThanOrEqual(2);
+      expect(after.said, "frames said after his wheel").toBeGreaterThan(10);
     });
   });
 });
