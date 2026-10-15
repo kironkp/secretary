@@ -9,8 +9,8 @@ beside me in a workshop."*
 
 - **Cycle counter: 109.** 1.00, 1.02, 1.03, 1.04 and 1.09 are accepted
   (1.09 live 2026-10-15, `5d4d98e`); 1.01 is open; 1.11 is being built (on
-  `jarvis-1.11-project-order`, merging `5d4d98e`; r2 `3b3c1a9` with the
-  Reviewer); then 1.16 (the names on public main), then 1.10, 1.13, 1.12, 1.14, 1.15 (Kiron's feedback,
+  `jarvis-1.11-project-order`, merging `5d4d98e`; r2 `3b3c1a9` FAILED,
+  r3 being made); then 1.16 (the names on public main), then 1.10, 1.13, 1.12, 1.14, 1.15 (Kiron's feedback,
   his mockup approved 2026-10-14, and the whole site in its look), then
   1.08, 1.05, 1.06, 1.07. Each pushed to Heroku as it passes (Kiron:
   "Push to heroku for each update"). See §9.
@@ -344,6 +344,14 @@ beside me in a workshop."*
     (the planner's, get_current_plan), it gets a fixed order. Test: rows
     shuffled give the same text, the same hash and the same prompt. Not
     put in r5, because any product change there restarts the burn-in.
+    r1 (`2b212e5`) FAILED: a deadlock when moves came at once, and four
+    smaller items. r2 (`3b3c1a9`, 2026-10-15) FAILED on one defect: held
+    at the bottom edge, the list scrolled past its end in Chromium and
+    the row left his finger. The deadlock, order, screen, voice and
+    migration all held. r3 carries the edge, the edge zone moved above
+    the tab bar, reads in sequence inside a transaction (a pg 9
+    deprecation), a time limit on a voice tool call, and a raised fill
+    for the lifted row in dark. A third FAIL stops the loop (§4).
   - **1.12** — merge two projects. He asked for one project to replace
     and absorb another; it made a new one and left the old one. There is
     no merge tool. Wanted: the tasks, notes and the rest move into the
@@ -393,7 +401,9 @@ beside me in a workshop."*
     page keeps the found message in place while what is above settles.
     And one test gap named in 1.09 r7: no typed test forces the last
     piece and the landing into one frame and judges that frame at paint
-    (the Reviewer forced it by hand: 0 under, 10 of 10).
+    (the Reviewer forced it by hand: 0 under, 10 of 10). From 1.11: the
+    floating voice button covers the drag handle of whichever row sits
+    under it; it needs room kept clear of it.
 - **1.05** — "asked means asked", the rest of what 1.03 began, built on main
   after 1.04: clarifications, understanding questions and nudges marked only
   after the hand-over; voice settles when the call really ran, not when the
