@@ -244,7 +244,10 @@ beside me in a workshop."*
   to both peers before any build: following stops only on his own input
   in the thread (wheel, touch, pointer, scroll keys) and resumes at the
   bottom; tests sample every frame in the page, in Chromium and in local
-  WebKit, 20 runs each.
+  WebKit, 20 runs each. r4 failed on a lost touch lift, r5 on a spoken line
+  of his not counting as a send; r6 (`cd712f9`, 2026-10-15) counts that
+  line as a send only if no hand came since his turn began, and is with
+  the Reviewer.
 - **1.08** — after 1.09, ahead of 1.05: an understanding
   call that was sent and not answered is counted, and a provider failure
   backs off. Today: up to 3 attempts a sweep per project, every 10 minutes,
@@ -354,6 +357,9 @@ beside me in a workshop."*
   after the hand-over; voice settles when the call really ran, not when the
   token was minted (the Reviewer proved a call that never connects still
   loses the promise); three tests the Reviewer's mutants showed missing.
+  Also, from 1.09 r6: on a call his line is shown when it arrives, so a
+  late line of his sits below the start of its answer; order call lines by
+  their place in the conversation.
 - **1.06** — one day count on the Overview (calendar days in his zone;
   `days_left` today is whole 24-hour periods, so in the evening a task due
   tomorrow at 17:00 counts as 0 days), and a size he sets on one card
