@@ -164,8 +164,8 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
     if (info.status === info.expectedStatus) return;
     const got = await page
       .evaluate(() => {
-        const w = window as unknown as { __frames?: Frame[]; __out?: unknown[]; __handAt?: number | null; __taps?: number[]; __wheels?: unknown[]; __scrolls?: unknown[]; __writes?: unknown[] };
-        return w.__frames ? { frames: w.__frames, out: w.__out, handAt: w.__handAt, taps: w.__taps, wheels: w.__wheels, scrolls: w.__scrolls, writes: w.__writes } : null;
+        const w = window as unknown as { __frames?: Frame[]; __out?: unknown[]; __handAt?: number | null; __taps?: number[]; __wheels?: unknown[]; __atThread?: unknown[]; __scrolls?: unknown[]; __writes?: unknown[]; __writesAfterWheel?: unknown[] };
+        return w.__frames ? { frames: w.__frames, out: w.__out, handAt: w.__handAt, taps: w.__taps, wheels: w.__wheels, atThread: w.__atThread, scrolls: w.__scrolls, writes: w.__writes, writesAfterWheel: w.__writesAfterWheel } : null;
       })
       .catch(() => null);
     if (!got) return;
@@ -176,6 +176,8 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
       [
         `[frames] ${info.title}: ${got.frames.length} frames; his hand at frame ${got.handAt ?? "-"}; taps at ${JSON.stringify(got.taps ?? [])}; at paint not wholly in view: ${JSON.stringify(got.out ?? [])}`,
         `  wheels: ${JSON.stringify(got.wheels ?? [])}`,
+        `  wheels that reached the thread itself (after the page's own listener): ${JSON.stringify(got.atThread ?? [])}`,
+        `  the first writes after a wheel: ${JSON.stringify(got.writesAfterWheel ?? [])}`,
         `  the thread's scrolls [frame, top, ms]: ${JSON.stringify(got.scrolls ?? [])}`,
         `  positions written to it by a script [frame, top, ms]: ${JSON.stringify(got.writes ?? [])}`,
         "  i t(ms) live-top live-bottom chars composer-top scroll height view pill",
@@ -208,32 +210,45 @@ test.describe("the thread follows the answer until his hand is on it; the pill f
         w.__handTop = el.scrollTop;
       };
       for (const type of ["wheel", "pointerdown", "touchstart", "keydown"]) document.addEventListener(type, hand, { capture: true, passive: true });
-      // For a failure's log, by frame number and time: each wheel (where, on what, the thread's position then, whether
-      // the panel's height was moving), each scroll of the thread, whoever made it, and each position a script wrote
-      // to it (the page's own writes: the setter is passed through, unchanged).
-      const log = w as unknown as { __wheels: unknown[]; __scrolls: [number, number, number][]; __writes: [number, number, number][] };
+      // For a failure's log, by frame number and time: each wheel (where, on what, the thread's position then, what was
+      // animating in the chat card, and the call stack of the page's last write before it); whether it reached the
+      // thread itself (a listener there, added after the page's own, runs only after the page's has); each scroll of
+      // the thread, whoever made it; each position a script wrote to it (the setter is passed through, unchanged), with
+      // the call stacks of the first three after a wheel.
+      const log = w as unknown as { __wheels: unknown[]; __atThread: unknown[]; __scrolls: [number, number, number][]; __writes: [number, number, number][]; __writesAfterWheel: unknown[] };
       log.__wheels = [];
+      log.__atThread = [];
       log.__scrolls = [];
       log.__writes = [];
+      log.__writesAfterWheel = [];
+      let lastStack = "";
+      const stackNow = () => (new Error().stack ?? "").split("\n").slice(2, 9).map((s) => s.trim()).join(" < ");
       const scroller = document.querySelector("[data-thread-scroll]");
       const top = Object.getOwnPropertyDescriptor(Element.prototype, "scrollTop")!;
-      if (scroller)
+      if (scroller) {
         Object.defineProperty(scroller, "scrollTop", {
           configurable: true,
           get() {
             return top.get!.call(this);
           },
           set(v: number) {
-            log.__writes.push([w.__frames.length, Math.round(v), Math.round(performance.now())]);
+            const at = w.__frames.length;
+            const t = Math.round(performance.now());
+            lastStack = stackNow();
+            log.__writes.push([at, Math.round(v), t]);
+            if (log.__wheels.length > 0 && log.__writesAfterWheel.length < 3) log.__writesAfterWheel.push({ at, top: Math.round(v), t, stack: lastStack });
             top.set!.call(this, v);
           },
         });
+        scroller.addEventListener("wheel", (e) => log.__atThread.push({ at: w.__frames.length, t: Math.round(performance.now()), defaultPrevented: e.defaultPrevented, cancelable: e.cancelable }), { passive: true });
+      }
       document.addEventListener(
         "wheel",
         (e) => {
           const el = document.querySelector("[data-thread-scroll]") as HTMLElement | null;
           const card = document.querySelector("[data-testid='chat-card']");
-          log.__wheels.push({ at: w.__frames.length, t: Math.round(performance.now()), x: Math.round(e.clientX), y: Math.round(e.clientY), dy: e.deltaY, mode: e.deltaMode, onThread: !!el?.contains(e.target as Node), top: el ? Math.round(el.scrollTop) : null, panelMoving: !!card?.getAnimations({ subtree: true }).some((a) => a.playState === "running") });
+          const moving = (card?.getAnimations({ subtree: true }) ?? []).filter((a) => a.playState === "running").map((a) => (a as CSSTransition).transitionProperty ?? (a as CSSAnimation).animationName ?? "?");
+          log.__wheels.push({ at: w.__frames.length, t: Math.round(performance.now()), x: Math.round(e.clientX), y: Math.round(e.clientY), dy: e.deltaY, mode: e.deltaMode, cancelable: e.cancelable, onThread: !!el?.contains(e.target as Node), top: el ? Math.round(el.scrollTop) : null, animating: moving, lastWrite: lastStack });
         },
         { capture: true, passive: true }
       );
