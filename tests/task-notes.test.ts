@@ -185,12 +185,12 @@ describe("the same title (§1.3)", () => {
     const again = await tool("add_to_list", { items: ["lotion"], list: "shopping", note: "the SPF 50 one" });
     const lotion = (await mine()).filter((r) => r.title.toLowerCase() === "lotion");
     expect(lotion.map((r) => r.notes)).toEqual(["the SPF 50 one"]);
-    expect(again.already_on_list).toEqual(["lotion"]);
-    expect(again.note_added_to).toEqual(["lotion"]);
+    expect(again.already_on_list).toEqual(["Lotion"]);
+    expect(again.note_added_to).toEqual(["Lotion"]);
     expect(String(again.read_back)).toMatch(/added the note/i);
     const thrice = await tool("add_to_list", { items: ["lotion"], list: "shopping", note: "the SPF 50 one" });
     expect(thrice.note_added_to ?? []).toEqual([]);
-    expect(thrice.note_already_on).toEqual(["lotion"]);
+    expect(thrice.note_already_on).toEqual(["Lotion"]);
     expect((await mine()).filter((r) => r.title.toLowerCase() === "lotion").map((r) => r.notes)).toEqual(["the SPF 50 one"]);
   });
 });

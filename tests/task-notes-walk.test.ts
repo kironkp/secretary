@@ -27,9 +27,16 @@ const TZ = "America/Los_Angeles";
 const HIS = "Corrugated, 8 ft long.\nGate code: 4412\nhttps://timber.example/roof?a=1&b=2\nÉtagère — café, naïve.\n\nOwner: me (my own label)";
 const SEEDS = (process.env.NOTES_WALK_SEEDS ?? Array.from({ length: 24 }, (_, i) => i + 1).join(",")).split(",").map(Number);
 const STEPS = Number(process.env.NOTES_WALK_STEPS ?? 30);
+const KINDS = [
+  "update_task", "amend_task", "progress", "started", "postponed", "blocked", "twin", "similar", "extract", "extract-similar",
+  "stale", "replace", "his-save", "his-save-racing", "two-at-once", "list",
+] as const;
+const ran = new Set<string>();
 const users: string[] = [];
 afterAll(async () => {
   for (const id of users) await db.delete(user).where(eq(user.id, id));
+  // The walk is only as good as what it walked: across the seeds, every kind of step ran.
+  if (SEEDS.length >= 24) expect([...KINDS].filter((k) => !ran.has(k)), "kinds of step no seed took").toEqual([]);
 });
 
 /** mulberry32: the same seed, the same walk. */
@@ -85,10 +92,8 @@ describe("his note against every model path, at random (v1.17)", () => {
       let where: "task" | "blocked" | "list" | "none" = "task"; // where the step's token should end up
       let saidNotSaved = false;
       let written = line; // the line this step wrote
-      const kind = pick([
-        "update_task", "amend_task", "progress", "started", "postponed", "blocked", "twin", "similar", "extract", "extract-similar",
-        "stale", "replace", "his-save", "his-save-racing", "two-at-once", "list",
-      ]);
+      const kind = pick([...KINDS]);
+      ran.add(kind);
       log.push(`${step} ${kind}`);
       const where_ = `seed ${seed}, steps: ${log.join(" | ")}`;
       switch (kind) {
