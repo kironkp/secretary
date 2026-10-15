@@ -52,8 +52,11 @@ scroll and its event). The rule now needs nothing but his first touch:
    while following is off, the bottom is out of view, and something has been
    written below since following stopped. His next send turns it on too.
 4. **A scroll with no input** (VoiceOver, the iOS scroll indicator, find in
-   page) turns following off when it is not the position the page last
-   wrote and leaves him more than 32 px above the bottom. A clamp (the
+   page) turns following off when it is not the position the page last wrote
+   and leaves him more than 32 px above the bottom as it stood when the page
+   last wrote (or as it stands, if the content has grown shorter). What was
+   written since is not his scroll: the panel growing pulls the position
+   down to the old bottom in the same moment a new piece lands. A clamp (the
    panel growing taller, a round that starts over shorter) leaves him at the
    bottom, so it never counts. The page checks this before every write too:
    such a scroll's event can come after the next piece.
