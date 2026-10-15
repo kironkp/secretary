@@ -1304,7 +1304,6 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
       added.length ? `Added ${spokenList(added)} to your ${list.name} list${note ? ` (${note})` : ""}.` : "",
       already.length ? `${spokenList(already)} ${already.length === 1 ? "is" : "are"} already on it.` : "",
       noteAddedTo.length ? `I added the note to ${spokenList(noteAddedTo)}.` : "",
-      noteAlreadyOn.length ? `${spokenList(noteAlreadyOn)} already ${noteAlreadyOn.length === 1 ? "has" : "have"} that note.` : "",
     ]
       .filter(Boolean)
       .join(" ");
