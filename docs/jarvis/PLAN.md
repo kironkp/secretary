@@ -270,7 +270,10 @@ beside me in a workshop."*
 - **1.16** — names on public main, after 1.11 (the Reviewer, 2026-10-15): words
   from his real data (a client's name and a person's first name) have
   been on public main since 2026-08-07, in test fixtures, Today and
-  interview copy, and docs/adaptive-ui/, about a dozen files. Replace
+  interview copy, lib/ and docs: one word in 63 files, the other in 24
+  (the Reviewer's count on `5d4d98e`), and a test fixture that replays a
+  production run. Code that acts on his data is listed, not renamed; no
+  change may make the understanding loop read his projects again. Replace
   them with made-up names in the current files; the counts of files and
   places go in the RESULT, never the words. Whether the history is
   rewritten or the repo made private is Kiron's call (§10).
