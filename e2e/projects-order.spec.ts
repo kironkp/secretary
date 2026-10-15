@@ -236,3 +236,152 @@ test("held near the top edge, a long list scrolls under the row: a project goes 
   await page.reload();
   expect((await names())[0]).toBe(last);
 });
+
+// v1.11 r3, the bottom edge (the Reviewer's r2 finding): a row held at the bottom ran the list past its end in
+// Chromium (the held row's transform counts in the scroller's overflow, and the scroll had no limit), the row was then
+// off the finger, and the zone itself lay under the tab bar. These tests use the long list made just above.
+
+/** Every row of Active, in order. */
+const activeNames = (page: Page) => page.locator("[data-project-group='active'] [data-project-row]").evaluateAll((rows) => rows.map((r) => r.getAttribute("data-project-name") ?? ""));
+/** The top of what covers the bottom of the screen: the tab bar, and the voice button above it at the right. */
+const coveredTop = (page: Page) =>
+  page.evaluate(() => Math.min(...["tab-bar", "chat-launcher"].map((id) => document.querySelector(`[data-testid="${id}"]`)!.getBoundingClientRect().top)));
+/** A finger: the mouse, or a real touch through the DevTools protocol (Chromium only). */
+type Finger = { down: (x: number, y: number) => Promise<void>; move: (x: number, y: number, steps: number) => Promise<void>; up: () => Promise<void> };
+async function fingerOf(page: Page, input: "mouse" | "touch"): Promise<Finger> {
+  if (input === "mouse")
+    return {
+      down: async (x, y) => {
+        await page.mouse.move(x, y);
+        await page.mouse.down();
+      },
+      move: (x, y, steps) => page.mouse.move(x, y, { steps }),
+      up: () => page.mouse.up(),
+    };
+  const cdp = await page.context().newCDPSession(page);
+  let at = { x: 0, y: 0 };
+  const send = async (type: "touchStart" | "touchMove" | "touchEnd", p?: { x: number; y: number }) => {
+    await cdp.send("Input.dispatchTouchEvent", { type, touchPoints: p ? [p] : [] });
+  };
+  return {
+    down: async (x, y) => {
+      at = { x, y };
+      await send("touchStart", at);
+    },
+    move: async (x, y, steps) => {
+      const from = at;
+      for (let i = 1; i <= steps; i++) {
+        at = { x: from.x + ((x - from.x) * i) / steps, y: from.y + ((y - from.y) * i) / steps };
+        await send("touchMove", at);
+        await page.waitForTimeout(16);
+      }
+    },
+    up: () => send("touchEnd"),
+  };
+}
+/** A list longer than the screen: the test above makes one; run alone, these tests make their own. */
+async function longList(request: APIRequestContext, page: Page) {
+  await page.goto("/projects");
+  const have = (await activeNames(page)).length;
+  for (let i = have + 1; i <= 17; i++) await tool(request, "create_project", { name: `Edge list ${String(i).padStart(2, "0")}` });
+  if (have < 17) await page.goto("/projects");
+}
+/** The scroller's highest scrollTop from now on, read every frame in the page. */
+const recordTop = (page: Page) =>
+  page.locator("main").evaluate((m) => {
+    const w = window as unknown as { __maxTop: number };
+    w.__maxTop = m.scrollTop;
+    const tick = () => {
+      w.__maxTop = Math.max(w.__maxTop, m.scrollTop);
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+
+for (const input of ["mouse", "touch"] as const) {
+  test.describe(`the bottom edge, by ${input}`, () => {
+    if (input === "touch") test.use({ hasTouch: true, isMobile: true });
+    for (const hold of [400, 1500]) {
+      test(`held at the bottom for ${hold} ms, then back to the middle: the list stops at its end, the row stays under the finger, it lands where it is let go`, async ({ page, browserName, request }) => {
+        test.skip(input === "touch" && browserName !== "chromium", "Playwright sends touch input to Chromium only");
+        await longList(request, page);
+        const main = page.locator("main");
+        await main.evaluate((m) => (m.scrollTop = 0));
+        const before = await activeNames(page);
+        const first = before[0];
+        // The list's end, measured before anything is held.
+        const max = await main.evaluate((m) => m.scrollHeight - m.clientHeight);
+        expect(max, "the list is longer than the screen").toBeGreaterThan(200);
+        const height = page.viewportSize()!.height;
+        const h = (await handle(page, first).boundingBox())!;
+        const x = h.x + h.width / 2;
+        await recordTop(page);
+        const finger = await fingerOf(page, input);
+        await finger.down(x, h.y + h.height / 2);
+        // All the way down, over the tab bar: inside the edge zone wherever it is.
+        await finger.move(x, height - 6, 12);
+        await page.waitForTimeout(hold);
+        const mid = Math.round(height / 2);
+        await finger.move(x, mid, 6);
+        await page.waitForTimeout(400);
+        const seen = await page.evaluate((y) => {
+          const rows = [...document.querySelectorAll("[data-project-group='active'] [data-project-row]")];
+          const lifted = rows.find((r) => r.getAttribute("data-lifted") === "true")!;
+          const centre = (el: Element) => {
+            const b = el.getBoundingClientRect();
+            return b.top + b.height / 2;
+          };
+          return {
+            maxTop: (window as unknown as { __maxTop: number }).__maxTop,
+            top: document.querySelector("main")!.scrollTop,
+            rowOffFinger: centre(lifted) - y,
+            // The place under the finger: the rows (the held one aside) whose centre is above it.
+            under: rows.filter((r) => r !== lifted && centre(r) < y).length,
+          };
+        }, mid);
+        console.log(`[bottom edge] ${input} ${hold} ms: max ${max}, highest scrollTop ${seen.maxTop}, now ${seen.top}, row ${seen.rowOffFinger} px off the finger, place under it ${seen.under}`);
+        expect(seen.maxTop, "the list never scrolls past its end").toBeLessThanOrEqual(max + 1);
+        expect(Math.abs(seen.rowOffFinger), "the held row is under the finger").toBeLessThanOrEqual(3);
+        const saved = seen.under !== 0 ? stored(page) : null;
+        await finger.up();
+        await saved;
+        expect((await activeNames(page)).indexOf(first), "it lands at the place under the finger").toBe(seen.under);
+        // Back on top for the next test.
+        if (seen.under !== 0) await tool(request, "move_project", { project: first, to: "top" });
+      });
+    }
+  });
+}
+
+for (const [label, viewport] of [
+  ["a phone", { width: 390, height: 844 }],
+  ["a wide screen", { width: 1280, height: 800 }],
+] as const) {
+  test.describe(`the bottom edge zone on ${label}`, () => {
+    test.use({ viewport });
+    test("is above the tab bar and the voice button, 64 px tall: held just above the voice button the list scrolls, held just above the zone it does not", async ({ page, request }) => {
+      await longList(request, page);
+      const main = page.locator("main");
+      await main.evaluate((m) => (m.scrollTop = 0));
+      expect(await main.evaluate((m) => m.scrollHeight - m.clientHeight), "the list is longer than the screen").toBeGreaterThan(0);
+      const covered = await coveredTop(page);
+      const first = (await activeNames(page))[0];
+      const h = (await handle(page, first).boundingBox())!;
+      const x = h.x + h.width / 2;
+      await page.mouse.move(x, h.y + h.height / 2);
+      await page.mouse.down();
+      // Just above the zone: nothing scrolls.
+      await page.mouse.move(x, covered - 64 - 8, { steps: 8 });
+      await page.waitForTimeout(500);
+      expect(await main.evaluate((m) => m.scrollTop), `held ${64 + 8} px above the voice button`).toBe(0);
+      // Just above the voice button, inside the zone: the list scrolls.
+      await page.mouse.move(x, covered - 8, { steps: 4 });
+      await expect.poll(() => main.evaluate((m) => m.scrollTop), { timeout: 2_000, message: "held 8 px above the voice button" }).toBeGreaterThan(0);
+      await page.screenshot({ path: `${DIR}/projects-${viewport.width}-bottom-edge.png` });
+      // Let go, and the first project back on top for the next test.
+      await page.mouse.up();
+      await page.waitForTimeout(300);
+      if ((await activeNames(page))[0] !== first) await tool(request, "move_project", { project: first, to: "top" });
+    });
+  });
+}
