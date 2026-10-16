@@ -388,6 +388,16 @@ beside me in a workshop."*
     task's history. The understanding bundle reads notes, not checkins,
     and adding checkins would change every stamp. Progress stays in his
     note, and only log_status's note text is tightened.
+    r1 (`e1da4b0`) FAILED on three defects. The check also read lines
+    already in the note, so an echo of a labelled line refused a plain
+    new one. A long link or one-word title ran off the card at 390. Two
+    controls under More were 32 px tall. Everything else held: the screen
+    side by side, contrast, the circle, completedAt, $0 and names. r2
+    also carries tests that a turn is marked live and that Done saves a
+    draft. It fixes the normalising order (bullets before dashes, "_",
+    double spaces, "due date", no "dues"), uses one dot-colour helper,
+    and strips "Suggested:" wherever a note is shown.
+    Queued for 1.05: complete_task on a done task adds another checkin.
   - **1.11** — he orders his projects. A grab handle to drag a project
     to the top, and "move that project to the top" by voice or chat: one
     operation, one stored order, no model call for the drag. 1.02 r5
