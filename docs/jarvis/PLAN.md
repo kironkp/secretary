@@ -398,6 +398,16 @@ beside me in a workshop."*
     double spaces, "due date", no "dues"), uses one dot-colour helper,
     and strips "Suggested:" wherever a note is shown.
     Queued for 1.05: complete_task on a done task adds another checkin.
+    r2 (`b120197`) FAILED, the second FAIL. add_to_list on an existing
+    item still checked its whole note and named his own line. Under More
+    with documents, file links were 16 px tall, and two texts were under
+    4.5:1 (an accent button in dark, a red word in light). Every other
+    path held. r3 carries those fixes and lock tests for the twin, the
+    list item and done. It also changes the method: one sweep over the
+    whole screen with every optional part present, both modes and
+    engines, every interactive element at 44, every text at 4.5:1. The
+    Executor runs the Reviewer's probes before offering. A third FAIL
+    stops the loop (§4).
   - **1.11** — he orders his projects. A grab handle to drag a project
     to the top, and "move that project to the top" by voice or chat: one
     operation, one stored order, no model call for the drag. 1.02 r5
