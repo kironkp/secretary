@@ -10,8 +10,9 @@ commits it covers so `git show <hash>` always reaches the real diff.
 ## v1.10 — A task reads like a reminder (2026-10-16)
 
 `c116fd0`, `87c3c76` (the rule, docs/tasks/SPEC.md §2), `8ff29f5`, `5b6c87b`,
-`0de45c1`, `9a59e75` (the tests, first and red), `bcbcea1`, `849e91b` (the
-code), `5f5f54c` (v1.17 r2 merged in), this commit.
+`0de45c1`, `9a59e75`, `3ff6e24` (the tests, first and red), `bcbcea1`,
+`849e91b`, `6575dd5`, `623868f` (the code), `5f5f54c` (v1.17 r2 merged in),
+`6312923` (this entry first, and the version), this commit.
 
 Kiron, comparing with Notion and Apple Reminders: "It should be really
 simple", "simple and working and no clutter". The labels a model wrote into
@@ -42,6 +43,12 @@ don't really work for me".
 - Six things 1.17 did right are tested now, so nothing can quietly break
   them, and the notes browser test will not run its chat turn against a
   server it did not start (one already running could reach a real model).
+- What a blocked task waited on stays in its History ("Status → blocked:
+  …") after it is unblocked. History is not in what an understanding run
+  reads, so it costs nothing.
+- On the task screen no text is lighter than the muted grey (the old
+  dialog's labels were 3.26:1 on white), and nothing runs past a card's
+  edge at phone width (the old Due field did).
 
 Cost: one prompt-cache rewrite for each prompt that changed; no new model
 calls; a refused note writes nothing. No understanding hash changes.
