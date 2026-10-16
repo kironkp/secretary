@@ -95,7 +95,7 @@ test("the screen against 1-task.html: each role's values (light)", async ({ page
   expect(v.done.w).toBeGreaterThanOrEqual(64);
   expect(v.titleCard).toMatchObject({ bg: "rgb(255, 255, 255)", radius: "12px", pad: "6px 16px 16px 6px" });
   expect(v.titleCard.box!.x, "16 px gutter").toBe(16);
-  expect(v.titleCard.box!.w).toBe(390 - 32);
+  expect(v.titleCard.box!.w, "the width less the two gutters (the iPhone profile is 393 wide)").toBe(page.viewportSize()!.width - 32);
   expect(v.rowsCard).toMatchObject({ bg: "rgb(255, 255, 255)", radius: "12px" });
   expect(v.rowsCard.box!.y - (v.titleCard.box!.y + v.titleCard.box!.h), "cards 16 apart").toBe(16);
   expect(v.circle.box).toMatchObject({ w: 44, h: 44, x: 16 + 6, y: v.titleCard.box!.y + 6 });
@@ -233,7 +233,8 @@ test("the circle completes a task the way complete_task does; a done task that d
   await expect(page.getByRole("button", { name: "Mark not done" })).toBeVisible();
   const done = await (await request.get(`/api/tasks/${id}`)).json();
   expect(done.task.status).toBe("done");
-  expect(done.history.map((h: { note: string }) => h.note)).toContain("Marked done");
+  // The checkin complete_task writes, with where it came from, as the route has always said it.
+  expect(done.history.map((h: { note: string }) => h.note)).toContain("Marked done from task");
   await page.getByRole("button", { name: "Mark not done" }).click();
   await expect(page.getByRole("button", { name: "Mark done" })).toBeVisible();
   const open = await taskOf(request, id);
