@@ -57,6 +57,36 @@ const ROW = "flex min-h-12 w-full items-center gap-3 px-4 text-left";
 const SEP = "border-t border-hairline";
 const ICON = { width: 22, height: 22, strokeWidth: 1.8, className: "flex-none text-accent-ink" } as const;
 
+/**
+ * The task screen while its task loads: the same sheet and header, so opening a task never shows another dialog
+ * first and then jumps to this one.
+ */
+export function TaskScreenLoading({ onClose, backdropReady }: { onClose: () => void; backdropReady: () => boolean }) {
+  return (
+    <div
+      onClick={() => backdropReady() && onClose()}
+      className="fixed inset-0 z-[60] flex sm:items-center sm:justify-center sm:bg-black/40 sm:p-4 sm:backdrop-blur-[2px]"
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-busy="true"
+        data-task-screen-loading=""
+        onClick={(e) => e.stopPropagation()}
+        className="animate-rise-in h-full w-full overflow-y-auto bg-bg text-ink sm:h-auto sm:min-h-64 sm:max-w-[420px] sm:rounded-2xl sm:shadow-xl"
+      >
+        <div className="flex h-14 items-center justify-between pr-2 pl-4">
+          <h2 className="text-[17px] font-semibold">Task</h2>
+          <button type="button" onClick={onClose} className="h-11 min-w-16 px-2 text-[17px] font-semibold text-accent-ink">
+            Done
+          </button>
+        </div>
+        <p className="px-4 text-base text-muted">Loading…</p>
+      </div>
+    </div>
+  );
+}
+
 export function TaskScreen({
   detail,
   onChange,

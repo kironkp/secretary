@@ -10,7 +10,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { AlarmClock, Calendar, MapPin, MessageSquare, X } from "lucide-react";
 import { Row, fmtFull } from "./detail-parts";
-import { TaskScreen, type TaskDetail } from "./task-screen";
+import { TaskScreen, TaskScreenLoading, type TaskDetail } from "./task-screen";
 
 type EventDetail = {
   kind: "event";
@@ -100,6 +100,11 @@ export function DetailDialog() {
   }, [target, isTask]);
 
   if (!target) return null;
+
+  // A task opens in its own sheet from the start: no other dialog while it loads (docs/tasks/SPEC.md §2.4).
+  if (target.kind === "task" && !detail && !error) {
+    return <TaskScreenLoading onClose={() => setTarget(null)} backdropReady={backdropReady} />;
+  }
 
   if (detail?.kind === "task") {
     return (
