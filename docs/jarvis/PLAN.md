@@ -366,8 +366,13 @@ beside me in a workshop."*
     with voice), title, plain notes, then Due, Remind me and Project.
     "Waiting on" shows while the task is blocked. Status, Stages, the
     packet, Heard, From and History sit under one collapsed "More" until
-    Kiron answers. Judged by the README's method. A draft, probed before
-    it is built: progress lines go to the task's history, not his note.
+    Kiron answers. Judged by the README's method. A done recurring task's
+    circle is not a button, because reopening one would leave two open copies;
+    one that doesn't recur reopens. Live means the chat and voice routes
+    only. Withdrawn after the diagnosis: moving progress lines to the
+    task's history. The understanding bundle reads notes, not checkins,
+    and adding checkins would change every stamp. Progress stays in his
+    note, and only log_status's note text is tightened.
   - **1.11** — he orders his projects. A grab handle to drag a project
     to the top, and "move that project to the top" by voice or chat: one
     operation, one stored order, no model call for the drag. 1.02 r5
