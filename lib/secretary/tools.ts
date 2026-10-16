@@ -824,6 +824,8 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
       updates.status = a.status;
       if (a.status === "in_progress" && !task.startedAt) updates.startedAt = new Date();
       if (a.status === "done") updates.completedAt = new Date();
+      // Reopened, it is not done any more: nothing should still read it as finished (docs/tasks/SPEC.md §2.4).
+      else if (task.status === "done") updates.completedAt = null;
     }
     if (a.title) updates.title = a.title;
     // His note is never replaced by a model's (docs/tasks/SPEC.md §1.1): the lines it lacks are added, in the
