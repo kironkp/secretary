@@ -97,7 +97,7 @@ export function PacketSection({ taskId }: { taskId: string }) {
         }}
       />
       <div className="mb-1.5 flex items-center justify-between gap-2">
-        <p className="text-xs text-faint">
+        <p className="text-xs text-muted">
           Documents{required > 0 && ` (${have}/${required})`}
           {packet.process && ` · ${packet.process}`}
         </p>
@@ -116,7 +116,7 @@ export function PacketSection({ taskId }: { taskId: string }) {
       <div className="flex flex-col gap-2.5">
         {withDocs.map((s) => (
           <div key={s.name}>
-            <p className={`text-xs font-semibold ${s.done ? "text-faint" : "text-ink"}`}>{s.name}</p>
+            <p className={`text-xs font-semibold ${s.done ? "text-muted" : "text-ink"}`}>{s.name}</p>
             <div className="mt-1 flex flex-col gap-1">
               {s.docs.map((d) => (
                 <div key={d.name} className="flex flex-col gap-0.5 pl-1">
@@ -153,7 +153,7 @@ export function PacketSection({ taskId }: { taskId: string }) {
             <div className="mt-1 flex flex-col gap-0.5 pl-1">
               {packet.other.map((f) => (
                 <div key={f.id} className="flex flex-col">
-                  <span className="text-xs text-faint">{f.docType}</span>
+                  <span className="text-xs text-muted">{f.docType}</span>
                   {fileRow(f)}
                 </div>
               ))}
@@ -178,7 +178,7 @@ export function PacketSection({ taskId }: { taskId: string }) {
           </button>
         </div>
         {!withDocs.length && (
-          <p className="text-xs text-faint">
+          <p className="text-xs text-muted">
             Tell me which documents each step needs (&ldquo;step 8 needs the ADM 2029&rdquo;) and they show up here as a
             checklist.
           </p>
