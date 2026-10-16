@@ -118,7 +118,7 @@ test("the screen against 1-task.html: each role's values (light)", async ({ page
   });
   expect(v.dot).toMatchObject({ w: 12, h: 12 });
   expect(v.chevron).toMatchObject({ w: 16, h: 16 });
-  await page.screenshot({ path: `${DIR}/task-390.png` });
+  await page.screenshot({ path: `${DIR}/task-390.png`, animations: "disabled" });
 });
 
 test("what is on it, in order: Task and Done; the circle, title and note; Due, Remind me, Project; More last", async ({ page, request }) => {
@@ -184,7 +184,7 @@ test("dark: the same roles on the dark tokens, text at 4.5:1", async ({ page, re
   });
   expect(ratios.ground).not.toBe("rgb(242, 242, 247)");
   for (const [what, r] of Object.entries(ratios)) if (typeof r === "number") expect(r, what).toBeGreaterThanOrEqual(4.5);
-  await page.screenshot({ path: `${DIR}/task-390-dark.png` });
+  await page.screenshot({ path: `${DIR}/task-390-dark.png`, animations: "disabled" });
   await page.context().clearCookies({ name: "theme" });
 });
 
@@ -343,4 +343,26 @@ test("nothing runs past its card's edges at phone width, More open, with long wo
   const width = page.viewportSize()!.width;
   const screenWide = await page.locator("[data-task-screen]").evaluate((el) => el.scrollWidth);
   expect(screenWide, "no sideways scroll").toBeLessThanOrEqual(width);
+});
+
+test("while a task loads, its own sheet shows, never another dialog first", async ({ page, request }) => {
+  const made = await tool(request, "create_task", { title: `Sweep the porch ${stamp()}` });
+  const id = String(made.task_id);
+  await page.goto("/today");
+  await page.waitForLoadState("load");
+  // The task's own read is held back a moment, so what shows while it loads can be seen.
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  await page.route(`**/api/tasks/${id}`, async (route) => {
+    if (route.request().method() === "GET") await held;
+    await route.continue();
+  });
+  await expect(async () => {
+    await page.evaluate((taskId) => window.dispatchEvent(new CustomEvent("secretary:open-detail", { detail: { kind: "task", id: taskId } })), id);
+    await expect(page.locator("[data-task-screen-loading]")).toBeVisible({ timeout: 1_000 });
+  }).toPass({ timeout: 20_000 });
+  await expect(page.locator("[role='dialog']:not([data-task-screen]):not([data-task-screen-loading])")).toHaveCount(0);
+  release();
+  await expect(page.locator("[data-task-screen]")).toBeVisible();
+  await expect(page.locator("[data-task-screen-loading]")).toHaveCount(0);
 });
