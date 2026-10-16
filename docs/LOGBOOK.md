@@ -57,6 +57,24 @@ item already on a list was said back with a new sentence when it already had
 the note (now only an added note is said), and extraction's summary has two
 new counts that its test compares exactly.
 
+**r2** (`cfb4083` the tests, first and red; `6e9f576` the code; this commit).
+The Reviewer found that "a trailing space" meant two things: the code
+trimmed every Unicode space, the database only spaces, tabs and returns. So a
+line he had stored ending in a no-break space (a phone or a paste puts one
+there) never matched the same line from the model: it was added a second
+time, looking the same, and the result said it was already there. On a task
+of the same title it also said "your note was added to it", because an empty
+list of added lines counted as something.
+
+- Trailing spaces are now one set, held once: exactly what JavaScript's
+  trimEnd strips. The code's trim and the database's are both built from it,
+  and a test asks the database and the code the same question for each of
+  its characters, and for three it keeps.
+- A result says lines were added only when some were.
+- The walk now gives his lines and the model's no-break spaces, ideographic
+  spaces and tabs at the end, and echoes his own lines back; on v1.17 it
+  failed 5 seeds in 24.
+
 ## v1.11 — His project order (2026-10-14)
 
 `8ecf219`, `a1b70a6`, `b2577e2` (the spec, docs/projects/SPEC.md, new, with
