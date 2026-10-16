@@ -22,6 +22,10 @@ export const BASE_URL = `http://localhost:${PORT}`;
 // The model stand-in (e2e/model-standin.mjs): a chat turn that reaches the
 // server is answered by it, never by a real model (v1.17).
 const STANDIN_PORT = Number(process.env.E2E_STANDIN_PORT ?? PORT + 1000);
+// This run's own id (set once in the runner; its workers inherit it). The app server this run starts writes it
+// to e2e/.runs/, so a spec whose chat turn must reach the stand-in can tell a server it started from one already
+// running on the port that Playwright reused, which could reach a real model (v1.10).
+process.env.E2E_RUN_ID ||= `${Date.now()}-${process.pid}`;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -149,8 +153,8 @@ export default defineConfig({
 
   webServer: [
     {
-      // Uses the build the verify job already produced; does not rebuild.
-      command: `npx next start -p ${PORT}`,
+      // Uses the build the verify job already produced; does not rebuild. First it notes this run's id (above).
+      command: `node e2e/started.mjs && npx next start -p ${PORT}`,
       url: BASE_URL,
       env: {
         // `next start` runs in production mode, and without an explicit base URL

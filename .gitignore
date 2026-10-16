@@ -48,3 +48,6 @@ backups/
 
 # Browser screenshots (e2e/screens.spec.ts); CI uploads them as an artifact.
 screenshots/
+
+# Marks of the app servers browser runs started (playwright.config.ts, v1.10)
+/e2e/.runs/

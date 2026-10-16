@@ -290,3 +290,62 @@ describe("what the understanding model reads of a long note (§1.8)", () => {
     expect(shown.length).toBeLessThanOrEqual(300);
   });
 });
+
+// v1.10: four things 1.17 did right that nothing caught a version breaking (the Reviewer's probe, M9, M22, M24, M27).
+describe("gaps the Reviewer's probe found (v1.10)", () => {
+  it("M9: he types a line a call is adding at the same time; his save stores it once", async () => {
+    const id = await hisTask("Fix the gate", {}, "Hinges are loose.");
+    const opened = (await row(id)).notes;
+    await tool("amend_task", { task: id, note: "Gate code: 4412" }); // a call, while he types
+    const saved = await save(id, { notes: "Hinges are loose.\nGate code: 4412", notesBase: opened });
+    expect(saved.notes).toBe("Hinges are loose.\nGate code: 4412");
+  });
+
+  it("M22: extraction never gives a note to a finished task of the same title", async () => {
+    const [done] = await db
+      .insert(tasks)
+      .values({ userId: uid, title: "Call the roofer", status: "done", source: "typed", notes: "His note.", completedAt: new Date() })
+      .returning();
+    const [conv] = await db.insert(conversations).values({ userId: uid, mode: "text" }).returning();
+    const out = await applyExtraction(uid, conv.id, {
+      tasks: [{ title: "call the roofer", notes: "He said Thursday works.", due_at: null, project: null }],
+      events: [],
+      status_updates: [],
+      facts: [],
+      mentions: [],
+      ambiguities: [],
+    } as unknown as ExtractionResult);
+    expect((await row(done.id)).notes).toBe("His note.");
+    expect(out).toMatchObject({ createdTasks: 0, notesAdded: 0, notesNotSaved: 1 });
+  });
+
+  it("M24: update_task done with a note on a recurring task: the next one takes the note from before it", async () => {
+    const id = await hisTask("Water the seedlings", { recurrence: "weekly", dueAt: new Date(Date.now() + 86_400_000) });
+    await tool("update_task", { task: id, status: "done", notes: "The tray by the window was dry." });
+    expect((await row(id)).notes).toBe(`${HIS}\nThe tray by the window was dry.`);
+    const next = (await mine()).filter((r) => r.title === "Water the seedlings" && r.id !== id);
+    expect(next.map((r) => r.notes)).toEqual([HIS]);
+  });
+
+  it("M27: his save reads the row under its lock: a line committed while he saves is kept", async () => {
+    const id = await hisTask("Order the roof panels");
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let locked!: () => void;
+    const hasLock = new Promise<void>((r) => (locked = r));
+    // Another connection: holds the row, adds a line, and commits only once his save is under way.
+    const other = db.transaction(async (tx) => {
+      await tx.select({ id: tasks.id }).from(tasks).where(eq(tasks.id, id)).for("update");
+      await tx.update(tasks).set({ notes: `${HIS}\nFrom the other connection.` }).where(eq(tasks.id, id));
+      locked();
+      await held;
+    });
+    await hasLock;
+    const saving = save(id, { notes: `${HIS}\nHis own line.`, notesBase: HIS });
+    await new Promise((r) => setTimeout(r, 300)); // his save is waiting on the row now
+    release();
+    await other;
+    const saved = await saving;
+    expect(saved.notes).toBe(`${HIS}\nHis own line.\nFrom the other connection.`);
+  });
+});
