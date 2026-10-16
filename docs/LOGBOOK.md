@@ -56,6 +56,16 @@ don't really work for me".
 Cost: one prompt-cache rewrite for each prompt that changed; no new model
 calls; a refused note writes nothing. No understanding hash changes.
 
+**r2** (`7c245bb` the tests, first and red; `14aadd5` the code; this commit).
+The Reviewer found the check reading every line the model sent, including
+the ones already in the note. So when a model in a chat or a call sent the
+note back with a new line, as models do, and the note already had a label
+in it (his own, or a model's from before), the whole write was refused and
+the new line lost. Now only the lines the note lacks are checked: the ones
+the write would add. That is worked out with the row locked, in the same
+step that writes them, so a line someone else adds at that moment is seen
+by both. A replace is still checked whole.
+
 ## v1.17 — A model write never loses his notes (2026-10-15)
 
 `5930c5e` (the rule, docs/tasks/SPEC.md §1, new), `a34d8aa`, `0cf87ae` (the
