@@ -138,6 +138,13 @@ export default defineConfig({
       testMatch: /task-notes\.spec\.ts/,
       use: { ...devices["iPhone 15"] },
     },
+    {
+      // A task reads like a reminder (v1.10, docs/tasks/SPEC.md §2.4): the task
+      // screen at 390 wide against the approved 1-task.html.
+      name: "task",
+      testMatch: /task-screen\.spec\.ts/,
+      use: { ...devices["iPhone 15"] },
+    },
   ],
 
   webServer: [

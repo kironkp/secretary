@@ -20,7 +20,7 @@ vi.mock("next/server", async (importOriginal) => ({ ...(await importOriginal<typ
 import { db } from "@/lib/db";
 import { conversations, tasks, user } from "@/lib/db/schema";
 import { applyExtraction, type ExtractionResult } from "@/lib/secretary/extraction";
-import { executeTool, liveTurnContext } from "@/lib/secretary/tools";
+import { executeTool, liveTurnContext, type ToolContext } from "@/lib/secretary/tools";
 import { PATCH } from "@/app/api/tasks/[id]/route";
 
 const TZ = "America/Los_Angeles";
@@ -59,7 +59,8 @@ describe("his note against every model path, at random (v1.17)", () => {
     users.push(uid);
     await db.insert(user).values({ id: uid, name: "Walk", email: `${uid}@v117.test`, timezone: TZ });
     session.user = { id: uid, email: `${uid}@v117.test`, name: "Walk", timezone: TZ };
-    const ctx = liveTurnContext({ userId: uid, timezone: TZ, attachmentCount: 0 });
+    // A chat or voice turn: the route marks it live, so a labelled note is refused there (v1.10, §2.1).
+    const ctx = { ...liveTurnContext({ userId: uid, timezone: TZ, attachmentCount: 0 }), live: true } as ToolContext;
     const [conv] = await db.insert(conversations).values({ userId: uid, mode: "text" }).returning();
     const tool = async (name: string, args: Record<string, unknown>) => (await executeTool(ctx, name, args)).result as Record<string, unknown>;
     const read = async (id: string) => (await db.select().from(tasks).where(eq(tasks.id, id)))[0];
@@ -87,7 +88,14 @@ describe("his note against every model path, at random (v1.17)", () => {
 
     for (let step = 0; step < STEPS; step++) {
       const tok = `tok${seed}x${step}`;
-      const line = pick([`Note ${tok}.`, `Next: call them ${tok}`, `Owner: Sam ${tok}`, `see https://x.example/${tok}?q=1`, `Façade ${tok} — déjà vu`]);
+      const line = pick([
+        `Note ${tok}.`,
+        `Next: call them ${tok}`,
+        `Owner: Sam ${tok}`,
+        `see https://x.example/${tok}?q=1`,
+        `Façade ${tok} — déjà vu`,
+        `- **Status** — ${tok}`,
+      ]);
       const before = await read(t.id);
       let where: "task" | "blocked" | "list" | "none" = "task"; // where the step's token should end up
       let saidNotSaved = false;
@@ -96,30 +104,31 @@ describe("his note against every model path, at random (v1.17)", () => {
       ran.add(kind);
       log.push(`${step} ${kind}`);
       const where_ = `seed ${seed}, steps: ${log.join(" | ")}`;
+      let res: Record<string, unknown> | null = null; // a live tool's result, which may say the note was not saved
       switch (kind) {
         case "update_task":
-          await tool("update_task", { task: t.id, notes: line });
+          res = await tool("update_task", { task: t.id, notes: line });
           break;
         case "amend_task":
-          await tool("amend_task", { task: t.id, note: line });
+          res = await tool("amend_task", { task: t.id, note: line });
           break;
         case "progress":
         case "started":
-          await tool("log_status", { task: t.id, signal: kind, note: line });
+          res = await tool("log_status", { task: t.id, signal: kind, note: line });
           break;
         case "postponed":
-          await tool("log_status", { task: t.id, signal: "postponed", new_due_at: `2026-12-${String(1 + (step % 28)).padStart(2, "0")}T09:00:00`, note: line });
+          res = await tool("log_status", { task: t.id, signal: "postponed", new_due_at: `2026-12-${String(1 + (step % 28)).padStart(2, "0")}T09:00:00`, note: line });
           break;
         case "blocked":
           await tool("log_status", { task: t.id, signal: "blocked", note: line });
           where = "blocked";
           break;
         case "twin":
-          await tool("create_task", { title: `  ${TITLE.toUpperCase()} `, notes: line });
+          res = await tool("create_task", { title: `  ${TITLE.toUpperCase()} `, notes: line });
           break;
         case "similar": {
           const out = await tool("create_task", { title: `${TITLE} now`, notes: line });
-          saidNotSaved = out.note_saved === false;
+          saidNotSaved = out.note_saved === false || Boolean(out.note_not_saved);
           where = "none";
           break;
         }
@@ -135,7 +144,7 @@ describe("his note against every model path, at random (v1.17)", () => {
         case "stale": {
           // A line written before, sent again (a re-issued call, a stale copy).
           written = sent.length ? pick(sent) : line;
-          await tool("amend_task", { task: t.id, note: written });
+          res = await tool("amend_task", { task: t.id, note: written });
           break;
         }
         case "replace": {
@@ -162,26 +171,33 @@ describe("his note against every model path, at random (v1.17)", () => {
         case "his-save-racing": {
           // He opens it; a model line lands while he types; he saves with what he opened.
           const opened = before.notes ?? "";
-          await tool("amend_task", { task: t.id, note: line });
+          const meanwhile = await tool("amend_task", { task: t.id, note: line });
           const his = `${opened}\nHis own ${tok}: typed while it was open`;
           await save(t.id, { notes: his, notesBase: opened });
-          subject[t.id] = { his, kept: new Set([line]) };
+          subject[t.id] = { his, kept: new Set(meanwhile.note_not_saved ? [] : [line]) };
           break;
         }
         case "two-at-once": {
           const other = `Also ${tok}b from the background.`;
-          await Promise.all([tool("amend_task", { task: t.id, note: line }), extract(TITLE, other)]);
-          expect((await read(t.id)).notes?.split("\n"), `both writes at once landed (${where_})`).toEqual(expect.arrayContaining([line, other]));
+          const [chat] = await Promise.all([tool("amend_task", { task: t.id, note: line }), extract(TITLE, other)]);
+          const landed = chat.note_not_saved ? [other] : [line, other];
+          expect((await read(t.id)).notes?.split("\n"), `both writes at once landed (${where_})`).toEqual(expect.arrayContaining(landed));
           subject[t.id].kept.add(other);
+          if (!chat.note_not_saved) subject[t.id].kept.add(line);
           sent.push(other);
           break;
         }
         case "list":
-          await tool("add_to_list", { items: ["lotion"], list: "shopping", note: line });
+          res = await tool("add_to_list", { items: ["lotion"], list: "shopping", note: line });
           where = "list";
           break;
       }
-      if (where === "task" && kind !== "replace" && kind !== "his-save") {
+      // In a live turn a note may be refused; the result says so, and it must not be anywhere (v1.10).
+      if (res?.note_not_saved) {
+        where = "none";
+        saidNotSaved = true;
+      }
+      if (where === "task" && !["replace", "his-save", "his-save-racing", "two-at-once"].includes(kind)) {
         subject[t.id].kept.add(written);
       }
       if (where === "list") subject[lotion.id].kept.add(line);
