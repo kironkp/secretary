@@ -226,10 +226,10 @@ above the tab bar and the voice button, so nothing of it is under them.
   (with "pushed N×"), Stages, the packet section, Heard, From and History, in
   that order. Nothing that was on the screen is gone until Kiron says.
 - The editor loses only priority; its look is 1.15's.
-- Every touch target is a 44 x 44 hit box. The title is a 44-tall button
-  level with the circle, and the note one below it; with a one-line note
-  that puts the note 4 px lower and the card 10 px taller than the mockup,
-  whose title and note together are 84 px tall.
+- Every touch target is a 44 x 44 hit box, and the text stays where the
+  mockup puts it: the title's 44-tall button reaches 4 px into the card's top
+  padding, and the note's reaches 22 px below its text, past the card's
+  bottom padding into the gap under the card.
 
 Values, from 1-task.html (light; dark uses the app's dark tokens for the same
 roles, text at 4.5:1 or better):
