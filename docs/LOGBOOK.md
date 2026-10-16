@@ -56,7 +56,8 @@ don't really work for me".
 Cost: one prompt-cache rewrite for each prompt that changed; no new model
 calls; a refused note writes nothing. No understanding hash changes.
 
-**r2** (`7c245bb` the tests, first and red; `14aadd5` the code; this commit).
+**r2** (`7c245bb`, `21c61d6` the tests, first and red; `14aadd5`, `d0eb6c8` the
+code; `6f8a5b7` this entry first; this commit).
 The Reviewer found the check reading every line the model sent, including
 the ones already in the note. So when a model in a chat or a call sent the
 note back with a new line, as models do, and the note already had a label
@@ -65,6 +66,20 @@ the new line lost. Now only the lines the note lacks are checked: the ones
 the write would add. That is worked out with the row locked, in the same
 step that writes them, so a line someone else adds at that moment is seen
 by both. A replace is still checked whole.
+
+The Reviewer's verdict on the first try named more, all in r2:
+
+- A long word or a pasted link ran off its card and the screen scrolled
+  sideways on a phone. Long words now wrap anywhere.
+- Under More, the document controls were 24 and 32 px tall; they are 44.
+- A line is read bullets first, so "– Owner:" is a label like "- Owner:";
+  "next_action:" and "Due date:" are too, and "Dues: $40 a month" is not.
+- A project with no colour had a different dot on the task screen than on
+  the Projects list; one helper gives both.
+- "Suggested:" is now off a task's note wherever it is shown, in Next up,
+  the list cards and the Workspace too.
+- Tests now show which turns count as a chat or a call (the real chat route,
+  the call's route, and not a tap's), and that Done keeps a note being typed.
 
 ## v1.17 — A model write never loses his notes (2026-10-15)
 
