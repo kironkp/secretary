@@ -470,7 +470,7 @@ export function NextUpHero({ tasks, events }: { tasks: TaskRow[]; events: EventR
       <div className="min-w-[220px] flex-1">
         <p className="text-lg font-semibold tracking-tight">{next.title}</p>
         <p className="mt-1 text-sm text-muted">
-          {next.notes ? `${next.meta} · ${next.notes}` : next.meta}
+          {next.notes ? `${next.meta} · ${withoutSuggested(next.notes)}` : next.meta}
         </p>
         {next.reminders.length > 0 && (
           <p className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-muted">

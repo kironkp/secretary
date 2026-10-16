@@ -8,6 +8,7 @@
 //      operator, or a fragment of SQL from anywhere near the model.
 //   3. Fields are formatted for DISPLAY here, once, on the server, in the
 //      user's own timezone — never in the widget markup and never in the model.
+import { withoutSuggested } from "@/lib/suggested";
 import { and, asc, desc, eq, gte, ilike, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { checkins, documents, events, projects, tasks } from "@/lib/db/schema";
@@ -166,7 +167,7 @@ async function resolveTasks(
       stage: stageLabel(r.stages),
       stakes: r.stakes ?? "",
       blocked: r.blockedReason ?? "",
-      notes: r.notes ?? "",
+      notes: r.notes ? withoutSuggested(r.notes) : "",
       created: formatDue(r.createdAt, tz, now),
       // The enum value as stored; "suggested" is the one readers act on
       // (docs/understanding/SPEC.md §10).

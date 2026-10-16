@@ -77,7 +77,7 @@ export function PacketSection({ taskId }: { taskId: string }) {
         onClick={() => void remove(f)}
         disabled={busy !== null}
         aria-label={`Remove ${f.name}`}
-        className="flex h-6 w-6 flex-none items-center justify-center rounded-full text-faint hover:text-danger disabled:opacity-40"
+        className="flex h-11 w-11 flex-none items-center justify-center rounded-full text-faint hover:text-danger disabled:opacity-40"
       >
         <X size={12} strokeWidth={2} />
       </button>
@@ -106,7 +106,7 @@ export function PacketSection({ taskId }: { taskId: string }) {
             href={`/api/tasks/${taskId}/packet/pdf`}
             target="_blank"
             rel="noreferrer"
-            className="rounded-full bg-accent px-3 py-1.5 text-xs font-semibold text-white"
+            className="inline-flex min-h-11 items-center rounded-full bg-accent-ink px-3 text-xs font-semibold text-white"
           >
             Compile PDF
           </a>
@@ -134,7 +134,7 @@ export function PacketSection({ taskId }: { taskId: string }) {
                       onClick={() => pick(d.name)}
                       disabled={busy !== null}
                       aria-label={`Upload ${d.name}`}
-                      className="flex h-7 items-center gap-1 rounded-full bg-surface-2 px-2.5 text-xs text-ink disabled:opacity-50"
+                      className="flex h-11 items-center gap-1 rounded-full bg-surface-2 px-3 text-xs text-ink disabled:opacity-50"
                     >
                       {busy === d.name ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} strokeWidth={2.25} />}
                       {d.files.length ? "Add" : "Upload"}
@@ -167,12 +167,12 @@ export function PacketSection({ taskId }: { taskId: string }) {
             onChange={(e) => setOtherName(e.target.value)}
             placeholder={withDocs.length ? "Another document (name)" : "Document name, e.g. STD 65"}
             aria-label="Name of the document to add"
-            className="h-8 min-w-0 flex-1 rounded-lg bg-surface-2 px-2.5 text-sm outline-none placeholder:text-faint"
+            className="h-11 min-w-0 flex-1 rounded-lg bg-surface-2 px-2.5 text-sm outline-none placeholder:text-faint"
           />
           <button
             onClick={() => pick(otherName.trim() || "Other")}
             disabled={busy !== null}
-            className="flex h-8 flex-none items-center gap-1 rounded-full bg-surface-2 px-3 text-xs text-ink disabled:opacity-50"
+            className="flex h-11 flex-none items-center gap-1 rounded-full bg-surface-2 px-3 text-xs text-ink disabled:opacity-50"
           >
             <Plus size={12} strokeWidth={2.25} /> Add file
           </button>

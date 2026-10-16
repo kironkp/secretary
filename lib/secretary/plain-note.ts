@@ -19,10 +19,14 @@ export const NOTE_LABELS = [
   "waiting on",
   "deadline",
   "due",
+  "due date",
   "source",
 ] as const;
 
-const plurals = (word: string) => [word, `${word}s`, `${word}es`, ...(word.endsWith("y") ? [`${word.slice(0, -1)}ies`] : [])];
+/** Words read without a plural: "Dues: $40 a month" is a detail, not a label (v1.10 r2). */
+const NO_PLURAL = new Set(["due"]);
+const plurals = (word: string) =>
+  NO_PLURAL.has(word) ? [word] : [word, `${word}s`, `${word}es`, ...(word.endsWith("y") ? [`${word.slice(0, -1)}ies`] : [])];
 const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 // Longest first, so "status of record" is read before "status".
 const LABEL = new RegExp(
@@ -32,15 +36,24 @@ const LABEL = new RegExp(
     .join("|")})\\s*:`
 );
 
-/** A line as the check reads it: no leading bullets or numbers, no markdown emphasis, lower case, one kind of colon. */
+/**
+ * A line as the check reads it (v1.10 r2), in this order: its leading bullets, numbering, headings and checkboxes
+ * gone first ("- ", "– ", "— ", "* ", "• ", "1. ", "## ", "- [ ] "), so a dash there is not read as a colon; then
+ * no markdown emphasis, "_" a space, the dashes and "=" a colon, runs of spaces one, lower case.
+ */
 function asRead(line: string): string {
-  let s = line.replace(/[*_`]/g, "").replace(/[：—–=]/g, ":").toLowerCase().trim();
-  // Bullets and numbering, however many: "- ", "• ", "1. ", "2) ", "(3) ", "a. ", "> ".
+  let s = line.trim();
   for (let prev = ""; prev !== s; ) {
     prev = s;
-    s = s.replace(/^(?:[-+•·◦▪‣>]|\(?\d{1,3}[.)]|\(?[a-z][.)](?=\s))\s*/, "");
+    s = s.replace(/^(?:[-–—*+•·◦▪‣>]|#{1,6}|\[[ xX]\]|\(?\d{1,3}[.)]|\(?[a-z][.)](?=\s))\s*/i, "");
   }
-  return s;
+  return s
+    .replace(/[*`]/g, "")
+    .replace(/_/g, " ")
+    .replace(/[：—–=]/g, ":")
+    .replace(/\s+/g, " ")
+    .toLowerCase()
+    .trim();
 }
 
 /**

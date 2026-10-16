@@ -7,6 +7,7 @@
 // it back with a plain line. A drag starts only at the handle: the rest of the
 // row scrolls the page and opens the project on a tap. Held near the top or the
 // bottom edge of the list's view, the list scrolls under the row.
+import { projectDotColor } from "@/lib/project-dot";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { createMoveQueue, type MoveQueueState } from "@/lib/projects/move-queue";
@@ -222,7 +223,7 @@ export function ProjectList({ group, rows, leading = null }: { group: string; ro
             >
               {/* The link takes the row up to the handle, the 12 px before it included: a tap there opens the project. */}
               <Link href={`/projects/${p.id}`} className="flex min-h-14 min-w-0 flex-1 items-center gap-3 self-stretch pr-3">
-                <span data-project-dot="" aria-hidden className="h-3 w-3 flex-none rounded-full" style={{ background: p.color ?? "var(--color-accent)" }} />
+                <span data-project-dot="" aria-hidden className="h-3 w-3 flex-none rounded-full" style={{ background: projectDotColor(p.color) }} />
                 <span data-project-name-text="" className={`min-w-0 flex-1 truncate text-[17px] text-ink ${lifted ? "font-semibold" : "font-normal"}`}>
                   {p.name}
                 </span>

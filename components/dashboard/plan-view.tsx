@@ -4,6 +4,7 @@
 // against the fixed registry. Every section is hand-built furniture — the plan
 // only chooses, orders, and parameterizes it. Why-chips surface the planner's
 // stated reason on adapted sections; pins + one-tap revert are the user's veto.
+import { withoutSuggested } from "@/lib/suggested";
 import { Fragment, useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Pin, Sparkles, Undo2 } from "lucide-react";
@@ -75,7 +76,7 @@ function ListCard({
               >
                 <span className="h-5 w-5 flex-none rounded-md border border-edge" aria-hidden />
                 <span className={crossing.has(t.id) ? "text-faint line-through" : undefined}>{t.title}</span>
-                {t.notes && <span className="text-xs text-faint">{t.notes}</span>}
+                {t.notes && <span className="text-xs text-faint">{withoutSuggested(t.notes)}</span>}
               </button>
             </li>
           ))}

@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Check, ChevronRight, Clock, MessageSquare, X } from "lucide-react";
+import { projectDotColor } from "@/lib/project-dot";
 import { withoutSuggested } from "@/lib/suggested";
 import { Row, fmtFull } from "./detail-parts";
 import { PacketSection } from "./packet-section";
@@ -188,7 +189,8 @@ export function TaskScreen({
         aria-labelledby="task-screen-title"
         data-task-screen=""
         onClick={(e) => e.stopPropagation()}
-        className="animate-rise-in h-full w-full overflow-y-auto bg-bg text-ink sm:h-auto sm:max-h-[85dvh] sm:max-w-[420px] sm:rounded-2xl sm:shadow-xl"
+        // A long word or a pasted link wraps anywhere rather than running off its card (v1.10 r2).
+        className="animate-rise-in h-full w-full overflow-y-auto bg-bg text-ink [overflow-wrap:anywhere] sm:h-auto sm:max-h-[85dvh] sm:max-w-[420px] sm:rounded-2xl sm:shadow-xl"
       >
         <div data-task-header="" data-order="header" className="flex h-14 items-center justify-between pr-2 pl-4">
           <h2 id="task-screen-title" data-task-header-title="" className="text-[17px] font-semibold">
@@ -349,7 +351,7 @@ export function TaskScreen({
                 <span
                   data-project-dot=""
                   className="h-3 w-3 rounded-full"
-                  style={{ background: detail.projectName ? (detail.projectColor ?? "var(--muted)") : "transparent", boxShadow: detail.projectName ? undefined : "inset 0 0 0 1.5px var(--muted)" }}
+                  style={{ background: detail.projectName ? projectDotColor(detail.projectColor) : "transparent", boxShadow: detail.projectName ? undefined : "inset 0 0 0 1.5px var(--muted)" }}
                 />
               </span>
               <span data-row-label="" className="flex-1 text-base text-ink">

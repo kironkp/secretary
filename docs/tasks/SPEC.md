@@ -156,14 +156,17 @@ is never checked, so echoing the note back with a new line is not refused
 for an old label. A replace is checked whole, and so is the note of a new
 task or a new list item (all of it is new). Never his typing (the PATCH
 route), recurrence's copy or §1.6's merge. Line by line (split on real and
-on literal "\n"), each line is read with its leading bullets and numbers,
-markdown bold and italic and case set aside, and ":", "：", "—", "–" and "="
-all read as a colon. A line is a label when it opens with one of
-`NOTE_LABELS`, plurals included, then that colon:
+on literal "\n"), each line is read in this order (v1.10 r2): its leading
+bullets, numbering, headings and checkboxes set aside first ("- ", "– ",
+"— ", "* ", "• ", "1. ", "## ", "- [ ] ", "- [x] "), so a dash there is not
+taken for a colon; then markdown emphasis gone, "_" read as a space, ":",
+"：", "—", "–" and "=" all read as a colon, runs of spaces as one, and case
+set aside. A line is a label when it opens with one of `NOTE_LABELS`, plurals
+included ("due" has none: "Dues: $40 a month" is a detail), then that colon:
 
 owner, assignee, depends on, dependency, effort, next action, next step,
 evidence, status, status of record, priority, blocker, blocked by, waiting on,
-deadline, due, source.
+deadline, due, due date, source.
 
 There is no list rule: "Gate code: 4412", two detail lines, a time
 ("11:00 AM PT / 2:00 PM ET"), a link and "Mon: 8-5" all pass. A label in the
@@ -197,8 +200,9 @@ still name the sort "priority" (it validates), and it sorts by due.
 
 A suggested task's note is the reason alone (its source already says
 suggested). Notes stored with the old "Suggested: " prefix stay as they are
-and are shown without it, by one helper (lib/suggested.ts) shared by the task
-view, the dashboard's suggestion card and the briefing.
+and are shown without it, by one helper (lib/suggested.ts), wherever a
+task's note is shown: the task view, the dashboard's suggestion card, Next up,
+the list cards, the Workspace's rows and the briefing (v1.10 r2).
 
 ### 2.4 The task screen
 
@@ -232,7 +236,12 @@ above the tab bar and the voice button, so nothing of it is under them.
   (with "pushed N×"), Stages, the packet section, Heard, From and History, in
   that order. Nothing that was on the screen is gone until Kiron says.
 - The editor loses only priority; its look is 1.15's.
-- Every touch target is a 44 x 44 hit box, and the text stays where the
+- A long word or a pasted link wraps anywhere; nothing runs past a card's
+  edge and the sheet never scrolls sideways (v1.10 r2).
+- A project's dot is the same here as on the Projects list: its colour, or
+  the accent when it has none (lib/project-dot.ts).
+- Every touch target is a 44 x 44 hit box, under More too (the packet's
+  controls), and the text stays where the
   mockup puts it: the title's 44-tall button reaches 4 px into the card's top
   padding, and the note's reaches 22 px below its text, past the card's
   bottom padding into the gap under the card.
