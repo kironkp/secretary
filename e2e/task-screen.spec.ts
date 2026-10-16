@@ -271,3 +271,76 @@ test("wider than a phone: the same content in a dialog at most 420 wide", async 
   expect(w).toBeLessThanOrEqual(420);
   await expect(page.locator("[data-task-row]")).toHaveCount(3);
 });
+
+// The Reviewer, on the old dialog: its row labels were #8e8e93 on white (3.26:1), and its Due field ran past the
+// row's edge at 390. On this screen, with More open: every piece of text at 4.5:1 or better, light and dark, and
+// nothing past its card's edges.
+for (const theme of ["light", "dark"] as const) {
+  test(`${theme}: every piece of text on it, More open, at 4.5:1 or better`, async ({ page, request, baseURL }) => {
+    if (theme === "dark") await page.context().addCookies([{ name: "theme", value: "dark", url: baseURL! }]);
+    const made = await tool(request, "create_task", { title: `Draft the shed plan ${stamp()}`, notes: "Two pages.", stages: ["Measure", "Sketch"], due_at: inDays(3) });
+    const id = String(made.task_id);
+    await tool(request, "update_task", { task: id, status: "in_progress" });
+    await openTask(page, id);
+    await page.locator("[data-task-more]").click();
+    await expect(page.locator("[data-task-more-body]")).toBeVisible();
+    const low = await page.locator("[data-task-screen]").evaluate((screen) => {
+      const rgba = (s: string) => (s.match(/[\d.]+/g) ?? []).map(Number);
+      const lum = ([r, g, b]: number[]) => {
+        const f = (c: number) => ((c /= 255) <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+        return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+      };
+      const ratio = (fg: number[], bg: number[]) => {
+        const [a, b] = [lum(fg), lum(bg)].sort((x, y) => y - x);
+        return (a + 0.05) / (b + 0.05);
+      };
+      /** The colour behind an element: the nearest ancestor (or itself) with a background that is not see-through. */
+      const behind = (el: Element) => {
+        for (let e: Element | null = el; e; e = e.parentElement) {
+          const c = rgba(getComputedStyle(e).backgroundColor);
+          if (c.length >= 3 && (c[3] ?? 1) > 0.5) return c;
+        }
+        return [255, 255, 255];
+      };
+      const out: string[] = [];
+      for (const el of screen.querySelectorAll("*")) {
+        const own = [...el.childNodes].some((n) => n.nodeType === Node.TEXT_NODE && n.textContent!.trim());
+        const r = el.getBoundingClientRect();
+        if (!own || r.width === 0 || r.height === 0 || getComputedStyle(el).visibility === "hidden" || getComputedStyle(el).opacity === "0") continue;
+        const x = ratio(rgba(getComputedStyle(el).color), behind(el));
+        if (x < 4.5) out.push(`${(el.textContent ?? "").trim().slice(0, 24)}: ${x.toFixed(2)}`);
+      }
+      return out;
+    });
+    expect(low, "text under 4.5:1").toEqual([]);
+    if (theme === "dark") await page.context().clearCookies({ name: "theme" });
+  });
+}
+
+test("nothing runs past its card's edges at phone width, More open, with long words in it", async ({ page, request }) => {
+  const made = await tool(request, "create_task", {
+    title: `Order the corrugated roof panels for the garden shed and the lean-to ${stamp()}`,
+    notes: "Corrugated, 8 ft long. Ask if they deliver to the side gate, and whether they take the old ones away.",
+    due_at: inDays(2, 17),
+    project: `The garden shed and the fence along the back ${stamp()}`,
+  });
+  const id = String(made.task_id);
+  await patch(request, id, { reminders: [new Date(Date.now() + 86_400_000).toISOString(), new Date(Date.now() + 2 * 86_400_000).toISOString()] });
+  await openTask(page, id);
+  await page.locator("[data-task-more]").click();
+  const past = await page.locator("[data-task-card]").evaluateAll((cards) =>
+    cards.flatMap((card) => {
+      const c = card.getBoundingClientRect();
+      return [...card.querySelectorAll("*")]
+        .filter((el) => {
+          const r = el.getBoundingClientRect();
+          return r.width > 0 && (r.right > c.right + 0.5 || r.left < c.left - 0.5);
+        })
+        .map((el) => `${card.getAttribute("data-task-card")}: ${el.tagName} ${(el.textContent ?? "").trim().slice(0, 20)}`);
+    })
+  );
+  expect(past).toEqual([]);
+  const width = page.viewportSize()!.width;
+  const screenWide = await page.locator("[data-task-screen]").evaluate((el) => el.scrollWidth);
+  expect(screenWide, "no sideways scroll").toBeLessThanOrEqual(width);
+});

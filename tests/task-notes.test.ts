@@ -16,12 +16,12 @@ vi.mock("next/headers", () => ({ cookies: async () => ({ get: () => undefined })
 vi.mock("next/server", async (importOriginal) => ({ ...(await importOriginal<typeof import("next/server")>()), after: () => {} }));
 
 import { db } from "@/lib/db";
-import { conversations, events, projects, tasks, user } from "@/lib/db/schema";
+import { checkins, conversations, events, projects, tasks, user } from "@/lib/db/schema";
 import { setGoogleHttpForTests } from "@/lib/google/connection";
 import { applyExtraction, type ExtractionResult } from "@/lib/secretary/extraction";
 import { toolSchemas } from "@/lib/secretary/tool-schemas";
 import { executeTool, liveTurnContext, type ToolContext } from "@/lib/secretary/tools";
-import { gatherProject } from "@/lib/understanding/gather";
+import { gatherProject, hashBundle } from "@/lib/understanding/gather";
 import { renderBundle } from "@/lib/understanding/prompt";
 import { PATCH } from "@/app/api/tasks/[id]/route";
 import { connectCalendar, fakeGoogle, type FakeGoogle } from "./fixtures/google";
@@ -325,6 +325,33 @@ describe("gaps the Reviewer's probe found (v1.10)", () => {
     expect((await row(id)).notes).toBe(`${HIS}\nThe tray by the window was dry.`);
     const next = (await mine()).filter((r) => r.title === "Water the seedlings" && r.id !== id);
     expect(next.map((r) => r.notes)).toEqual([HIS]);
+  });
+
+  it("M9's other half: his line ending in a no-break space and a call's same line are one line", async () => {
+    const id = await hisTask("Fix the gate", {}, "Hinges are loose.");
+    const opened = (await row(id)).notes;
+    await tool("amend_task", { task: id, note: "Gate code: 4412" }); // a call, while he types
+    const his = "Hinges are loose.\nGate code: 4412\u00a0";
+    const saved = await save(id, { notes: his, notesBase: opened });
+    expect(saved.notes).toBe(his);
+  });
+
+  it("a blocked reason stays in History: its checkin says what it waited on, after it is unblocked too", async () => {
+    const id = await hisTask("Move the compost bin");
+    await tool("log_status", { task: id, signal: "blocked", note: "the neighbour's answer" });
+    await tool("log_status", { task: id, signal: "started" });
+    expect((await row(id)).blockedReason, "unblocked, the field is clear").toBeNull();
+    const trail = await db.select().from(checkins).where(eq(checkins.taskId, id));
+    expect(trail.map((c) => c.note)).toContain("Status → blocked: the neighbour's answer");
+  });
+
+  it("a checkin changes no understanding hash: History is not in what a run reads", async () => {
+    const [p] = await db.insert(projects).values({ userId: uid, name: "Garden", status: "active" }).returning();
+    const [t] = await db.insert(tasks).values({ userId: uid, projectId: p.id, title: "Move the compost bin", status: "blocked", source: "typed", blockedReason: "the neighbour's answer" }).returning();
+    const now = new Date();
+    const before = hashBundle((await gatherProject(uid, p.id, { timezone: TZ, now }))!);
+    await db.insert(checkins).values({ userId: uid, taskId: t.id, type: "user_update", note: "Status → blocked: the neighbour's answer" });
+    expect(hashBundle((await gatherProject(uid, p.id, { timezone: TZ, now }))!)).toBe(before);
   });
 
   it("M27: his save reads the row under its lock: a line committed while he saves is kept", async () => {
