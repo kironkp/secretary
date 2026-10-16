@@ -24,12 +24,16 @@ import { executeTool, liveTurnContext, type ToolContext } from "@/lib/secretary/
 import { PATCH } from "@/app/api/tasks/[id]/route";
 
 const TZ = "America/Los_Angeles";
-const HIS = "Corrugated, 8 ft long.\nGate code: 4412\nhttps://timber.example/roof?a=1&b=2\nÉtagère — café, naïve.\n\nOwner: me (my own label)";
+// r2: some of his lines end in a no-break space, an ideographic space or a tab, as typed on a phone or pasted.
+const HIS =
+  "Corrugated, 8 ft long.\nGate code: 4412\nhttps://timber.example/roof?a=1&b=2\nÉtagère — café, naïve.\n\nOwner: me (my own label)\nConfirmation: KX7Q2\u00a0\nBay 3\u3000\nSide gate\t";
+/** Trailing characters the model's lines and his own may end in (v1.17 r2). */
+const TRAILING = ["", "", " ", "\u00a0", "\u3000", "\t"];
 const SEEDS = (process.env.NOTES_WALK_SEEDS ?? Array.from({ length: 24 }, (_, i) => i + 1).join(",")).split(",").map(Number);
 const STEPS = Number(process.env.NOTES_WALK_STEPS ?? 30);
 const KINDS = [
   "update_task", "amend_task", "progress", "started", "postponed", "blocked", "twin", "similar", "extract", "extract-similar",
-  "stale", "replace", "his-save", "his-save-racing", "two-at-once", "list",
+  "stale", "replace", "his-save", "his-save-racing", "two-at-once", "list", "echo",
 ] as const;
 const ran = new Set<string>();
 const users: string[] = [];
@@ -88,14 +92,15 @@ describe("his note against every model path, at random (v1.17)", () => {
 
     for (let step = 0; step < STEPS; step++) {
       const tok = `tok${seed}x${step}`;
-      const line = pick([
-        `Note ${tok}.`,
-        `Next: call them ${tok}`,
-        `Owner: Sam ${tok}`,
-        `see https://x.example/${tok}?q=1`,
-        `Façade ${tok} — déjà vu`,
-        `- **Status** — ${tok}`,
-      ]);
+      const line =
+        pick([
+          `Note ${tok}.`,
+          `Next: call them ${tok}`,
+          `Owner: Sam ${tok}`,
+          `see https://x.example/${tok}?q=1`,
+          `Façade ${tok} — déjà vu`,
+          `- **Status** — ${tok}`,
+        ]) + pick(TRAILING);
       const before = await read(t.id);
       let where: "task" | "blocked" | "list" | "none" = "task"; // where the step's token should end up
       let saidNotSaved = false;
@@ -162,7 +167,7 @@ describe("his note against every model path, at random (v1.17)", () => {
           const opened = before.notes ?? "";
           const lines = opened.split("\n");
           const drop = lines.findIndex((l) => l.includes("tok") && random() < 0.5);
-          const his = [...lines.filter((_, i) => i !== drop), `His own ${tok}: kept as typed  `].join("\n");
+          const his = [...lines.filter((_, i) => i !== drop), `His own ${tok}: kept as typed${pick(TRAILING)}`].join("\n");
           await save(t.id, { notes: his, notesBase: opened });
           expect((await read(t.id)).notes, `stored exactly as he sent it (${where_})`).toBe(his);
           subject[t.id] = { his, kept: new Set() };
@@ -180,8 +185,10 @@ describe("his note against every model path, at random (v1.17)", () => {
         case "two-at-once": {
           const other = `Also ${tok}b from the background.`;
           const [chat] = await Promise.all([tool("amend_task", { task: t.id, note: line }), extract(TITLE, other)]);
-          const landed = chat.note_not_saved ? [other] : [line, other];
-          expect((await read(t.id)).notes?.split("\n"), `both writes at once landed (${where_})`).toEqual(expect.arrayContaining(landed));
+          const landed = chat.note_not_saved ? [other] : [line.trimEnd(), other];
+          expect((await read(t.id)).notes?.split("\n").map((l) => l.trimEnd()), `both writes at once landed (${where_})`).toEqual(
+            expect.arrayContaining(landed)
+          );
           subject[t.id].kept.add(other);
           if (!chat.note_not_saved) subject[t.id].kept.add(line);
           sent.push(other);
@@ -191,17 +198,32 @@ describe("his note against every model path, at random (v1.17)", () => {
           res = await tool("add_to_list", { items: ["lotion"], list: "shopping", note: line });
           where = "list";
           break;
+        case "echo": {
+          // One of his own lines, sent back by the model with whatever it ends in: it is there already (r2).
+          const his = subject[t.id].his.split("\n").filter((l) => l.trim());
+          const echoed = pick(his).trimEnd() + pick(TRAILING);
+          const out = await pick([
+            () => tool("amend_task", { task: t.id, note: echoed }),
+            () => tool("update_task", { task: t.id, notes: echoed }),
+            () => tool("log_status", { task: t.id, signal: "progress", note: echoed }),
+          ])();
+          expect((await read(t.id)).notes, `his own line echoed adds nothing (${where_})`).toBe(before.notes);
+          // (In a live turn one of his own labelled lines is refused instead: nothing written either way.)
+          expect(out.notes_already_there || Boolean(out.note_not_saved), `and the result says it was there (${where_})`).toBe(true);
+          written = echoed;
+          break;
+        }
       }
       // In a live turn a note may be refused; the result says so, and it must not be anywhere (v1.10).
       if (res?.note_not_saved) {
         where = "none";
         saidNotSaved = true;
       }
-      if (where === "task" && !["replace", "his-save", "his-save-racing", "two-at-once"].includes(kind)) {
+      if (where === "task" && !["replace", "his-save", "his-save-racing", "two-at-once", "echo"].includes(kind)) {
         subject[t.id].kept.add(written);
       }
       if (where === "list") subject[lotion.id].kept.add(line);
-      if (!["replace", "his-save", "stale"].includes(kind)) sent.push(line);
+      if (!["replace", "his-save", "stale", "echo"].includes(kind)) sent.push(line);
 
       // The step's token: on the task (or the list item), or the result said it was not saved.
       const now = await read(t.id);
@@ -211,12 +233,13 @@ describe("his note against every model path, at random (v1.17)", () => {
         expect(saidNotSaved, `the result says the note was not saved (${where_})`).toBe(true);
         expect(`${now.notes}\n${item.notes}`, `and it was not (${where_})`).not.toContain(tok);
       }
-      if (where === "list") expect(item.notes?.split("\n"), `on the item (${where_})`).toContain(line);
+      if (where === "list") expect(item.notes?.split("\n").map((l) => l.trimEnd()), `on the item (${where_})`).toContain(line.trimEnd());
 
       for (const [id, s] of Object.entries(subject)) {
         const notes = (id === t.id ? now : item).notes ?? "";
         expect(notes.startsWith(s.his), `his text first, byte for byte (${where_})`).toBe(true);
-        for (const k of s.kept) expect(notes.split("\n"), `a line a write added is still there (${where_})`).toContain(k);
+        for (const k of s.kept)
+          expect(notes.split("\n").map((l) => l.trimEnd()), `a line a write added is still there (${where_})`).toContain(k.trimEnd());
         const lines = notes.split("\n").filter((l) => l.trim());
         expect(lines.length, `no line twice: ${JSON.stringify(lines)} (${where_})`).toBe(new Set(lines.map((l) => l.trimEnd())).size);
       }

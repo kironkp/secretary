@@ -98,7 +98,7 @@ function checkNote(ctx: ToolContext, text: string | null | undefined) {
 
 /**
  * A model's note added to a task (§1.1, §1.3; checked, §2.1): only when some line is new, so a note already there
- * writes nothing. What the result says about it.
+ * writes nothing. What the result says about it: notes_added only when some lines were (v1.17 r2).
  */
 async function addToTaskNote(ctx: ToolContext, taskId: string, text: string | null | undefined) {
   const noteChecked = checkNote(ctx, text);
