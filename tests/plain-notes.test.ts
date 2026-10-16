@@ -279,3 +279,70 @@ describe("every write of a task's notes goes through the check, or is on the lis
     expect(unchecked).toEqual([]);
   });
 });
+
+// v1.10 r2 (§2.1): the check reads only the lines a write would add, the ones the note lacks, decided under the
+// row's lock. The Reviewer's defect: a live write that echoed the note was refused whenever the note already held a
+// labelled line, his own or a model's from before v1.10, and the new line was lost.
+describe("only the lines a write would add are checked (r2)", () => {
+  const OLD = "Corrugated, 8 ft long.\nNext action: call the yard";
+  const ECHO = `${OLD}\nThey deliver on Fridays.`;
+  const paths: [string, (id: string) => Promise<Record<string, unknown>>][] = [
+    ["amend_task", (id) => tool(live, "amend_task", { task: id, note: ECHO })],
+    ["update_task", (id) => tool(live, "update_task", { task: id, notes: ECHO })],
+    ["log_status progress", (id) => tool(live, "log_status", { task: id, signal: "progress", note: ECHO })],
+    ["log_status done", (id) => tool(live, "log_status", { task: id, signal: "done", note: ECHO })],
+    ["create_task on the same-title twin", () => tool(live, "create_task", { title: "order the ROOF panels", notes: ECHO })],
+  ];
+  it.each(paths)("%s: the note echoed with a plain new line: the new line is saved, the old label never read", async (_name, write) => {
+    const id = await aTask("Order the roof panels", OLD);
+    const out = await write(id);
+    expect(out.note_not_saved).toBeUndefined();
+    expect((await row(id)).notes).toBe(`${OLD}\nThey deliver on Fridays.`);
+    expect(out.notes_added).toEqual(["They deliver on Fridays."]);
+  });
+
+  it("his own labelled line echoed back with a plain new line: the new line is saved", async () => {
+    const his = "Owner: me (my own label)\nHinges are loose.";
+    const id = await aTask("Fix the gate", his);
+    const out = await tool(live, "amend_task", { task: id, note: `${his}\nBring the long screws.` });
+    expect(out.note_not_saved).toBeUndefined();
+    expect((await row(id)).notes).toBe(`${his}\nBring the long screws.`);
+  });
+
+  it("an echo with a new labelled line: refused, naming only the new line", async () => {
+    const id = await aTask("Order the roof panels", OLD);
+    const out = await tool(live, "amend_task", { task: id, note: `${OLD}\nNext step: book the van` });
+    expect(out.note_not_saved).toMatchObject({ line: "Next step: book the van" });
+    expect((await row(id)).notes).toBe(OLD);
+  });
+
+  it("a replace is still checked whole", async () => {
+    const id = await aTask("Order the roof panels", OLD);
+    const out = await tool(live, "update_task", { task: id, notes: OLD, replace_notes: true });
+    expect(out.note_not_saved).toMatchObject({ line: "Next action: call the yard" });
+    expect((await row(id)).notes).toBe(OLD);
+  });
+
+  it("a labelled line another connection commits while the write waits is already there: not checked, and not lost", async () => {
+    const id = await aTask("Order the roof panels", "Corrugated, 8 ft long.");
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let locked!: () => void;
+    const hasLock = new Promise<void>((r) => (locked = r));
+    const other = db.transaction(async (tx) => {
+      await tx.select({ id: tasks.id }).from(tasks).where(eq(tasks.id, id)).for("update");
+      await tx.update(tasks).set({ notes: OLD }).where(eq(tasks.id, id));
+      locked();
+      await held;
+    });
+    await hasLock;
+    // The model read the note before that line was there, and sends it back with a new one.
+    const writing = tool(live, "amend_task", { task: id, note: ECHO });
+    await new Promise((r) => setTimeout(r, 300)); // the write is waiting on the row
+    release();
+    await other;
+    const out = await writing;
+    expect(out.note_not_saved).toBeUndefined();
+    expect((await row(id)).notes).toBe(`${OLD}\nThey deliver on Fridays.`);
+  });
+});
