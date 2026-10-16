@@ -11,7 +11,8 @@ beside me in a workshop."*
   accepted (1.09 live 2026-10-15 at `5d4d98e`; 1.11 live the same day at
   `282c7e0`); 1.01 is open; 1.16 (the names on public main) is built and
   waits on Kiron to allow its push; 1.17 (his notes are kept)
-  is being built; then 1.10, 1.13, 1.12, 1.14, 1.15 (Kiron's feedback,
+  is offered at `ddc90e3` and with the Reviewer; 1.10 is contracted and
+  built on top of it; then 1.13, 1.12, 1.14, 1.15 (Kiron's feedback,
   his mockup approved 2026-10-14, and the whole site in its look), then
   1.08, 1.05, 1.06, 1.07. Each pushed to Heroku as it passes (Kiron:
   "Push to heroku for each update"). See §9.
@@ -344,6 +345,29 @@ beside me in a workshop."*
     files on a task are new columns and come as a second part. Notes
     already written are his data: nothing is rewritten or deleted
     without his word.
+    **Contracted 2026-10-15**, after the Executor's diagnosis and the
+    Reviewer's probe of the draft rules, on top of 1.17 (`ddc90e3`; a new
+    1.17 round is merged in, never rebased; offered only once 1.17 is on
+    main). Plain notes: the prompts first (persona.ts:23 and :25, every
+    notes field, no "Word: …" example anywhere); then one backstop on the
+    model's new text only, never his typing or a recurrence copy. It
+    matches bookkeeping words and their plurals at a line's start, after
+    bullets, bold and case are stripped and dashes, "=" and full-width
+    colons are read as colons. There is no list rule, so details like
+    "Gate code: 4412" pass. In a live chat or voice turn the note is not
+    saved and the result says why; the rest of the call is saved. In the
+    background the note is kept as written and the slip is counted.
+    No priority in the view, the editor or the tool schemas. The column
+    stays, the editor never sends it, and the workspace sort keeps the
+    word and falls through to due. "Suggested:" is stripped on display
+    and new suggestions store the reason alone.
+    The screen is 1-task.html's top half at 390, full screen on a
+    phone: the header with Done, the done circle (one completion path
+    with voice), title, plain notes, then Due, Remind me and Project.
+    "Waiting on" shows while the task is blocked. Status, Stages, the
+    packet, Heard, From and History sit under one collapsed "More" until
+    Kiron answers. Judged by the README's method. A draft, probed before
+    it is built: progress lines go to the task's history, not his note.
   - **1.11** — he orders his projects. A grab handle to drag a project
     to the top, and "move that project to the top" by voice or chat: one
     operation, one stored order, no model call for the drag. 1.02 r5
