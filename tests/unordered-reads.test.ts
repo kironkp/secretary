@@ -37,8 +37,8 @@ const TABLES = { wishlist: "wishlist", layout_preferences: "layout_preferences",
 const rawOrder = async (table: string, userId: string) =>
   ((await db.execute(sql`select id from ${sql.identifier(table)} where user_id = ${userId}`)).rows as { id: string }[]).map((r) => r.id);
 /** Each row updated to itself, newest first: new copies, so the read order turns over. */
-async function shuffle(userId: string) {
-  for (const table of Object.values(TABLES)) {
+async function shuffle(userId: string, tables: string[] = Object.values(TABLES)) {
+  for (const table of tables) {
     for (const id of (await rawOrder(table, userId)).reverse()) {
       await db.execute(sql`update ${sql.identifier(table)} set user_id = user_id where id = ${id}`);
     }
@@ -132,6 +132,17 @@ describe("the same rows read in another order", () => {
     expect(before.next).not.toBeNull();
     const orders = Object.fromEntries(await Promise.all(Object.values(TABLES).map(async (t) => [t, await rawOrder(t, h.id)])));
     await shuffle(h.id);
+    // Postgres may put a row's new copy back in its old place: these tables share pages with rows other test files
+    // write at the same moment, so whether a copy moves depends on what runs alongside (v1.10 r2: one table kept
+    // its order in 3 runs of 3 here, a different one each time). A table that has not turned over is shuffled
+    // again, up to five times; the check below still asks for every one of them.
+    for (let pass = 0; pass < 5; pass++) {
+      const still: string[] = [];
+      for (const t of ["wishlist", "layout_preferences", "events", "projects"])
+        if ((await rawOrder(t, h.id)).join() === orders[t].join()) still.push(t);
+      if (!still.length) break;
+      await shuffle(h.id, still);
+    }
     // The shuffle must have turned the read order over, or this test proves nothing. It always can for the three
     // whose order reached the why, the hash and the prompts on 51d4828 (wishes, preferences, events), and for the
     // projects, whose order reached the Projects tab on 2b212e5 (two with one name). Tasks and messages Postgres
