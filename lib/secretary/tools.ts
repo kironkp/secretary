@@ -937,7 +937,11 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         type: "user_update",
         note: postponed
           ? `Postponed to ${fmtDate(updated.dueAt, ctx.timezone)}${a.postpone_reason ? ` — ${a.postpone_reason}` : ""} (${updated.postponedCount}× total)`
-          : `Status → ${updated.status}`,
+          : // What a blocked task waits on stays in its History after it is unblocked (checkins are not in
+            // what an understanding run reads, so this changes no hash).
+            updated.status === "blocked" && updated.blockedReason
+            ? `Status → blocked: ${updated.blockedReason}`
+            : `Status → ${updated.status}`,
       });
     }
 

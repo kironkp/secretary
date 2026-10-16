@@ -344,7 +344,7 @@ export function TaskScreen({
             )}
           </div>
 
-          <div className="rounded-xl bg-card">
+          <div data-task-card="more" className="rounded-xl bg-card">
             <button
               type="button"
               data-task-more=""
@@ -358,13 +358,13 @@ export function TaskScreen({
             </button>
             {moreOpen && (
               <div data-task-more-body="" className="divide-y divide-edge/50 border-t border-hairline px-4 pb-2">
-                <Row label="Status" part="status">
+                <Row label="Status" part="status" labelClass="text-muted">
                   {t.status.replace("_", " ")}
-                  {t.postponedCount > 0 && <span className="ml-2 text-xs text-warn">pushed {t.postponedCount}×</span>}
+                  {t.postponedCount > 0 && <span className="ml-2 text-xs text-muted">pushed {t.postponedCount}×</span>}
                 </Row>
                 {(t.stages ?? []).length > 0 && (
                   <div data-more-part="stages" className="py-1.5">
-                    <p className="mb-1.5 text-xs text-faint">
+                    <p className="mb-1.5 text-xs text-muted">
                       Stages ({t.stages.filter((s) => s.done).length}/{t.stages.length})
                     </p>
                     <div className="flex flex-col">
@@ -383,7 +383,7 @@ export function TaskScreen({
                           >
                             <Check size={11} strokeWidth={3} />
                           </span>
-                          <span className={s.done ? "text-faint line-through" : ""}>{s.name}</span>
+                          <span className={s.done ? "text-muted line-through" : ""}>{s.name}</span>
                         </button>
                       ))}
                     </div>
@@ -392,10 +392,10 @@ export function TaskScreen({
                 <div data-more-part="packet">
                   <PacketSection key={t.id} taskId={t.id} />
                 </div>
-                <Row label="Heard" part="heard">
+                <Row label="Heard" part="heard" labelClass="text-muted">
                   {t.source} · {fmtFull(t.createdAt, false)}
                 </Row>
-                <Row label="From" part="from">
+                <Row label="From" part="from" labelClass="text-muted">
                   {t.createdFromConversationId ? (
                     <Link
                       href={`/chat?c=${t.createdFromConversationId}${t.createdFromMessageId ? `&m=${t.createdFromMessageId}` : ""}`}
@@ -406,15 +406,15 @@ export function TaskScreen({
                       the conversation moment
                     </Link>
                   ) : (
-                    <span className="text-faint">—</span>
+                    <span className="text-muted">—</span>
                   )}
                 </Row>
                 {detail.history.length > 0 && (
                   <div data-more-part="history" className="pt-2.5">
-                    <p className="mb-1.5 text-xs font-bold tracking-wide text-faint uppercase">History</p>
+                    <p className="mb-1.5 text-xs font-bold tracking-wide text-muted uppercase">History</p>
                     {detail.history.map((h) => (
                       <p key={h.id} className="mb-1 text-xs text-muted">
-                        <span className="text-faint">{fmtFull(h.at)}</span> — {h.note ?? h.type}
+                        <span className="text-muted">{fmtFull(h.at)}</span> — {h.note ?? h.type}
                       </p>
                     ))}
                   </div>
