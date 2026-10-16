@@ -168,7 +168,9 @@ export async function insertSuggestions(
   existingTasks: { title: string; dueAt: Date | null }[]
 ): Promise<number> {
   const { resolveProject } = await import("./tools");
+  const { plainNote } = await import("./plain-note");
   let inserted = 0;
+  let labelled = 0;
   for (const s of list) {
     if (findDuplicate({ title: s.title }, existingTasks)) continue;
     const dueAt = s.due_at ? new Date(s.due_at) : null;
@@ -176,10 +178,13 @@ export async function insertSuggestions(
     const { project } = s.project
       ? await resolveProject(userId, s.project, { create: false })
       : { project: null };
+    // The reason alone: its source already says suggested (docs/tasks/SPEC.md §2.3). A labelled one is kept, and
+    // counted (§2.1).
+    if (plainNote(s.reason) !== null) labelled++;
     await db.insert(tasks).values({
       userId,
       title: s.title,
-      notes: `Suggested: ${s.reason}`,
+      notes: s.reason,
       projectId: project?.id,
       dueAt: dueAt && !Number.isNaN(dueAt.getTime()) ? dueAt : undefined,
       status: "inbox",
@@ -187,6 +192,7 @@ export async function insertSuggestions(
     });
     inserted++;
   }
+  if (labelled) console.log(`suggestions: ${labelled} labelled note(s) stored`);
   return inserted;
 }
 

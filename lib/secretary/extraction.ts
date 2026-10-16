@@ -26,6 +26,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { findDuplicate, findDuplicateEvent, titleSimilarity } from "./dedupe";
 import { addedLines, noteLines, sameTitle, withLines } from "./notes";
+import { plainNote } from "./plain-note";
 import { parseInTz } from "@/lib/time";
 import { recordUsage } from "@/lib/usage";
 import { untrustedSince } from "./proposals";
@@ -35,7 +36,10 @@ export const extractionSchema = z.object({
   tasks: z.array(
     z.object({
       title: z.string(),
-      notes: z.string().nullable(),
+      notes: z
+        .string()
+        .nullable()
+        .describe("What is worth keeping that has no field of its own: a line or two of plain words, or nothing; no 'Label:' lines; never what has its own field"),
       due_at: z.string().nullable().describe("ISO 8601 in the user's timezone, if a deadline was stated"),
       project: z
         .string()
@@ -290,6 +294,8 @@ export async function applyExtraction(
   /** Notes added to an open task of the same title, and notes not saved anywhere (docs/tasks/SPEC.md §1.3). */
   notesAdded: number;
   notesNotSaved: number;
+  /** Notes it stored that read as field labels: in the background they are kept, and counted (§2.1). */
+  notesLabelled: number;
 }> {
   const result: ExtractionResult = {
     tasks: raw.tasks.slice(0, APPLY_CAPS.tasks),
@@ -325,6 +331,7 @@ export async function applyExtraction(
   let savedFacts = 0;
   let notesAdded = 0;
   let notesNotSaved = 0;
+  let notesLabelled = 0;
 
   // File into EXISTING projects only — an extraction guess never creates one.
   const { resolveProject } = await import("./tools");
@@ -345,17 +352,23 @@ export async function applyExtraction(
       const lines = noteLines(t.notes);
       if (!lines.length) continue;
       if (sameTitle(twin.title, t.title) && (OPEN_STATUSES as readonly string[]).includes(twin.status)) {
+        // In the background a labelled note is kept, and counted (docs/tasks/SPEC.md §2.1).
+        const labelled = plainNote(t.notes) !== null;
         const [hit] = await db
           .update(tasks)
           .set({ notes: withLines(tasks.notes, lines), updatedAt: new Date() })
           .where(and(eq(tasks.userId, userId), eq(tasks.id, twin.id), sql`${addedLines(tasks.notes, lines)} is not null`))
           .returning({ id: tasks.id });
-        if (hit) notesAdded++;
+        if (hit) {
+          notesAdded++;
+          if (labelled) notesLabelled++;
+        }
       } else {
         notesNotSaved++;
       }
       continue;
     }
+    if (plainNote(t.notes) !== null) notesLabelled++; // kept as written, and counted (§2.1)
     await db.insert(tasks).values({
       userId,
       title: t.title,
@@ -460,7 +473,8 @@ export async function applyExtraction(
     });
   }
 
-  return { createdTasks, createdEvents, updatedTasks, savedFacts, notesAdded, notesNotSaved };
+  if (notesLabelled) console.log(`extraction: ${notesLabelled} labelled note(s) stored`);
+  return { createdTasks, createdEvents, updatedTasks, savedFacts, notesAdded, notesNotSaved, notesLabelled };
 }
 
 /**

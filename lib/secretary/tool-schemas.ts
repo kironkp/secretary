@@ -16,7 +16,7 @@ const refField = z
 export const toolSchemas = {
   create_task: z.object({
     title: z.string().min(1).describe("Short imperative title, e.g. 'Renew passport'"),
-    notes: z.string().optional().describe("Extra context worth keeping"),
+    notes: z.string().optional().describe("What is worth keeping that has no field of its own: a line or two of plain words, or nothing; no 'Label:' lines; never what has its own field"),
     due_at: z
       .string()
       .optional()
@@ -26,7 +26,6 @@ export const toolSchemas = {
       .optional()
       .describe("When work should start, ISO 8601, if mentioned ('start Monday'); never after due_at"),
     project: z.string().optional().describe("Project name to file it under (created if new)"),
-    priority: z.number().int().min(0).max(3).optional().describe("0 none · 1 low · 2 medium · 3 high"),
     reminders: z
       .array(z.string())
       .optional()
@@ -62,9 +61,8 @@ export const toolSchemas = {
     notes: z
       .string()
       .optional()
-      .describe("Added to the task's note as new lines; lines already in it are not added again. It never replaces the note"),
+      .describe("Added to the task's note as new lines; lines already in it are not added again. It never replaces the note: a line or two of plain words, or nothing; no 'Label:' lines; never what has its own field"),
     replace_notes: z.boolean().optional().describe("Only when the user asks to change or clear the note: replaces the whole note with this text (\"\" clears it), and the result gives back what it replaced. Otherwise leave it out: the text is added to the note."),
-    priority: z.number().int().min(0).max(3).optional(),
     project: z
       .string()
       .optional()
@@ -218,7 +216,7 @@ export const toolSchemas = {
       .string()
       .max(200)
       .optional()
-      .describe("What the items are for, kept on each: 'for the boat'"),
+      .describe("What the items are for, kept on each ('for the boat'): a line or two of plain words, or nothing; no 'Label:' lines; never what has its own field"),
   }),
   list_items: z.object({
     list: z.string().max(80).optional().describe("The list's name; shopping when omitted"),
@@ -346,7 +344,7 @@ export const toolSchemas = {
       .string()
       .optional()
       .describe(
-        "What the user said, briefly; added to the task's note. On signal blocked this is THE REASON — what it's stuck on and what would clear it (\"waiting on Tamsin's signature\") — stored as what the task is waiting on (not in its note) so later sessions can explain the block instead of reciting the word.",
+        "Only what is worth keeping on the task, a short plain line; nothing when the signal says it all. Added to the task's note. On signal blocked this is THE REASON — what it's stuck on and what would clear it (\"waiting on Tamsin's signature\") — stored as what the task is waiting on (not in its note) so later sessions can explain the block instead of reciting the word.",
       ),
   }),
   create_commitment: z.object({
@@ -370,7 +368,7 @@ export const toolSchemas = {
         'File it under this project (fuzzy-matched against existing names, created if new). The literal value "none" removes it from its project.'
       ),
     title: z.string().optional().describe("New title, if the user renamed it"),
-    note: z.string().optional().describe("Detail worth keeping on the task, briefly. Added to its note; never replaces it"),
+    note: z.string().optional().describe("Detail worth keeping on the task, added to its note (never replacing it): a line or two of plain words, or nothing; no 'Label:' lines; never what has its own field"),
     replace_note: z.boolean().optional().describe("Only when the user asks to change or clear the note: replaces the whole note with this text (\"\" clears it), and the result gives back what it replaced. Otherwise leave it out: the text is added to the note."),
     start_at: z
       .string()
@@ -680,7 +678,7 @@ const toolDescriptions: Record<ToolName, string> = {
   create_task:
     "Log a task the user needs to do. Call this the moment a to-do, deadline, or obligation comes up in conversation — don't wait to be asked. Supports notes, reminder times, stages (multi-step deliverables), and recurrence (e.g. rent monthly).",
   update_task:
-    "Change a task: status, due date, title, notes, priority, MOVE IT TO ANOTHER PROJECT (project: name, or \"none\"), define stages, mark a stage done (stage_done: 'outline'), or set/clear recurrence. Use when the user postpones, starts, advances a stage, or edits anything.",
+    "Change a task: status, due date, title, notes, MOVE IT TO ANOTHER PROJECT (project: name, or \"none\"), define stages, mark a stage done (stage_done: 'outline'), or set/clear recurrence. Use when the user postpones, starts, advances a stage, or edits anything.",
   complete_task:
     "Mark a task done. Use when the user says they did it ('yeah I sent it this morning').",
   create_project:

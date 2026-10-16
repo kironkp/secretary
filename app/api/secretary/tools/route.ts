@@ -78,6 +78,8 @@ export async function POST(req: Request) {
       // Every call through here is a call's turn; without both numbers its
       // place is unknown, and a yes there is never taken.
       voice: { session: parsed.voiceSession ?? null, seq: parsed.voiceSeq ?? null },
+      // A model's turn: its notes are checked for labels (docs/tasks/SPEC.md §2.1).
+      live: true,
     },
     parsed.name,
     parsed.args

@@ -1,7 +1,7 @@
 "use client";
 
 // The FULL task editor: everything the quick dialog can't do — retitle,
-// refile, status, priority, due date, notes, reminders — in one full-screen
+// refile, status, due date, notes, reminders — in one full-screen
 // form. Opened from the detail dialog's Edit button; one PATCH on save.
 import { useEffect, useState } from "react";
 import { AlarmClock, Plus, X } from "lucide-react";
@@ -13,13 +13,11 @@ type EditableTask = {
   status: string;
   notes: string | null;
   dueAt: string | null;
-  priority: number;
   reminders: string[];
   projectId?: string | null;
 };
 
 const STATUSES = ["inbox", "todo", "in_progress", "blocked", "done", "dropped"] as const;
-const PRIORITIES = ["none", "low", "medium", "high"];
 
 /** ISO ↔ the local wall-clock string <input type="datetime-local"> speaks. */
 export function isoToLocalInput(iso: string | null): string {
@@ -60,7 +58,6 @@ export function TaskEditor({
 }) {
   const [title, setTitle] = useState(task.title);
   const [status, setStatus] = useState(task.status);
-  const [priority, setPriority] = useState(task.priority);
   const [project, setProject] = useState<string>(projectId ?? "");
   const [due, setDue] = useState(isoToLocalInput(task.dueAt));
   const [notes, setNotes] = useState(task.notes ?? "");
@@ -103,7 +100,7 @@ export function TaskEditor({
       body: JSON.stringify({
         title: title.trim(),
         status,
-        priority,
+        // Never priority, not even 0: he is not asked it, and what is stored stays (docs/tasks/SPEC.md §2.2).
         projectId: project || null,
         dueAt: localInputToIso(due),
         notes: notes.trim() || null,
@@ -145,19 +142,6 @@ export function TaskEditor({
                 {STATUSES.map((s) => (
                   <option key={s} value={s}>
                     {s.replace("_", " ")}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Priority">
-              <select
-                value={priority}
-                onChange={(e) => setPriority(Number(e.target.value))}
-                className={inputCls}
-              >
-                {PRIORITIES.map((p, i) => (
-                  <option key={p} value={i}>
-                    {p}
                   </option>
                 ))}
               </select>

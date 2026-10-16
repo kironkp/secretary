@@ -6,6 +6,7 @@
 // cards, a 5-week pressure timeline, and the grouped Open-loops table.
 import { Fragment, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { withoutSuggested } from "@/lib/suggested";
 import {
   AlarmClock,
   CalendarClock,
@@ -953,7 +954,7 @@ export function SuggestedZone({ suggestions }: { suggestions: TaskRow[] }) {
         </button>
       </div>
       <p className="text-xl font-semibold leading-snug">{s.title}</p>
-      {s.notes && <p className="mt-1 text-sm text-muted">{s.notes.replace(/^Suggested: /, "")}</p>}
+      {s.notes && <p className="mt-1 text-sm text-muted">{withoutSuggested(s.notes)}</p>}
       <div className="mt-3 flex gap-2">
         <button
           type="button"

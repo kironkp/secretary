@@ -337,14 +337,18 @@ async function runModels(
 
   // One context for every tool this turn calls, whichever model answers: a
   // turn that carries a flyer or a file asks before writing Google Calendar.
-  const toolCtx = liveTurnContext({
-    userId: user.id,
-    timezone: user.timezone,
-    conversationId,
-    anchorMessageId: userMessage.id,
-    attachmentCount: attachRows.length,
-    untrusted: readMail,
-  });
+  const toolCtx = {
+    ...liveTurnContext({
+      userId: user.id,
+      timezone: user.timezone,
+      conversationId,
+      anchorMessageId: userMessage.id,
+      attachmentCount: attachRows.length,
+      untrusted: readMail,
+    }),
+    // A model's turn: its notes are checked for labels (docs/tasks/SPEC.md §2.1).
+    live: true as const,
+  };
   const canChain = Boolean(storedResponseId) && prior.length > 0 && prior[prior.length - 1].mode === "text";
   let input: InputItem[] = canChain
     ? [userTurn]

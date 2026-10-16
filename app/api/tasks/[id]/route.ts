@@ -4,8 +4,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { checkins, projects, tasks } from "@/lib/db/schema";
 import { isErrorResponse, parseBody, requireSession } from "@/lib/api";
-import { clearExpectationsFor } from "@/lib/secretary/expectations";
-import { spawnNextOccurrence } from "@/lib/secretary/recurrence";
+import { completeTask } from "@/lib/secretary/tools";
 import { mergeNotes } from "@/lib/secretary/notes";
 
 /** Full detail for the task dialog: every tool-writable field + history. */
@@ -53,7 +52,7 @@ const bodySchema = z.object({
   reminders: z.array(z.string().datetime({ offset: true })).max(10).optional(),
   // Provenance for the done check-in note; absent = dashboard (the historical
   // default — existing callers keep their wording).
-  source: z.enum(["dashboard", "canvas"]).optional(),
+  source: z.enum(["dashboard", "canvas", "task"]).optional(),
 });
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -72,10 +71,13 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const updates: Partial<typeof tasks.$inferInsert> = { updatedAt: new Date() };
-  if (parsed.status) {
+  // Done goes through the one path complete_task takes, below (docs/tasks/SPEC.md §2.4).
+  const finishing = parsed.status === "done";
+  if (parsed.status && !finishing) {
     updates.status = parsed.status;
-    if (parsed.status === "done") updates.completedAt = new Date();
     if (parsed.status === "in_progress" && !existing.startedAt) updates.startedAt = new Date();
+    // Taken off done, it is not done any more: the editor's Status and the done circle alike.
+    if (existing.status === "done") updates.completedAt = null;
   }
   if (parsed.title) updates.title = parsed.title;
   if (parsed.priority !== undefined) updates.priority = parsed.priority;
@@ -105,7 +107,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   // His note, with what a model added while he typed kept after it: read and written under the row's lock, so a
   // write that lands meanwhile waits and is not lost (docs/tasks/SPEC.md §1.6).
-  const [updated] = await db.transaction(async (tx) => {
+  let [updated] = await db.transaction(async (tx) => {
     if (parsed.notes !== undefined) {
       const [locked] = await tx
         .select({ notes: tasks.notes })
@@ -121,16 +123,12 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       .returning();
   });
 
-  if (parsed.status === "done") {
-    await db.insert(checkins).values({
-      userId: user.id,
-      taskId: id,
-      type: "user_update",
-      note: `Marked done from ${parsed.source ?? "dashboard"}`,
-    });
-    // SPEC §11: only matches open rows, so a repeat PATCH is a no-op.
-    await clearExpectationsFor(user.id, id);
-    if (existing.status !== "done") await spawnNextOccurrence(updated);
+  if (finishing) {
+    // The checkin, its expectations (SPEC §11: only open rows, so a repeat PATCH changes none), and a recurring
+    // task's next occurrence once.
+    ({ updated } = await completeTask(user.id, id, existing.status === "done", {
+      checkinNote: `Marked done from ${parsed.source ?? "dashboard"}`,
+    }));
   }
 
   return NextResponse.json({ task: updated });

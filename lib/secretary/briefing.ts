@@ -20,6 +20,7 @@ import { isQuietHours } from "./persona";
 import { refreshProcrastinationScores } from "./procrastination";
 import { getPendingSuggestions } from "./suggestions";
 import { listProjects } from "@/lib/projects/list";
+import { withoutSuggested } from "@/lib/suggested";
 
 const OPEN_STATUSES = ["inbox", "todo", "in_progress", "blocked"] as const;
 const MAX_NUDGES = 3;
@@ -377,7 +378,7 @@ export async function buildBriefing(
     suggestions: suggestionRows.map((t) => ({
       id: t.id,
       title: t.title,
-      detail: t.notes?.replace(/^Suggested: /, "") ?? "",
+      detail: t.notes ? withoutSuggested(t.notes) : "",
     })),
     hasContent:
       overdueRows.length + dueTodayRows.length + todayEvents.length + stalledRows.length > 0,

@@ -65,6 +65,7 @@ import { findDuplicate, findDuplicateEvent } from "./dedupe";
 import { clearExpectationsFor } from "./expectations";
 import { spawnNextOccurrence } from "./recurrence";
 import { addedLines, linesAdded, noteLines, noteOutcome, sameTitle, withLines } from "./notes";
+import { plainNote } from "./plain-note";
 import { toolSchemas, type ToolName } from "./tool-schemas";
 
 /** Live create-guard threshold: only near-identical titles count as dupes —
@@ -79,18 +80,38 @@ const CREATE_GUARD_SIMILARITY = 0.85;
 const notesBefore = (table: typeof tasks | typeof events, id: string) =>
   sql`(select ${table.id} as prev_id, ${table.notes} as notes_before from ${table} where ${table.id} = ${id} for update) as prev`;
 
+const NOTE_REFUSED =
+  "That note reads like a field label, so it was not saved; the rest of the call was. Say it as plain words, a line or two, or leave it out.";
+
 /**
- * A model's note added to a task (§1.1, §1.3): only when some line is new, so a note already there writes nothing.
- * Null when nothing was written.
+ * A model's new note text, checked for field labels (docs/tasks/SPEC.md §2.1). In a live turn a labelled note is
+ * refused: `keep` is false and `said` is what the result carries. Anywhere else it is kept, and counted in the log
+ * (a count, never the text).
  */
-async function addToTaskNote(userId: string, taskId: string, lines: string[]) {
+function checkNote(ctx: ToolContext, text: string | null | undefined) {
+  const line = plainNote(text);
+  if (!line) return { keep: true as const, said: {} };
+  if (ctx.live) return { keep: false as const, said: { note_not_saved: { line, why: NOTE_REFUSED } } };
+  console.log("notes: 1 labelled note stored (not a live turn)");
+  return { keep: true as const, said: {} };
+}
+
+/**
+ * A model's note added to a task (§1.1, §1.3; checked, §2.1): only when some line is new, so a note already there
+ * writes nothing. What the result says about it.
+ */
+async function addToTaskNote(ctx: ToolContext, taskId: string, text: string | null | undefined) {
+  const noteChecked = checkNote(ctx, text);
+  if (!noteChecked.keep) return noteChecked.said;
+  const lines = noteLines(text);
+  if (!lines.length) return {};
   const [hit] = await db
     .update(tasks)
     .set({ notes: withLines(tasks.notes, lines), updatedAt: new Date() })
     .from(notesBefore(tasks, taskId))
-    .where(and(eq(tasks.userId, userId), eq(tasks.id, sql`prev.prev_id`), sql`${addedLines(tasks.notes, lines)} is not null`))
+    .where(and(eq(tasks.userId, ctx.userId), eq(tasks.id, sql`prev.prev_id`), sql`${addedLines(tasks.notes, lines)} is not null`))
     .returning({ id: tasks.id, notesBefore: sql<string | null>`prev.notes_before` });
-  return hit ? linesAdded(hit.notesBefore, lines) : null;
+  return noteOutcome(hit ? linesAdded(hit.notesBefore, lines) : []);
 }
 
 export type ToolContext = {
@@ -126,6 +147,11 @@ export type ToolContext = {
    * proposal on a call is answered only on that call, in item order.
    */
   voice?: { session: string | null; seq: number | null };
+  /**
+   * A chat or voice turn, the model answering him (docs/tasks/SPEC.md §2.1): set by the chat route and the voice
+   * tools route only, never by a tap's route. A labelled note is refused here and stored, counted, anywhere else.
+   */
+  live?: true;
 };
 
 /**
@@ -595,8 +621,43 @@ type Args = Record<string, unknown>;
 async function finishTask(ctx: ToolContext, ref: string, note?: string): Promise<ToolOutcome> {
   const task = await findTask(ctx.userId, ref);
   if (!task) return { result: { error: `No task matching "${ref}"` } };
-  const lines = noteLines(note);
-  const [updated] = await db
+  // Done either way; a labelled note in a live turn is not saved (§2.1).
+  const noteChecked = checkNote(ctx, note);
+  const lines = noteChecked.keep ? noteLines(note) : [];
+  const { updated, notesBefore: before, next } = await completeTask(ctx.userId, task.id, task.status === "done", {
+    lines,
+    checkinNote: "Marked done",
+  });
+  const nextDue = next ? fmtDate(next.dueAt, ctx.timezone, false) : null;
+  return {
+    result: {
+      task_id: updated.id,
+      title: updated.title,
+      status: "done",
+      ...(lines.length ? noteOutcome(linesAdded(before, lines)) : {}),
+      ...noteChecked.said,
+      ...(nextDue ? { next_occurrence_due: nextDue } : {}),
+    },
+    toast: {
+      icon: "✓",
+      text: nextDue ? `Done: ${updated.title} — next one due ${nextDue}` : `Done: ${updated.title}`,
+    },
+  };
+}
+
+/**
+ * The one way a task is marked done (complete_task, log_status done, and his done circle through the PATCH route,
+ * docs/tasks/SPEC.md §2.4): one UPDATE (with a done note's lines, §1.4), the checkin, its expectations cleared, and
+ * a recurring task's next occurrence once, copying the note from before those lines.
+ */
+export async function completeTask(
+  userId: string,
+  taskId: string,
+  wasDone: boolean,
+  opts: { lines?: string[]; checkinNote: string }
+) {
+  const lines = opts.lines ?? [];
+  const [{ notesBefore: before, ...updated }] = await db
     .update(tasks)
     // done is a signal like any other: whatever it was stuck on, it isn't now
     .set({
@@ -606,31 +667,13 @@ async function finishTask(ctx: ToolContext, ref: string, note?: string): Promise
       updatedAt: new Date(),
       ...(lines.length ? { notes: withLines(tasks.notes, lines) } : {}),
     })
-    .from(notesBefore(tasks, task.id))
-    .where(and(eq(tasks.userId, ctx.userId), eq(tasks.id, sql`prev.prev_id`)))
+    .from(notesBefore(tasks, taskId))
+    .where(and(eq(tasks.userId, userId), eq(tasks.id, sql`prev.prev_id`)))
     .returning({ ...getTableColumns(tasks), notesBefore: sql<string | null>`prev.notes_before` });
-  await db.insert(checkins).values({
-    userId: ctx.userId,
-    taskId: task.id,
-    type: "user_update",
-    note: "Marked done",
-  });
-  await clearExpectationsFor(ctx.userId, task.id);
-  const next = task.status !== "done" ? await spawnNextOccurrence({ ...updated, notes: updated.notesBefore }) : null;
-  const nextDue = next ? fmtDate(next.dueAt, ctx.timezone, false) : null;
-  return {
-    result: {
-      task_id: updated.id,
-      title: updated.title,
-      status: "done",
-      ...(lines.length ? noteOutcome(linesAdded(updated.notesBefore, lines)) : {}),
-      ...(nextDue ? { next_occurrence_due: nextDue } : {}),
-    },
-    toast: {
-      icon: "✓",
-      text: nextDue ? `Done: ${updated.title} — next one due ${nextDue}` : `Done: ${updated.title}`,
-    },
-  };
+  await db.insert(checkins).values({ userId, taskId, type: "user_update", note: opts.checkinNote });
+  await clearExpectationsFor(userId, taskId);
+  const next = wasDone ? null : await spawnNextOccurrence({ ...updated, notes: before });
+  return { updated, notesBefore: before, next };
 }
 
 const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolOutcome>> = {
@@ -667,22 +710,24 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
       // similar it is not saved, and the result says so, so the model can add it to the right task.
       const lines = noteLines(a.notes);
       const same = sameTitle(twin.title, a.title);
-      const added = lines.length && same ? await addToTaskNote(ctx.userId, twin.id, lines) : null;
+      const noteSaid: Record<string, unknown> = !lines.length ? {} : same ? await addToTaskNote(ctx, twin.id, a.notes) : { note_saved: false };
       const filed = filedUnder ? `; it's now filed under "${filedUnder}"` : "";
       const note = !lines.length
         ? filedUnder
           ? `An open task with this title already existed — nothing was created${filed}. Use update_task for other changes.`
           : "An open task with this title already exists — nothing was created. Use update_task to change it."
-        : same
-          ? `An open task with this title already existed — nothing was created${filed}; ${added ? "your note was added to it" : "the note was already in it"}.`
-          : `Nothing was created: a similar open task exists ("${twin.title}")${filed}. The note was not saved — if it belongs there, add it with update_task.`;
+        : !same
+          ? `Nothing was created: a similar open task exists ("${twin.title}")${filed}. The note was not saved — if it belongs there, add it with update_task.`
+          : noteSaid.note_not_saved
+            ? `An open task with this title already existed — nothing was created${filed}. ${NOTE_REFUSED}`
+            : `An open task with this title already existed — nothing was created${filed}; ${noteSaid.notes_added ? "your note was added to it" : "the note was already in it"}.`;
       return {
         result: {
           task_id: twin.id,
           title: twin.title,
           already_existed: true,
           ...(filedUnder ? { project: filedUnder } : {}),
-          ...(lines.length ? (same ? noteOutcome(added ?? []) : { note_saved: false }) : {}),
+          ...noteSaid,
           note,
         },
         ...(filedUnder
@@ -697,16 +742,17 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     }
     const { project, matched } = await resolveProject(ctx.userId, a.project);
     const reminders = parseReminders(a.reminders, ctx.timezone) ?? [];
+    // A labelled note in a live turn: the task is made, without it (docs/tasks/SPEC.md §2.1).
+    const noteChecked = checkNote(ctx, a.notes);
     const [task] = await db
       .insert(tasks)
       .values({
         userId: ctx.userId,
         title: a.title,
-        notes: a.notes,
+        notes: noteChecked.keep ? a.notes : undefined,
         projectId: project?.id,
         dueAt,
         startAt,
-        priority: a.priority ?? 0,
         reminders,
         stages: (a.stages ?? []).map((name) => ({ name, done: false })),
         recurrence: a.recurrence,
@@ -726,6 +772,7 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         ...(task.startAt ? { start_at: task.startAt } : {}),
         project: project?.name ?? null,
         project_match: matched,
+        ...noteChecked.said,
         ...(task.stages.length ? { stages: task.stages.map((s) => s.name) } : {}),
         ...(task.recurrence ? { recurrence: task.recurrence } : {}),
         ...(reminders.length ? { reminders, delivery: REMINDER_DELIVERY } : {}),
@@ -781,10 +828,12 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     if (a.title) updates.title = a.title;
     // His note is never replaced by a model's (docs/tasks/SPEC.md §1.1): the lines it lacks are added, in the
     // UPDATE itself. Only replace_notes, kept for when he asks to change or clear it, replaces it (§1.2).
-    const replacing = Boolean(a.replace_notes) && a.notes !== undefined;
+    // A labelled note in a live turn is not saved, and the rest of the call is (§2.1).
+    const noteChecked = checkNote(ctx, a.notes);
+    const replacing = Boolean(a.replace_notes) && a.notes !== undefined && noteChecked.keep;
     if (replacing) updates.notes = a.notes === "" ? null : a.notes;
-    const lines = replacing ? [] : noteLines(a.notes);
-    if (a.priority !== undefined) updates.priority = a.priority;
+    const lines = replacing || !noteChecked.keep ? [] : noteLines(a.notes);
+    const addedNote = lines.length ? withLines(tasks.notes, lines) : null;
     const newReminders = parseReminders(a.reminders, ctx.timezone);
     if (newReminders !== undefined) updates.reminders = newReminders;
     if (a.recurrence !== undefined) {
@@ -830,11 +879,15 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
       stageAdvanced = hit.name;
     }
 
+    // A refused note and nothing else: nothing is written; the result says why.
+    if (!noteChecked.keep && Object.keys(updates).every((k) => k === "updatedAt")) {
+      return { result: { task_id: task.id, title: task.title, status: task.status, ...noteChecked.said } };
+    }
     // A note and nothing else, whose lines are all there already: nothing is written.
     const onlyNote = lines.length > 0 && Object.keys(updates).every((k) => k === "updatedAt");
     const [updated] = await db
       .update(tasks)
-      .set({ ...updates, ...(lines.length ? { notes: withLines(tasks.notes, lines) } : {}) })
+      .set({ ...updates, ...(addedNote ? { notes: addedNote } : {}) })
       .from(notesBefore(tasks, task.id))
       .where(
         and(
@@ -896,6 +949,7 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         ...(updated.startAt ? { start_at: updated.startAt } : {}),
         postponed_count: updated.postponedCount,
         ...notesSaid,
+        ...noteChecked.said,
         ...(updated.blockedReason ? { blocked_reason: updated.blockedReason } : {}),
         ...(movedTo !== undefined ? { project: movedTo, project_match: projectMatch } : {}),
         ...(updated.stages.length
@@ -1273,8 +1327,11 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     const onList = new Map(open.map((t) => [t.title.toLowerCase(), t.id]));
     const added: string[] = [];
     const already: string[] = [];
-    // An item already on it gets the note too, added to its own (docs/tasks/SPEC.md §1.1).
-    const lines = noteLines(note);
+    // An item already on it gets the note too, added to its own (docs/tasks/SPEC.md §1.1). A labelled one in a
+    // live turn goes on no item; the items do (§2.1).
+    const noteChecked = checkNote(ctx, note);
+    const kept = noteChecked.keep ? note : null;
+    const lines = noteLines(kept);
     const noteAddedTo: string[] = [];
     const noteAlreadyOn: string[] = [];
     for (const raw of a.items) {
@@ -1284,13 +1341,13 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         already.push(title);
         // ("" is one this call just put on it, with the note already.)
         const there = onList.get(title.toLowerCase());
-        if (there && lines.length) ((await addToTaskNote(ctx.userId, there, lines)) ? noteAddedTo : noteAlreadyOn).push(title);
+        if (there && lines.length) ("notes_added" in (await addToTaskNote(ctx, there, kept)) ? noteAddedTo : noteAlreadyOn).push(title);
         continue;
       }
       await db.insert(tasks).values({
         userId: ctx.userId,
         title,
-        notes: note,
+        notes: noteChecked.keep ? note : null,
         projectId: list.id,
         status: "todo",
         source: ctx.conversationId ? "spoken" : "typed",
@@ -1301,7 +1358,7 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
       added.push(title);
     }
     const said = [
-      added.length ? `Added ${spokenList(added)} to your ${list.name} list${note ? ` (${note})` : ""}.` : "",
+      added.length ? `Added ${spokenList(added)} to your ${list.name} list${kept ? ` (${kept})` : ""}.` : "",
       already.length ? `${spokenList(already)} ${already.length === 1 ? "is" : "are"} already on it.` : "",
       noteAddedTo.length ? `I added the note to ${spokenList(noteAddedTo)}.` : "",
     ]
@@ -1313,7 +1370,8 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         list_created: created,
         added,
         already_on_list: already,
-        note,
+        note: kept,
+        ...noteChecked.said,
         ...(noteAddedTo.length ? { note_added_to: noteAddedTo } : {}),
         ...(noteAlreadyOn.length ? { note_already_on: noteAlreadyOn } : {}),
         read_back: said,

@@ -152,7 +152,7 @@ describe("applyExtraction (real database)", () => {
     };
 
     const summary = await applyExtraction(U.id, convId, result);
-    expect(summary).toEqual({ createdTasks: 1, createdEvents: 1, updatedTasks: 1, savedFacts: 1, notesAdded: 0, notesNotSaved: 0 });
+    expect(summary).toEqual({ createdTasks: 1, createdEvents: 1, updatedTasks: 1, savedFacts: 1, notesAdded: 0, notesNotSaved: 0, notesLabelled: 0 });
 
     const rows = await db.select().from(tasks).where(eq(tasks.userId, U.id));
     expect(rows).toHaveLength(3); // 2 originals + dentist, no passport dupe
@@ -194,7 +194,7 @@ describe("applyExtraction (real database)", () => {
     mentions: [],
     ambiguities: [],
     });
-    expect(again).toEqual({ createdTasks: 0, createdEvents: 0, updatedTasks: 0, savedFacts: 0, notesAdded: 0, notesNotSaved: 0 });
+    expect(again).toEqual({ createdTasks: 0, createdEvents: 0, updatedTasks: 0, savedFacts: 0, notesAdded: 0, notesNotSaved: 0, notesLabelled: 0 });
   });
 
   it("inferred tasks file into EXISTING projects only (fuzzy, never creating)", async () => {

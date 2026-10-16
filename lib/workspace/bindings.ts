@@ -128,9 +128,8 @@ async function resolveTasks(
       ? [desc(tasks.createdAt)]
       : q.sort === "updated"
         ? [desc(tasks.updatedAt)]
-        : q.sort === "priority"
-          ? [desc(tasks.priority), asc(tasks.dueAt)]
-          : q.sort === "procrastination"
+        : // "priority" still validates, and sorts by due like the default (docs/tasks/SPEC.md §2.2).
+          q.sort === "procrastination"
             ? [desc(tasks.procrastinationScore)]
             : q.sort === "title"
               ? [asc(tasks.title)]
