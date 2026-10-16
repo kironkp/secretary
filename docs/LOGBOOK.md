@@ -10,9 +10,10 @@ commits it covers so `git show <hash>` always reaches the real diff.
 ## v1.10 — A task reads like a reminder (2026-10-16)
 
 `c116fd0`, `87c3c76` (the rule, docs/tasks/SPEC.md §2), `8ff29f5`, `5b6c87b`,
-`0de45c1`, `9a59e75`, `3ff6e24` (the tests, first and red), `bcbcea1`,
-`849e91b`, `6575dd5`, `623868f` (the code), `5f5f54c` (v1.17 r2 merged in),
-`6312923` (this entry first, and the version), this commit.
+`0de45c1`, `9a59e75`, `3ff6e24`, `0e23eb5` (the tests, first and red),
+`bcbcea1`, `849e91b`, `6575dd5`, `623868f`, `1f5c95c` (the code), `5f5f54c`
+(v1.17 r2 merged in), `6312923`, `8cb2689` (this entry, and the version),
+this commit.
 
 Kiron, comparing with Notion and Apple Reminders: "It should be really
 simple", "simple and working and no clutter". The labels a model wrote into
@@ -35,7 +36,9 @@ don't really work for me".
 - The task screen is the approved design's top half: "Task" and Done; the
   done circle, the title and his note; Due, Remind me and Project (and what
   it is waiting on, while blocked); everything else under "More", closed
-  each time. The circle finishes a task the way the assistant does, once,
+  each time. A task opens straight into that sheet; while it loads, the
+  sheet says so, rather than another dialog showing first. The circle
+  finishes a task the way the assistant does, once,
   even for one that repeats; a repeating task already done is not reopened
   from it, since that would leave two open copies.
 - Taken off done, a task is not done any more: before, its finish date
