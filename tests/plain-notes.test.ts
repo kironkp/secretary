@@ -9,6 +9,12 @@ import { join } from "node:path";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 
+const session = vi.hoisted(() => ({ user: null as null | { id: string; email: string; name: string; timezone: string } }));
+vi.mock("@/lib/api", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/lib/api")>();
+  const { NextResponse } = await import("next/server");
+  return { ...real, requireSession: async () => session.user ?? NextResponse.json({ error: "Not authenticated" }, { status: 401 }) };
+});
 vi.mock("next/headers", () => ({ cookies: async () => ({ get: () => undefined }), headers: async () => new Headers() }));
 vi.mock("next/server", async (importOriginal) => ({ ...(await importOriginal<typeof import("next/server")>()), after: () => {} }));
 
@@ -21,6 +27,7 @@ import { anthropicToolDefs, toolSchemas } from "@/lib/secretary/tool-schemas";
 import { executeTool, liveTurnContext, type ToolContext } from "@/lib/secretary/tools";
 import { bindingQuerySchema } from "@/lib/workspace/types";
 import { resolveBinding } from "@/lib/workspace/bindings";
+import { POST as voiceTool } from "@/app/api/secretary/tools/route";
 
 const TZ = "America/Los_Angeles";
 const users: string[] = [];
@@ -31,6 +38,7 @@ beforeEach(async () => {
   uid = `test-plain-${crypto.randomUUID()}`;
   users.push(uid);
   await db.insert(user).values({ id: uid, name: "Plain", email: `${uid}@v110.test`, timezone: TZ });
+  session.user = { id: uid, email: `${uid}@v110.test`, name: "Plain", timezone: TZ };
   // A chat or voice turn: the route marks it live.
   live = { ...liveTurnContext({ userId: uid, timezone: TZ, attachmentCount: 0 }), live: true } as ToolContext;
   // Anything else that runs a tool (an understanding answer builds just this).
@@ -344,5 +352,89 @@ describe("only the lines a write would add are checked (r2)", () => {
     const out = await writing;
     expect(out.note_not_saved).toBeUndefined();
     expect((await row(id)).notes).toBe(`${OLD}\nThey deliver on Fridays.`);
+  });
+});
+
+// v1.10 r2, the Reviewer's verdict on e1da4b0: what marks a turn live, how a line is read, and "Suggested:" wherever a
+// task's note is shown.
+describe("what marks a turn live (r2)", () => {
+  it("the voice tools route marks its call live: a labelled note is not saved", async () => {
+    const id = await aTask("Fix the gate", "Hinges are loose.");
+    const res = await voiceTool(
+      new Request("http://x/api/secretary/tools", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "amend_task", args: { task: id, note: "Owner: Sam" } }),
+      })
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { result: Record<string, unknown> };
+    expect(body.result.note_not_saved).toMatchObject({ line: "Owner: Sam" });
+    expect((await row(id)).notes).toBe("Hinges are loose.");
+  });
+
+  it("a context built by liveTurnContext alone (a tap's route) is not live: the note is stored", async () => {
+    const id = await aTask("Fix the gate", null);
+    await tool(liveTurnContext({ userId: uid, timezone: TZ, attachmentCount: 0 }), "amend_task", { task: id, note: "Owner: Sam" });
+    expect((await row(id)).notes).toBe("Owner: Sam");
+  });
+});
+
+describe("how a line is read (r2)", () => {
+  const labelled = [
+    "– Owner: Sam",
+    "— Status: waiting",
+    "## Next action: call the yard",
+    "- [ ] Next step: book the van",
+    "- [x] Owner: me",
+    "next_action: call the yard",
+    "Next   action: call the yard",
+    "Due date: Friday",
+    "• Evidence – the email",
+  ];
+  it.each(labelled)("%j is a label: bullets first, then dashes as colons, underscores and runs of spaces as one space", async (note) => {
+    const id = await aTask("Fix the gate", null);
+    const out = await tool(live, "amend_task", { task: id, note });
+    expect(out.note_not_saved).toMatchObject({ line: note });
+    expect((await row(id)).notes).toBeNull();
+  });
+
+  it("\"Dues: $40 a month\" is not: due has no plural", async () => {
+    const id = await aTask("Join the allotment", null);
+    const out = await tool(live, "amend_task", { task: id, note: "Dues: $40 a month" });
+    expect(out.note_not_saved).toBeUndefined();
+    expect((await row(id)).notes).toBe("Dues: $40 a month");
+  });
+});
+
+describe("\"Suggested:\" wherever a task's note is shown (r2)", () => {
+  it("the Workspace's task rows carry the note without it; the stored row keeps it", async () => {
+    const [t] = await db
+      .insert(tasks)
+      .values({ userId: uid, title: "Clean the gutters", status: "todo", source: "suggested", notes: "Suggested: leaves are piling up." })
+      .returning();
+    const rows = await resolveBinding(uid, bindingQuerySchema.parse({ source: "tasks", where: { open: true } }), TZ);
+    expect(rows.find((r) => r.id === t.id)?.fields.notes).toBe("leaves are piling up.");
+    expect((await row(t.id)).notes).toBe("Suggested: leaves are piling up.");
+  });
+
+  it("every place in the app that shows a task's note takes it through withoutSuggested", () => {
+    const files = (dir: string): string[] =>
+      readdirSync(dir).flatMap((f) => {
+        const p = join(dir, f);
+        return statSync(p).isDirectory() ? files(p) : /\.tsx$/.test(f) ? [p] : [];
+      });
+    const raw: string[] = [];
+    for (const file of [...files("components"), ...files("app")]) {
+      readFileSync(file, "utf8")
+        .split("\n")
+        .forEach((line, i) => {
+          // A note in what is drawn: inside JSX braces or a template, not an event's, not his own draft.
+          if (!/\{[^}]*\b\w+\.notes\b/.test(line)) return;
+          if (/withoutSuggested\(|notesDraft|notesBase|setNotes|event\.notes|notes: /.test(line)) return;
+          raw.push(`${file}:${i + 1}: ${line.trim()}`);
+        });
+    }
+    expect(raw).toEqual([]);
   });
 });

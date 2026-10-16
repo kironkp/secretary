@@ -116,3 +116,27 @@ test("\"Waiting on\" shows only while the task is blocked", async ({ page, reque
   await openTask(page, id);
   await expect(page.getByText("Waiting on", { exact: true })).toHaveCount(0);
 });
+
+// v1.10 r2, the Reviewer's verdict on e1da4b0.
+test("Done with a note draft open saves it, and a line a call added meanwhile is kept after it", async ({ page, request }) => {
+  const made = await tool(request, "create_task", { title: `Paint the shed door ${Date.now()}`, notes: "Sand it first." });
+  const id = String(made.task_id);
+  await openTask(page, id);
+  await page.getByTitle("Edit notes").click();
+  await page.getByPlaceholder("Type a note…").fill("Two coats.\nSand it first.");
+  await tool(request, "amend_task", { task: id, note: "Voice: the brush is in the shed." });
+  await page.getByRole("button", { name: "Done", exact: true }).click();
+  await expect(page.locator("[data-task-screen]")).toHaveCount(0);
+  expect(await notesOf(request, id)).toBe("Two coats.\nSand it first.\nVoice: the brush is in the shed.");
+});
+
+test("a labelled note from a chat turn (the real chat route, a live turn) is not saved", async ({ request }) => {
+  const made = await tool(request, "create_task", { title: `Paint the fence ${Date.now()}`, notes: "Two coats." });
+  const id = String(made.task_id);
+  const res = await request.post("/api/chat", { data: { message: `Add to the note of task ${id}: Owner: Sam` } });
+  expect(res.ok(), "the chat turn answered").toBe(true);
+  expect(await notesOf(request, id)).toBe("Two coats.");
+  // The same route with a plain line: it lands, so the turn above did reach the tool.
+  await chatAdds(request, id, "They deliver on Fridays.");
+  expect(await notesOf(request, id)).toBe("Two coats.\nThey deliver on Fridays.");
+});

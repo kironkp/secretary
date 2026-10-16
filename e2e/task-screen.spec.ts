@@ -366,3 +366,69 @@ test("while a task loads, its own sheet shows, never another dialog first", asyn
   await expect(page.locator("[data-task-screen]")).toBeVisible();
   await expect(page.locator("[data-task-screen-loading]")).toHaveCount(0);
 });
+
+// v1.10 r2, the Reviewer's verdict on e1da4b0.
+test("long text wraps inside its card: a pasted link in the note and a one-word title; the sheet never scrolls sideways", async ({ page, request }) => {
+  const word = "Corrugatedgalvanisedroofpanelsfortheshed".repeat(3);
+  const link = `https://timber.example/products/roofing/corrugated-panels/${"galvanised-steel-".repeat(6)}8ft?ref=${"q".repeat(40)}`;
+  const made = await tool(request, "create_task", { title: word, notes: `See ${link}` });
+  const id = String(made.task_id);
+  await openTask(page, id);
+  await page.locator("[data-task-more]").click();
+  const r = await page.locator("[data-task-screen]").evaluate((screen) => {
+    const out: string[] = [];
+    const walker = document.createTreeWalker(screen, NodeFilter.SHOW_TEXT);
+    const range = document.createRange();
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      if (!n.textContent!.trim()) continue;
+      const box = (n.parentElement!.closest("[data-task-card]") ?? screen).getBoundingClientRect();
+      range.selectNodeContents(n);
+      for (const rect of range.getClientRects()) {
+        if (rect.width && (rect.right > box.right + 0.5 || rect.left < box.left - 0.5))
+          out.push(`${n.textContent!.trim().slice(0, 20)}: ${Math.round(rect.left)}–${Math.round(rect.right)} in ${Math.round(box.left)}–${Math.round(box.right)}`);
+      }
+    }
+    return { out, sideways: screen.scrollWidth - screen.clientWidth };
+  });
+  expect(r.out, "text past its card's edge").toEqual([]);
+  expect(r.sideways, "the sheet scrolls sideways by").toBe(0);
+});
+
+test("every touch target is 44 x 44 with More open and a file in the task's packet", async ({ page, request }) => {
+  const made = await tool(request, "create_task", { title: `Buy the shed paint ${stamp()}`, stages: ["Quote", "Order"] });
+  const id = String(made.task_id);
+  const up = await request.post(`/api/tasks/${id}/packet`, {
+    multipart: { file: { name: "quote.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 made up\n") }, docType: "Quote" },
+  });
+  expect(up.ok(), "the file went on the packet").toBe(true);
+  await openTask(page, id);
+  await page.locator("[data-task-more]").click();
+  await expect(page.locator("[data-testid='packet']")).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Remove / })).toBeVisible();
+  const boxes = await page.locator("[data-task-screen] button, [data-task-screen] [role='button'], [data-task-screen] input").evaluateAll((els) =>
+    els
+      .filter((e) => (e as HTMLElement).offsetParent !== null && (e as HTMLInputElement).type !== "file")
+      .map((e) => {
+        const r = e.getBoundingClientRect();
+        return { what: e.getAttribute("aria-label") ?? e.textContent?.trim().slice(0, 30), w: Math.round(r.width), h: Math.round(r.height) };
+      })
+  );
+  expect(boxes.length).toBeGreaterThan(8);
+  for (const b of boxes) {
+    expect(b.w, `${b.what} wide`).toBeGreaterThanOrEqual(44);
+    expect(b.h, `${b.what} tall`).toBeGreaterThanOrEqual(44);
+  }
+});
+
+test("a project with no colour has the same dot on the task screen as on the Projects list", async ({ page, request }) => {
+  const name = `Back fence ${stamp()}`;
+  const project = await tool(request, "create_project", { name });
+  expect((await request.patch(`/api/projects/${project.project_id}`, { data: { color: null } })).ok()).toBe(true);
+  const made = await tool(request, "create_task", { title: `Stain the fence ${stamp()}`, project: name });
+  await openTask(page, String(made.task_id));
+  const onTask = await page.locator("[data-task-row='project'] [data-project-dot]").evaluate((el) => getComputedStyle(el).backgroundColor);
+  await page.goto("/projects");
+  const row = page.locator("[data-project-row]").filter({ hasText: name });
+  const onList = await row.locator("[data-project-dot]").evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(onTask).toBe(onList);
+});
