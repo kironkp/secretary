@@ -7,6 +7,45 @@ commits it covers so `git show <hash>` always reaches the real diff.
 
 ---
 
+## v1.10 — A task reads like a reminder (2026-10-16)
+
+`c116fd0`, `87c3c76` (the rule, docs/tasks/SPEC.md §2), `8ff29f5`, `5b6c87b`,
+`0de45c1`, `9a59e75` (the tests, first and red), `bcbcea1`, `849e91b` (the
+code), `5f5f54c` (v1.17 r2 merged in), this commit.
+
+Kiron, comparing with Notion and Apple Reminders: "It should be really
+simple", "simple and working and no clutter". The labels a model wrote into
+his notes were "completely unnecessary for me to know", and "the priorities
+don't really work for me".
+
+- Notes are plain words. The prompts now say a note is a line or two of
+  plain words or nothing, with every detail still kept, in its own field
+  when there is one. One check backs them up, on the model's new words only,
+  never on his: a note whose line opens with a field label (owner, next
+  action, status, due and the rest, however it is dressed) is not saved in a
+  chat or a call, and the result tells the model to say it plainly; the rest
+  of what it asked for is done. In the background (the extraction after a
+  call, the suggestions) such a note is kept and counted, never quoted in
+  the log.
+- No priority. It is gone from the task screen, the editor and what the
+  model can set; what is stored stays, and nothing else changes.
+- A suggestion's note is its reason alone now. Old ones are shown without
+  "Suggested:" and stored as they were.
+- The task screen is the approved design's top half: "Task" and Done; the
+  done circle, the title and his note; Due, Remind me and Project (and what
+  it is waiting on, while blocked); everything else under "More", closed
+  each time. The circle finishes a task the way the assistant does, once,
+  even for one that repeats; a repeating task already done is not reopened
+  from it, since that would leave two open copies.
+- Taken off done, a task is not done any more: before, its finish date
+  stayed, and the suggestions saw it as done beside its open status.
+- Six things 1.17 did right are tested now, so nothing can quietly break
+  them, and the notes browser test will not run its chat turn against a
+  server it did not start (one already running could reach a real model).
+
+Cost: one prompt-cache rewrite for each prompt that changed; no new model
+calls; a refused note writes nothing. No understanding hash changes.
+
 ## v1.17 — A model write never loses his notes (2026-10-15)
 
 `5930c5e` (the rule, docs/tasks/SPEC.md §1, new), `a34d8aa`, `0cf87ae` (the
