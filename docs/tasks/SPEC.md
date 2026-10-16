@@ -148,8 +148,14 @@ a short plain line; nothing when the signal says it all"; progress stays in
 his note (§1.1).
 
 One backstop, `plainNote` (lib/secretary/plain-note.ts), reads the model's
-NEW text only: never the combined note, never his typing (the PATCH route),
-never recurrence's copy, never §1.6's merge. Line by line (split on real and
+new text only: exactly the lines a write would add, the ones the note lacks
+by §1.1's comparison, decided under the row's lock in the transaction that
+writes them, so a line written meanwhile is seen by both the check and the
+write (v1.10 r2). A line already in the note, his or a model's from before,
+is never checked, so echoing the note back with a new line is not refused
+for an old label. A replace is checked whole, and so is the note of a new
+task or a new list item (all of it is new). Never his typing (the PATCH
+route), recurrence's copy or §1.6's merge. Line by line (split on real and
 on literal "\n"), each line is read with its leading bullets and numbers,
 markdown bold and italic and case set aside, and ":", "：", "—", "–" and "="
 all read as a colon. A line is a label when it opens with one of
@@ -166,8 +172,8 @@ middle of a line ("Call first. Owner: Sam") passes too; the prompt covers it.
 On a label:
 
 - In a live turn the whole note is not saved and the rest of the call is.
-  The result carries `note_not_saved`, the line that tripped it, and "say it
-  as plain words, a line or two". A turn is live when the chat route or the
+  The result carries `note_not_saved`, the line that tripped it (always one
+  the write would have added), and "say it as plain words, a line or two". A turn is live when the chat route or the
   voice tools route says so (`ToolContext.live`, set at those two call sites;
   chat-claude runs with the chat route's context). Taps (the projects route,
   the timeline routes) and understanding answers are not live; none of them

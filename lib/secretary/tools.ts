@@ -97,21 +97,29 @@ function checkNote(ctx: ToolContext, text: string | null | undefined) {
 }
 
 /**
- * A model's note added to a task (§1.1, §1.3; checked, §2.1): only when some line is new, so a note already there
- * writes nothing. What the result says about it: notes_added only when some lines were (v1.17 r2).
+ * A model's note added to a task (§1.1, §1.3): only when some line is new, so a note already there writes nothing.
+ * Under the row's lock, only the lines the note lacks are checked for labels and written (§2.1, v1.10 r2). What the
+ * result says about it: notes_added only when some lines were (v1.17 r2).
  */
 async function addToTaskNote(ctx: ToolContext, taskId: string, text: string | null | undefined) {
-  const noteChecked = checkNote(ctx, text);
-  if (!noteChecked.keep) return noteChecked.said;
   const lines = noteLines(text);
   if (!lines.length) return {};
-  const [hit] = await db
-    .update(tasks)
-    .set({ notes: withLines(tasks.notes, lines), updatedAt: new Date() })
-    .from(notesBefore(tasks, taskId))
-    .where(and(eq(tasks.userId, ctx.userId), eq(tasks.id, sql`prev.prev_id`), sql`${addedLines(tasks.notes, lines)} is not null`))
-    .returning({ id: tasks.id, notesBefore: sql<string | null>`prev.notes_before` });
-  return noteOutcome(hit ? linesAdded(hit.notesBefore, lines) : []);
+  return db.transaction(async (tx) => {
+    const [locked] = await tx
+      .select({ notes: tasks.notes })
+      .from(tasks)
+      .where(and(eq(tasks.userId, ctx.userId), eq(tasks.id, taskId)))
+      .for("update");
+    const lacking = linesAdded(locked?.notes ?? null, lines);
+    if (!lacking.length) return noteOutcome([]);
+    const noteChecked = checkNote(ctx, lacking.join("\n"));
+    if (!noteChecked.keep) return noteChecked.said;
+    await tx
+      .update(tasks)
+      .set({ notes: withLines(tasks.notes, lines), updatedAt: new Date() })
+      .where(and(eq(tasks.userId, ctx.userId), eq(tasks.id, taskId)));
+    return noteOutcome(lacking);
+  });
 }
 
 export type ToolContext = {
@@ -621,11 +629,11 @@ type Args = Record<string, unknown>;
 async function finishTask(ctx: ToolContext, ref: string, note?: string): Promise<ToolOutcome> {
   const task = await findTask(ctx.userId, ref);
   if (!task) return { result: { error: `No task matching "${ref}"` } };
-  // Done either way; a labelled note in a live turn is not saved (§2.1).
-  const noteChecked = checkNote(ctx, note);
-  const lines = noteChecked.keep ? noteLines(note) : [];
-  const { updated, notesBefore: before, next } = await completeTask(ctx.userId, task.id, task.status === "done", {
+  // Done either way; a labelled line among those the note lacks, in a live turn, keeps the note out (§2.1).
+  const lines = noteLines(note);
+  const { updated, added, noteChecked, next } = await completeTask(ctx.userId, task.id, task.status === "done", {
     lines,
+    ctx,
     checkinNote: "Marked done",
   });
   const nextDue = next ? fmtDate(next.dueAt, ctx.timezone, false) : null;
@@ -634,7 +642,7 @@ async function finishTask(ctx: ToolContext, ref: string, note?: string): Promise
       task_id: updated.id,
       title: updated.title,
       status: "done",
-      ...(lines.length ? noteOutcome(linesAdded(before, lines)) : {}),
+      ...(lines.length && noteChecked.keep ? noteOutcome(added) : {}),
       ...noteChecked.said,
       ...(nextDue ? { next_occurrence_due: nextDue } : {}),
     },
@@ -654,26 +662,38 @@ export async function completeTask(
   userId: string,
   taskId: string,
   wasDone: boolean,
-  opts: { lines?: string[]; checkinNote: string }
+  opts: { lines?: string[]; ctx?: ToolContext; checkinNote: string }
 ) {
   const lines = opts.lines ?? [];
-  const [{ notesBefore: before, ...updated }] = await db
-    .update(tasks)
-    // done is a signal like any other: whatever it was stuck on, it isn't now
-    .set({
-      status: "done",
-      completedAt: new Date(),
-      blockedReason: null,
-      updatedAt: new Date(),
-      ...(lines.length ? { notes: withLines(tasks.notes, lines) } : {}),
-    })
-    .from(notesBefore(tasks, taskId))
-    .where(and(eq(tasks.userId, userId), eq(tasks.id, sql`prev.prev_id`)))
-    .returning({ ...getTableColumns(tasks), notesBefore: sql<string | null>`prev.notes_before` });
+  // Under the row's lock (v1.10 r2): of a done note, only the lines the note lacks are checked and written.
+  const { updated, before, added, noteChecked } = await db.transaction(async (tx) => {
+    const [locked] = await tx
+      .select({ notes: tasks.notes })
+      .from(tasks)
+      .where(and(eq(tasks.userId, userId), eq(tasks.id, taskId)))
+      .for("update");
+    const before = locked?.notes ?? null;
+    const lacking = linesAdded(before, lines);
+    const noteChecked = lacking.length && opts.ctx ? checkNote(opts.ctx, lacking.join("\n")) : { keep: true as const, said: {} };
+    const writing = lacking.length > 0 && noteChecked.keep;
+    const [updated] = await tx
+      .update(tasks)
+      // done is a signal like any other: whatever it was stuck on, it isn't now
+      .set({
+        status: "done",
+        completedAt: new Date(),
+        blockedReason: null,
+        updatedAt: new Date(),
+        ...(writing ? { notes: withLines(tasks.notes, lines) } : {}),
+      })
+      .where(and(eq(tasks.userId, userId), eq(tasks.id, taskId)))
+      .returning();
+    return { updated, before, added: writing ? lacking : [], noteChecked };
+  });
   await db.insert(checkins).values({ userId, taskId, type: "user_update", note: opts.checkinNote });
   await clearExpectationsFor(userId, taskId);
   const next = wasDone ? null : await spawnNextOccurrence({ ...updated, notes: before });
-  return { updated, notesBefore: before, next };
+  return { updated, notesBefore: before, added, noteChecked, next };
 }
 
 const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolOutcome>> = {
@@ -829,13 +849,12 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     }
     if (a.title) updates.title = a.title;
     // His note is never replaced by a model's (docs/tasks/SPEC.md §1.1): the lines it lacks are added, in the
-    // UPDATE itself. Only replace_notes, kept for when he asks to change or clear it, replaces it (§1.2).
-    // A labelled note in a live turn is not saved, and the rest of the call is (§2.1).
-    const noteChecked = checkNote(ctx, a.notes);
-    const replacing = Boolean(a.replace_notes) && a.notes !== undefined && noteChecked.keep;
+    // UPDATE itself. Only replace_notes, kept for when he asks to change or clear it, replaces it (§1.2); a
+    // replace is checked whole for labels (§2.1), an addition below, under the row's lock.
+    const replaceChecked = a.replace_notes && a.notes !== undefined ? checkNote(ctx, a.notes) : null;
+    const replacing = Boolean(replaceChecked?.keep);
     if (replacing) updates.notes = a.notes === "" ? null : a.notes;
-    const lines = replacing || !noteChecked.keep ? [] : noteLines(a.notes);
-    const addedNote = lines.length ? withLines(tasks.notes, lines) : null;
+    const lines = a.replace_notes ? [] : noteLines(a.notes);
     const newReminders = parseReminders(a.reminders, ctx.timezone);
     if (newReminders !== undefined) updates.reminders = newReminders;
     if (a.recurrence !== undefined) {
@@ -881,46 +900,50 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
       stageAdvanced = hit.name;
     }
 
-    // A refused note and nothing else: nothing is written; the result says why.
-    if (!noteChecked.keep && Object.keys(updates).every((k) => k === "updatedAt")) {
-      return { result: { task_id: task.id, title: task.title, status: task.status, ...noteChecked.said } };
-    }
-    // A note and nothing else, whose lines are all there already: nothing is written.
-    const onlyNote = lines.length > 0 && Object.keys(updates).every((k) => k === "updatedAt");
-    const [updated] = await db
-      .update(tasks)
-      .set({ ...updates, ...(addedNote ? { notes: addedNote } : {}) })
-      .from(notesBefore(tasks, task.id))
-      .where(
-        and(
-          eq(tasks.userId, ctx.userId),
-          eq(tasks.id, sql`prev.prev_id`),
-          ...(onlyNote ? [sql`${addedLines(tasks.notes, lines)} is not null`] : [])
-        )
-      )
-      .returning({ ...getTableColumns(tasks), notesBefore: sql<string | null>`prev.notes_before` });
+    // Under the row's lock (v1.10 r2): the lines the note lacks are the ones checked and the ones written, so the
+    // check and the write see the same note, and a line already in it, his or a model's, is never checked.
+    const onlyUpdatedAt = Object.keys(updates).every((k) => k === "updatedAt");
+    const { updated, before, added, noteChecked } = await db.transaction(async (tx) => {
+      const [locked] = await tx
+        .select({ notes: tasks.notes })
+        .from(tasks)
+        .where(and(eq(tasks.userId, ctx.userId), eq(tasks.id, task.id)))
+        .for("update");
+      const before = locked?.notes ?? null;
+      const lacking = linesAdded(before, lines);
+      const noteChecked = lacking.length ? checkNote(ctx, lacking.join("\n")) : (replaceChecked ?? { keep: true as const, said: {} });
+      const writing = lacking.length > 0 && noteChecked.keep;
+      // The note was all there, or refused, or a replace was refused, and nothing else changes: nothing is written.
+      if (onlyUpdatedAt && ((lines.length > 0 && !writing) || (replaceChecked && !replaceChecked.keep))) {
+        return { updated: null, before, added: [] as string[], noteChecked };
+      }
+      const [updated] = await tx
+        .update(tasks)
+        .set({ ...updates, ...(writing ? { notes: withLines(tasks.notes, lines) } : {}) })
+        .where(and(eq(tasks.userId, ctx.userId), eq(tasks.id, task.id)))
+        .returning();
+      return { updated, before, added: writing ? lacking : [], noteChecked };
+    });
     if (!updated) {
       return {
         result: {
           task_id: task.id,
           title: task.title,
           status: task.status,
-          notes_already_there: true,
-          note: "Every line of that note is already on the task: nothing was written.",
+          ...(noteChecked.keep
+            ? { notes_already_there: true, note: "Every line of that note is already on the task: nothing was written." }
+            : {}),
+          ...noteChecked.said,
         },
       };
     }
-    const notesSaid = replacing
-      ? { notes_replaced: updated.notesBefore }
-      : lines.length
-        ? noteOutcome(linesAdded(updated.notesBefore, lines))
-        : {};
+    const notesSaid = replacing ? { notes_replaced: before } : lines.length && noteChecked.keep ? noteOutcome(added) : {};
 
     // completing a recurring task spawns its next occurrence, with the note as it was before this write's
     // own lines (docs/tasks/SPEC.md §1.4)
     let spawnedNext: string | null = null;
     if (a.status === "done" && task.status !== "done") {
-      const next = await spawnNextOccurrence(lines.length ? { ...updated, notes: updated.notesBefore } : updated);
+      const next = await spawnNextOccurrence(lines.length ? { ...updated, notes: before } : updated);
       if (next) spawnedNext = fmtDate(next.dueAt, ctx.timezone, false) ?? "soon";
     }
 
@@ -1333,11 +1356,14 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
     const onList = new Map(open.map((t) => [t.title.toLowerCase(), t.id]));
     const added: string[] = [];
     const already: string[] = [];
-    // An item already on it gets the note too, added to its own (docs/tasks/SPEC.md §1.1). A labelled one in a
-    // live turn goes on no item; the items do (§2.1).
+    // An item already on it gets the note too, added to its own (docs/tasks/SPEC.md §1.1). A new item's note is
+    // all new, so it is checked whole; one already on the list, only for the lines its note lacks (§2.1, v1.10
+    // r2). A labelled one in a live turn goes on no item; the items do.
     const noteChecked = checkNote(ctx, note);
+    // What an item already on the list said, when its new lines were refused.
+    let refusedOnItem: Record<string, unknown> = {};
     const kept = noteChecked.keep ? note : null;
-    const lines = noteLines(kept);
+    const lines = noteLines(note);
     const noteAddedTo: string[] = [];
     const noteAlreadyOn: string[] = [];
     for (const raw of a.items) {
@@ -1347,7 +1373,11 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         already.push(title);
         // ("" is one this call just put on it, with the note already.)
         const there = onList.get(title.toLowerCase());
-        if (there && lines.length) ("notes_added" in (await addToTaskNote(ctx, there, kept)) ? noteAddedTo : noteAlreadyOn).push(title);
+        if (there && lines.length) {
+          const said: Record<string, unknown> = await addToTaskNote(ctx, there, note);
+          if (said.note_not_saved) refusedOnItem = said;
+          else ("notes_added" in said ? noteAddedTo : noteAlreadyOn).push(title);
+        }
         continue;
       }
       await db.insert(tasks).values({
@@ -1377,6 +1407,7 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         added,
         already_on_list: already,
         note: kept,
+        ...refusedOnItem,
         ...noteChecked.said,
         ...(noteAddedTo.length ? { note_added_to: noteAddedTo } : {}),
         ...(noteAlreadyOn.length ? { note_already_on: noteAlreadyOn } : {}),
