@@ -57,7 +57,7 @@ Cost: one prompt-cache rewrite for each prompt that changed; no new model
 calls; a refused note writes nothing. No understanding hash changes.
 
 **r2** (`7c245bb`, `21c61d6` the tests, first and red; `14aadd5`, `d0eb6c8` the
-code; `6f8a5b7` this entry first; this commit).
+code; `6f8a5b7`, `b1ca768` this entry; the shuffle test's fix and this commit).
 The Reviewer found the check reading every line the model sent, including
 the ones already in the note. So when a model in a chat or a call sent the
 note back with a new line, as models do, and the note already had a label
@@ -80,6 +80,9 @@ The Reviewer's verdict on the first try named more, all in r2:
   the list cards and the Workspace too.
 - Tests now show which turns count as a chat or a call (the real chat route,
   the call's route, and not a tap's), and that Done keeps a note being typed.
+- A test from 1.11 that reshuffles rows in the database could find one table
+  unmoved when other tests wrote to it at the same time; it now shuffles that
+  table again. Tests only.
 
 ## v1.17 — A model write never loses his notes (2026-10-15)
 
