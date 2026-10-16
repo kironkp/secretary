@@ -7,12 +7,12 @@ beside me in a workshop."*
 
 ## Now
 
-- **Cycle counter: 111.** 1.00, 1.02, 1.03, 1.04, 1.09 and 1.11 are
+- **Cycle counter: 117.** 1.00, 1.02, 1.03, 1.04, 1.09, 1.11 and 1.17 are
   accepted (1.09 live 2026-10-15 at `5d4d98e`; 1.11 live the same day at
-  `282c7e0`); 1.01 is open; 1.16 (the names on public main) is built and
-  waits on Kiron to allow its push; 1.17 (his notes are kept)
-  is offered at `ddc90e3` and with the Reviewer; 1.10 is contracted and
-  built on top of it; then 1.13, 1.12, 1.14, 1.15 (Kiron's feedback,
+  `282c7e0`; 1.17 live 2026-10-16 at `748b913`); 1.01 is open; 1.16
+  (the names on public main) is built and waits on Kiron to allow its
+  push, and must merge main again (it conflicts with 1.17); 1.10 is
+  being built on top of 1.17; then 1.13, 1.12, 1.14, 1.15 (Kiron's feedback,
   his mockup approved 2026-10-14, and the whole site in its look), then
   1.08, 1.05, 1.06, 1.07. Each pushed to Heroku as it passes (Kiron:
   "Push to heroku for each update"). See §9.
@@ -281,7 +281,22 @@ beside me in a workshop."*
   there; it replaces only when he asks, and says what it replaced; a
   blocked reason goes in its own field; his save keeps lines added since
   he opened the editor. Tests from no rule: his text survives any
-  sequence of model writes byte for byte.
+  sequence of model writes byte for byte. r1 (`ddc90e3`) FAILED on one
+  defect. The code trimmed every Unicode space from a line's end and the
+  SQL only space, tab and CR. So a line ending in a no-break space was
+  stored twice, and the result said it was already there. Everything
+  else held: walks, races, hashes identical ($0), and the stand-in
+  reached only by the notes test. r2 holds one set of trailing spaces
+  that builds both trims, tested character by character against
+  Postgres, and says "added" only when lines were added.
+  **r2 PASSED 2026-10-15 at `748b913`** (GitHub `test` 3 of 3).
+  **Live**: main CI run 38836819010 success, Heroku's deploy of `748b913`
+  succeeded 01:56 UTC 2026-10-16 (GitHub deployment 7108913579; release
+  number not read, the Heroku CLI's login had expired). Into
+  1.10: six tests the Reviewer's mutants showed missing, his own lines
+  trimmed in his save, the blocked reason kept in History, and a
+  reused local server never reaching a real model. Accepted: a leading
+  space, NFD vs NFC or U+200B can still give a line that looks the same.
 - **1.16** — names on public main, after 1.11 (the Reviewer, 2026-10-15): words
   from his real data (a client's name and a person's first name) have
   been on public main since 2026-08-07, in test fixtures, Today and
