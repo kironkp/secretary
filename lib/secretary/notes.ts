@@ -4,11 +4,25 @@
 import { sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 
+/**
+ * What "a trailing space" is, in the code and in the database alike (v1.17 r2): exactly the characters
+ * String.prototype.trimEnd strips (white space and line ends, the Unicode space separators among them). Both the
+ * code's trim and the SQL's are built from this one string, so they cannot drift: the SQL used to trim ' \t\r'
+ * only, so a line he stored ending in a no-break space never matched the same line from the model.
+ */
+export const TRAILING_SPACES =
+  "\t\n\v\f\r \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff";
+const TRAILING_RUN = `[${TRAILING_SPACES}]+$`;
+const TRAILING_RE = new RegExp(TRAILING_RUN, "u");
+
+/** A line without its trailing spaces, by TRAILING_SPACES. */
+export const trimTrailing = (line: string): string => line.replace(TRAILING_RE, "");
+
 /** A model's note as the lines it would add: each without its trailing spaces, blank lines dropped, each once. */
 export function noteLines(text: string | null | undefined): string[] {
   const out: string[] = [];
   for (const raw of (text ?? "").split(/\r?\n/)) {
-    const line = raw.trimEnd();
+    const line = trimTrailing(raw);
     if (line.trim() && !out.includes(line)) out.push(line);
   }
   return out;
@@ -27,7 +41,7 @@ export const sameTitle = (a: string, b: string) => {
 export function addedLines(column: AnyPgColumn, lines: string[]): SQL {
   return sql`(select string_agg(x.l, E'\\n' order by x.i)
     from jsonb_array_elements_text(${JSON.stringify(lines)}::jsonb) with ordinality as x(l, i)
-    where x.l <> all (select rtrim(h, E' \\t\\r') from unnest(string_to_array(coalesce(${column}, ''), E'\\n')) as h))`;
+    where x.l <> all (select regexp_replace(h, ${TRAILING_RUN}, '') from unnest(string_to_array(coalesce(${column}, ''), E'\\n')) as h))`;
 }
 
 /** SQL for the column with those lines added after it on lines of their own; unchanged when they are all there. */
@@ -40,7 +54,7 @@ export function withLines(column: AnyPgColumn, lines: string[]): SQL {
 
 /** The lines a write added: those of `lines` the note before did not have (§1.1's comparison). */
 export function linesAdded(before: string | null, lines: string[]): string[] {
-  const had = new Set((before ?? "").split("\n").map((l) => l.trimEnd()));
+  const had = new Set((before ?? "").split("\n").map(trimTrailing));
   return lines.filter((l) => !had.has(l));
 }
 
@@ -58,10 +72,10 @@ export function noteOutcome(added: string[]): { notes_added: string[] } | { note
 export function mergeNotes(base: string | null | undefined, his: string | null, stored: string | null): string | null {
   const from = (base === undefined ? his : base) ?? "";
   const gained = sinceBase(from.split("\n"), (stored ?? "").split("\n"));
-  const hisLines = new Set((his ?? "").split("\n").map((l) => l.trimEnd()));
+  const hisLines = new Set((his ?? "").split("\n").map(trimTrailing));
   const keep: string[] = [];
   for (const line of gained) {
-    const l = line.trimEnd();
+    const l = trimTrailing(line);
     if (!l.trim() || hisLines.has(l) || keep.includes(l)) continue;
     keep.push(l);
   }
@@ -71,7 +85,7 @@ export function mergeNotes(base: string | null | undefined, his: string | null, 
 
 /** The lines of `now` that are not in a longest common subsequence with `base`: what was added since, in order. */
 function sinceBase(base: string[], now: string[]): string[] {
-  const eq = (a: string, b: string) => a.trimEnd() === b.trimEnd();
+  const eq = (a: string, b: string) => trimTrailing(a) === trimTrailing(b);
   const m = base.length;
   const n = now.length;
   const len: number[][] = Array.from({ length: m + 1 }, () => new Array<number>(n + 1).fill(0));

@@ -28,7 +28,12 @@ The new text is taken a line at a time: each line without its trailing
 spaces, blank lines dropped, each line once. A line is added only if no line
 of the note is the same line (compared with the note's trailing spaces
 trimmed too), and the lines added go after the note, in their order, on
-lines of their own. If every line is there already, nothing is written and
+lines of their own. "Trailing spaces" is one set of characters, in the code
+and in the database alike: exactly those JavaScript's trimEnd strips (white
+space and line ends, the no-break space and the other Unicode space
+separators among them), held once (TRAILING_SPACES, lib/secretary/notes.ts)
+and both trims built from it (v1.17 r2). A result says lines were added only
+when some were. If every line is there already, nothing is written and
 the result says it was already in the note; otherwise the result says what
 was added. So no line is ever there twice, however a write is repeated.
 

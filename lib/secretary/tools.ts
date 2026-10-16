@@ -81,7 +81,7 @@ const notesBefore = (table: typeof tasks | typeof events, id: string) =>
 
 /**
  * A model's note added to a task (§1.1, §1.3): only when some line is new, so a note already there writes nothing.
- * Null when nothing was written.
+ * The lines it added; none (an empty list, never a truthy stand-in) when they were all there (v1.17 r2).
  */
 async function addToTaskNote(userId: string, taskId: string, lines: string[]) {
   const [hit] = await db
@@ -90,7 +90,7 @@ async function addToTaskNote(userId: string, taskId: string, lines: string[]) {
     .from(notesBefore(tasks, taskId))
     .where(and(eq(tasks.userId, userId), eq(tasks.id, sql`prev.prev_id`), sql`${addedLines(tasks.notes, lines)} is not null`))
     .returning({ id: tasks.id, notesBefore: sql<string | null>`prev.notes_before` });
-  return hit ? linesAdded(hit.notesBefore, lines) : null;
+  return hit ? linesAdded(hit.notesBefore, lines) : [];
 }
 
 export type ToolContext = {
@@ -667,14 +667,14 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
       // similar it is not saved, and the result says so, so the model can add it to the right task.
       const lines = noteLines(a.notes);
       const same = sameTitle(twin.title, a.title);
-      const added = lines.length && same ? await addToTaskNote(ctx.userId, twin.id, lines) : null;
+      const added = lines.length && same ? await addToTaskNote(ctx.userId, twin.id, lines) : [];
       const filed = filedUnder ? `; it's now filed under "${filedUnder}"` : "";
       const note = !lines.length
         ? filedUnder
           ? `An open task with this title already existed — nothing was created${filed}. Use update_task for other changes.`
           : "An open task with this title already exists — nothing was created. Use update_task to change it."
         : same
-          ? `An open task with this title already existed — nothing was created${filed}; ${added ? "your note was added to it" : "the note was already in it"}.`
+          ? `An open task with this title already existed — nothing was created${filed}; ${added.length ? "your note was added to it" : "the note was already in it"}.`
           : `Nothing was created: a similar open task exists ("${twin.title}")${filed}. The note was not saved — if it belongs there, add it with update_task.`;
       return {
         result: {
@@ -682,7 +682,7 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
           title: twin.title,
           already_existed: true,
           ...(filedUnder ? { project: filedUnder } : {}),
-          ...(lines.length ? (same ? noteOutcome(added ?? []) : { note_saved: false }) : {}),
+          ...(lines.length ? (same ? noteOutcome(added) : { note_saved: false }) : {}),
           note,
         },
         ...(filedUnder
@@ -1284,7 +1284,7 @@ const handlers: Record<ToolName, (ctx: ToolContext, args: Args) => Promise<ToolO
         already.push(title);
         // ("" is one this call just put on it, with the note already.)
         const there = onList.get(title.toLowerCase());
-        if (there && lines.length) ((await addToTaskNote(ctx.userId, there, lines)) ? noteAddedTo : noteAlreadyOn).push(title);
+        if (there && lines.length) ((await addToTaskNote(ctx.userId, there, lines)).length ? noteAddedTo : noteAlreadyOn).push(title);
         continue;
       }
       await db.insert(tasks).values({
